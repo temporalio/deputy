@@ -4,7 +4,7 @@ Triage Summary:
   Critical/High: 2
   Medium: 0
   Low: 1
-  Fixable: 2
+  Fix available: 2
   Direct deps affected: 1
   Packages with vulns: 5 (direct: 1, indirect: 4)
 

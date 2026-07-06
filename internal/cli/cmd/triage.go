@@ -17,6 +17,7 @@ import (
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	triagev1 "github.com/temporalio/deputy/gen/deputy/triage/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
+	"github.com/temporalio/deputy/internal/ignore"
 	"github.com/temporalio/deputy/internal/policy"
 	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/report/render"
@@ -85,6 +86,7 @@ AI ASSISTANCE:
 	triageCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
 	triageCmd.Flags().StringP("format", "f", "text", "Output format (text, json)")
 	addExcludePathFlag(triageCmd)
+	triageCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	triageCmd.Flags().String("agent", "", "Use an AI agent to analyze the triage summary (e.g. 'codex')")
 	triageCmd.Flags().String("agent-model", "", "Model identifier to use when --agent is set")
 	triageCmd.Flags().String("agent-sandbox", "read-only", "Sandbox policy for AI agent (read-only|workspace-write|danger-full-access)")
@@ -137,6 +139,7 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 		if scanResult == nil {
 			return fmt.Errorf("failed to convert scan response")
 		}
+		*scanResult = applyTriageIgnoreRules(cmd, *scanResult, ".")
 		if ignoreUnfixed {
 			*scanResult = scanning.FilterUnfixed(*scanResult)
 		}
@@ -207,7 +210,7 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 		}
 
 		repoPath = scanResult.Target.LocalPath
-		resultOut := *scanResult
+		resultOut := applyTriageIgnoreRules(cmd, *scanResult, repoPath)
 		if ignoreUnfixed {
 			resultOut = scanning.FilterUnfixed(resultOut)
 		}
@@ -322,4 +325,29 @@ Focus on:
 2. Potential exploit paths or attack vectors
 3. Quick wins (easy fixes with high impact)
 4. Any patterns or systemic issues`, string(data)), nil
+}
+
+// applyTriageIgnoreRules filters findings through the target's vulnerability
+// suppressions (--ignore-file, or auto-discovered .deputyignore.yaml and
+// friends), matching deputy scan, and notes how many findings were ignored.
+// Load failures degrade to no suppressions with a warning: triage should not
+// fail because a config file is malformed.
+func applyTriageIgnoreRules(cmd *cobra.Command, result scanning.Result, workDir string) scanning.Result {
+	ignoreFile, _ := cmd.Flags().GetString("ignore-file")
+	var rules *ignore.Rules
+	var err error
+	if ignoreFile != "" {
+		rules, err = ignore.LoadFromPath(ignoreFile)
+	} else {
+		rules, err = ignore.LoadFromDirectory(workDir)
+	}
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: loading ignore rules: %v\n", err)
+		return result
+	}
+	filtered, ignored := scanning.FilterIgnored(result, rules)
+	if ignored > 0 {
+		fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render(fmt.Sprintf("Note: %d vulnerability finding(s) ignored by rules", ignored)))
+	}
+	return filtered
 }

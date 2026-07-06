@@ -37,7 +37,10 @@ fields, so an absent field means empty, none, or not applicable (no
 `found`, `direct`, `hasFix`, `migration`, `executable`, `depth`,
 `isContainerDiff`) are present whenever they apply, even when false or zero,
 and severity count maps always carry all their keys so per-severity counts
-sum to the total.
+sum to the total. Assessment tools honor the target's vulnerability
+suppressions (`.deputyignore.yaml` and friends), exactly like the CLI:
+suppressed findings are excluded from results and counted in
+`ignoredCount`.
 
 ```mermaid
 flowchart LR

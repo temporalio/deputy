@@ -182,6 +182,10 @@ message ScanDirectoryResult {
   string scan_time = 10;
   // ScanTimeMs is the elapsed scan time in milliseconds.
   int32 scan_time_ms = 11;
+  // IgnoredCount is the number of findings suppressed by the target's ignore
+  // rules (.deputyignore.yaml and friends); suppressed findings are excluded
+  // from every other field.
+  int32 ignored_count = 12;
 }
 
 // ScanContainerRequest asks for a vulnerability scan of a container image.
@@ -218,6 +222,10 @@ message ScanContainerResult {
   string scan_time = 8;
   // ScanTimeMs is the elapsed scan time in milliseconds.
   int32 scan_time_ms = 9;
+  // IgnoredCount is the number of findings suppressed by the server working directory's ignore
+  // rules (.deputyignore.yaml and friends); suppressed findings are excluded
+  // from every other field.
+  int32 ignored_count = 10;
 }
 
 // TriageRequest asks for a prioritized vulnerability summary of a directory.
@@ -320,6 +328,10 @@ message TriageResult {
   repeated TriagedVuln vulnerabilities = 18;
   // Recommendations are actionable next steps derived from the findings.
   repeated string recommendations = 19;
+  // IgnoredCount is the number of findings suppressed by the target's ignore
+  // rules (.deputyignore.yaml and friends); suppressed findings are excluded
+  // from every other field.
+  int32 ignored_count = 20;
 }
 
 // ListDependenciesRequest asks for the resolved dependency inventory of a
@@ -887,6 +899,10 @@ message GetRemediationResult {
   // (deputy.remediation.v1 GeneratePlanResponse.unaddressed_vulnerabilities).
   // Unfixable means still vulnerable, not safe.
   repeated string unfixable_vulnerabilities = 11;
+  // IgnoredCount is the number of findings suppressed by the target's ignore
+  // rules (.deputyignore.yaml and friends); suppressed findings are excluded
+  // from every other field.
+  int32 ignored_count = 12;
 }
 
 // DiffRefsRequest compares dependencies between two Git references or two
@@ -1023,4 +1039,8 @@ message DiffRefsResult {
   repeated DiffVulnChange vulnerability_changes = 14;
   // ContainerSummary totals the container diff; absent for Git ref diffs.
   ContainerSummary container_summary = 15;
+  // IgnoredCount is the number of the target ref's findings suppressed by
+  // ignore rules (.deputyignore.yaml and friends); suppressed findings are
+  // excluded from the vulnerability fields.
+  int32 ignored_count = 16;
 }

@@ -30,12 +30,14 @@ import (
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/dependency/graphquery"
 	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/ignore"
 	"github.com/temporalio/deputy/internal/logs"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/policy"
 	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/purlx"
 	sbomx "github.com/temporalio/deputy/internal/sbom"
+	"github.com/temporalio/deputy/internal/scanning"
 	"github.com/temporalio/deputy/internal/services"
 	"github.com/temporalio/deputy/internal/version"
 	"github.com/temporalio/deputy/internal/vulnerability"
@@ -141,6 +143,7 @@ const serverInstructions = "Deputy is a supply-chain security engine. Its tools 
 	"- A clean target reports `clean: true`; this is success, not an error.\n" +
 	"- Absent fields mean empty, zero, or not applicable: results omit empty lists, zero counts, and optional attributes (no `vulnerabilities` key = none found; no `kind` = ordinary vulnerability). Affirmative answers (`clean`, `found`, `direct`, `hasFix`, `migration`, `executable`, `depth`, `isContainerDiff`) are present whenever they apply, even when false or zero; severity count maps always carry all their keys.\n" +
 	"- A package absent from the graph is a normal `found: false` result (with a `matchedNode` when the package is present but has no paths), not an error.\n" +
+	"- Assessment results honor the target's vulnerability suppressions (`.deputyignore.yaml`); `ignoredCount` reports how many findings were excluded by rule.\n" +
 	"- Scan results include a `coverage` block: `covered` lists (ecosystem, artifact) combinations an advisory source answered for, `uncovered` lists those none could (e.g. container base images). Uncovered means not-checked, not safe. Findings carry `sources` (provenance, e.g. `[\"osv\"]`) and `kind` (`malware` vs vulnerability).\n" +
 	"\n" +
 	"Typical workflow\n" +
@@ -593,6 +596,20 @@ func (s *Server) registerTools() {
 		InputSchema:  diffIn,
 		OutputSchema: diffOut,
 	}, openWorld, s.diffRefs)
+}
+
+// ignoreRulesFor loads the target's vulnerability suppressions
+// (.deputyignore.yaml and friends) the same way the CLI does, so MCP results
+// honor the repository's documented ignore decisions. Load failures degrade
+// to no suppressions with a warning: a malformed config file must not fail
+// the scan.
+func ignoreRulesFor(ctx context.Context, dir string) *ignore.Rules {
+	rules, err := ignore.LoadFromDirectory(dir)
+	if err != nil {
+		logs.Warn(ctx, "loading ignore rules", "dir", dir, "error", err)
+		return nil
+	}
+	return rules
 }
 
 // mcpTargetRef extracts the requested ref, resolved effective ref, and commit
@@ -1392,7 +1409,8 @@ func (s *Server) scanDirectoryTool(ctx context.Context, args *mcpv1.ScanDirector
 
 	scanResult := resp.Msg
 	internalScanResult := internalproto.ScanningResultFromProto(scanResult)
-	consolidated := vulnerability.ConsolidateAll(internalScanResult.Findings, internalScanResult.Advisories)
+	filtered, ignoredCount := scanning.FilterIgnored(*internalScanResult, ignoreRulesFor(ctx, targetPath))
+	consolidated := vulnerability.ConsolidateAll(filtered.Findings, filtered.Advisories)
 	ref, effectiveRef, commit := mcpTargetRef(scanResult.GetTarget())
 	elapsed := time.Since(startTime)
 	result := &mcpv1.ScanDirectoryResult{
@@ -1408,10 +1426,11 @@ func (s *Server) scanDirectoryTool(ctx context.Context, args *mcpv1.ScanDirector
 			"low":      consolidated.Stats.GetLow(),
 			"unknown":  consolidated.Stats.GetUnknown(),
 		},
-		Clean:      proto.Bool(consolidated.Stats.GetUnique() == 0),
-		Coverage:   coverageProto(scanResult.GetCoverage()),
-		ScanTime:   elapsed.String(),
-		ScanTimeMs: int32(elapsed.Milliseconds()),
+		Clean:        proto.Bool(consolidated.Stats.GetUnique() == 0),
+		Coverage:     coverageProto(scanResult.GetCoverage()),
+		ScanTime:     elapsed.String(),
+		ScanTimeMs:   int32(elapsed.Milliseconds()),
+		IgnoredCount: int32(ignoredCount),
 	}
 
 	for _, vuln := range consolidated.Vulnerabilities {
@@ -1625,10 +1644,16 @@ func (s *Server) getRemediationTool(ctx context.Context, args *mcpv1.GetRemediat
 		return nil, err
 	}
 
+	// Honor the target's documented suppressions before planning: the plan
+	// must never recommend work the repository has ignored by rule.
+	internalScanResult := internalproto.ScanningResultFromProto(resp.Msg)
+	filteredResult, ignoredCount := scanning.FilterIgnored(*internalScanResult, ignoreRulesFor(ctx, targetPath))
+	filteredScan := internalproto.ScanningResultToProto(&filteredResult)
+
 	// Generate the plan through the remediation service, the same producer
 	// the API and agent flows use, with hints adapted to MCP tooling.
 	planResp, err := s.clients.Remediation.GeneratePlan(ctx, connect.NewRequest(&remediationv1.GeneratePlanRequest{
-		Source: &remediationv1.GeneratePlanRequest_ScanResult{ScanResult: resp.Msg},
+		Source: &remediationv1.GeneratePlanRequest_ScanResult{ScanResult: filteredScan},
 		Options: &remediationv1.PlanOptions{
 			GuidanceProfile: remediationv1.GuidanceProfile_GUIDANCE_PROFILE_MCP,
 		},
@@ -1647,7 +1672,8 @@ func (s *Server) getRemediationTool(ctx context.Context, args *mcpv1.GetRemediat
 		EffectiveRef:             effectiveRef,
 		Commit:                   commit,
 		PlanId:                   plan.GetId(),
-		VulnerabilitiesFound:     resp.Msg.GetStats().GetUnique(),
+		VulnerabilitiesFound:     filteredResult.Stats.GetUnique(),
+		IgnoredCount:             int32(ignoredCount),
 		Stats:                    planResp.Msg.GetStats(),
 		StdlibUpgrade:            plan.GetStdlibUpgrade(),
 		UnfixableVulnerabilities: planResp.Msg.GetUnaddressedVulnerabilities(),
@@ -2149,8 +2175,10 @@ func (s *Server) triageVulnerabilitiesTool(ctx context.Context, args *mcpv1.Tria
 		return nil, err
 	}
 
-	// Convert proto response to internal types
+	// Convert proto response to internal types and honor the target's
+	// documented suppressions before ranking anything.
 	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
+	filtered, ignoredCount := scanning.FilterIgnored(*scanResult, ignoreRulesFor(ctx, targetPath))
 	ref, effectiveRef, commit := mcpTargetRef(resp.Msg.GetTarget())
 
 	result := &mcpv1.TriageResult{
@@ -2158,10 +2186,11 @@ func (s *Server) triageVulnerabilitiesTool(ctx context.Context, args *mcpv1.Tria
 		Ref:          ref,
 		EffectiveRef: effectiveRef,
 		Commit:       commit,
+		IgnoredCount: int32(ignoredCount),
 	}
 
 	// Consolidate vulnerabilities
-	consolidated := vulnerability.ConsolidateAll(scanResult.Findings, scanResult.Advisories)
+	consolidated := vulnerability.ConsolidateAll(filtered.Findings, filtered.Advisories)
 
 	// Process each vulnerability
 	for _, v := range consolidated.Vulnerabilities {
@@ -2321,7 +2350,10 @@ func (s *Server) scanContainerTool(ctx context.Context, args *mcpv1.ScanContaine
 
 	scanResult := resp.Msg
 	internalScanResult := internalproto.ScanningResultFromProto(scanResult)
-	consolidated := vulnerability.ConsolidateAll(internalScanResult.Findings, internalScanResult.Advisories)
+	// Container images have no local target directory; suppressions come from
+	// the server's working directory, matching a CLI image scan run there.
+	filtered, ignoredCount := scanning.FilterIgnored(*internalScanResult, ignoreRulesFor(ctx, "."))
+	consolidated := vulnerability.ConsolidateAll(filtered.Findings, filtered.Advisories)
 	elapsed := time.Since(startTime)
 	result := &mcpv1.ScanContainerResult{
 		Image:           imageRef,
@@ -2334,10 +2366,11 @@ func (s *Server) scanContainerTool(ctx context.Context, args *mcpv1.ScanContaine
 			"low":      consolidated.Stats.GetLow(),
 			"unknown":  consolidated.Stats.GetUnknown(),
 		},
-		Clean:      proto.Bool(consolidated.Stats.GetUnique() == 0),
-		Coverage:   coverageProto(scanResult.GetCoverage()),
-		ScanTime:   elapsed.String(),
-		ScanTimeMs: int32(elapsed.Milliseconds()),
+		Clean:        proto.Bool(consolidated.Stats.GetUnique() == 0),
+		Coverage:     coverageProto(scanResult.GetCoverage()),
+		ScanTime:     elapsed.String(),
+		ScanTimeMs:   int32(elapsed.Milliseconds()),
+		IgnoredCount: int32(ignoredCount),
 	}
 
 	for _, vuln := range consolidated.Vulnerabilities {
@@ -2528,12 +2561,20 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 		}
 	}
 
-	result.VulnerabilitiesBySeverity, result.Vulnerabilities = diffTargetVulnerabilities(targetScan)
+	// Container images have no local target directory; suppressions come from
+	// the server's working directory and apply to both sides of the delta so
+	// a suppressed finding cannot resurface as an added or fixed change.
+	rules := ignoreRulesFor(ctx, ".")
+	var ignoredCount int
+	result.VulnerabilitiesBySeverity, result.Vulnerabilities, ignoredCount = diffTargetVulnerabilities(targetScan, rules)
+	result.IgnoredCount = int32(ignoredCount)
 	sortDependencyChanges(result.Changes)
 	baseInternal := internalproto.ScanningResultFromProto(baseScan)
 	targetInternal := internalproto.ScanningResultFromProto(targetScan)
 	if baseInternal != nil && targetInternal != nil {
-		containerDiff := internalproto.BuildContainerDiffResponseFromScanning(baseInternal, targetInternal)
+		filteredBase, _ := scanning.FilterIgnored(*baseInternal, rules)
+		filteredTarget, _ := scanning.FilterIgnored(*targetInternal, rules)
+		containerDiff := internalproto.BuildContainerDiffResponseFromScanning(&filteredBase, &filteredTarget)
 		result.VulnerabilityChanges = containerVulnerabilityChangesProto(containerDiff.GetVulnerabilityChanges())
 		result.ContainerSummary = containerSummaryProto(containerDiff.GetSummary())
 	}
@@ -2663,7 +2704,9 @@ func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (
 		}
 	}
 
-	result.VulnerabilitiesBySeverity, result.Vulnerabilities = diffTargetVulnerabilities(targetScan)
+	var ignoredCount int
+	result.VulnerabilitiesBySeverity, result.Vulnerabilities, ignoredCount = diffTargetVulnerabilities(targetScan, ignoreRulesFor(ctx, targetPath))
+	result.IgnoredCount = int32(ignoredCount)
 	sortDependencyChanges(result.Changes)
 
 	return result, nil
@@ -2941,8 +2984,10 @@ func diffPackageKey(purl, ecosystemName, packageName string) string {
 }
 
 // diffTargetVulnerabilities summarizes the target ref's findings per severity
-// level and projects each finding into its compact mcp.v1 explanation.
-func diffTargetVulnerabilities(scanResult *scanv1.ScanResponse) (map[string]int32, []*mcpv1.VulnExplanation) {
+// level and projects each finding into its compact mcp.v1 explanation,
+// honoring the given suppressions and reporting how many findings they
+// removed.
+func diffTargetVulnerabilities(scanResult *scanv1.ScanResponse, rules *ignore.Rules) (map[string]int32, []*mcpv1.VulnExplanation, int) {
 	summary := map[string]int32{
 		"critical": 0,
 		"high":     0,
@@ -2953,10 +2998,11 @@ func diffTargetVulnerabilities(scanResult *scanv1.ScanResponse) (map[string]int3
 
 	internalScanResult := internalproto.ScanningResultFromProto(scanResult)
 	if internalScanResult == nil {
-		return summary, nil
+		return summary, nil, 0
 	}
+	filtered, ignoredCount := scanning.FilterIgnored(*internalScanResult, rules)
 
-	consolidated := vulnerability.ConsolidateAll(internalScanResult.Findings, internalScanResult.Advisories)
+	consolidated := vulnerability.ConsolidateAll(filtered.Findings, filtered.Advisories)
 	summary["critical"] = consolidated.Stats.GetCritical()
 	summary["high"] = consolidated.Stats.GetHigh()
 	summary["medium"] = consolidated.Stats.GetMedium()
@@ -2968,7 +3014,7 @@ func diffTargetVulnerabilities(scanResult *scanv1.ScanResponse) (map[string]int3
 		vulns = append(vulns, vulnExplanationProto(vuln, vulnExplanationOptions{referenceLimit: compactVulnReferenceLimit}))
 	}
 
-	return summary, vulns
+	return summary, vulns, ignoredCount
 }
 
 // containerVulnerabilityChangesProto converts container diff vulnerability

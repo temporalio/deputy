@@ -62,6 +62,15 @@ func TriageSummary(w io.Writer, resp *triagev1.TriageResponse, showDBInfo bool) 
 		if pkg.GetSummary() != "" {
 			fmt.Fprintln(w, "     ", ui.StyleDim.Render(pkg.GetSummary()))
 		}
+		// The triage ladder verdict is the point of this command: show the
+		// priority and its reason, the same verdict the API and MCP emit.
+		if priority := pkg.GetPriority(); priority != "" {
+			verdict := "Fix priority: " + ui.PriorityLabel(priority)
+			if reason := pkg.GetPriorityReason(); reason != "" {
+				verdict += " " + ui.StyleMeta.Render("("+reason+")")
+			}
+			fmt.Fprintln(w, "     ", verdict)
+		}
 		if fix != "" {
 			fmt.Fprintln(w, "     ", fix)
 		}

@@ -141,6 +141,25 @@ func SeverityLabel(severity, severityType string) string {
 	return ScoreLabel(score)
 }
 
+// PriorityLabel renders a triage-ladder priority with severity-matched
+// styling. The word itself stays the canonical ladder value (critical, high,
+// medium, low) so humans and machine output share one vocabulary; unknown
+// values render unstyled so a new ladder rung can never disappear.
+func PriorityLabel(priority string) string {
+	switch strings.ToLower(strings.TrimSpace(priority)) {
+	case "critical":
+		return StyleCritical.Render("critical")
+	case "high":
+		return StyleRemoved.Render("high")
+	case "medium":
+		return StyleDowngraded.Render("medium")
+	case "low":
+		return StyleVersion.Render("low")
+	default:
+		return priority
+	}
+}
+
 // ScoreLabel returns a styled severity label based on a numeric CVSS score.
 func ScoreLabel(score float64) string {
 	switch {

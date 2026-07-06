@@ -594,7 +594,11 @@ type ScanDirectoryResult struct {
 	// ScanTime is the elapsed scan time as a human-readable duration.
 	ScanTime string `protobuf:"bytes,10,opt,name=scan_time,json=scanTime,proto3" json:"scan_time,omitempty"`
 	// ScanTimeMs is the elapsed scan time in milliseconds.
-	ScanTimeMs    int32 `protobuf:"varint,11,opt,name=scan_time_ms,json=scanTimeMs,proto3" json:"scan_time_ms,omitempty"`
+	ScanTimeMs int32 `protobuf:"varint,11,opt,name=scan_time_ms,json=scanTimeMs,proto3" json:"scan_time_ms,omitempty"`
+	// IgnoredCount is the number of findings suppressed by the target's ignore
+	// rules (.deputyignore.yaml and friends); suppressed findings are excluded
+	// from every other field.
+	IgnoredCount  int32 `protobuf:"varint,12,opt,name=ignored_count,json=ignoredCount,proto3" json:"ignored_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -706,6 +710,13 @@ func (x *ScanDirectoryResult) GetScanTimeMs() int32 {
 	return 0
 }
 
+func (x *ScanDirectoryResult) GetIgnoredCount() int32 {
+	if x != nil {
+		return x.IgnoredCount
+	}
+	return 0
+}
+
 // ScanContainerRequest asks for a vulnerability scan of a container image.
 type ScanContainerRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -787,7 +798,11 @@ type ScanContainerResult struct {
 	// ScanTime is the elapsed scan time as a human-readable duration.
 	ScanTime string `protobuf:"bytes,8,opt,name=scan_time,json=scanTime,proto3" json:"scan_time,omitempty"`
 	// ScanTimeMs is the elapsed scan time in milliseconds.
-	ScanTimeMs    int32 `protobuf:"varint,9,opt,name=scan_time_ms,json=scanTimeMs,proto3" json:"scan_time_ms,omitempty"`
+	ScanTimeMs int32 `protobuf:"varint,9,opt,name=scan_time_ms,json=scanTimeMs,proto3" json:"scan_time_ms,omitempty"`
+	// IgnoredCount is the number of findings suppressed by the server working directory's ignore
+	// rules (.deputyignore.yaml and friends); suppressed findings are excluded
+	// from every other field.
+	IgnoredCount  int32 `protobuf:"varint,10,opt,name=ignored_count,json=ignoredCount,proto3" json:"ignored_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -881,6 +896,13 @@ func (x *ScanContainerResult) GetScanTime() string {
 func (x *ScanContainerResult) GetScanTimeMs() int32 {
 	if x != nil {
 		return x.ScanTimeMs
+	}
+	return 0
+}
+
+func (x *ScanContainerResult) GetIgnoredCount() int32 {
+	if x != nil {
+		return x.IgnoredCount
 	}
 	return 0
 }
@@ -1192,8 +1214,12 @@ type TriageResult struct {
 	Vulnerabilities []*TriagedVuln `protobuf:"bytes,18,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
 	// Recommendations are actionable next steps derived from the findings.
 	Recommendations []string `protobuf:"bytes,19,rep,name=recommendations,proto3" json:"recommendations,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// IgnoredCount is the number of findings suppressed by the target's ignore
+	// rules (.deputyignore.yaml and friends); suppressed findings are excluded
+	// from every other field.
+	IgnoredCount  int32 `protobuf:"varint,20,opt,name=ignored_count,json=ignoredCount,proto3" json:"ignored_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TriageResult) Reset() {
@@ -1357,6 +1383,13 @@ func (x *TriageResult) GetRecommendations() []string {
 		return x.Recommendations
 	}
 	return nil
+}
+
+func (x *TriageResult) GetIgnoredCount() int32 {
+	if x != nil {
+		return x.IgnoredCount
+	}
+	return 0
 }
 
 // ListDependenciesRequest asks for the resolved dependency inventory of a
@@ -3914,8 +3947,12 @@ type GetRemediationResult struct {
 	// (deputy.remediation.v1 GeneratePlanResponse.unaddressed_vulnerabilities).
 	// Unfixable means still vulnerable, not safe.
 	UnfixableVulnerabilities []string `protobuf:"bytes,11,rep,name=unfixable_vulnerabilities,json=unfixableVulnerabilities,proto3" json:"unfixable_vulnerabilities,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// IgnoredCount is the number of findings suppressed by the target's ignore
+	// rules (.deputyignore.yaml and friends); suppressed findings are excluded
+	// from every other field.
+	IgnoredCount  int32 `protobuf:"varint,12,opt,name=ignored_count,json=ignoredCount,proto3" json:"ignored_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetRemediationResult) Reset() {
@@ -4023,6 +4060,13 @@ func (x *GetRemediationResult) GetUnfixableVulnerabilities() []string {
 		return x.UnfixableVulnerabilities
 	}
 	return nil
+}
+
+func (x *GetRemediationResult) GetIgnoredCount() int32 {
+	if x != nil {
+		return x.IgnoredCount
+	}
+	return 0
 }
 
 // DiffRefsRequest compares dependencies between two Git references or two
@@ -4530,8 +4574,12 @@ type DiffRefsResult struct {
 	VulnerabilityChanges []*DiffVulnChange `protobuf:"bytes,14,rep,name=vulnerability_changes,json=vulnerabilityChanges,proto3" json:"vulnerability_changes,omitempty"`
 	// ContainerSummary totals the container diff; absent for Git ref diffs.
 	ContainerSummary *ContainerSummary `protobuf:"bytes,15,opt,name=container_summary,json=containerSummary,proto3" json:"container_summary,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// IgnoredCount is the number of the target ref's findings suppressed by
+	// ignore rules (.deputyignore.yaml and friends); suppressed findings are
+	// excluded from the vulnerability fields.
+	IgnoredCount  int32 `protobuf:"varint,16,opt,name=ignored_count,json=ignoredCount,proto3" json:"ignored_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DiffRefsResult) Reset() {
@@ -4669,6 +4717,13 @@ func (x *DiffRefsResult) GetContainerSummary() *ContainerSummary {
 	return nil
 }
 
+func (x *DiffRefsResult) GetIgnoredCount() int32 {
+	if x != nil {
+		return x.IgnoredCount
+	}
+	return 0
+}
+
 var File_deputy_mcp_v1_mcp_proto protoreflect.FileDescriptor
 
 const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
@@ -4721,7 +4776,7 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\n" +
 	"ecosystems\x18\x03 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
 	"ecosystems\x12:\n" +
-	"\rexclude_paths\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\"\xd8\x04\n" +
+	"\rexclude_paths\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\"\xfd\x04\n" +
 	"\x13ScanDirectoryResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -4735,14 +4790,15 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\tscan_time\x18\n" +
 	" \x01(\tR\bscanTime\x12 \n" +
 	"\fscan_time_ms\x18\v \x01(\x05R\n" +
-	"scanTimeMs\x1aL\n" +
+	"scanTimeMs\x12#\n" +
+	"\rignored_count\x18\f \x01(\x05R\fignoredCount\x1aL\n" +
 	"\x1eVulnerabilitiesBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\b\n" +
 	"\x06_clean\"X\n" +
 	"\x14ScanContainerRequest\x12$\n" +
 	"\x05image\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x05image\x12\x1a\n" +
-	"\bplatform\x18\x02 \x01(\tR\bplatform\"\xa7\x04\n" +
+	"\bplatform\x18\x02 \x01(\tR\bplatform\"\xcc\x04\n" +
 	"\x13ScanContainerResult\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12)\n" +
@@ -4753,7 +4809,9 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\bcoverage\x18\a \x01(\v2\x17.deputy.mcp.v1.CoverageR\bcoverage\x12\x1b\n" +
 	"\tscan_time\x18\b \x01(\tR\bscanTime\x12 \n" +
 	"\fscan_time_ms\x18\t \x01(\x05R\n" +
-	"scanTimeMs\x1aL\n" +
+	"scanTimeMs\x12#\n" +
+	"\rignored_count\x18\n" +
+	" \x01(\x05R\fignoredCount\x1aL\n" +
 	"\x1eVulnerabilitiesBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\b\n" +
@@ -4785,7 +4843,7 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x0fpriority_reason\x18\x10 \x01(\tR\x0epriorityReasonB\t\n" +
 	"\a_directB\n" +
 	"\n" +
-	"\b_has_fix\"\x9a\x06\n" +
+	"\b_has_fix\"\xbf\x06\n" +
 	"\fTriageResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -4807,7 +4865,8 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x14direct_fixable_count\x18\x10 \x01(\x05R\x12directFixableCount\x128\n" +
 	"\x18transitive_fixable_count\x18\x11 \x01(\x05R\x16transitiveFixableCount\x12D\n" +
 	"\x0fvulnerabilities\x18\x12 \x03(\v2\x1a.deputy.mcp.v1.TriagedVulnR\x0fvulnerabilities\x12(\n" +
-	"\x0frecommendations\x18\x13 \x03(\tR\x0frecommendations\"\xe3\x01\n" +
+	"\x0frecommendations\x18\x13 \x03(\tR\x0frecommendations\x12#\n" +
+	"\rignored_count\x18\x14 \x01(\x05R\fignoredCount\"\xe3\x01\n" +
 	"\x17ListDependenciesRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x1f\n" +
 	"\vdirect_only\x18\x02 \x01(\bR\n" +
@@ -5053,7 +5112,7 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\n" +
 	"_migrationB\t\n" +
 	"\a_directB\r\n" +
-	"\v_executable\"\xbc\x03\n" +
+	"\v_executable\"\xe1\x03\n" +
 	"\x14GetRemediationResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -5066,7 +5125,8 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x05steps\x18\t \x03(\v2\x1e.deputy.mcp.v1.RemediationStepR\x05steps\x12%\n" +
 	"\x0estdlib_upgrade\x18\n" +
 	" \x01(\tR\rstdlibUpgrade\x12;\n" +
-	"\x19unfixable_vulnerabilities\x18\v \x03(\tR\x18unfixableVulnerabilities\"\x8e\x02\n" +
+	"\x19unfixable_vulnerabilities\x18\v \x03(\tR\x18unfixableVulnerabilities\x12#\n" +
+	"\rignored_count\x18\f \x01(\x05R\fignoredCount\"\x8e\x02\n" +
 	"\x0fDiffRefsRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12)\n" +
 	"\bbase_ref\x18\x02 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\abaseRef\x12-\n" +
@@ -5113,7 +5173,7 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\flayers_added\x18\b \x01(\x05R\vlayersAdded\x12%\n" +
 	"\x0elayers_removed\x18\t \x01(\x05R\rlayersRemoved\x12%\n" +
 	"\x0econfig_changed\x18\n" +
-	" \x01(\bR\rconfigChanged\"\xe5\x06\n" +
+	" \x01(\bR\rconfigChanged\"\x8a\a\n" +
 	"\x0eDiffRefsResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x19\n" +
 	"\bbase_ref\x18\x02 \x01(\tR\abaseRef\x12\x1d\n" +
@@ -5133,7 +5193,8 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x0fvulnerabilities\x18\f \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12|\n" +
 	"\x1bvulnerabilities_by_severity\x18\r \x03(\v2<.deputy.mcp.v1.DiffRefsResult.VulnerabilitiesBySeverityEntryR\x19vulnerabilitiesBySeverity\x12R\n" +
 	"\x15vulnerability_changes\x18\x0e \x03(\v2\x1d.deputy.mcp.v1.DiffVulnChangeR\x14vulnerabilityChanges\x12L\n" +
-	"\x11container_summary\x18\x0f \x01(\v2\x1f.deputy.mcp.v1.ContainerSummaryR\x10containerSummary\x1aL\n" +
+	"\x11container_summary\x18\x0f \x01(\v2\x1f.deputy.mcp.v1.ContainerSummaryR\x10containerSummary\x12#\n" +
+	"\rignored_count\x18\x10 \x01(\x05R\fignoredCount\x1aL\n" +
 	"\x1eVulnerabilitiesBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\x14\n" +
