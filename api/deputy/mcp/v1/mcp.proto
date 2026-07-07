@@ -437,7 +437,8 @@ message GenerateSBOMResult {
   string commit = 4;
   // Format is the canonical serialization format of the document.
   string format = 5 [(buf.validate.field).string = {in: ["cyclonedx-json", "spdx-json", "protobom-json"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
-  // Components is the number of components in the document.
+  // Components is the number of component entries in the document, excluding
+  // the root that describes the analyzed target itself.
   int32 components = 6;
   // Sbom is the serialized SBOM document in the requested format.
   string sbom = 7;

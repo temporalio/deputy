@@ -1831,7 +1831,8 @@ type GenerateSBOMResult struct {
 	Commit string `protobuf:"bytes,4,opt,name=commit,proto3" json:"commit,omitempty"`
 	// Format is the canonical serialization format of the document.
 	Format string `protobuf:"bytes,5,opt,name=format,proto3" json:"format,omitempty"`
-	// Components is the number of components in the document.
+	// Components is the number of component entries in the document, excluding
+	// the root that describes the analyzed target itself.
 	Components int32 `protobuf:"varint,6,opt,name=components,proto3" json:"components,omitempty"`
 	// Sbom is the serialized SBOM document in the requested format.
 	Sbom          string `protobuf:"bytes,7,opt,name=sbom,proto3" json:"sbom,omitempty"`

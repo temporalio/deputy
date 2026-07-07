@@ -628,7 +628,7 @@ func Test_addDockerfileBaseImagesToSBOM(t *testing.T) {
 		},
 	}
 
-	addDockerfileBaseImagesToSBOM(doc, dockerfiles, app.Id)
+	addDockerfileBaseImagesToSBOM(doc, dockerfiles, app.Id, map[string]struct{}{app.Id: {}})
 
 	// Should have added 2 nodes (golang and alpine)
 	// Total nodes: 1 (app) + 2 (base images) = 3
@@ -687,7 +687,7 @@ func Test_addDockerfileBaseImagesToSBOM_deduplication(t *testing.T) {
 		},
 	}
 
-	addDockerfileBaseImagesToSBOM(doc, dockerfiles, app.Id)
+	addDockerfileBaseImagesToSBOM(doc, dockerfiles, app.Id, map[string]struct{}{app.Id: {}})
 
 	// Should have only 1 base image node (deduplicated)
 	// Total nodes: 1 (app) + 1 (alpine) = 2
@@ -723,7 +723,7 @@ func Test_addDockerfileBaseImagesToSBOM_skipScratch(t *testing.T) {
 		},
 	}
 
-	addDockerfileBaseImagesToSBOM(doc, dockerfiles, app.Id)
+	addDockerfileBaseImagesToSBOM(doc, dockerfiles, app.Id, map[string]struct{}{app.Id: {}})
 
 	// Should have only 1 base image node (scratch skipped)
 	// Total nodes: 1 (app) + 1 (golang) = 2
@@ -1078,5 +1078,43 @@ func Test_buildProtobomDocument_setsTimestamp(t *testing.T) {
 	ts := doc.Metadata.Date.AsTime().Unix()
 	if ts < before || ts > after {
 		t.Errorf("timestamp %d not in expected range [%d, %d]", ts, before, after)
+	}
+}
+
+// Test_buildProtobomDocument_dedupesBaseImageNodes pins a live-spin
+// regression: a Dockerfile base image reaches the builder twice, once from
+// the stage-aware Dockerfile pass and once as the dockerfilex extractor's
+// package, and both map to the same node id. Node ids must stay unique in
+// the document, and the richer Dockerfile-pass node wins.
+func Test_buildProtobomDocument_dedupesBaseImageNodes(t *testing.T) {
+	ws := workspace.NewMemory()
+	defer ws.Close()
+	if err := ws.WriteFile("Dockerfile", []byte("FROM python:3.10\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	pkgs := []*extractor.Package{
+		{Name: "library/python", Version: "3.10", PURLType: "docker", Locations: []string{"Dockerfile"}},
+	}
+
+	doc, err := buildProtobomDocument(t.Context(), ws, "https://example.com/repo", "HEAD", "test", pkgs, nil, nil)
+	if err != nil {
+		t.Fatalf("buildProtobomDocument: %v", err)
+	}
+
+	ids := map[string]int{}
+	pythonNodes := 0
+	for _, n := range doc.GetNodeList().GetNodes() {
+		ids[n.GetId()]++
+		if n.GetName() == "library/python" {
+			pythonNodes++
+		}
+	}
+	for id, count := range ids {
+		if count > 1 {
+			t.Errorf("node id %q appears %d times, want 1", id, count)
+		}
+	}
+	if pythonNodes != 1 {
+		t.Errorf("library/python nodes = %d, want 1", pythonNodes)
 	}
 }

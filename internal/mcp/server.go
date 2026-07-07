@@ -1582,9 +1582,12 @@ func (s *Server) generateSBOMTool(ctx context.Context, args *mcpv1.GenerateSBOMR
 		}
 	}
 
+	// Count what a reader finds as component entries in the serialized
+	// document: root nodes describe the analyzed target itself (CycloneDX
+	// metadata.component, SPDX document describes) and are not components.
 	components := 0
 	if sbomResult.Document != nil && sbomResult.Document.NodeList != nil {
-		components = len(sbomResult.Document.NodeList.Nodes)
+		components = max(len(sbomResult.Document.NodeList.Nodes)-len(sbomResult.Document.NodeList.RootElements), 0)
 	}
 
 	span.SetAttributes(otel.AttrMCPPackageCount.Int(components))
