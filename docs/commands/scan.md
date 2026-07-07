@@ -290,6 +290,8 @@ Deputy supports 17 ecosystems for scanning:
 Detection is powered by [OSV-SCALIBR](https://github.com/google/osv-scalibr) with custom extensions for GitHub Actions.
 Binary analysis extracts dependencies from compiled Go and Rust executables.
 
+When a project has both a manifest and the lockfile that resolves it (Cargo.toml alongside Cargo.lock, including workspace members resolved by a root lockfile), Deputy inventories the lockfile's exact resolutions and drops the manifest's version requirements, so findings always reference the versions actually built. Manifest-only projects fall back to requirement-derived entries.
+
 ### Historical Analysis
 
 ```console

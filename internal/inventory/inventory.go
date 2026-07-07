@@ -152,6 +152,7 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 	if ignoredDirs != nil {
 		pkgs = filterGitignoredPackageLocations(ws, pkgs, ignoredDirs)
 	}
+	pkgs = preferLockfileResolutions(pkgs)
 	if scanErr := summarizeScanFailures(results); scanErr != nil {
 		if len(pkgs) > 0 {
 			return deduplicatePackages(pkgs), scanErr
@@ -555,6 +556,81 @@ func DefaultScanner() func(ctx context.Context, ws workspace.FS, ecosystems []st
 	return func(ctx context.Context, ws workspace.FS, ecosystems []string) ([]*extractor.Package, error) {
 		return ScanPackagesWorking(ctx, ws, ScanOptions{Ecosystems: ecosystems})
 	}
+}
+
+// manifestLockPairs maps dependency manifest basenames to the lockfile
+// basenames that fully resolve them. When both are extracted from the same
+// project, the manifest entries carry version requirements (tokio = "1.26"),
+// not resolutions, and must yield to the lockfile's exact versions.
+var manifestLockPairs = map[string]string{
+	"Cargo.toml": "Cargo.lock",
+}
+
+// preferLockfileResolutions drops manifest-derived package entries whose
+// manifest is resolved by an extracted lockfile. Matching requirement strings
+// against advisories as if they were exact versions produces false positives
+// (and misses) whenever the lockfile resolves to a different version. A
+// manifest counts as resolved when its paired lockfile exists in the same or
+// any ancestor directory (Cargo workspaces keep one lock at the root for all
+// member crates). Manifest-only projects keep their requirement-derived
+// entries: there is no resolution to prefer, and partial inventory beats none.
+func preferLockfileResolutions(pkgs []*extractor.Package) []*extractor.Package {
+	lockDirs := make(map[string]map[string]struct{})
+	for _, pkg := range pkgs {
+		if pkg == nil {
+			continue
+		}
+		for _, loc := range pkg.Locations {
+			base := path.Base(loc)
+			for _, lock := range manifestLockPairs {
+				if base == lock {
+					if lockDirs[lock] == nil {
+						lockDirs[lock] = make(map[string]struct{})
+					}
+					lockDirs[lock][path.Dir(loc)] = struct{}{}
+				}
+			}
+		}
+	}
+	if len(lockDirs) == 0 {
+		return pkgs
+	}
+
+	// resolved reports whether a manifest location is covered by its paired
+	// lockfile in the same directory or an ancestor directory.
+	resolved := func(loc string) bool {
+		lock, ok := manifestLockPairs[path.Base(loc)]
+		if !ok {
+			return false
+		}
+		dirs := lockDirs[lock]
+		if len(dirs) == 0 {
+			return false
+		}
+		for d := path.Dir(loc); ; d = path.Dir(d) {
+			if _, ok := dirs[d]; ok {
+				return true
+			}
+			if d == "." || d == "/" {
+				return false
+			}
+		}
+	}
+
+	out := make([]*extractor.Package, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		if pkg == nil || len(pkg.Locations) == 0 {
+			out = append(out, pkg)
+			continue
+		}
+		kept := slices.DeleteFunc(slices.Clone(pkg.Locations), resolved)
+		if len(kept) == 0 {
+			continue
+		}
+		pkg.Locations = kept
+		out = append(out, pkg)
+	}
+	return out
 }
 
 // deduplicatePackages collapses packages with identical PURLs, merging their locations.
