@@ -121,6 +121,9 @@ func TestHydrateSparseVulnerabilityAliasesSkipsCompleteRecords(t *testing.T) {
 			{Package: osvschema.Package{Name: "golang.org/x/crypto"}},
 		},
 		Aliases: []string{"CVE-2022-30636"},
+		Severity: []osvschema.Severity{
+			{Type: "CVSS_V3", Score: "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N"},
+		},
 	}
 
 	got := HydrateSparseVulnerabilityAliases(t.Context(), client, base)
@@ -129,5 +132,67 @@ func TestHydrateSparseVulnerabilityAliasesSkipsCompleteRecords(t *testing.T) {
 	}
 	if len(client.calls) != 0 {
 		t.Fatalf("alias calls = %v, want none", client.calls)
+	}
+}
+
+// TestNeedsVulnerabilityAliasHydrationOnMissingSeverity pins the trigger that
+// makes single-advisory lookups severity-complete: a record with summary and
+// affected packages but no rating still hydrates, because alias records (a GO
+// advisory's GHSA alias) commonly carry the rating.
+func TestNeedsVulnerabilityAliasHydrationOnMissingSeverity(t *testing.T) {
+	unrated := &osvschema.Vulnerability{
+		ID:      "GO-2025-3563",
+		Summary: "Request smuggling in net/http",
+		Affected: []osvschema.Affected{
+			{Package: osvschema.Package{Name: "stdlib"}},
+		},
+	}
+	if !NeedsVulnerabilityAliasHydration(unrated) {
+		t.Error("unrated record should hydrate")
+	}
+	unrated.DatabaseSpecific = map[string]any{"severity": "CRITICAL"}
+	if NeedsVulnerabilityAliasHydration(unrated) {
+		t.Error("database_specific severity counts as a rating")
+	}
+}
+
+// TestSeverityAliasOrder pins the deterministic consult order for severity
+// resolution: GHSA first, then CVE, then the rest, alphabetical within class.
+func TestSeverityAliasOrder(t *testing.T) {
+	got := SeverityAliasOrder([]string{
+		"BIT-golang-2025-22871", "CVE-2025-22871", "GHSA-g9pc-8g42-g6vq", "cve-2020-0001", "GHSA-a", "GHSA-a",
+	})
+	want := []string{"GHSA-a", "GHSA-g9pc-8g42-g6vq", "CVE-2025-22871", "cve-2020-0001", "BIT-golang-2025-22871"}
+	if !slices.Equal(got, want) {
+		t.Errorf("SeverityAliasOrder = %v, want %v", got, want)
+	}
+}
+
+// TestResolveSeverityFromAliases verifies the first rated alias record wins
+// and unrated alias sets resolve to nothing.
+func TestResolveSeverityFromAliases(t *testing.T) {
+	client := &hydrateAliasClient{
+		vulns: map[string]*osvschema.Vulnerability{
+			"CVE-2025-22871": {ID: "CVE-2025-22871"},
+			"GHSA-g9pc-8g42-g6vq": {
+				ID:       "GHSA-g9pc-8g42-g6vq",
+				Severity: []osvschema.Severity{{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"}},
+			},
+		},
+	}
+
+	raw, rawType := ResolveSeverityFromAliases(t.Context(), client, []string{"CVE-2025-22871", "GHSA-g9pc-8g42-g6vq"})
+	if raw == "" || rawType != "CVSS_V3" {
+		t.Fatalf("resolved (%q, %q), want the GHSA record's CVSS_V3 rating", raw, rawType)
+	}
+	if len(client.calls) == 0 || client.calls[0] != "GHSA-g9pc-8g42-g6vq" {
+		t.Fatalf("consult order %v, want GHSA first", client.calls)
+	}
+
+	raw, rawType = ResolveSeverityFromAliases(t.Context(), &hydrateAliasClient{
+		vulns: map[string]*osvschema.Vulnerability{"CVE-1": {ID: "CVE-1"}},
+	}, []string{"CVE-1"})
+	if raw != "" || rawType != "" {
+		t.Fatalf("unrated aliases resolved (%q, %q), want empty", raw, rawType)
 	}
 }

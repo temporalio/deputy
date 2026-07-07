@@ -545,17 +545,25 @@ func (x *GraphOptions) GetPrivatePatterns() []string {
 	return nil
 }
 
-// EnrichOptions configures vulnerability enrichment with threat intelligence.
+// EnrichOptions configures opt-in vulnerability enrichment. Every enrichment
+// consults the network; none runs by default.
 type EnrichOptions struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Enabled controls whether to enrich vulnerabilities with threat intel.
+	// Enabled turns on every enrichment below.
 	Enabled bool `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	// IncludeEpss adds EPSS scores to findings.
 	IncludeEpss bool `protobuf:"varint,2,opt,name=include_epss,json=includeEpss,proto3" json:"include_epss,omitempty"`
 	// IncludeKev adds CISA KEV catalog data to findings.
-	IncludeKev    bool `protobuf:"varint,3,opt,name=include_kev,json=includeKev,proto3" json:"include_kev,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	IncludeKev bool `protobuf:"varint,3,opt,name=include_kev,json=includeKev,proto3" json:"include_kev,omitempty"`
+	// IncludeSeverity resolves a severity rating for advisories whose matched
+	// record carries none (many ecosystem databases, like the Go vulnerability
+	// database, do not rate advisories) by consulting the advisory's alias
+	// records, GHSA aliases first, then CVE. The resolved Severity keeps its
+	// origin in type/raw, and resolution runs before consolidation so stats and
+	// triage priorities reflect it.
+	IncludeSeverity bool `protobuf:"varint,4,opt,name=include_severity,json=includeSeverity,proto3" json:"include_severity,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *EnrichOptions) Reset() {
@@ -605,6 +613,13 @@ func (x *EnrichOptions) GetIncludeEpss() bool {
 func (x *EnrichOptions) GetIncludeKev() bool {
 	if x != nil {
 		return x.IncludeKev
+	}
+	return false
+}
+
+func (x *EnrichOptions) GetIncludeSeverity() bool {
+	if x != nil {
+		return x.IncludeSeverity
 	}
 	return false
 }
@@ -1426,12 +1441,13 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1b\n" +
 	"\tuse_proxy\x18\x02 \x01(\bR\buseProxy\x12\x17\n" +
 	"\ause_git\x18\x03 \x01(\bR\x06useGit\x12:\n" +
-	"\x10private_patterns\x18\x04 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\x0fprivatePatterns\"m\n" +
+	"\x10private_patterns\x18\x04 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\x0fprivatePatterns\"\x98\x01\n" +
 	"\rEnrichOptions\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12!\n" +
 	"\finclude_epss\x18\x02 \x01(\bR\vincludeEpss\x12\x1f\n" +
 	"\vinclude_kev\x18\x03 \x01(\bR\n" +
-	"includeKev\"\xf3\a\n" +
+	"includeKev\x12)\n" +
+	"\x10include_severity\x18\x04 \x01(\bR\x0fincludeSeverity\"\xf3\a\n" +
 	"\fScanResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x122\n" +

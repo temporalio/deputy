@@ -77,7 +77,7 @@ can plug into the same scan flow as providers are added.
 | `--policy` | | | CEL policy file(s) to evaluate (repeatable) |
 | `--ecosystems` | `-e` | all | Limit to specific ecosystems (see [supported ecosystems](#supported-ecosystems)) |
 | `--exclude-path` | | | Directory glob to skip during the walk (repeatable; e.g. `.bin/**`). Unioned with `scan.exclude_paths` from config. A slash-less name matches at any depth; a slashed path is anchored to the scan root |
-| `--enrich` | | `false` | Enrich with EPSS scores and KEV status (requires network) |
+| `--enrich` | | `false` | Enrich with EPSS scores, KEV status, and severity ratings resolved from alias advisories (requires network) |
 | `--with-graph` | | `false` | Build dependency graph to show paths to vulnerable packages |
 | `--secrets` | | `false` | Scan for leaked secrets and credentials alongside vulnerabilities |
 | `--filter` | | | CEL expression to filter vulnerabilities (e.g., `'vulnerability.advisory.severity.level == severity.critical'`) |
@@ -257,6 +257,7 @@ $ deputy scan --show-symbols
 The `--enrich` flag queries external APIs to add:
 - **EPSS scores**: Probability of exploitation in the next 30 days (0.0-1.0)
 - **KEV status**: Whether the CVE is in CISA's Known Exploited Vulnerabilities catalog
+- **Severity resolution**: advisories whose matched record carries no rating (common for Go vulnerability database records) get one from their alias advisories, GHSA first, then CVE. Resolution runs before consolidation, so severity counts and triage priorities reflect the resolved ratings, and the severity type records where the rating came from. Without `--enrich`, `UNKNOWN` means exactly "the matched record carries no rating".
 
 The `--show-unfixable-guidance` flag provides actionable recommendations for vulnerabilities without fixes, including:
 - Risk assessment factors

@@ -501,7 +501,11 @@ type ScanDirectoryRequest struct {
 	Ecosystems []string `protobuf:"bytes,3,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
 	// Optional directory globs to skip during the walk, e.g. .bin/** or
 	// **/testdata.
-	ExcludePaths  []string `protobuf:"bytes,4,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	ExcludePaths []string `protobuf:"bytes,4,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	// If true, enrich findings over the network: severity ratings are resolved
+	// from alias advisories for records that carry none (moving counts out of
+	// the unknown bucket), plus threat intel where available. Slower.
+	Enrich        bool `protobuf:"varint,5,opt,name=enrich,proto3" json:"enrich,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -562,6 +566,13 @@ func (x *ScanDirectoryRequest) GetExcludePaths() []string {
 		return x.ExcludePaths
 	}
 	return nil
+}
+
+func (x *ScanDirectoryRequest) GetEnrich() bool {
+	if x != nil {
+		return x.Enrich
+	}
+	return false
 }
 
 // ScanDirectoryResult summarizes a directory scan: severity totals that always
@@ -725,7 +736,11 @@ type ScanContainerRequest struct {
 	Image string `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
 	// Target platform, e.g. linux/amd64 or linux/arm64. Defaults to the current
 	// platform.
-	Platform      string `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`
+	Platform string `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`
+	// If true, enrich findings over the network: severity ratings are resolved
+	// from alias advisories for records that carry none (moving counts out of
+	// the unknown bucket), plus threat intel where available. Slower.
+	Enrich        bool `protobuf:"varint,3,opt,name=enrich,proto3" json:"enrich,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -772,6 +787,13 @@ func (x *ScanContainerRequest) GetPlatform() string {
 		return x.Platform
 	}
 	return ""
+}
+
+func (x *ScanContainerRequest) GetEnrich() bool {
+	if x != nil {
+		return x.Enrich
+	}
+	return false
 }
 
 // ScanContainerResult summarizes a container image scan.
@@ -919,7 +941,11 @@ type TriageRequest struct {
 	Ecosystems []string `protobuf:"bytes,3,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
 	// Optional directory globs to skip during the walk, e.g. .bin/** or
 	// **/testdata.
-	ExcludePaths  []string `protobuf:"bytes,4,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	ExcludePaths []string `protobuf:"bytes,4,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	// If true, enrich findings over the network: severity ratings are resolved
+	// from alias advisories for records that carry none, so triage priorities
+	// and severity counts reflect real ratings instead of unknown. Slower.
+	Enrich        bool `protobuf:"varint,5,opt,name=enrich,proto3" json:"enrich,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -980,6 +1006,13 @@ func (x *TriageRequest) GetExcludePaths() []string {
 		return x.ExcludePaths
 	}
 	return nil
+}
+
+func (x *TriageRequest) GetEnrich() bool {
+	if x != nil {
+		return x.Enrich
+	}
+	return false
 }
 
 // TriagedVuln is one prioritized finding: identity plus the canonical triage
@@ -4771,14 +4804,15 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\bartifact\x18\x02 \x01(\tBA\xbaH>\xd8\x01\x01r9R\apackageR\n" +
 	"os_packageR\x13container_image_refR\rgithub_actionR\bartifact\x12\x18\n" +
 	"\asources\x18\x03 \x03(\tR\asources\x12#\n" +
-	"\rpackage_count\x18\x04 \x01(\x05R\fpackageCount\"\xbf\x01\n" +
+	"\rpackage_count\x18\x04 \x01(\x05R\fpackageCount\"\xd7\x01\n" +
 	"\x14ScanDirectoryRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x125\n" +
 	"\n" +
 	"ecosystems\x18\x03 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
 	"ecosystems\x12:\n" +
-	"\rexclude_paths\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\"\xfd\x04\n" +
+	"\rexclude_paths\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\x12\x16\n" +
+	"\x06enrich\x18\x05 \x01(\bR\x06enrich\"\xfd\x04\n" +
 	"\x13ScanDirectoryResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -4797,10 +4831,11 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x1eVulnerabilitiesBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\b\n" +
-	"\x06_clean\"X\n" +
+	"\x06_clean\"p\n" +
 	"\x14ScanContainerRequest\x12$\n" +
 	"\x05image\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x05image\x12\x1a\n" +
-	"\bplatform\x18\x02 \x01(\tR\bplatform\"\xcc\x04\n" +
+	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x16\n" +
+	"\x06enrich\x18\x03 \x01(\bR\x06enrich\"\xcc\x04\n" +
 	"\x13ScanContainerResult\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12)\n" +
@@ -4817,14 +4852,15 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x1eVulnerabilitiesBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\b\n" +
-	"\x06_clean\"\xb8\x01\n" +
+	"\x06_clean\"\xd0\x01\n" +
 	"\rTriageRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x125\n" +
 	"\n" +
 	"ecosystems\x18\x03 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
 	"ecosystems\x12:\n" +
-	"\rexclude_paths\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\"\xa3\x05\n" +
+	"\rexclude_paths\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\x12\x16\n" +
+	"\x06enrich\x18\x05 \x01(\bR\x06enrich\"\xa3\x05\n" +
 	"\vTriagedVuln\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\x04kind\x18\x02 \x01(\tB \xbaH\x1d\xd8\x01\x01r\x18R\rvulnerabilityR\amalwareR\x04kind\x12J\n" +

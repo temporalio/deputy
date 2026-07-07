@@ -46,9 +46,13 @@ func HydrateSparseVulnerabilityAliases(ctx context.Context, client Client, vuln 
 }
 
 // NeedsVulnerabilityAliasHydration reports whether an OSV record is missing
-// fields that commonly exist in ecosystem-native alias records.
+// fields that commonly exist in alias records: a summary, affected packages,
+// or a severity rating (ecosystem databases like the Go vulnerability
+// database publish unrated records whose GHSA aliases carry the rating).
+// Single-advisory lookups hydrate on any of these so their answer is the full
+// picture across the alias set.
 func NeedsVulnerabilityAliasHydration(vuln *osvschema.Vulnerability) bool {
-	return vuln != nil && (strings.TrimSpace(vuln.Summary) == "" || len(vuln.Affected) == 0)
+	return vuln != nil && (strings.TrimSpace(vuln.Summary) == "" || len(vuln.Affected) == 0 || !hasSeverityRating(vuln))
 }
 
 func cloneOSVVulnerability(vuln *osvschema.Vulnerability) *osvschema.Vulnerability {
@@ -205,4 +209,77 @@ func mergeStringAnyMap(base map[string]any, extra map[string]any) map[string]any
 		out[key] = value
 	}
 	return out
+}
+
+// hasSeverityRating reports whether the record itself carries any severity
+// signal: a CVSS entry or a database_specific severity label.
+func hasSeverityRating(vuln *osvschema.Vulnerability) bool {
+	if vuln == nil {
+		return false
+	}
+	return len(vuln.Severity) > 0 || extractDatabaseSeverity(vuln.DatabaseSpecific) != ""
+}
+
+// SeverityAliasOrder returns the advisory's aliases in the order severity
+// resolution should consult them: GHSA aliases first (GitHub reviews and
+// rates advisories), then CVE, then everything else, alphabetical within each
+// class so resolution is deterministic.
+func SeverityAliasOrder(aliases []string) []string {
+	out := make([]string, 0, len(aliases))
+	seen := map[string]struct{}{}
+	for _, alias := range aliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			continue
+		}
+		key := strings.ToUpper(alias)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, alias)
+	}
+	class := func(id string) int {
+		upper := strings.ToUpper(id)
+		switch {
+		case strings.HasPrefix(upper, "GHSA-"):
+			return 0
+		case strings.HasPrefix(upper, "CVE-"):
+			return 1
+		default:
+			return 2
+		}
+	}
+	slices.SortFunc(out, func(a, b string) int {
+		if c := class(a) - class(b); c != 0 {
+			return c
+		}
+		return strings.Compare(a, b)
+	})
+	return out
+}
+
+// ResolveSeverityFromAliases returns the first severity rating found among
+// the given alias records, consulted in SeverityAliasOrder. It returns the
+// raw severity value and its type descriptor in the same shape the matched
+// record's own rating would have, so callers normalize both identically.
+// Empty results mean no alias record carries a rating. This lookup is always
+// opt-in: Deputy never substitutes an alias rating silently.
+func ResolveSeverityFromAliases(ctx context.Context, client Client, aliases []string) (raw, rawType string) {
+	if client == nil {
+		return "", ""
+	}
+	for _, alias := range SeverityAliasOrder(aliases) {
+		if err := ctx.Err(); err != nil {
+			return "", ""
+		}
+		vuln, err := client.GetVulnByID(ctx, alias)
+		if err != nil || vuln == nil {
+			continue
+		}
+		if raw, rawType = resolveSeverity(*vuln); raw != "" {
+			return raw, rawType
+		}
+	}
+	return "", ""
 }

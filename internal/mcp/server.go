@@ -138,7 +138,7 @@ const serverInstructions = "Deputy is a supply-chain security engine. Its tools 
 	"- Prefer a PURL (e.g. `pkg:npm/lodash@4.17.21`) for exact matches. Tools also accept `name`, `name@version`, or `name` + `ecosystem`. Ecosystem names are lenient (e.g. `gha` resolves to `github-actions`, `golang` to `go`).\n" +
 	"\n" +
 	"Reading results\n" +
-	"- Severity totals include an `unknown` bucket, so per-severity counts always sum to the total.\n" +
+	"- Severity totals include an `unknown` bucket, so per-severity counts always sum to the total. `UNKNOWN` means the matched advisory record carries no rating (common for Go vuln DB records), not that none exists: pass `enrich: true` to scan and triage tools to resolve ratings from alias advisories (GHSA first), at the cost of extra network lookups. `explain_vulnerability` always resolves across aliases.\n" +
 	"- Sampled outputs (advisory references, graph paths) are capped and set a `*Truncated` flag alongside a full count (e.g. `pathCount` with `pathsTruncated`); check them before assuming a result is complete. Other lists are returned whole. Ordering is deterministic across calls.\n" +
 	"- A clean target reports `clean: true`; this is success, not an error.\n" +
 	"- Absent fields mean empty, zero, or not applicable: results omit empty lists, zero counts, and optional attributes (no `vulnerabilities` key = none found; no `kind` = ordinary vulnerability). Affirmative answers (`clean`, `found`, `direct`, `hasFix`, `migration`, `executable`, `depth`, `isContainerDiff`) are present whenever they apply, even when false or zero; severity count maps always carry all their keys.\n" +
@@ -1372,6 +1372,17 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ra
 }
 
 // scanDirectoryTool scans a local directory and summarizes consolidated findings with advisory-source coverage.
+// mcpEnrichOptions maps a tool's enrich flag to scan enrichment: one knob
+// that turns on every enrichment (severity resolution from alias records,
+// EPSS, KEV), matching the CLI's single --enrich flag. Nil when not requested
+// so unenriched scans carry no options.
+func mcpEnrichOptions(enrich bool) *scanv1.EnrichOptions {
+	if !enrich {
+		return nil
+	}
+	return &scanv1.EnrichOptions{Enabled: true}
+}
+
 func (s *Server) scanDirectoryTool(ctx context.Context, args *mcpv1.ScanDirectoryRequest) (proto.Message, error) {
 	span := otel.SpanFromContext(ctx)
 	startTime := time.Now()
@@ -1399,6 +1410,8 @@ func (s *Server) scanDirectoryTool(ctx context.Context, args *mcpv1.ScanDirector
 			},
 		},
 	})
+
+	scanReq.Msg.Options.EnrichOptions = mcpEnrichOptions(args.GetEnrich())
 
 	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
@@ -2171,6 +2184,8 @@ func (s *Server) triageVulnerabilitiesTool(ctx context.Context, args *mcpv1.Tria
 		},
 	})
 
+	scanReq.Msg.Options.EnrichOptions = mcpEnrichOptions(args.GetEnrich())
+
 	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
@@ -2343,6 +2358,8 @@ func (s *Server) scanContainerTool(ctx context.Context, args *mcpv1.ScanContaine
 			},
 		},
 	})
+
+	scanReq.Msg.Options.EnrichOptions = mcpEnrichOptions(args.GetEnrich())
 
 	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {

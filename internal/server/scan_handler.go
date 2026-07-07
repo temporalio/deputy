@@ -95,6 +95,7 @@ func (h *ScanHandler) Scan(
 		opts.DetectBaseImage = req.Msg.Options.DetectBaseImage
 		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 		opts.VerifyFixes = !req.Msg.Options.DisableFixVerification
+		opts.ResolveSeverities = enrichSeverityRequested(req.Msg.Options.GetEnrichOptions())
 	}
 
 	// Extract ref from options if provided
@@ -251,6 +252,7 @@ func (h *ScanHandler) StreamScan(
 		opts.DetectBaseImage = req.Msg.Options.DetectBaseImage
 		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 		opts.VerifyFixes = !req.Msg.Options.DisableFixVerification
+		opts.ResolveSeverities = enrichSeverityRequested(req.Msg.Options.GetEnrichOptions())
 	}
 
 	// Send resolving target phase
@@ -360,6 +362,12 @@ func countBySeverity(findings []*vulnerabilityv1.Finding, level vulnerabilityv1.
 }
 
 // enrichFindings enriches vulnerability findings with EPSS and KEV data.
+// enrichSeverityRequested reports whether enrichment asks for severity
+// resolution from alias records, either explicitly or via the enable-all flag.
+func enrichSeverityRequested(opts *scanv1.EnrichOptions) bool {
+	return opts.GetIncludeSeverity() || opts.GetEnabled()
+}
+
 func enrichFindings(ctx context.Context, findings []*vulnerabilityv1.Finding, opts *scanv1.EnrichOptions) {
 	if len(findings) == 0 {
 		return

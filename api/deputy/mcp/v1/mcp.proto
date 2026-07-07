@@ -150,6 +150,10 @@ message ScanDirectoryRequest {
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
   repeated string exclude_paths = 4 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
+  // If true, enrich findings over the network: severity ratings are resolved
+  // from alias advisories for records that carry none (moving counts out of
+  // the unknown bucket), plus threat intel where available. Slower.
+  bool enrich = 5;
 }
 
 // ScanDirectoryResult summarizes a directory scan: severity totals that always
@@ -196,6 +200,10 @@ message ScanContainerRequest {
   // Target platform, e.g. linux/amd64 or linux/arm64. Defaults to the current
   // platform.
   string platform = 2;
+  // If true, enrich findings over the network: severity ratings are resolved
+  // from alias advisories for records that carry none (moving counts out of
+  // the unknown bucket), plus threat intel where available. Slower.
+  bool enrich = 3;
 }
 
 // ScanContainerResult summarizes a container image scan.
@@ -240,6 +248,10 @@ message TriageRequest {
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
   repeated string exclude_paths = 4 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
+  // If true, enrich findings over the network: severity ratings are resolved
+  // from alias advisories for records that carry none, so triage priorities
+  // and severity counts reflect real ratings instead of unknown. Slower.
+  bool enrich = 5;
 }
 
 // TriagedVuln is one prioritized finding: identity plus the canonical triage

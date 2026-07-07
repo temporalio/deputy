@@ -15,6 +15,7 @@ import (
 	packageurl "github.com/package-url/packageurl-go"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
 
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
@@ -130,6 +131,14 @@ type Options struct {
 	// Requires network access. Disable (via --no-verify-fixes) for offline scans
 	// to fall back to trusting advisory-reported fixed versions verbatim.
 	VerifyFixes bool
+
+	// ResolveSeverities rates advisories whose matched record carries no
+	// severity by consulting their alias records (GHSA first, then CVE), before
+	// consolidation so stats and triage priorities reflect the resolved
+	// ratings. The resulting Severity keeps its origin in type/raw. Opt-in via
+	// scan enrichment: it adds network lookups and Deputy never substitutes an
+	// alias rating silently.
+	ResolveSeverities bool
 
 	// GoProxyURL overrides the Go module proxy used for fix verification.
 	// Empty uses the default (proxy.golang.org).
@@ -490,6 +499,9 @@ func purlEcosystem(pu packageurl.PackageURL) string {
 // Go module proxy so downstream stats/rendering distinguish installable
 // in-place upgrades from module migrations and unreachable advisory versions.
 func consolidateAndResolve(ctx context.Context, findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory, opts Options) ([]vulnerability.Consolidated, *vulnerabilityv1.Stats) {
+	if opts.ResolveSeverities {
+		resolveUnratedSeverities(ctx, osv.NewClient(), advisories)
+	}
 	cons := vulnerability.Consolidate(findings, advisories)
 	if opts.VerifyFixes {
 		resolver := fixresolve.NewGoProxyResolver(opts.GoProxyURL)
@@ -499,6 +511,36 @@ func consolidateAndResolve(ctx context.Context, findings []vulnerability.Finding
 		persistFixVerdicts(cons, advisories)
 	}
 	return cons, vulnerability.StatsFromConsolidated(cons, len(findings))
+}
+
+// resolveSeverityLookups caps concurrent alias-record fetches during severity
+// resolution.
+const resolveSeverityLookups = 8
+
+// resolveUnratedSeverities rates advisories whose matched record carries no
+// severity by consulting their alias records in osv.SeverityAliasOrder. The
+// resolved Severity is normalized through the same path as record-carried
+// ratings and keeps its origin in type/raw. Advisories that stay unrated keep
+// severity UNKNOWN: absence of a rating anywhere is itself the answer.
+func resolveUnratedSeverities(ctx context.Context, client osv.Client, advisories map[string]*vulnerabilityv1.Advisory) {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(resolveSeverityLookups)
+	for _, adv := range advisories {
+		if adv == nil || len(adv.GetAliases()) == 0 {
+			continue
+		}
+		if adv.GetSeverity().GetLevel() != vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_UNSPECIFIED {
+			continue
+		}
+		g.Go(func() error {
+			raw, rawType := osv.ResolveSeverityFromAliases(ctx, client, adv.GetAliases())
+			if raw != "" {
+				adv.Severity = vulnerability.NewSeverity(raw, rawType)
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
 }
 
 // persistFixVerdicts writes each consolidated finding's resolved fix verdict

@@ -163,9 +163,10 @@ message GraphOptions {
   repeated string private_patterns = 4 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 256}}}];
 }
 
-// EnrichOptions configures vulnerability enrichment with threat intelligence.
+// EnrichOptions configures opt-in vulnerability enrichment. Every enrichment
+// consults the network; none runs by default.
 message EnrichOptions {
-  // Enabled controls whether to enrich vulnerabilities with threat intel.
+  // Enabled turns on every enrichment below.
   bool enabled = 1;
 
   // IncludeEpss adds EPSS scores to findings.
@@ -173,6 +174,14 @@ message EnrichOptions {
 
   // IncludeKev adds CISA KEV catalog data to findings.
   bool include_kev = 3;
+
+  // IncludeSeverity resolves a severity rating for advisories whose matched
+  // record carries none (many ecosystem databases, like the Go vulnerability
+  // database, do not rate advisories) by consulting the advisory's alias
+  // records, GHSA aliases first, then CVE. The resolved Severity keeps its
+  // origin in type/raw, and resolution runs before consolidation so stats and
+  // triage priorities reflect it.
+  bool include_severity = 4;
 }
 
 // ScanResponse contains the complete scan results.

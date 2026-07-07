@@ -22,6 +22,7 @@ deputy triage [repo] [flags]
 | `--ref` | | auto | Git reference to scan; omitted lets Deputy choose `HEAD` or the working tree |
 | `--ecosystems` | | all | Limit to specific ecosystems |
 | `--ignore-unfixed` | | `false` | Hide vulns without fixes |
+| `--enrich` | | `false` | Resolve severity ratings from alias advisories for unrated records, plus EPSS/KEV (requires network) |
 | `--published-before` | | | Date filter for vulnerabilities |
 | `--published-after` | | | Date filter for vulnerabilities |
 | `--as-of` | | | Historical view date |

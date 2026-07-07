@@ -462,7 +462,12 @@ decisions without loading full advisory prose into context. Use
 you need full `details` text or complete advisory references.
 The `severity` field is always a canonical label: `CRITICAL`, `HIGH`,
 `MEDIUM`, `LOW`, or `UNKNOWN`; raw CVSS vectors remain internal scoring data
-and are not emitted as the MCP severity value.
+and are not emitted as the MCP severity value. `UNKNOWN` means the matched
+advisory record carries no rating, not that none exists anywhere: pass
+`enrich: true` to `scan_directory`, `scan_container`, or
+`triage_vulnerabilities` to resolve ratings from alias advisories (GHSA
+first) at the cost of extra network lookups. `explain_vulnerability` always
+resolves across the alias set.
 When present, `published` and `modified` use RFC3339 timestamps.
 Vulnerability arrays are ordered consistently: higher severity first, then
 direct dependencies, fixable findings, and stable package/ID tie-breakers.
