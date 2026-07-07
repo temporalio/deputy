@@ -772,18 +772,16 @@ type GraphStats struct {
 	DirectNodes int32 `protobuf:"varint,2,opt,name=direct_nodes,json=directNodes,proto3" json:"direct_nodes,omitempty"`
 	// TransitiveNodes is the count of transitive dependencies.
 	TransitiveNodes int32 `protobuf:"varint,3,opt,name=transitive_nodes,json=transitiveNodes,proto3" json:"transitive_nodes,omitempty"`
-	// MaxDepth is the maximum dependency depth across all nodes.
-	// Note: Includes disconnected nodes (depth=999). Use max_connected_depth
-	// for the actual graph depth.
+	// MaxDepth is the maximum resolved dependency depth across connected nodes
+	// (0 when only roots are resolved). Disconnected nodes carry no dependency
+	// depth and are counted in disconnected_nodes instead.
 	MaxDepth int32 `protobuf:"varint,4,opt,name=max_depth,json=maxDepth,proto3" json:"max_depth,omitempty"`
 	// VulnerableNodes is the count of packages with vulnerabilities.
 	VulnerableNodes int32 `protobuf:"varint,5,opt,name=vulnerable_nodes,json=vulnerableNodes,proto3" json:"vulnerable_nodes,omitempty"`
 	// Ecosystems maps ecosystem names to package counts.
 	Ecosystems map[string]int32 `protobuf:"bytes,6,rep,name=ecosystems,proto3" json:"ecosystems,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	// MaxConnectedDepth is the maximum depth among connected nodes only.
-	// Excludes disconnected nodes (depth=999) which are packages discovered
-	// but not reachable from any direct dependency (e.g., GitHub Actions,
-	// container base images from Dockerfiles).
+	// MaxConnectedDepth equals max_depth. Retained for wire compatibility with
+	// releases where max_depth still included a disconnected-node sentinel.
 	MaxConnectedDepth int32 `protobuf:"varint,7,opt,name=max_connected_depth,json=maxConnectedDepth,proto3" json:"max_connected_depth,omitempty"`
 	// DisconnectedNodes is the count of packages with no path from any root.
 	// These are typically packages from non-dependency sources like GitHub

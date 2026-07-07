@@ -1933,8 +1933,9 @@ type GraphPathNode struct {
 	Purl string `protobuf:"bytes,4,opt,name=purl,proto3" json:"purl,omitempty"`
 	// Direct reports whether this is a direct dependency. Always present.
 	Direct *bool `protobuf:"varint,5,opt,name=direct,proto3,oneof" json:"direct,omitempty"`
-	// Depth is the node's distance from the nearest root (0 for roots). Always
-	// present.
+	// Depth is the node's distance from the nearest root (0 for roots). Present
+	// for every connected node; absent for disconnected nodes, which have no
+	// path from a root (see disconnected).
 	Depth *int32 `protobuf:"varint,6,opt,name=depth,proto3,oneof" json:"depth,omitempty"`
 	// Disconnected reports that the node has no path from any root (e.g. GitHub
 	// Actions or Dockerfile base images).

@@ -457,8 +457,9 @@ message GraphPathNode {
   string purl = 4;
   // Direct reports whether this is a direct dependency. Always present.
   optional bool direct = 5;
-  // Depth is the node's distance from the nearest root (0 for roots). Always
-  // present.
+  // Depth is the node's distance from the nearest root (0 for roots). Present
+  // for every connected node; absent for disconnected nodes, which have no
+  // path from a root (see disconnected).
   optional int32 depth = 6;
   // Disconnected reports that the node has no path from any root (e.g. GitHub
   // Actions or Dockerfile base images).

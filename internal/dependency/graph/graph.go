@@ -646,14 +646,11 @@ func (g *Graph) Stats() *graphv1.GraphStats {
 			stats.TransitiveNodes++
 		}
 
-		// Track max depth across all nodes (including disconnected)
-		if depth > stats.MaxDepth {
+		// Track max resolved depth. Disconnected nodes carry the internal
+		// DepthDisconnected sentinel and synthetic roots carry -1; neither is a
+		// dependency depth, so neither may leak into the reported maximum.
+		if depth != DepthDisconnected && depth >= 0 && depth > stats.MaxDepth {
 			stats.MaxDepth = depth
-		}
-
-		// Track max connected depth (exclude disconnected nodes with depth=999)
-		if depth != DepthDisconnected && depth >= 0 && depth > stats.MaxConnectedDepth {
-			stats.MaxConnectedDepth = depth
 		}
 
 		// Count disconnected nodes
@@ -687,6 +684,10 @@ func (g *Graph) Stats() *graphv1.GraphStats {
 	if hasImportStatus {
 		stats.ImportStatusCounts = importCounts
 	}
+
+	// Kept equal to MaxDepth for wire compatibility with releases where
+	// max_depth still included the disconnected sentinel.
+	stats.MaxConnectedDepth = stats.MaxDepth
 
 	return stats
 }

@@ -854,3 +854,26 @@ func TestVulnerablePaths(t *testing.T) {
 		}
 	}
 }
+
+// TestStatsExcludesDisconnectedSentinelFromMaxDepth pins a live-spin
+// regression: disconnected nodes carry the internal DepthDisconnected
+// sentinel, which leaked into MaxDepth as 999 while the real depth was
+// omitted from wire output as a zero value.
+func TestStatsExcludesDisconnectedSentinelFromMaxDepth(t *testing.T) {
+	g := New()
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true, Depth: 0, Ecosystem: "npm"})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", Depth: 3, Ecosystem: "npm"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c", Depth: DepthDisconnected, Ecosystem: "npm"})
+
+	stats := g.Stats()
+
+	if stats.MaxDepth != 3 {
+		t.Errorf("MaxDepth = %d, want 3 (sentinel must not leak)", stats.MaxDepth)
+	}
+	if stats.MaxConnectedDepth != 3 {
+		t.Errorf("MaxConnectedDepth = %d, want 3", stats.MaxConnectedDepth)
+	}
+	if stats.DisconnectedNodes != 1 {
+		t.Errorf("DisconnectedNodes = %d, want 1", stats.DisconnectedNodes)
+	}
+}

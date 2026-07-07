@@ -3254,16 +3254,21 @@ func graphNodeProto(node *graph.Node) *mcpv1.GraphPathNode {
 	if node == nil {
 		return &mcpv1.GraphPathNode{}
 	}
-	return &mcpv1.GraphPathNode{
+	out := &mcpv1.GraphPathNode{
 		Name:         node.GetName(),
 		Version:      node.GetVersion(),
 		Ecosystem:    mcpOutputEcosystem(node.GetEcosystem()),
 		Purl:         node.GetPurl(),
 		Direct:       proto.Bool(node.GetDirect()),
-		Depth:        proto.Int32(node.GetDepth()),
 		Disconnected: node.GetDepth() == graph.DepthDisconnected,
 		ImportStatus: graphImportStatusString(node.GetImportStatus()),
 	}
+	// A disconnected node has no path from a root, so it has no depth; the
+	// internal sentinel must not leak to the wire as if it were a distance.
+	if !out.Disconnected {
+		out.Depth = proto.Int32(node.GetDepth())
+	}
+	return out
 }
 
 func graphNodeDisplayName(node *graph.Node) string {
