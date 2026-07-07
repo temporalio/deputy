@@ -490,13 +490,13 @@ func TestIsValidMavenCoordinate(t *testing.T) {
 		{"org.slf4j", "slf4j-api", true},
 
 		// Invalid coordinates
-		{"", "artifact", false},           // empty group
-		{"group", "", false},              // empty artifact
-		{"a", "artifact", false},          // group too short, no dot
-		{"ab", "artifact", false},         // group too short, no dot
-		{", module", " ", false},          // exclusion syntax fragment
-		{"group", "a", false},             // artifact too short
-		{"com.example, other", "x", false}, // comma in group
+		{"", "artifact", false},                 // empty group
+		{"group", "", false},                    // empty artifact
+		{"a", "artifact", false},                // group too short, no dot
+		{"ab", "artifact", false},               // group too short, no dot
+		{", module", " ", false},                // exclusion syntax fragment
+		{"group", "a", false},                   // artifact too short
+		{"com.example, other", "x", false},      // comma in group
 		{"com.example", "artifact name", false}, // space in artifact
 	}
 
