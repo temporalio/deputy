@@ -18,6 +18,24 @@ const (
 	RefWORKING = "WORKING"
 )
 
+// IsWorkingTreeRef reports whether ref names the checked-out working tree
+// rather than a committed snapshot. Scan and list default to "what I have on
+// disk", so HEAD and its documented HEAD~0 spelling count as working-tree
+// requests alongside WORKING/WORKTREE/WT, ".", and the empty ref. Diff
+// deliberately treats HEAD as a commit (it compares snapshots) and keeps its
+// own narrower predicate.
+func IsWorkingTreeRef(ref string) bool {
+	r := strings.TrimSpace(ref)
+	if r == "" || r == "." {
+		return true
+	}
+	switch strings.ToUpper(r) {
+	case RefHEAD, "HEAD~0", RefWORKING, "WORKTREE", "WT":
+		return true
+	}
+	return false
+}
+
 // PathMatcher reports whether a path should be treated as a dependency manifest.
 type PathMatcher interface {
 	Matches(path string) bool

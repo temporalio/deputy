@@ -14,6 +14,7 @@ import (
 	"github.com/temporalio/deputy/gen/deputy/graph/v1/graphv1connect"
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/dependency/graphquery"
+	"github.com/temporalio/deputy/internal/gitutil"
 	"github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/otel"
 	internalproto "github.com/temporalio/deputy/internal/proto"
@@ -164,19 +165,19 @@ func (h *GraphHandler) collectInventory(ctx context.Context, target, ref string,
 		return inventory.CollectContainerImage(ctx, target, targetOpts, opts)
 
 	case targets.KindDir:
-		if refProvided && ref != "" && !isWorkingTreeRef(ref) {
+		if refProvided && ref != "" && !gitutil.IsWorkingTreeRef(ref) {
 			return inventory.CollectRepositoryAtRef(ctx, target, ref, opts)
 		}
 		return inventory.CollectDirectory(ctx, target, opts)
 
 	case targets.KindGit:
-		if refProvided && ref != "" && !isWorkingTreeRef(ref) {
+		if refProvided && ref != "" && !gitutil.IsWorkingTreeRef(ref) {
 			return inventory.CollectRepositoryAtRef(ctx, target, ref, opts)
 		}
 		return inventory.CollectRepository(ctx, target, graphRefOrHEAD(ref), refProvided, opts)
 
 	default:
-		if refProvided && ref != "" && !isWorkingTreeRef(ref) {
+		if refProvided && ref != "" && !gitutil.IsWorkingTreeRef(ref) {
 			return inventory.CollectRepositoryAtRef(ctx, target, ref, opts)
 		}
 		return inventory.CollectRepository(ctx, target, graphRefOrHEAD(ref), refProvided, opts)

@@ -82,29 +82,11 @@ func (h *ListHandler) routeCollection(ctx context.Context, target, ref string, r
 			return inventory.CollectBinary(ctx, target, opts)
 		}
 
-		// Repository, directory, or unspecified
-		// Handle refs consistently with scan and diff:
-		// - WORKING/WORKTREE/WT/. → scan current working tree
-		// - HEAD → scan current working tree (when refProvided, equivalent to HEAD~0)
-		// - other refs (tags, branches, commits) → scan at that exact snapshot
-		if refProvided && ref != "" && !isWorkingTreeRef(ref) {
-			return inventory.CollectRepositoryAtRef(ctx, target, ref, opts)
-		}
-		// Otherwise scan the working tree
+		// Repository, directory, or unspecified. CollectRepository routes
+		// committed-snapshot refs to the at-ref collector itself (see
+		// gitutil.IsWorkingTreeRef for the working-tree vocabulary).
 		return inventory.CollectRepository(ctx, target, ref, refProvided, opts)
 	}
-}
-
-// isWorkingTreeRef reports whether the reference should be treated as
-// the current working tree rather than a specific commit snapshot.
-// This is consistent with how diff handles WORKING/WORKTREE/WT/. refs.
-func isWorkingTreeRef(ref string) bool {
-	r := strings.TrimSpace(ref)
-	if r == "" || r == "." {
-		return true
-	}
-	u := strings.ToUpper(r)
-	return u == "HEAD" || u == "WORKING" || u == "WORKTREE" || u == "WT"
 }
 
 // ListPackages enumerates packages in a target.

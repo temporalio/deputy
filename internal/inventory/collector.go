@@ -26,6 +26,7 @@ import (
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/container/image"
 	"github.com/temporalio/deputy/internal/dockerfile"
+	"github.com/temporalio/deputy/internal/gitutil"
 	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/repository/workspace"
@@ -192,6 +193,13 @@ func Collect(ctx context.Context, target string, opts Options) (*Execution, erro
 //   - refProvided: true if the caller explicitly provided ref
 //   - opts: collection options
 func CollectRepository(ctx context.Context, target, ref string, refProvided bool, opts Options) (*Execution, error) {
+	// A committed snapshot was requested: delegate to the at-ref collector so
+	// the inventory reads that commit's tree. Scanning the working tree here
+	// would silently analyze the wrong content while echoing the requested ref.
+	if refProvided && !gitutil.IsWorkingTreeRef(ref) {
+		return CollectRepositoryAtRef(ctx, target, ref, opts)
+	}
+
 	ctx, span := otel.StartSpan(ctx, "deputy.inventory.repository",
 		trace.WithAttributes(
 			attribute.String("deputy.target.path", target),
@@ -564,8 +572,9 @@ func CollectRepositoryAtRef(ctx context.Context, target, ref string, opts Option
 		return nil, fmt.Errorf("failed to open git repository: %w", err)
 	}
 
-	// Resolve the ref to a commit hash
-	hash, err := repo.ResolveRevision(plumbing.Revision(ref))
+	// Resolve the ref to a commit hash, honoring the same revision grammar as
+	// diff (ancestry suffixes, time selectors, origin fallback).
+	hash, err := gitutil.ResolveRevisionEnhanced(repo, ref)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("failed to resolve ref %q: %w", ref, err)
