@@ -236,7 +236,7 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	includeGradle := shouldIncludeGradle(names)
 	includeMise := shouldIncludeMise(names)
 	includeAsdf := shouldIncludeAsdf(names)
-	scalibrNames := filterExternalEcosystems(names)
+	scalibrNames := scalibrEcosystemNames(filterExternalEcosystems(names))
 
 	var plugins []plugin.Plugin
 
@@ -246,7 +246,7 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 		var err error
 		plugins, err = pl.FromNames(scalibrNames)
 		if err != nil {
-			return nil, fmt.Errorf("error creating plugins: %w", err)
+			return nil, fmt.Errorf("unsupported ecosystem filter (expected names like go, npm, pypi, cargo): %w", err)
 		}
 		plugins = appendRegisteredPlugins(plugins)
 		plugins = plugin.FilterByCapabilities(plugins, cap)
@@ -477,6 +477,29 @@ func filterExternalEcosystems(names []string) []string {
 		return nil
 	}
 	return out
+}
+
+// scalibrEcosystemNames translates Deputy ecosystem names into the OSV-SCALIBR
+// plugin group names that upstream plugin resolution understands (cargo ->
+// rust, npm -> javascript, pypi -> python, maven -> java). Deputy's canonical
+// vocabulary is what every surface emits (purl types, finding ecosystems, CLI
+// help), so filters must accept it; a name the registry does not recognize
+// passes through verbatim so raw SCALIBR group names (haskell, r, cpp) and
+// exact plugin names keep working.
+func scalibrEcosystemNames(names []string) []string {
+	if names == nil {
+		return nil
+	}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if prefixes := ecosystem.Parse(name).ScalibrPrefixes(); len(prefixes) > 0 {
+			out = append(out, prefixes...)
+			continue
+		}
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // populateWorkspaceFromTree copies files from a git tree into the workspace.

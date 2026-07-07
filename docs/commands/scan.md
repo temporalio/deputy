@@ -265,7 +265,7 @@ The `--show-unfixable-guidance` flag provides actionable recommendations for vul
 
 ## Supported Ecosystems
 
-Deputy supports 15 ecosystems for scanning:
+Deputy supports 17 ecosystems for scanning:
 
 | Ecosystem | Flag Value | Lockfiles / Manifests |
 |-----------|------------|----------------------|
@@ -281,12 +281,14 @@ Deputy supports 15 ecosystems for scanning:
 | CocoaPods | `cocoapods` | Podfile.lock, Package.resolved |
 | Packagist | `packagist` | composer.lock |
 | GitHub Actions | `github-actions` | .github/workflows/*.yml |
+| mise | `mise` | mise.toml (inventory only) |
+| asdf | `asdf` | .tool-versions (inventory only) |
 | Haskell | `haskell` | cabal.project.freeze, stack.yaml.lock |
 | R | `r` | renv.lock |
 | C++ | `cpp` | conan.lock |
 
 Detection is powered by [OSV-SCALIBR](https://github.com/google/osv-scalibr) with custom extensions for GitHub Actions.
-Binary analysis extracts dependencies from compiled Go and Rust executables
+Binary analysis extracts dependencies from compiled Go and Rust executables.
 
 ### Historical Analysis
 
