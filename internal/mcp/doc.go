@@ -52,8 +52,10 @@
 // vulnerability suppressions (.deputyignore.yaml and friends), exactly like
 // the CLI: suppressed findings are excluded and counted in ignoredCount.
 // Directory tools load suppressions from the scanned path; container-image
-// tools have no target directory, so they load them from the server
-// process's working directory, matching a CLI image scan run there.
+// tools have no target directory, so they take an optional ignorePath (a
+// directory to discover rules in, or a rules file directly) and default to
+// the server process's working directory, matching a CLI image scan run
+// there.
 // Zero values of plain fields are omitted, so
 // an absent field means empty, none, or not applicable; affirmative answers
 // (found, clean, direct, hasFix, migration, executable, depth,

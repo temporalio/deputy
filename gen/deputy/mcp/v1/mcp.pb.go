@@ -740,7 +740,11 @@ type ScanContainerRequest struct {
 	// If true, enrich findings over the network: severity ratings are resolved
 	// from alias advisories for records that carry none (moving counts out of
 	// the unknown bucket), plus threat intel where available. Slower.
-	Enrich        bool `protobuf:"varint,3,opt,name=enrich,proto3" json:"enrich,omitempty"`
+	Enrich bool `protobuf:"varint,3,opt,name=enrich,proto3" json:"enrich,omitempty"`
+	// Optional source of vulnerability suppressions. A directory discovers its
+	// .deputyignore.yaml (and friends) the way directory tools do; a file loads
+	// directly. Absent, suppressions load from the server's working directory.
+	IgnorePath    string `protobuf:"bytes,4,opt,name=ignore_path,json=ignorePath,proto3" json:"ignore_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -794,6 +798,13 @@ func (x *ScanContainerRequest) GetEnrich() bool {
 		return x.Enrich
 	}
 	return false
+}
+
+func (x *ScanContainerRequest) GetIgnorePath() string {
+	if x != nil {
+		return x.IgnorePath
+	}
+	return ""
 }
 
 // ScanContainerResult summarizes a container image scan.
@@ -4122,7 +4133,13 @@ type DiffRefsRequest struct {
 	Ecosystems []string `protobuf:"bytes,5,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
 	// Optional directory globs to skip during Git ref scans, e.g. .bin/** or
 	// **/testdata.
-	ExcludePaths  []string `protobuf:"bytes,6,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	ExcludePaths []string `protobuf:"bytes,6,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	// Optional source of vulnerability suppressions for container image diffs.
+	// A directory discovers its .deputyignore.yaml (and friends) the way
+	// directory tools do; a file loads directly. Absent, suppressions load from
+	// the server's working directory. Git ref diffs ignore this and use the
+	// repository path.
+	IgnorePath    string `protobuf:"bytes,7,opt,name=ignore_path,json=ignorePath,proto3" json:"ignore_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4197,6 +4214,13 @@ func (x *DiffRefsRequest) GetExcludePaths() []string {
 		return x.ExcludePaths
 	}
 	return nil
+}
+
+func (x *DiffRefsRequest) GetIgnorePath() string {
+	if x != nil {
+		return x.IgnorePath
+	}
+	return ""
 }
 
 // DependencyChange is one package-level difference between base and target.
@@ -4831,11 +4855,13 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x1eVulnerabilitiesBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\b\n" +
-	"\x06_clean\"p\n" +
+	"\x06_clean\"\x91\x01\n" +
 	"\x14ScanContainerRequest\x12$\n" +
 	"\x05image\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x05image\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x16\n" +
-	"\x06enrich\x18\x03 \x01(\bR\x06enrich\"\xcc\x04\n" +
+	"\x06enrich\x18\x03 \x01(\bR\x06enrich\x12\x1f\n" +
+	"\vignore_path\x18\x04 \x01(\tR\n" +
+	"ignorePath\"\xcc\x04\n" +
 	"\x13ScanContainerResult\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12)\n" +
@@ -5164,7 +5190,7 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x0estdlib_upgrade\x18\n" +
 	" \x01(\tR\rstdlibUpgrade\x12;\n" +
 	"\x19unfixable_vulnerabilities\x18\v \x03(\tR\x18unfixableVulnerabilities\x12#\n" +
-	"\rignored_count\x18\f \x01(\x05R\fignoredCount\"\x8e\x02\n" +
+	"\rignored_count\x18\f \x01(\x05R\fignoredCount\"\xaf\x02\n" +
 	"\x0fDiffRefsRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12)\n" +
 	"\bbase_ref\x18\x02 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\abaseRef\x12-\n" +
@@ -5174,7 +5200,9 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\n" +
 	"ecosystems\x18\x05 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
 	"ecosystems\x12:\n" +
-	"\rexclude_paths\x18\x06 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\"\xa4\x02\n" +
+	"\rexclude_paths\x18\x06 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\x12\x1f\n" +
+	"\vignore_path\x18\a \x01(\tR\n" +
+	"ignorePath\"\xa4\x02\n" +
 	"\x10DependencyChange\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\fbase_version\x18\x02 \x01(\tR\vbaseVersion\x12%\n" +

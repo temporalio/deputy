@@ -143,7 +143,7 @@ const serverInstructions = "Deputy is a supply-chain security engine. Its tools 
 	"- A clean target reports `clean: true`; this is success, not an error.\n" +
 	"- Absent fields mean empty, zero, or not applicable: results omit empty lists, zero counts, and optional attributes (no `vulnerabilities` key = none found; no `kind` = ordinary vulnerability). Affirmative answers (`clean`, `found`, `direct`, `hasFix`, `migration`, `executable`, `depth`, `isContainerDiff`) are present whenever they apply, even when false or zero; severity count maps always carry all their keys.\n" +
 	"- A package absent from the graph is a normal `found: false` result (with a `matchedNode` when the package is present but has no paths), not an error.\n" +
-	"- Assessment results honor the target's vulnerability suppressions (`.deputyignore.yaml`); `ignoredCount` reports how many findings were excluded by rule. Directory tools load suppressions from the scanned path; container-image tools load them from the server's working directory.\n" +
+	"- Assessment results honor the target's vulnerability suppressions (`.deputyignore.yaml`); `ignoredCount` reports how many findings were excluded by rule. Directory tools load suppressions from the scanned path; container-image tools take an optional `ignorePath` (directory or rules file) and default to the server's working directory.\n" +
 	"- Scan results include a `coverage` block: `covered` lists (ecosystem, artifact) combinations an advisory source answered for, `uncovered` lists those none could (e.g. container base images). Uncovered means not-checked, not safe. Findings carry `sources` (provenance, e.g. `[\"osv\"]`) and `kind` (`malware` vs vulnerability).\n" +
 	"\n" +
 	"Typical workflow\n" +
@@ -613,6 +613,36 @@ func ignoreRulesFor(ctx context.Context, dir string) *ignore.Rules {
 		return nil
 	}
 	return rules
+}
+
+// ignoreRulesForSource resolves a container tool's suppression source: a
+// directory discovers its .deputyignore.yaml (and friends) the way directory
+// tools do, a file loads directly, and an absent ignorePath falls back to the
+// server's working directory, the documented default for tools with no target
+// directory. An invalid path is an argument error, not a silent no-suppression
+// scan: a caller who named a source must not get unfiltered results because of
+// a typo.
+func ignoreRulesForSource(ctx context.Context, ignorePath string) (*ignore.Rules, error) {
+	ignorePath = strings.TrimSpace(ignorePath)
+	if ignorePath == "" {
+		return ignoreRulesFor(ctx, "."), nil
+	}
+	normalized, err := normalizeLocalPath(ignorePath)
+	if err != nil {
+		return nil, fmt.Errorf("ignorePath: %w", err)
+	}
+	info, err := os.Stat(normalized)
+	if err != nil {
+		return nil, fmt.Errorf("ignorePath: %w", err)
+	}
+	if info.IsDir() {
+		return ignoreRulesFor(ctx, normalized), nil
+	}
+	rules, err := ignore.LoadFromPath(normalized)
+	if err != nil {
+		return nil, fmt.Errorf("ignorePath: %w", err)
+	}
+	return rules, nil
 }
 
 // mcpTargetRef extracts the requested ref, resolved effective ref, and commit
@@ -2382,9 +2412,11 @@ func (s *Server) scanContainerTool(ctx context.Context, args *mcpv1.ScanContaine
 
 	scanResult := resp.Msg
 	internalScanResult := internalproto.ScanningResultFromProto(scanResult)
-	// Container images have no local target directory; suppressions come from
-	// the server's working directory, matching a CLI image scan run there.
-	filtered, ignoredCount := scanning.FilterIgnored(*internalScanResult, ignoreRulesFor(ctx, "."))
+	rules, err := ignoreRulesForSource(ctx, args.GetIgnorePath())
+	if err != nil {
+		return nil, err
+	}
+	filtered, ignoredCount := scanning.FilterIgnored(*internalScanResult, rules)
 	consolidated := vulnerability.ConsolidateAll(filtered.Findings, filtered.Advisories)
 	elapsed := time.Since(startTime)
 	result := &mcpv1.ScanContainerResult{
@@ -2593,10 +2625,12 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 		}
 	}
 
-	// Container images have no local target directory; suppressions come from
-	// the server's working directory and apply to both sides of the delta so
-	// a suppressed finding cannot resurface as an added or fixed change.
-	rules := ignoreRulesFor(ctx, ".")
+	// Suppressions apply to both sides of the delta so a suppressed finding
+	// cannot resurface as an added or fixed change.
+	rules, err := ignoreRulesForSource(ctx, args.GetIgnorePath())
+	if err != nil {
+		return nil, err
+	}
 	var ignoredCount int
 	result.VulnerabilitiesBySeverity, result.Vulnerabilities, ignoredCount = diffTargetVulnerabilities(targetScan, rules)
 	result.IgnoredCount = int32(ignoredCount)
