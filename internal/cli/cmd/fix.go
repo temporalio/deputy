@@ -371,7 +371,12 @@ func buildFixFromReport(cmd *cobra.Command, r io.Reader, reportPath string, igno
 		return nil, fmt.Errorf("scan result is empty")
 	}
 
-	resultOut := applyFixIgnoreRules(cmd, *scanResult, ".")
+	// An imported report was filtered by its own target's suppressions when
+	// it was produced, and the current working directory has no necessary
+	// relationship to that target: auto-discovering .deputyignore.yaml here
+	// would let an unrelated repository's rules silently drop remediation
+	// commands. Only an explicit --ignore-file applies.
+	resultOut := applyFixIgnoreRules(cmd, *scanResult, "")
 	if ignoreUnfixed {
 		resultOut = scanning.FilterUnfixed(resultOut)
 	}
@@ -385,16 +390,21 @@ func buildFixFromReport(cmd *cobra.Command, r io.Reader, reportPath string, igno
 // applyFixIgnoreRules filters findings through the target's vulnerability
 // suppressions (--ignore-file, or auto-discovered .deputyignore.yaml and
 // friends), matching deputy scan, so the plan never recommends work the
-// repository has documented as suppressed. Load failures degrade to no
+// repository has documented as suppressed. An empty workDir disables
+// auto-discovery, leaving only an explicit --ignore-file: imported reports
+// have no local target to discover rules from. Load failures degrade to no
 // suppressions with a warning.
 func applyFixIgnoreRules(cmd *cobra.Command, result scanning.Result, workDir string) scanning.Result {
 	ignoreFile, _ := cmd.Flags().GetString("ignore-file")
 	var rules *ignore.Rules
 	var err error
-	if ignoreFile != "" {
+	switch {
+	case ignoreFile != "":
 		rules, err = ignore.LoadFromPath(ignoreFile)
-	} else {
+	case workDir != "":
 		rules, err = ignore.LoadFromDirectory(workDir)
+	default:
+		return result
 	}
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: loading ignore rules: %v\n", err)
