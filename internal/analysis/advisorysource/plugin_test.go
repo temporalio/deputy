@@ -31,7 +31,7 @@ func (f *fakeAdvisoryClient) Query(_ context.Context, req *pluginv1.AdvisoryQuer
 
 // TestPluginSourceQueryIsProtoOneToOne verifies the plugin adapter passes proto
 // packages through unchanged and returns the plugin's proto findings verbatim,
-// only stamping provenance — no domain conversion at the boundary.
+// only stamping provenance: no domain conversion at the boundary.
 func TestPluginSourceQueryIsProtoOneToOne(t *testing.T) {
 	fake := &fakeAdvisoryClient{
 		resp: &pluginv1.AdvisoryQueryResponse{

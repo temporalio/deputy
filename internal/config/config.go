@@ -69,7 +69,7 @@ type AdvisorySourceConfig struct {
 	// PATH-resolved name or a path. Deputy executes it per query; it never
 	// auto-executes binaries it merely finds on PATH.
 	Program string `yaml:"program,omitempty" json:"program,omitempty"`
-	// URL is the base URL of a ConnectRPC AdvisorySourceService — a persistent
+	// URL is the base URL of a ConnectRPC AdvisorySourceService: a persistent
 	// local sidecar or shared remote service (e.g. an org-wide threat feed).
 	URL string `yaml:"url,omitempty" json:"url,omitempty"`
 }

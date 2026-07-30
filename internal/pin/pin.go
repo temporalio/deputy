@@ -257,7 +257,7 @@ type Verification struct {
 	IsForkCommit bool `json:"isForkCommit"`
 	// Unverifiable indicates provenance could not be checked (rate limit,
 	// network error, missing token, renamed repo). This is NOT an imposter
-	// signal — it means "unknown", and must never be treated as fatal.
+	// signal; it means "unknown", and must never be treated as fatal.
 	Unverifiable bool     `json:"unverifiable,omitempty"`
 	CommitAuthor string   `json:"commitAuthor,omitempty"`
 	Warnings     []string `json:"warnings,omitempty"`
@@ -425,7 +425,7 @@ func pinRef(ctx context.Context, ref Ref, strategy Strategy, opts *Options, resu
 // Only a flagged likely-imposter ref (Verification.IsForkCommit) under
 // VerificationError blocks pinning (returns false, setting StatusSuspicious).
 // Off mode, verification-call errors, and unverifiable results (rate limit /
-// network / missing token) never block — the ref is pinned with a warning,
+// network / missing token) never block: the ref is pinned with a warning,
 // since a floating tag already resolves to that SHA at runtime.
 func verifyForPin(ctx context.Context, strategy Strategy, verifyRef Ref, opts *Options, result *Result) bool {
 	if opts.verificationMode() == VerificationOff {
@@ -492,7 +492,7 @@ func writeStrategyUpdates(strategy Strategy, root *os.Root, results []Result, tr
 }
 
 // Check discovers pinnable refs and reports which are pinned and which are not.
-// It makes no API calls and writes no files — purely local file scanning.
+// It makes no API calls and writes no files; purely local file scanning.
 func Check(ctx context.Context, root *os.Root, opts Options, strategies ...Strategy) (*Report, error) {
 	if err := validateExcludePatterns(opts.Exclude); err != nil {
 		return nil, err
@@ -644,7 +644,7 @@ func processOneVerifyRef(ctx context.Context, ref Ref, strategy Strategy, opts *
 		return result
 	}
 	if v == nil {
-		// Strategy returned no verification data — there is no pin-time
+		// Strategy returned no verification data: there is no pin-time
 		// provenance check for this ecosystem (e.g. mise verifies tool
 		// provenance at install time via cosign/SLSA/attestations; container
 		// digest signature checking is not yet supported). Report as
@@ -938,8 +938,8 @@ func processOneUpdateRef(ctx context.Context, ref Ref, strategy Strategy, opts *
 // DisplayName() (owner/repo/subpath) and its repo identity Name (owner/repo).
 // Matching the repo identity as well means an org- or repo-level pattern such
 // as "temporalio/*" or "temporalio/private-actions" excludes monorepo subpath
-// actions like "temporalio/private-actions/golang/setup" — not just top-level
-// ones — and "temporalio/**" excludes the whole org at any depth.
+// actions like "temporalio/private-actions/golang/setup" (not just top-level
+// ones), and "temporalio/**" excludes the whole org at any depth.
 func shouldExclude(ref Ref, excludes []string) bool {
 	if len(excludes) == 0 {
 		return false

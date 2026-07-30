@@ -770,7 +770,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 	if certPool, err := x509.SystemCertPool(); err == nil {
 		if conn, err := grpc.NewClient("api.deps.dev:443", grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certPool, ""))); err == nil {
 			client = pb.NewInsightsClient(conn)
-			// closing conn when context done (fire and forget) – rely on GC otherwise
+			// closing conn when context done (fire and forget); rely on GC otherwise
 			go func() { <-ctx.Done(); _ = conn.Close() }()
 		}
 	}

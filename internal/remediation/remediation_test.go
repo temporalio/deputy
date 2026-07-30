@@ -91,7 +91,7 @@ func TestCommandsFromConsolidatedMigration(t *testing.T) {
 	assertCommand(t, commands, "Upgrade the dependency that pulls this in (indirect; no in-place fix)", false)
 
 	indirectMigrations := map[string]Command{}
-	// An indirect migration must NOT emit a runnable go get for the target —
+	// An indirect migration must NOT emit a runnable go get for the target;
 	// it would add an unused require that `go mod tidy` then drops.
 	for _, c := range commands {
 		if c.Command == "go get github.com/moby/moby/v2@v2.0.0-beta.14" {

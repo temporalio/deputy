@@ -12,9 +12,9 @@ deputy policy <subcommand> [flags]
 
 Deputy uses the Common Expression Language (CEL) for security policies covering:
 
-- **Vulnerability management** — block critical/high severity
-- **License compliance** — deny AGPL, require Apache-2.0
-- **Dependency constraints** — allowlist specific packages
+- **Vulnerability management**: block critical/high severity
+- **License compliance**: deny AGPL, require Apache-2.0
+- **Dependency constraints**: allowlist specific packages
 
 The `policy` command provides a complete development workflow: lint your policies, test them against fixtures, bundle them for deployment, and even explore CEL interactively.
 
@@ -199,7 +199,7 @@ $ deputy policy simulate \
     --format text
 
 Input 0:
-  DENY from security.yaml — Critical vulnerability detected
+  DENY from security.yaml: Critical vulnerability detected
 Input 1:
   ALLOW from security.yaml
 ```

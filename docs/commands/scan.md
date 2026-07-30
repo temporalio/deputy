@@ -146,7 +146,7 @@ $ deputy scan --format json | jq '.vulnerabilities[] | {id: .id, severity: .seve
 
 ### Advisory Coverage and Provenance
 
-Scan results report what was — and was not — checked for advisories, so a clean
+Scan results report what was (and was not) checked for advisories, so a clean
 result is never mistaken for complete coverage:
 
 - **`coverage`** (JSON/API/MCP): `covered` lists (ecosystem, artifact)
@@ -165,7 +165,7 @@ $ deputy scan --format json | jq '.coverage'
 ```
 
 Additional advisory sources (threat feeds, vendor databases) can be added via
-plugins — see the [plugins guide](../guides/plugins.md#advisory-source-plugins).
+plugins; see the [plugins guide](../guides/plugins.md#advisory-source-plugins).
 
 ### Filtering
 

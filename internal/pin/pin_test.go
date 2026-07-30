@@ -530,7 +530,7 @@ func TestVerify_Suspicious(t *testing.T) {
 
 func TestVerify_NoVerifierAvailable(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
-	// A strategy where Verify returns (nil, nil) — no verifier configured.
+	// A strategy where Verify returns (nil, nil): no verifier configured.
 	strategy := &nilVerifyStrategy{
 		mockStrategy: mockStrategy{
 			refs: []Ref{
@@ -544,7 +544,7 @@ func TestVerify_NoVerifierAvailable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Should NOT be counted as verified — should be already-pinned.
+	// Should NOT be counted as verified; should be already-pinned.
 	if report.Stats.Verified != 0 {
 		t.Errorf("expected 0 verified (no verifier), got %d", report.Stats.Verified)
 	}
@@ -1316,7 +1316,7 @@ jobs:
 		t.Errorf("expected at least 2 pinned (GHA + container), got stats: %+v", report.Stats)
 	}
 
-	// Read the final file — both GHA and container pins must be present.
+	// Read the final file: both GHA and container pins must be present.
 	got, err := fs.ReadFile(root.FS(), ".github/workflows/ci.yml")
 	if err != nil {
 		t.Fatal(err)

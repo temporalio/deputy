@@ -306,8 +306,8 @@ func outputTriageProtoJSON(w io.Writer, resp *triagev1.TriageResponse) error {
 }
 
 // renderTriageText outputs the triage response as human-readable text. The
-// renderer consumes the deputy.triage.v1 proto directly — the same message the
-// JSON output marshals — so no view-model conversion is needed.
+// renderer consumes the deputy.triage.v1 proto directly (the same message the
+// JSON output marshals), so no view-model conversion is needed.
 func renderTriageText(w io.Writer, resp *triagev1.TriageResponse, showDBInfo bool) {
 	render.TriageSummary(w, resp, showDBInfo)
 }

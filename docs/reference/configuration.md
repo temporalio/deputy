@@ -182,7 +182,7 @@ ai:
 External advisory sources (threat feeds, vendor databases) aggregate with the
 built-in OSV source during scans, with union-with-provenance merging. Each entry
 sets exactly one of `program` (a pluginrpc plugin executable, run per query) or
-`url` (a persistent ConnectRPC `AdvisorySourceService` — lower latency, and the
+`url` (a persistent ConnectRPC `AdvisorySourceService`; lower latency, and the
 right binding for shared or remote feeds):
 
 ```yaml

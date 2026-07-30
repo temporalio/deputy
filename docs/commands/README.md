@@ -78,8 +78,8 @@ $ deputy list --format json | jq '.packages[] | select(.direct) | .purl'
 
 ## Exit Codes
 
-- `0` — Success (no policy violations)
-- `1` — Policy violations, scan errors, or other failures
+- `0`: Success (no policy violations)
+- `1`: Policy violations, scan errors, or other failures
 
 Use exit codes for CI gating.
 
@@ -87,30 +87,30 @@ Use exit codes for CI gating.
 
 ### Core Workflow
 
-- [Scan](scan.md) — Vulnerability scanning
-- [Secrets](secrets.md) — Secret and credential detection
-- [Explain](explain.md) — Vulnerability explanation with agent analysis
-- [Fix](fix.md) — Remediation planning
-- [Triage](triage.md) — Prioritization
-- [Diff](diff.md) — Dependency change analysis
-- [Graph](graph.md) — Dependency graph visualization
-- [SBOM](sbom.md) — SBOM generation
-- [List](list.md) — Dependency listing
-- [Pin](pin.md) — Dependency pinning for supply chain security
-- [Exec](exec.md) — Sandboxed command execution
+- [Scan](scan.md): Vulnerability scanning
+- [Secrets](secrets.md): Secret and credential detection
+- [Explain](explain.md): Vulnerability explanation with agent analysis
+- [Fix](fix.md): Remediation planning
+- [Triage](triage.md): Prioritization
+- [Diff](diff.md): Dependency change analysis
+- [Graph](graph.md): Dependency graph visualization
+- [SBOM](sbom.md): SBOM generation
+- [List](list.md): Dependency listing
+- [Pin](pin.md): Dependency pinning for supply chain security
+- [Exec](exec.md): Sandboxed command execution
 
 ### Enforcement & Platform
 
-- [Policy](policy.md) — Policy authoring tools
-- [Proxy](proxy.md) — Package proxy
-- [Server](server.md) — API server for remote clients
+- [Policy](policy.md): Policy authoring tools
+- [Proxy](proxy.md): Package proxy
+- [Server](server.md): API server for remote clients
 
 ### Integrations
 
-- [MCP](mcp.md) — MCP server for AI assistants (Claude, Codex, Cursor)
+- [MCP](mcp.md): MCP server for AI assistants (Claude, Codex, Cursor)
 
 ### Setup & Configuration
 
-- [Init](init.md) — Project initialization
-- [Config](config.md) — Configuration management
-- [Completion](completion.md) — Shell autocompletion
+- [Init](init.md): Project initialization
+- [Config](config.md): Configuration management
+- [Completion](completion.md): Shell autocompletion

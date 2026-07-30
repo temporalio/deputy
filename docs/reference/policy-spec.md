@@ -69,8 +69,8 @@ flowchart TB
 - `env.command` and `env.entrypoint` indicate the invoking command/entrypoint.
 - Use canonical command names in `commands`: `proxy`, `scan`, `diff`, `sbom`, `fix`, `triage`, `secrets`, `graph`, `server`, `sandbox`. `exec` is accepted as a legacy alias for `sandbox`. Container image diff policies still use `commands: ["diff"]`; `container_diff` is the policy discovery category for the `container_diff_*` entrypoints.
 - Proxy requests always include `request.version` as a string. When no concrete version exists yet (e.g., metadata/index requests), Deputy sets it to the placeholder `"<unknown>"` and also provides:
-  - `request.has_version` (bool) — true only when a real version was present in the request path.
-  - `request.raw_version` (string) — the original version string (empty when none was present).
+  - `request.has_version` (bool): true only when a real version was present in the request path.
+  - `request.raw_version` (string): the original version string (empty when none was present).
   Use `request.has_version` to guard version-sensitive logic, e.g.:
   ```cel
   request.has_version &&

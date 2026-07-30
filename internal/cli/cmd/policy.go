@@ -938,7 +938,7 @@ func writeSimulationResult(w io.Writer, format string, index int, payload map[st
 		for _, act := range actions {
 			fmt.Fprintf(w, "  %s from %s", strings.ToUpper(act.Type), act.Source)
 			if act.Reason != "" {
-				fmt.Fprintf(w, " — %s", act.Reason)
+				fmt.Fprintf(w, ": %s", act.Reason)
 			}
 			fmt.Fprintln(w)
 		}

@@ -749,18 +749,18 @@ Avoid these anti-patterns when writing CEL policies.
 **Why:** Objects representing external data (like `vulnerability`, `change`, `jwt`) may not have all fields present. Use `?.orValue()` for fields that may be absent.
 
 **When to use `?.orValue()`:**
-- `vulnerability.advisory.?fixed_versions.orValue([])` — not all vulns have fixes
-- `component.?purlType.orValue("")` — SBOM components may lack type
-- `change.?targetVersion.orValue("")` — diff changes may lack target
-- `jwt.?roles.orValue([])` — JWT custom claims are optional
+- `vulnerability.advisory.?fixed_versions.orValue([])`: not all vulns have fixes
+- `component.?purlType.orValue("")`: SBOM components may lack type
+- `change.?targetVersion.orValue("")`: diff changes may lack target
+- `jwt.?roles.orValue([])`: JWT custom claims are optional
 
 **When NOT needed (sensible defaults provided):**
-- `pkg.name` — defaults to `""` (empty string)
-- `pkg.version` — defaults to `""` (empty string)
-- `pkg.ecosystem` — defaults to `""` (empty string)
-- `pkg.licenses` — defaults to `[]` (empty list)
-- `vulnerabilities.exists(...)` — top-level list handles nil gracefully
-- `env.command` — always injected by Deputy
+- `pkg.name`: defaults to `""` (empty string)
+- `pkg.version`: defaults to `""` (empty string)
+- `pkg.ecosystem`: defaults to `""` (empty string)
+- `pkg.licenses`: defaults to `[]` (empty list)
+- `vulnerabilities.exists(...)`: top-level list handles nil gracefully
+- `env.command`: always injected by Deputy
 
 The `pkg` helper is synthesized by Deputy and always provides sensible defaults, so you can safely write:
 
@@ -916,7 +916,7 @@ policies:
   reason: critical vulnerability found
 ```
 
-**Why:** `all()` on an empty list returns `true` (vacuously true). This can cause unexpected allows. Prefer `exists()` for deny rules — it returns `false` on empty lists.
+**Why:** `all()` on an empty list returns `true` (vacuously true). This can cause unexpected allows. Prefer `exists()` for deny rules: it returns `false` on empty lists.
 
 ### Debugging Checklist
 

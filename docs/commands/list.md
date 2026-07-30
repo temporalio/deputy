@@ -201,7 +201,7 @@ Unlike `deputy scan`, `list` does not query the OSV vulnerability database, maki
 ## See Also
 
 - [SBOM command](sbom.md)
-- [Scan command](scan.md) — vulnerability scanning with container support
+- [Scan command](scan.md): vulnerability scanning with container support
 - [Inventory concepts](../concepts/inventory-and-sboms.md)
 
 ## Code Pointers

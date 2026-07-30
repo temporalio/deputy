@@ -36,7 +36,7 @@ Deputy auto-detects the mode based on whether references contain `/` with `:` (i
 
 ## Container Image Diff
 
-Compare two container images to understand what changed between versions—packages added/removed, vulnerabilities fixed/introduced, configuration changes, and layer modifications.
+Compare two container images to understand what changed between versions: packages added/removed, vulnerabilities fixed/introduced, configuration changes, and layer modifications.
 
 ### How Container Diff Works
 

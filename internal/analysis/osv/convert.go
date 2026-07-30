@@ -28,7 +28,7 @@ func ProcessOSVVulnerability(vuln osvschema.Vulnerability, input PkgInput) Vulne
 }
 
 // VulnerabilitiesFromProto flattens proto findings (plus their advisory
-// records) back into the flat records the proxy layer consumes — the inverse of
+// records) back into the flat records the proxy layer consumes, the inverse of
 // VulnerabilitiesToFindings. Each finding's inline advisory is preferred,
 // falling back to the advisories map by ID, so results from any advisory
 // source (built-in or plugin) flatten identically.

@@ -1676,9 +1676,9 @@ X-MCP-Auth-Message: <human-readable message>
 ## See Also
 
 - [MCP Protocol Specification](https://modelcontextprotocol.io/)
-- [Scan command](scan.md) — CLI equivalent
-- [Graph command](graph.md) — CLI graph analysis
-- [SBOM command](sbom.md) — CLI SBOM generation
+- [Scan command](scan.md): CLI equivalent
+- [Graph command](graph.md): CLI graph analysis
+- [SBOM command](sbom.md): CLI SBOM generation
 
 ## Platform Documentation
 

@@ -391,10 +391,10 @@ In DOT and Mermaid formats, nodes are styled based on their characteristics:
 
 ## See Also
 
-- [Scan command](scan.md) — Scan for vulnerabilities
-- [List command](list.md) — List dependencies
-- [SBOM command](sbom.md) — Generate SBOM
-- [Graph policies](../reference/policy-inputs.md#graph-entrypoints) — CEL policies for graph analysis
+- [Scan command](scan.md): Scan for vulnerabilities
+- [List command](list.md): List dependencies
+- [SBOM command](sbom.md): Generate SBOM
+- [Graph policies](../reference/policy-inputs.md#graph-entrypoints): CEL policies for graph analysis
 - [Graphviz Documentation](https://graphviz.org/documentation/)
 - [Mermaid.js Documentation](https://mermaid.js.org/)
 

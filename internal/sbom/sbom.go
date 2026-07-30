@@ -833,7 +833,7 @@ var miseHashAlgorithms = map[string]sbom.HashAlgorithm{
 // addMiseLockReferences enriches a package node with the exact locked version
 // and per-platform integrity metadata from a sibling mise.lock. Each platform's
 // asset is modeled as a DOWNLOAD external reference carrying its URL and
-// checksum — a faithful, non-lossy representation, since mise installs a
+// checksum: a faithful, non-lossy representation, since mise installs a
 // distinct artifact per platform. When the lock pins exactly one platform, its
 // checksum is also set as the component-level hash for conventional consumers.
 func addMiseLockReferences(n *sbom.Node, md *mise.Metadata) {
