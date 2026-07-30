@@ -347,7 +347,7 @@ pytest
 google-cloud-bigquery
 `,
 			expected: map[string]bool{
-				"flask_restful":        true,
+				"flask_restful":         true,
 				"google_cloud_bigquery": true,
 			},
 		},

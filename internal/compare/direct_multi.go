@@ -2,12 +2,45 @@ package compare
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
-	"path/filepath"
+	"path"
 	"strings"
+
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/temporalio/deputy/internal/repository/workspace"
 )
+
+// manifestDirectDepParsers maps non-Go manifest basenames to the parser that
+// extracts direct dependency names from that manifest's contents. Both the
+// workspace walk and the commit-tree walk dispatch through this table so the
+// two collection paths cannot drift in ecosystem coverage. go.mod is handled
+// separately by the CollectGoDirectModules* functions because of its module
+// root and stdlib pseudo-dependency handling.
+var manifestDirectDepParsers = map[string]func([]byte) map[string]bool{
+	"package.json":     getNpmDirectDeps,
+	"Cargo.toml":       getCargoDirectDeps,
+	"pyproject.toml":   getPyprojectDirectDeps,
+	"requirements.txt": getRequirementsDirectDeps,
+}
+
+// isVendoredManifestPath reports whether a slash-separated manifest path lies
+// under a vendored or installed dependency tree (vendor/, node_modules/) or
+// git metadata. Manifests there describe third-party packages, not the
+// project's own direct dependencies, mirroring the directory skips applied
+// during workspace walks.
+func isVendoredManifestPath(p string) bool {
+	for seg := range strings.SplitSeq(path.Clean(p), "/") {
+		switch seg {
+		case "vendor", "node_modules", ".git":
+			return true
+		}
+	}
+	return false
+}
 
 // CollectDirectDependenciesFromWorkspace scans the workspace for manifest files
 // across multiple ecosystems and extracts direct dependencies. Returns a map
@@ -31,7 +64,7 @@ func CollectDirectDependenciesFromWorkspace(ws workspace.FS) map[string]bool {
 	direct := CollectGoDirectModulesFromWorkspace(ws)
 
 	// Walk workspace looking for other ecosystem manifests
-	_ = fs.WalkDir(ws, ".", func(path string, d fs.DirEntry, err error) error {
+	_ = fs.WalkDir(ws, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -42,40 +75,60 @@ func CollectDirectDependenciesFromWorkspace(ws workspace.FS) map[string]bool {
 			}
 			return nil
 		}
-
-		base := filepath.Base(path)
-
-		// Skip vendored paths
-		if strings.Contains(path, "/vendor/") || strings.Contains(path, "/node_modules/") {
+		parse, ok := manifestDirectDepParsers[path.Base(p)]
+		if !ok || isVendoredManifestPath(p) {
 			return nil
 		}
-
-		switch base {
-		case "package.json":
-			data, err := ws.ReadFile(path)
-			if err == nil {
-				mergeDirectDependencies(direct, getNpmDirectDeps(data))
-			}
-		case "Cargo.toml":
-			data, err := ws.ReadFile(path)
-			if err == nil {
-				mergeDirectDependencies(direct, getCargoDirectDeps(data))
-			}
-		case "pyproject.toml":
-			data, err := ws.ReadFile(path)
-			if err == nil {
-				mergeDirectDependencies(direct, getPyprojectDirectDeps(data))
-			}
-		case "requirements.txt":
-			data, err := ws.ReadFile(path)
-			if err == nil {
-				mergeDirectDependencies(direct, getRequirementsDirectDeps(data))
-			}
+		data, err := ws.ReadFile(p)
+		if err != nil {
+			return nil
 		}
+		mergeDirectDependencies(direct, parse(data))
 		return nil
 	})
 
 	return direct
+}
+
+// CollectDirectDependenciesFromCommit extracts direct dependencies from
+// manifest files present in a specific Git commit, covering the same
+// ecosystems as CollectDirectDependenciesFromWorkspace (Go, npm, Cargo,
+// PyPI). Ref-based scans must classify direct vs transitive dependencies with
+// the same fidelity as working-tree scans, so both paths share the same
+// per-manifest parsers; only the file source differs. Individual files that
+// fail to read are skipped best-effort, matching the workspace walk.
+func CollectDirectDependenciesFromCommit(repo *git.Repository, hash plumbing.Hash) (map[string]bool, error) {
+	direct, err := CollectGoDirectModulesFromCommit(repo, hash)
+	if err != nil {
+		return nil, fmt.Errorf("collecting go direct modules at commit: %w", err)
+	}
+	if repo == nil {
+		return direct, nil
+	}
+	commit, err := repo.CommitObject(hash)
+	if err != nil {
+		return nil, fmt.Errorf("getting commit %s: %w", hash, err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("getting tree for commit %s: %w", hash, err)
+	}
+	err = tree.Files().ForEach(func(f *object.File) error {
+		parse, ok := manifestDirectDepParsers[path.Base(f.Name)]
+		if !ok || isVendoredManifestPath(f.Name) {
+			return nil
+		}
+		contents, err := f.Contents()
+		if err != nil {
+			return nil
+		}
+		mergeDirectDependencies(direct, parse([]byte(contents)))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking commit tree: %w", err)
+	}
+	return direct, nil
 }
 
 // getNpmDirectDeps extracts direct dependencies from package.json.

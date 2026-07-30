@@ -99,3 +99,78 @@ func TestCollectRepositoryHonorsRef(t *testing.T) {
 		}
 	})
 }
+
+// commitFiles writes the given files (paths relative to dir, slash-separated)
+// and commits them all, returning the commit hash. It exists so ref-based
+// tests can stage multi-ecosystem trees without repeating git plumbing.
+func commitFiles(t *testing.T, dir string, repo *git.Repository, files map[string]string, message string) string {
+	t.Helper()
+	for name, content := range files {
+		full := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", name, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree: %v", err)
+	}
+	if err := wt.AddWithOptions(&git.AddOptions{All: true}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	hash, err := wt.Commit(message, &git.CommitOptions{
+		Author: &object.Signature{Name: "tester", Email: "tester@example.com", When: time.Now()},
+	})
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	return hash.String()
+}
+
+// TestCollectRepositoryAtRefDetectsMultiEcosystemDirects pins a regression:
+// ref-based collection used Go-only direct detection, so `deputy scan --ref X`
+// on an npm/Cargo/PyPI project marked every direct dependency as transitive.
+// Direct detection at a ref must cover the same ecosystems as the working-tree
+// path (Go, npm, Cargo, PyPI).
+func TestCollectRepositoryAtRefDetectsMultiEcosystemDirects(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	hash := commitFiles(t, dir, repo, map[string]string{
+		"go.mod":           "module example.com/app\n\ngo 1.24\n\nrequire github.com/pkg/errors v0.9.1\n",
+		"package.json":     `{"name":"app","dependencies":{"lodash":"^4.17.21"}}`,
+		"Cargo.toml":       "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\ntokio = \"1.26\"\n",
+		"requirements.txt": "flask==2.3.0\n",
+	}, "multi-ecosystem manifests")
+
+	exec, err := inventory.CollectRepository(context.Background(), dir, hash, true, inventory.Options{})
+	if err != nil {
+		t.Fatalf("CollectRepository: %v", err)
+	}
+	defer exec.Close()
+	if got := exec.Result.Target.CommitHash; got != hash {
+		t.Fatalf("commit echo = %s, want %s", got, hash)
+	}
+
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{name: "go direct module", key: "github.com/pkg/errors"},
+		{name: "npm direct dependency", key: "lodash"},
+		{name: "cargo direct dependency", key: "tokio"},
+		{name: "pypi direct dependency", key: "flask"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !exec.Result.Direct[tt.key] {
+				t.Errorf("Direct[%q] = false, want true (direct at ref %s)", tt.key, hash)
+			}
+		})
+	}
+}

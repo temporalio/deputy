@@ -528,8 +528,14 @@ func CollectAtCommit(ctx context.Context, repo *git.Repository, commitHash plumb
 	}
 	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
 
-	// Try to get direct dependencies from the commit snapshot
-	direct, _ := compare.CollectGoDirectModulesFromCommit(repo, commitHash)
+	// Resolve direct dependencies from the commit snapshot across the same
+	// ecosystems as working-tree scans (Go, npm, Cargo, PyPI). Best-effort: a
+	// failure here degrades direct/transitive labels, not the inventory.
+	direct, err := compare.CollectDirectDependenciesFromCommit(repo, commitHash)
+	if err != nil {
+		slog.DebugContext(ctx, "inventory: direct dependency detection at commit failed",
+			"commit", commitHash.String(), "error", err)
+	}
 
 	result := Result{
 		Target: Target{
@@ -589,8 +595,14 @@ func CollectRepositoryAtRef(ctx context.Context, target, ref string, opts Option
 	}
 	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
 
-	// Get direct dependencies from the commit
-	direct, _ := compare.CollectGoDirectModulesFromCommit(repo, *hash)
+	// Resolve direct dependencies from the commit snapshot across the same
+	// ecosystems as working-tree scans (Go, npm, Cargo, PyPI). Best-effort: a
+	// failure here degrades direct/transitive labels, not the inventory.
+	direct, err := compare.CollectDirectDependenciesFromCommit(repo, *hash)
+	if err != nil {
+		slog.DebugContext(ctx, "inventory: direct dependency detection at ref failed",
+			"ref", ref, "commit", hash.String(), "error", err)
+	}
 
 	// Get origin URL
 	originURL := ""
