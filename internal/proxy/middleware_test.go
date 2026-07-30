@@ -26,17 +26,17 @@ func TestRequestIDFromContext(t *testing.T) {
 		},
 		{
 			name: "empty context",
-			ctx:  context.Background(),
+			ctx:  t.Context(),
 			want: "",
 		},
 		{
 			name: "context with request ID",
-			ctx:  context.WithValue(context.Background(), requestIDKey{}, "test-id-123"),
+			ctx:  context.WithValue(t.Context(), requestIDKey{}, "test-id-123"),
 			want: "test-id-123",
 		},
 		{
 			name: "context with wrong type",
-			ctx:  context.WithValue(context.Background(), requestIDKey{}, 12345),
+			ctx:  context.WithValue(t.Context(), requestIDKey{}, 12345),
 			want: "",
 		},
 	}

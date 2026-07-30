@@ -1,7 +1,6 @@
 package services
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
@@ -22,7 +21,7 @@ func TestInProcessTransport(t *testing.T) {
 	clients := svc.InProcessClients()
 
 	// Test ListEcosystems (doesn't require target validation)
-	ctx := context.Background()
+	ctx := t.Context()
 	resp, err := clients.Packages.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err != nil {
 		t.Fatalf("ListEcosystems failed: %v", err)
@@ -60,7 +59,7 @@ func TestInProcessTransport_NotFound(t *testing.T) {
 	// Try to call a service that's not registered
 	client := listv1connect.NewListServiceClient(httpClient, "")
 
-	_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err == nil {
 		t.Error("expected error for unregistered handler")
 	}

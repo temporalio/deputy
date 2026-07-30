@@ -1,7 +1,6 @@
 package inventory_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,7 +63,7 @@ func TestCollectRepositoryHonorsRef(t *testing.T) {
 	}
 	firstCommit := commitGoMod(t, dir, repo, "github.com/pkg/errors v0.8.1", "initial")
 	secondCommit := commitGoMod(t, dir, repo, "github.com/pkg/errors v0.9.1", "bump errors")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("HEAD~1 reads the previous commit's tree", func(t *testing.T) {
 		exec, err := inventory.CollectRepository(ctx, dir, "HEAD~1", true, inventory.Options{})
@@ -149,7 +148,7 @@ func TestCollectRepositoryAtRefDetectsMultiEcosystemDirects(t *testing.T) {
 		"requirements.txt": "flask==2.3.0\n",
 	}, "multi-ecosystem manifests")
 
-	exec, err := inventory.CollectRepository(context.Background(), dir, hash, true, inventory.Options{})
+	exec, err := inventory.CollectRepository(t.Context(), dir, hash, true, inventory.Options{})
 	if err != nil {
 		t.Fatalf("CollectRepository: %v", err)
 	}

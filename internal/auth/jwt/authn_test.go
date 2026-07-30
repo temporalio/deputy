@@ -35,7 +35,7 @@ func TestAuthnFunc_Required_WithValidToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
 
-	info, err := authFunc(context.Background(), req)
+	info, err := authFunc(t.Context(), req)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -57,7 +57,7 @@ func TestAuthnFunc_Required_NoToken(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	_, err := authFunc(context.Background(), req)
+	_, err := authFunc(t.Context(), req)
 	if err == nil {
 		t.Fatal("expected error for missing token in required mode")
 	}
@@ -73,7 +73,7 @@ func TestAuthnFunc_Optional_NoToken(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	info, err := authFunc(context.Background(), req)
+	info, err := authFunc(t.Context(), req)
 	if err != nil {
 		t.Fatalf("expected no error in optional mode, got %v", err)
 	}
@@ -93,7 +93,7 @@ func TestAuthnFunc_Disabled(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	info, err := authFunc(context.Background(), req)
+	info, err := authFunc(t.Context(), req)
 	if err != nil {
 		t.Fatalf("expected no error in disabled mode, got %v", err)
 	}
@@ -109,7 +109,7 @@ func TestAuthnFunc_NilAuthenticator(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	info, err := authFunc(context.Background(), req)
+	info, err := authFunc(t.Context(), req)
 	if err != nil {
 		t.Fatalf("expected no error with nil authenticator, got %v", err)
 	}
@@ -130,7 +130,7 @@ func TestAuthnFunc_AuthError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer expired-token")
 
-	_, err := authFunc(context.Background(), req)
+	_, err := authFunc(t.Context(), req)
 	if err == nil {
 		t.Fatal("expected error for expired token")
 	}
@@ -148,7 +148,7 @@ func TestClaimsFromAuthn(t *testing.T) {
 	}
 
 	// Set up context with authn info
-	ctx := authn.SetInfo(context.Background(), claims)
+	ctx := authn.SetInfo(t.Context(), claims)
 
 	// Retrieve claims using our helper
 	result := jwt.ClaimsFromAuthn(ctx)
@@ -162,7 +162,7 @@ func TestClaimsFromAuthn(t *testing.T) {
 }
 
 func TestClaimsFromAuthn_NoInfo(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	result := jwt.ClaimsFromAuthn(ctx)
 	if result != nil {
@@ -172,7 +172,7 @@ func TestClaimsFromAuthn_NoInfo(t *testing.T) {
 
 func TestClaimsFromAuthn_WrongType(t *testing.T) {
 	// Set up context with non-Claims info
-	ctx := authn.SetInfo(context.Background(), "not-claims")
+	ctx := authn.SetInfo(t.Context(), "not-claims")
 
 	result := jwt.ClaimsFromAuthn(ctx)
 	if result != nil {
@@ -188,17 +188,17 @@ func TestIsAnonymousAuthn(t *testing.T) {
 	}{
 		{
 			name:     "no info",
-			ctx:      context.Background(),
+			ctx:      t.Context(),
 			expected: true,
 		},
 		{
 			name:     "with claims",
-			ctx:      authn.SetInfo(context.Background(), &jwt.Claims{Subject: "user:alice"}),
+			ctx:      authn.SetInfo(t.Context(), &jwt.Claims{Subject: "user:alice"}),
 			expected: false,
 		},
 		{
 			name:     "with nil info explicitly set",
-			ctx:      authn.SetInfo(context.Background(), nil),
+			ctx:      authn.SetInfo(t.Context(), nil),
 			expected: true, // nil is treated as anonymous
 		},
 	}

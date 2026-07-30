@@ -2,7 +2,6 @@ package render
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -481,7 +480,7 @@ func TestStreamingRenderer_SpinnerMethods(t *testing.T) {
 		errW := &bytes.Buffer{}
 		r := NewStreamingRenderer(out, errW, "claude")
 
-		ctx := context.Background()
+		ctx := t.Context()
 		r.StartSpinner(ctx, "Loading...")
 
 		// Should not create a spinner for non-TTY

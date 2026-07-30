@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -41,7 +40,7 @@ func TestDisplayDetailedDependencyChanges_ScanUsesBestEffortLicenses(t *testing.
 	}}
 
 	var buf bytes.Buffer
-	displayDetailedDependencyChanges(context.Background(), nil, changes, true, "scan", &buf, io.Discard)
+	displayDetailedDependencyChanges(t.Context(), nil, changes, true, "scan", &buf, io.Discard)
 
 	out := buf.String()
 	if !strings.Contains(out, "MIT") {

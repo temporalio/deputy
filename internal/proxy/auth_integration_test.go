@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -329,7 +328,7 @@ func TestAuthIntegration_JWKSRefresh(t *testing.T) {
 	defer cache.Close()
 
 	// First fetch
-	_, err = cache.GetKey(context.Background(), "test-key-1")
+	_, err = cache.GetKey(t.Context(), "test-key-1")
 	if err != nil {
 		t.Fatalf("first fetch failed: %v", err)
 	}
@@ -339,7 +338,7 @@ func TestAuthIntegration_JWKSRefresh(t *testing.T) {
 	}
 
 	// Second fetch should use cache
-	_, err = cache.GetKey(context.Background(), "test-key-1")
+	_, err = cache.GetKey(t.Context(), "test-key-1")
 	if err != nil {
 		t.Fatalf("second fetch failed: %v", err)
 	}

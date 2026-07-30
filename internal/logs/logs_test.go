@@ -12,7 +12,7 @@ func TestWithContextAndFromContext(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(buf, nil))
 
-	ctx := WithContext(context.Background(), logger)
+	ctx := WithContext(t.Context(), logger)
 	retrieved := FromContext(ctx)
 
 	if retrieved != logger {
@@ -32,7 +32,7 @@ func TestWithContextAndFromContext(t *testing.T) {
 
 func TestFromContextDefault(t *testing.T) {
 	// Test that FromContext returns default logger when none is set
-	ctx := context.Background()
+	ctx := t.Context()
 	logger := FromContext(ctx)
 	if logger == nil {
 		t.Error("FromContext should never return nil")
@@ -43,7 +43,7 @@ func TestWithField(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(buf, nil))
 
-	ctx := WithContext(context.Background(), logger)
+	ctx := WithContext(t.Context(), logger)
 	ctx = WithField(ctx, "request_id", "12345")
 
 	Info(ctx, "operation")
@@ -60,7 +60,7 @@ func TestWithFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(buf, nil))
 
-	ctx := WithContext(context.Background(), logger)
+	ctx := WithContext(t.Context(), logger)
 	ctx = WithFields(ctx, map[string]any{
 		"user":   "alice",
 		"action": "scan",
@@ -95,7 +95,7 @@ func TestLogLevels(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{
 				Level: slog.LevelDebug,
 			}))
-			ctx := WithContext(context.Background(), logger)
+			ctx := WithContext(t.Context(), logger)
 
 			tt.logFunc(ctx, "test message")
 			output := buf.String()
@@ -157,7 +157,7 @@ func TestColorHandler(t *testing.T) {
 	})
 	logger := slog.New(handler)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test different levels produce different colors
 	logger.DebugContext(ctx, "debug message")
@@ -218,7 +218,7 @@ func TestSetDefault(t *testing.T) {
 	SetDefault(customLogger)
 
 	// Use a fresh context with no logger
-	ctx := context.Background()
+	ctx := t.Context()
 	Info(ctx, "test with custom default")
 
 	if buf.Len() == 0 {

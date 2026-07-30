@@ -257,7 +257,7 @@ func TestPyPIHandlerEndToEndPip(t *testing.T) {
 	u, _ := url.Parse(ts.URL)
 	host := u.Host
 
-	ctx := context.Background()
+	ctx := t.Context()
 	tests := []struct {
 		name    string
 		pkg     string

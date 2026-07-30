@@ -17,7 +17,7 @@ config:
   name: test
 `)
 
-	findings, err := engine.Scan(context.Background(), content)
+	findings, err := engine.Scan(t.Context(), content)
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -51,7 +51,7 @@ func TestEngine_Scan_AWSAccessKey(t *testing.T) {
 
 	content := []byte(`aws_access_key_id = AKIAIOSFODNN7EXAMPLE`)
 
-	findings, err := engine.Scan(context.Background(), content)
+	findings, err := engine.Scan(t.Context(), content)
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -77,7 +77,7 @@ func TestEngine_Scan_PrivateKey(t *testing.T) {
 MIIEpAIBAAKCAQEA...
 -----END RSA PRIVATE KEY-----`)
 
-	findings, err := engine.Scan(context.Background(), content)
+	findings, err := engine.Scan(t.Context(), content)
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -102,7 +102,7 @@ func TestEngine_Scan_JWT(t *testing.T) {
 	// Example JWT (not a real secret)
 	content := []byte(`token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c`)
 
-	findings, err := engine.Scan(context.Background(), content)
+	findings, err := engine.Scan(t.Context(), content)
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -126,7 +126,7 @@ func TestEngine_Scan_SlackToken(t *testing.T) {
 
 	content := []byte(`SLACK_TOKEN=xoxb-1234567890-1234567890123-abcdefghijklmnop`)
 
-	findings, err := engine.Scan(context.Background(), content)
+	findings, err := engine.Scan(t.Context(), content)
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -150,7 +150,7 @@ func TestEngine_Scan_StripeKey(t *testing.T) {
 
 	content := []byte(`stripe_key: sk_live_abcdefghijklmnopqrstuvwxyz`)
 
-	findings, err := engine.Scan(context.Background(), content)
+	findings, err := engine.Scan(t.Context(), content)
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -179,7 +179,7 @@ version: 1.0.0
 description: A normal application
 `)
 
-	findings, err := engine.Scan(context.Background(), content)
+	findings, err := engine.Scan(t.Context(), content)
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -198,7 +198,7 @@ func TestEngine_Scan_SendGridKey(t *testing.T) {
 	// SendGrid key format: SG.<22 chars>.<43 chars>
 	content := []byte(`SENDGRID_API_KEY=SG.abcdefghijklmnopqrstuv.wxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ012`)
 
-	findings, err := engine.Scan(context.Background(), content)
+	findings, err := engine.Scan(t.Context(), content)
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -222,7 +222,7 @@ func TestEngine_Scan_NpmToken(t *testing.T) {
 
 	content := []byte(`//registry.npmjs.org/:_authToken=npm_abcdefghijklmnopqrstuvwxyz0123456789`)
 
-	findings, err := engine.Scan(context.Background(), content)
+	findings, err := engine.Scan(t.Context(), content)
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -246,7 +246,7 @@ func TestEngine_ScanFile(t *testing.T) {
 
 	content := []byte(`token: ghp_ABCDEFghijklmnopqrstuvwxyz0123456789`)
 
-	findings, err := engine.ScanFile(context.Background(), "config.yaml", content)
+	findings, err := engine.ScanFile(t.Context(), "config.yaml", content)
 	if err != nil {
 		t.Fatalf("ScanFile() error = %v", err)
 	}
@@ -396,7 +396,7 @@ func TestMultiScanner(t *testing.T) {
 
 	content := []byte(`token: ghp_ABCDEFghijklmnopqrstuvwxyz0123456789`)
 
-	findings, err := multi.Scan(context.Background(), content)
+	findings, err := multi.Scan(t.Context(), content)
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
@@ -427,7 +427,7 @@ stripe: sk_live_abcdefghijklmnopqrstuvwxyz
 
 	t.Run("allow types", func(t *testing.T) {
 		filtered := NewFilteringScanner(engine, WithAllowedTypes(TypeGitHubToken))
-		findings, err := filtered.Scan(context.Background(), content)
+		findings, err := filtered.Scan(t.Context(), content)
 		if err != nil {
 			t.Fatalf("Scan() error = %v", err)
 		}
@@ -441,7 +441,7 @@ stripe: sk_live_abcdefghijklmnopqrstuvwxyz
 
 	t.Run("deny types", func(t *testing.T) {
 		filtered := NewFilteringScanner(engine, WithDeniedTypes(TypeGitHubToken))
-		findings, err := filtered.Scan(context.Background(), content)
+		findings, err := filtered.Scan(t.Context(), content)
 		if err != nil {
 			t.Fatalf("Scan() error = %v", err)
 		}
@@ -455,7 +455,7 @@ stripe: sk_live_abcdefghijklmnopqrstuvwxyz
 
 	t.Run("min confidence", func(t *testing.T) {
 		filtered := NewFilteringScanner(engine, WithMinConfidence(0.98))
-		findings, err := filtered.Scan(context.Background(), content)
+		findings, err := filtered.Scan(t.Context(), content)
 		if err != nil {
 			t.Fatalf("Scan() error = %v", err)
 		}
@@ -470,9 +470,9 @@ stripe: sk_live_abcdefghijklmnopqrstuvwxyz
 
 func TestShannonEntropy(t *testing.T) {
 	tests := []struct {
-		input    string
-		minExp   float64
-		maxExp   float64
+		input  string
+		minExp float64
+		maxExp float64
 	}{
 		{"", 0, 0},
 		{"aaaaaaaaaa", 0, 0.1},
@@ -536,7 +536,7 @@ func TestBatchScanner_ScanBatch(t *testing.T) {
 		"clean.yaml":   []byte(`name: test`),
 	}
 
-	results := batch.ScanBatch(context.Background(), items)
+	results := batch.ScanBatch(t.Context(), items)
 
 	if len(results) != 3 {
 		t.Errorf("expected 3 results, got %d", len(results))
@@ -606,7 +606,7 @@ func TestBatchScanner_ContextCancellation(t *testing.T) {
 	batch := NewBatchScanner(engine, 1)
 
 	// Create a cancelled context
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	items := map[string][]byte{

@@ -409,7 +409,7 @@ func TestGoModuleHandlerEndToEndGoGet(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			caseDir := filepath.Join(tmp, strings.ReplaceAll(test.name, " ", "_"))
 			if err := os.MkdirAll(caseDir, 0o755); err != nil {
 				t.Fatalf("mkdir: %v", err)

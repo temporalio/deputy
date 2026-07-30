@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -243,7 +242,7 @@ func TestBuildPinStrategies(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			strategies, err := buildPinStrategies(context.Background(), tc.ecosystems, false, tc.allowedHostBins)
+			strategies, err := buildPinStrategies(t.Context(), tc.ecosystems, false, tc.allowedHostBins)
 			if tc.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tc.wantErr)

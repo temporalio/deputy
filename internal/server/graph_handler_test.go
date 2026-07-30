@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -81,7 +80,7 @@ require github.com/pkg/errors v0.9.1
 	}
 
 	h := NewGraphHandler(WithGraphLocalMode())
-	resp, err := h.BuildGraph(context.Background(), connect.NewRequest(&graphv1.BuildGraphRequest{
+	resp, err := h.BuildGraph(t.Context(), connect.NewRequest(&graphv1.BuildGraphRequest{
 		Target: tmpDir,
 		Options: &graphv1.GraphOptions{
 			Ecosystems: []string{"go"},
@@ -202,7 +201,7 @@ require github.com/pkg/errors v0.9.1
 	}
 
 	h := NewGraphHandler(WithGraphLocalMode())
-	resp, err := h.BuildGraph(context.Background(), connect.NewRequest(&graphv1.BuildGraphRequest{
+	resp, err := h.BuildGraph(t.Context(), connect.NewRequest(&graphv1.BuildGraphRequest{
 		Target: tmpDir,
 		Options: &graphv1.GraphOptions{
 			Ecosystems: []string{"go"},
@@ -243,7 +242,7 @@ require github.com/pkg/errors v0.9.1 // indirect
 	}
 
 	h := NewGraphHandler(WithGraphLocalMode())
-	resp, err := h.WhyDependency(context.Background(), connect.NewRequest(&graphv1.WhyDependencyRequest{
+	resp, err := h.WhyDependency(t.Context(), connect.NewRequest(&graphv1.WhyDependencyRequest{
 		Target:     tmpDir,
 		Dependency: "pkg:golang/github.com/pkg/errors@0.9.1",
 		Options: &graphv1.GraphOptions{

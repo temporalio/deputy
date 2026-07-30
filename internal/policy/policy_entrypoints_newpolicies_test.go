@@ -1,7 +1,6 @@
 package policy
 
 import (
-	"context"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -35,7 +34,7 @@ func TestCriticalTransitiveSpotlight(t *testing.T) {
 		},
 		Env: &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, input)
+	actions, err := EvaluateAll(t.Context(), sources, input)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -57,7 +56,7 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 			Pkg:     &dependencyv1.Package{Name: "lodas", Ecosystem: "npm"},
 			Env:     &policyv1.Environment{Command: "proxy"},
 		}
-		if actions, err := EvaluateAll(context.Background(), sources, input); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+		if actions, err := EvaluateAll(t.Context(), sources, input); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 			t.Fatalf("expected deny for typosquat, got %+v err=%v", actions, err)
 		}
 	})
@@ -68,7 +67,7 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 			Pkg:     &dependencyv1.Package{Name: "reqeusts", Ecosystem: "npm"},
 			Env:     &policyv1.Environment{Command: "proxy"},
 		}
-		if actions, err := EvaluateAll(context.Background(), sources, input); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+		if actions, err := EvaluateAll(t.Context(), sources, input); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 			t.Fatalf("expected deny for typosquat, got %+v err=%v", actions, err)
 		}
 	})
@@ -79,7 +78,7 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 			Pkg:     &dependencyv1.Package{Name: "teamlib", Ecosystem: "npm"},
 			Env:     &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, input)
+		actions, err := EvaluateAll(t.Context(), sources, input)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -96,7 +95,7 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 			Pkg:     &dependencyv1.Package{Name: "@acme/lodas", Ecosystem: "npm"},
 			Env:     &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, input)
+		actions, err := EvaluateAll(t.Context(), sources, input)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -113,7 +112,7 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 			Pkg:     &dependencyv1.Package{Name: "react2", Ecosystem: "npm"},
 			Env:     &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, input)
+		actions, err := EvaluateAll(t.Context(), sources, input)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -130,7 +129,7 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 			Pkg:     &dependencyv1.Package{Name: "lodas", Ecosystem: "npm"},
 			Env:     &policyv1.Environment{Command: "scan"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, input)
+		actions, err := EvaluateAll(t.Context(), sources, input)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -148,8 +147,6 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
-
-	
 
 	t.Run("deny critical base image vulnerability", func(t *testing.T) {
 		payload := map[string]any{
@@ -171,7 +168,7 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateMap(context.Background(), sources, payload)
+		actions, err := EvaluateMap(t.Context(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -201,7 +198,7 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateMap(context.Background(), sources, payload)
+		actions, err := EvaluateMap(t.Context(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -229,7 +226,7 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateMap(context.Background(), sources, payload)
+		actions, err := EvaluateMap(t.Context(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -259,7 +256,7 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateMap(context.Background(), sources, payload)
+		actions, err := EvaluateMap(t.Context(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -289,7 +286,7 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateMap(context.Background(), sources, payload)
+		actions, err := EvaluateMap(t.Context(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -319,7 +316,7 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateMap(context.Background(), sources, payload)
+		actions, err := EvaluateMap(t.Context(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -348,7 +345,7 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateMap(context.Background(), sources, payload)
+		actions, err := EvaluateMap(t.Context(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -377,7 +374,7 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateMap(context.Background(), sources, payload)
+		actions, err := EvaluateMap(t.Context(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -405,7 +402,7 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateMap(context.Background(), sources, payload)
+		actions, err := EvaluateMap(t.Context(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -433,7 +430,7 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateMap(context.Background(), sources, payload)
+		actions, err := EvaluateMap(t.Context(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}

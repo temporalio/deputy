@@ -1,7 +1,6 @@
 package sandbox_test
 
 import (
-	"context"
 	"testing"
 
 	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
@@ -53,7 +52,7 @@ func TestRegistryRegisterAndGet(t *testing.T) {
 func TestRegistryAvailable(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	reg := sandbox.NewRegistry()
 
 	// None runtime is always available
@@ -69,7 +68,7 @@ func TestRegistryAvailable(t *testing.T) {
 func TestRegistryDefault(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	reg := sandbox.NewRegistry()
 
 	// No runtimes = no default
@@ -91,7 +90,7 @@ func TestRegistryDefault(t *testing.T) {
 func TestNewManager(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	mgr, err := sandbox.NewManager(ctx)
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
@@ -104,7 +103,7 @@ func TestNewManager(t *testing.T) {
 func TestNoneRuntimeInfo(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := none.New()
 
 	info, err := rt.Info(ctx)
@@ -148,7 +147,7 @@ func TestNoneRuntimeCapabilities(t *testing.T) {
 func TestNoneRuntimeExecute(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := none.New()
 
 	req := &sandboxv1.ExecuteRequest{
@@ -171,7 +170,7 @@ func TestNoneRuntimeExecute(t *testing.T) {
 func TestNoneRuntimeExecuteFailure(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := none.New()
 
 	req := &sandboxv1.ExecuteRequest{
@@ -191,7 +190,7 @@ func TestNoneRuntimeExecuteFailure(t *testing.T) {
 func TestNoneRuntimeExecuteEmpty(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := none.New()
 
 	req := &sandboxv1.ExecuteRequest{
@@ -208,7 +207,7 @@ func TestNoneRuntimeExecuteEmpty(t *testing.T) {
 func TestDockerRuntimeInfo(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := docker.New()
 
 	info, err := rt.Info(ctx)
@@ -249,7 +248,7 @@ func TestDockerRuntimeCapabilities(t *testing.T) {
 func TestManagerListRuntimes(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create manager with custom registry
 	reg := sandbox.NewRegistry()
@@ -286,7 +285,7 @@ func TestManagerListRuntimes(t *testing.T) {
 func TestCollectResult(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := none.New()
 
 	req := &sandboxv1.ExecuteRequest{
@@ -327,7 +326,7 @@ func TestExecutionError(t *testing.T) {
 func TestGVisorRuntimeInfo(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rt := gvisor.New()
 
 	info, err := rt.Info(ctx)
@@ -391,7 +390,7 @@ func TestGVisorRuntimeOptions(t *testing.T) {
 func TestGVisorStandaloneMode(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create gVisor runtime in standalone mode
 	rt := gvisor.New(gvisor.WithStandaloneMode())
@@ -410,7 +409,7 @@ func TestGVisorStandaloneMode(t *testing.T) {
 func TestDockerRuntimeWithOCIRuntime(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create Docker runtime with custom OCI runtime
 	rt := docker.New(docker.WithOCIRuntime("runsc"))
@@ -429,7 +428,7 @@ func TestDockerRuntimeWithOCIRuntime(t *testing.T) {
 func TestDockerRuntimeDefaultOCIRuntime(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create Docker runtime without OCI runtime (uses default runc)
 	rt := docker.New()

@@ -63,7 +63,7 @@ func TestSession_Send(t *testing.T) {
 
 	session := NewSession(SessionConfig{Provider: provider})
 
-	resp, err := session.Send(context.Background(), "Say hello")
+	resp, err := session.Send(t.Context(), "Say hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestSession_Stream(t *testing.T) {
 	session := NewSession(SessionConfig{Provider: provider})
 
 	var parts []string
-	for event, err := range session.Stream(context.Background(), "Test prompt") {
+	for event, err := range session.Stream(t.Context(), "Test prompt") {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestSession_Run(t *testing.T) {
 		}
 
 		session := NewSession(SessionConfig{Provider: provider})
-		result, err := session.Run(context.Background(), "Run task")
+		result, err := session.Run(t.Context(), "Run task")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -150,7 +150,7 @@ func TestSession_Run(t *testing.T) {
 		}
 
 		session := NewSession(SessionConfig{Provider: provider})
-		result, err := session.Run(context.Background(), "Fail task")
+		result, err := session.Run(t.Context(), "Fail task")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -190,7 +190,7 @@ func TestSession_Hooks(t *testing.T) {
 		})
 
 		var errorEvents []ErrorEvent
-		for event, _ := range session.Stream(context.Background(), "Run echo") {
+		for event, _ := range session.Stream(t.Context(), "Run echo") {
 			if ee, ok := event.(ErrorEvent); ok {
 				errorEvents = append(errorEvents, ee)
 			}
@@ -228,7 +228,7 @@ func TestSession_Hooks(t *testing.T) {
 			},
 		})
 
-		for range session.Stream(context.Background(), "Modify file") {
+		for range session.Stream(t.Context(), "Modify file") {
 			// Just iterate
 		}
 
@@ -256,7 +256,7 @@ func TestSession_Hooks(t *testing.T) {
 			},
 		})
 
-		_, _ = session.Run(context.Background(), "Test")
+		_, _ = session.Run(t.Context(), "Test")
 
 		if len(messages) != 2 {
 			t.Errorf("expected 2 messages, got %d", len(messages))
@@ -278,7 +278,7 @@ func TestApprovalPolicy(t *testing.T) {
 		session := NewSession(SessionConfig{Provider: provider})
 
 		var errorEvents []ErrorEvent
-		for event, _ := range session.Stream(context.Background(), "List files") {
+		for event, _ := range session.Stream(t.Context(), "List files") {
 			if ee, ok := event.(ErrorEvent); ok {
 				errorEvents = append(errorEvents, ee)
 			}
@@ -307,7 +307,7 @@ func TestApprovalPolicy(t *testing.T) {
 		})
 
 		var commandEvents []CommandEvent
-		for event, _ := range session.Stream(context.Background(), "List files") {
+		for event, _ := range session.Stream(t.Context(), "List files") {
 			if ce, ok := event.(CommandEvent); ok {
 				commandEvents = append(commandEvents, ce)
 			}
@@ -340,7 +340,7 @@ func TestApprovalPolicy(t *testing.T) {
 			},
 		})
 
-		for range session.Stream(context.Background(), "List files") {
+		for range session.Stream(t.Context(), "List files") {
 		}
 
 		if !approved {
@@ -369,7 +369,7 @@ func TestApprovalPolicy(t *testing.T) {
 		})
 
 		var errorEvents []ErrorEvent
-		for event, _ := range session.Stream(context.Background(), "List files") {
+		for event, _ := range session.Stream(t.Context(), "List files") {
 			if ee, ok := event.(ErrorEvent); ok {
 				errorEvents = append(errorEvents, ee)
 			}
@@ -397,7 +397,7 @@ func TestApprovalPolicy(t *testing.T) {
 		})
 
 		var errorEvents []ErrorEvent
-		for event, _ := range session.Stream(context.Background(), "List files") {
+		for event, _ := range session.Stream(t.Context(), "List files") {
 			if ee, ok := event.(ErrorEvent); ok {
 				errorEvents = append(errorEvents, ee)
 			}
@@ -500,7 +500,7 @@ func TestHighRiskDetection(t *testing.T) {
 		})
 
 		var errorEvents []ErrorEvent
-		for event, _ := range session.Stream(context.Background(), "Delete tmp") {
+		for event, _ := range session.Stream(t.Context(), "Delete tmp") {
 			if ee, ok := event.(ErrorEvent); ok {
 				errorEvents = append(errorEvents, ee)
 			}
@@ -531,7 +531,7 @@ func TestStreamToWriter(t *testing.T) {
 	out := &bytes.Buffer{}
 	errOut := &bytes.Buffer{}
 
-	result, err := StreamToWriter(context.Background(), session, "Test", out, errOut)
+	result, err := StreamToWriter(t.Context(), session, "Test", out, errOut)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

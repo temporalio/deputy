@@ -68,7 +68,7 @@ func TestGitHubActionsMALDetection(t *testing.T) {
 	now := time.Now()
 	_ = os.Chtimes(zipPath, now, now)
 
-	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+	got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{Name: "malicious-actor/evil-action", Version: "1.0.0", Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestGitHubActionsMALMultipleVersions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.version, func(t *testing.T) {
-			got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+			got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 				{QueryKey: QueryKey{Name: "crypto-miner/hidden-action", Version: tc.version, Ecosystem: "GitHub Actions"}},
 			})
 			if err != nil {
@@ -193,7 +193,7 @@ func TestGitHubActionsTyposquattingDetection(t *testing.T) {
 	_ = os.Chtimes(zipPath, now, now)
 
 	// Test the malicious typosquat is detected
-	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+	got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{Name: "action/checkout", Version: "v4", Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
@@ -204,7 +204,7 @@ func TestGitHubActionsTyposquattingDetection(t *testing.T) {
 	}
 
 	// The legitimate action should not match
-	got2, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+	got2, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{Name: "actions/checkout", Version: "v4", Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
@@ -285,7 +285,7 @@ func TestGitHubActionsSHAPinnedVersions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+			got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 				{QueryKey: QueryKey{Name: "owner/vulnerable-action", Version: tc.version, Ecosystem: "GitHub Actions"}},
 			})
 			if err != nil {
@@ -362,7 +362,7 @@ func TestGitHubActionsMultipleVulnerabilities(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.version, func(t *testing.T) {
-			got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+			got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 				{QueryKey: QueryKey{Name: "owner/multi-vuln-action", Version: tc.version, Ecosystem: "GitHub Actions"}},
 			})
 			if err != nil {
@@ -420,7 +420,7 @@ func TestGitHubActionsReusableWorkflowDetection(t *testing.T) {
 	_ = os.Chtimes(zipPath, now, now)
 
 	// The workflow name includes subpath but OSV matches on owner/repo
-	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+	got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{Name: "org/shared-workflows", Version: "1.5.0", Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
@@ -475,7 +475,7 @@ func TestGitHubActionsCaseInsensitiveMatching(t *testing.T) {
 
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+			got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 				{QueryKey: QueryKey{Name: name, Version: "1.0.0", Ecosystem: "GitHub Actions"}},
 			})
 			if err != nil {
@@ -545,7 +545,7 @@ func TestGitHubActionsGHSAIDFormats(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+			got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 				{QueryKey: QueryKey{Name: tc.action, Version: "1.0.0", Ecosystem: "GitHub Actions"}},
 			})
 			if err != nil {
@@ -618,7 +618,7 @@ func TestGitHubActionsKnownVulnerableVersions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.version, func(t *testing.T) {
-			got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+			got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 				{QueryKey: QueryKey{Name: "actions/download-artifact", Version: tc.version, Ecosystem: "GitHub Actions"}},
 			})
 			if err != nil {
@@ -739,7 +739,7 @@ func TestGitHubActionsWithZipRefresh(t *testing.T) {
 	ghaIndexTTL = time.Hour
 
 	// First query should see v1 only
-	idx1, err := loadGHAVulnIndex(context.Background())
+	idx1, err := loadGHAVulnIndex(t.Context())
 	if err != nil {
 		t.Fatalf("loadGHAVulnIndex v1: %v", err)
 	}
@@ -758,7 +758,7 @@ func TestGitHubActionsWithZipRefresh(t *testing.T) {
 
 	// Force index refresh
 	ghaIndexTTL = 0
-	idx2, err := loadGHAVulnIndex(context.Background())
+	idx2, err := loadGHAVulnIndex(t.Context())
 	if err != nil {
 		t.Fatalf("loadGHAVulnIndex v2: %v", err)
 	}
@@ -825,7 +825,7 @@ func TestGitHubActionsIntroducedZeroOpenEnded(t *testing.T) {
 	versions := []string{"0.0.1", "1.0.0", "2.5.3", "10.0.0", "v1", "v2", "v99"}
 	for _, ver := range versions {
 		t.Run(ver, func(t *testing.T) {
-			got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+			got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 				{QueryKey: QueryKey{Name: "malicious/package", Version: ver, Ecosystem: "GitHub Actions"}},
 			})
 			if err != nil {

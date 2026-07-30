@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -67,7 +66,7 @@ func TestDockerIsolatorSetupAndTeardown(t *testing.T) {
 		t.Fatalf("NewDockerIsolator() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Setup
 	isolatedPath, err := isolator.Setup(ctx)
@@ -114,7 +113,7 @@ func TestDockerIsolatorPreserveChanges(t *testing.T) {
 		t.Fatalf("NewDockerIsolator() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	isolatedPath, err := isolator.Setup(ctx)
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)
@@ -146,7 +145,7 @@ func TestDockerIsolatorChanges(t *testing.T) {
 		t.Fatalf("NewDockerIsolator() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	isolatedPath, err := isolator.Setup(ctx)
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)
@@ -198,7 +197,7 @@ func TestDockerIsolatorBuildMounts(t *testing.T) {
 		t.Fatalf("NewDockerIsolator() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	isolatedPath, err := isolator.Setup(ctx)
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)
@@ -242,7 +241,7 @@ func TestDockerIsolatorApplyToHostConfig(t *testing.T) {
 		t.Fatalf("NewDockerIsolator() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := isolator.Setup(ctx); err != nil {
 		t.Fatalf("Setup() error = %v", err)
 	}

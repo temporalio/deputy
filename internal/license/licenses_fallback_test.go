@@ -53,14 +53,14 @@ func TestFetchLicensesForEcosystem_NormalizesAndCaches(t *testing.T) {
 	resetLicenseTestState(t)
 
 	client := &countingDepsClientEcosystem{}
-	got := FetchLicensesForEcosystem(context.Background(), client, "python", "Requests", "2.31.0")
+	got := FetchLicensesForEcosystem(t.Context(), client, "python", "Requests", "2.31.0")
 	if want := []string{"Apache-2.0"}; !slices.Equal(got, want) {
 		t.Fatalf("unexpected licenses: %v", got)
 	}
 	if client.sys != pb.System_PYPI {
 		t.Fatalf("expected PYPI system, got %v", client.sys)
 	}
-	FetchLicensesForEcosystem(context.Background(), client, "python", "Requests", "2.31.0")
+	FetchLicensesForEcosystem(t.Context(), client, "python", "Requests", "2.31.0")
 	if client.calls != 1 {
 		t.Fatalf("expected cache hit to avoid second call, got %d calls", client.calls)
 	}
@@ -99,11 +99,11 @@ SOFTWARE.`
 	restoreBases := WithLicenseEndpoints(server.URL, cratesBase, packagistBase, pubBase, cocoapodsBase, hexpmBase)
 	defer restoreBases()
 
-	if got := GoProxyLicenseScan(context.Background(), "example.com/mod", "v1.2.3"); !slices.Equal(got, []string{"MIT"}) {
+	if got := GoProxyLicenseScan(t.Context(), "example.com/mod", "v1.2.3"); !slices.Equal(got, []string{"MIT"}) {
 		t.Fatalf("expected go proxy direct scan to return MIT, got %v", got)
 	}
 
-	licenses := LookupLicensesBestEffort(context.Background(), "go", "example.com/mod", "v1.2.3")
+	licenses := LookupLicensesBestEffort(t.Context(), "go", "example.com/mod", "v1.2.3")
 	if want := []string{"MIT"}; !slices.Equal(licenses, want) {
 		t.Fatalf("expected go proxy license, got %v", licenses)
 	}
@@ -128,7 +128,7 @@ func TestLookupLicensesBestEffort_Crates(t *testing.T) {
 	restoreBases := WithLicenseEndpoints(goProxyBase, server.URL, packagistBase, pubBase, cocoapodsBase, hexpmBase)
 	defer restoreBases()
 
-	got := LookupLicensesBestEffort(context.Background(), "rust", "serde", "1.0.0")
+	got := LookupLicensesBestEffort(t.Context(), "rust", "serde", "1.0.0")
 	if want := []string{"MIT"}; !slices.Equal(got, want) {
 		t.Fatalf("expected crates.io license, got %v", got)
 	}
@@ -159,7 +159,7 @@ func TestLookupLicensesBestEffort_Packagist(t *testing.T) {
 		restoreBases := WithLicenseEndpoints(goProxyBase, cratesBase, server.URL, pubBase, cocoapodsBase, hexpmBase)
 		defer restoreBases()
 
-		got := LookupLicensesBestEffort(context.Background(), "php", "laravel/framework", "10.0.0")
+		got := LookupLicensesBestEffort(t.Context(), "php", "laravel/framework", "10.0.0")
 		if want := []string{"BSD-3-Clause"}; !slices.Equal(got, want) {
 			t.Fatalf("expected packagist license, got %v", got)
 		}
@@ -189,7 +189,7 @@ func TestLookupLicensesBestEffort_Packagist(t *testing.T) {
 		restoreBases := WithLicenseEndpoints(goProxyBase, cratesBase, server.URL, pubBase, cocoapodsBase, hexpmBase)
 		defer restoreBases()
 
-		got := LookupLicensesBestEffort(context.Background(), "composer", "vendor/name", "1.2.3")
+		got := LookupLicensesBestEffort(t.Context(), "composer", "vendor/name", "1.2.3")
 		if want := []string{"Apache-2.0"}; !slices.Equal(got, want) {
 			t.Fatalf("expected packagist legacy license, got %v", got)
 		}
@@ -241,7 +241,7 @@ SOFTWARE.`
 	restoreBases := WithLicenseEndpoints(goProxyBase, cratesBase, packagistBase, server.URL, cocoapodsBase, hexpmBase)
 	defer restoreBases()
 
-	got := LookupLicensesBestEffort(context.Background(), "dart", "riverpod", "1.0.0")
+	got := LookupLicensesBestEffort(t.Context(), "dart", "riverpod", "1.0.0")
 	if want := []string{"MIT"}; !slices.Equal(got, want) {
 		t.Fatalf("expected pub license, got %v", got)
 	}
@@ -268,7 +268,7 @@ func TestLookupLicensesBestEffort_CocoaPods(t *testing.T) {
 	restoreBases := WithLicenseEndpoints(goProxyBase, cratesBase, packagistBase, pubBase, server.URL, hexpmBase)
 	defer restoreBases()
 
-	got := LookupLicensesBestEffort(context.Background(), "cocoapods", "Alamofire", "5.9.1")
+	got := LookupLicensesBestEffort(t.Context(), "cocoapods", "Alamofire", "5.9.1")
 	if want := []string{"MIT"}; !slices.Equal(got, want) {
 		t.Fatalf("expected cocoapods license, got %v", got)
 	}
@@ -289,7 +289,7 @@ func TestLookupLicensesBestEffort_Hex(t *testing.T) {
 	restoreBases := WithLicenseEndpoints(goProxyBase, cratesBase, packagistBase, pubBase, cocoapodsBase, server.URL)
 	defer restoreBases()
 
-	got := LookupLicensesBestEffort(context.Background(), "hex", "plug", "1.12.0")
+	got := LookupLicensesBestEffort(t.Context(), "hex", "plug", "1.12.0")
 	if want := []string{"Apache-2.0"}; !slices.Equal(got, want) {
 		t.Fatalf("expected hex license, got %v", got)
 	}
@@ -336,13 +336,13 @@ func TestLookupLicensesBestEffort_WellKnown(t *testing.T) {
 	resetLicenseTestState(t)
 
 	// Go stdlib should return BSD-3-Clause without any network calls
-	got := LookupLicensesBestEffort(context.Background(), "go", "stdlib", "")
+	got := LookupLicensesBestEffort(t.Context(), "go", "stdlib", "")
 	if want := []string{"BSD-3-Clause"}; !slices.Equal(got, want) {
 		t.Fatalf("expected Go stdlib license %v, got %v", want, got)
 	}
 
 	// toolchain should also work
-	got = LookupLicensesBestEffort(context.Background(), "golang", "toolchain", "go1.21.0")
+	got = LookupLicensesBestEffort(t.Context(), "golang", "toolchain", "go1.21.0")
 	if want := []string{"BSD-3-Clause"}; !slices.Equal(got, want) {
 		t.Fatalf("expected toolchain license %v, got %v", want, got)
 	}
@@ -371,7 +371,7 @@ func TestLookupLicensesBestEffort_GitHubWithoutVersion(t *testing.T) {
 	defer restoreClient()
 
 	// GitHub Actions without version should still work
-	got := LookupLicensesBestEffort(context.Background(), "github", "actions/checkout", "")
+	got := LookupLicensesBestEffort(t.Context(), "github", "actions/checkout", "")
 	if want := []string{"MIT"}; !slices.Equal(got, want) {
 		t.Fatalf("expected GitHub Actions license %v without version, got %v", want, got)
 	}
@@ -415,7 +415,7 @@ func TestRemoteModuleLicenseScan_GitHubVersionedUsesRequestedRef(t *testing.T) {
 	restoreBases := WithLicenseEndpoints(server.URL, cratesBase, packagistBase, pubBase, cocoapodsBase, hexpmBase)
 	defer restoreBases()
 
-	got := RemoteModuleLicenseScan(context.Background(), "github.com/owner/repo", version)
+	got := RemoteModuleLicenseScan(t.Context(), "github.com/owner/repo", version)
 	if want := []string{"MIT"}; !slices.Equal(got, want) {
 		t.Fatalf("expected requested-ref license %v, got %v", want, got)
 	}
@@ -460,7 +460,7 @@ func TestRemoteModuleLicenseScan_GitHubVersionedDoesNotFallBackToDefaultBranchLi
 	restoreBases := WithLicenseEndpoints(server.URL, cratesBase, packagistBase, pubBase, cocoapodsBase, hexpmBase)
 	defer restoreBases()
 
-	got := RemoteModuleLicenseScan(context.Background(), "github.com/owner/repo", version)
+	got := RemoteModuleLicenseScan(t.Context(), "github.com/owner/repo", version)
 	if len(got) != 0 {
 		t.Fatalf("expected no license when requested ref has no license file, got %v", got)
 	}
@@ -492,7 +492,7 @@ func TestFetchLicensesFromGitHubRawUsesSHAWithoutVPrefix(t *testing.T) {
 	restoreClient := swapGitHubHTTPClient(server)
 	defer restoreClient()
 
-	got, err := fetchLicensesFromGitHubRaw(context.Background(), "owner", "repo", sha)
+	got, err := fetchLicensesFromGitHubRaw(t.Context(), "owner", "repo", sha)
 	if err != nil {
 		t.Fatalf("fetchLicensesFromGitHubRaw returned error: %v", err)
 	}
@@ -581,7 +581,7 @@ func TestLookupLicensesBestEffort_GitHubRefCandidatesAreGitHubOnly(t *testing.T)
 	pypiBase = server.URL
 	defer func() { pypiBase = oldPyPIBase }()
 
-	got := LookupLicensesBestEffort(context.Background(), "pypi", "requests", shaLikeVersion)
+	got := LookupLicensesBestEffort(t.Context(), "pypi", "requests", shaLikeVersion)
 	if want := []string{"Apache-2.0"}; !slices.Equal(got, want) {
 		t.Fatalf("expected PyPI license %v, got %v", want, got)
 	}
@@ -616,7 +616,7 @@ func TestLookupLicensesBestEffort_PyPI(t *testing.T) {
 		pypiBase = server.URL
 		defer func() { pypiBase = oldPyPIBase }()
 
-		got := LookupLicensesBestEffort(context.Background(), "pypi", "requests", "2.31.0")
+		got := LookupLicensesBestEffort(t.Context(), "pypi", "requests", "2.31.0")
 		if want := []string{"Apache-2.0"}; !slices.Equal(got, want) {
 			t.Fatalf("expected PyPI license_expression %v, got %v", want, got)
 		}
@@ -640,7 +640,7 @@ func TestLookupLicensesBestEffort_PyPI(t *testing.T) {
 		pypiBase = server.URL
 		defer func() { pypiBase = oldPyPIBase }()
 
-		got := LookupLicensesBestEffort(context.Background(), "python", "flask", "3.0.0")
+		got := LookupLicensesBestEffort(t.Context(), "python", "flask", "3.0.0")
 		if want := []string{"MIT"}; !slices.Equal(got, want) {
 			t.Fatalf("expected PyPI license field %v, got %v", want, got)
 		}
@@ -669,7 +669,7 @@ func TestLookupLicensesBestEffort_PyPI(t *testing.T) {
 		pypiBase = server.URL
 		defer func() { pypiBase = oldPyPIBase }()
 
-		got := LookupLicensesBestEffort(context.Background(), "pypi", "numpy", "1.26.0")
+		got := LookupLicensesBestEffort(t.Context(), "pypi", "numpy", "1.26.0")
 		if want := []string{"BSD-3-Clause"}; !slices.Equal(got, want) {
 			t.Fatalf("expected PyPI classifier license %v, got %v", want, got)
 		}
@@ -748,7 +748,7 @@ func TestFetchLicenseFromGitHubAPI(t *testing.T) {
 		restoreClient := swapGitHubHTTPClient(server)
 		defer restoreClient()
 
-		got := fetchLicenseFromGitHubAPI(context.Background(), "owner", "repo")
+		got := fetchLicenseFromGitHubAPI(t.Context(), "owner", "repo")
 		if want := []string{"MIT"}; !slices.Equal(got, want) {
 			t.Fatalf("expected %v, got %v", want, got)
 		}
@@ -769,7 +769,7 @@ func TestFetchLicenseFromGitHubAPI(t *testing.T) {
 		restoreClient := swapGitHubHTTPClient(server)
 		defer restoreClient()
 
-		got := fetchLicenseFromGitHubAPI(context.Background(), "owner", "repo")
+		got := fetchLicenseFromGitHubAPI(t.Context(), "owner", "repo")
 		if want := []string{"APACHE-2.0"}; !slices.Equal(got, want) {
 			t.Fatalf("expected %v, got %v", want, got)
 		}
@@ -790,7 +790,7 @@ func TestFetchLicenseFromGitHubAPI(t *testing.T) {
 		restoreClient := swapGitHubHTTPClient(server)
 		defer restoreClient()
 
-		got := fetchLicenseFromGitHubAPI(context.Background(), "owner", "repo")
+		got := fetchLicenseFromGitHubAPI(t.Context(), "owner", "repo")
 		if got != nil {
 			t.Fatalf("expected nil for NOASSERTION, got %v", got)
 		}

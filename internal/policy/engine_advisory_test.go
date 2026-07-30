@@ -1,7 +1,6 @@
 package policy
 
 import (
-	"context"
 	"testing"
 )
 
@@ -16,7 +15,7 @@ true ? [{"action":"deny","reason":"block it"}] : []`,
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
-	actions, err := eng.EvaluateAll(context.Background(), nil, "proxy", "")
+	actions, err := eng.EvaluateAll(t.Context(), nil, "proxy", "")
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -51,7 +50,7 @@ func TestStructuredPolicyModeAdvisory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
-	acts, err := eng.EvaluateAll(context.Background(), nil, "scan", "scan_report")
+	acts, err := eng.EvaluateAll(t.Context(), nil, "scan", "scan_report")
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}

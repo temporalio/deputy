@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -76,7 +75,7 @@ func TestScanServiceRegistered(t *testing.T) {
 	)
 
 	// Call with empty target - should return InvalidArgument error
-	_, err = client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+	_, err = client.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{
 		Target: "",
 	}))
 
@@ -161,7 +160,7 @@ func TestSecretsServiceRegistered(t *testing.T) {
 	)
 
 	// Call ListDetectors - should succeed
-	resp, err := client.ListDetectors(context.Background(), connect.NewRequest(&secretsv1.ListDetectorsRequest{}))
+	resp, err := client.ListDetectors(t.Context(), connect.NewRequest(&secretsv1.ListDetectorsRequest{}))
 	if err != nil {
 		t.Fatalf("ListDetectors failed: %v", err)
 	}
@@ -190,7 +189,7 @@ func TestSecretsServiceScanEmptyTarget(t *testing.T) {
 
 	// Call Scan with empty target - should use "." as default
 	// This will fail validation for remote targets, which is expected
-	_, err = client.Scan(context.Background(), connect.NewRequest(&secretsv1.ScanRequest{
+	_, err = client.Scan(t.Context(), connect.NewRequest(&secretsv1.ScanRequest{
 		Target: "",
 	}))
 
@@ -225,7 +224,7 @@ func TestListServiceRegistered(t *testing.T) {
 	)
 
 	// Call ListEcosystems - should succeed
-	resp, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	resp, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err != nil {
 		t.Fatalf("ListEcosystems failed: %v", err)
 	}

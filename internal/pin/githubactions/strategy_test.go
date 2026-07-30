@@ -25,7 +25,7 @@ jobs:
 	})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ runs:
 	})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestStrategy_DiscoverNoWorkflows(t *testing.T) {
 	fsys := testMapFS(map[string]string{})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ runs:
 	})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ runs:
 	})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ runs:
 	})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestStrategy_DiscoverMalformedYAML(t *testing.T) {
 	})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ runs:
 	})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ jobs:
 	})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ jobs:
 	})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ jobs:
 	})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ jobs:
 	})
 
 	s := &Strategy{}
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func TestStrategy_ResolveUpdate(t *testing.T) {
 	}
 
 	ref := pin.Ref{Name: "actions/checkout", Version: oldSHA}
-	pinnedValue, newTag, currentTag, err := s.ResolveUpdate(context.Background(), ref)
+	pinnedValue, newTag, currentTag, err := s.ResolveUpdate(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func TestStrategy_ResolveUpdateNoChange(t *testing.T) {
 	}
 
 	ref := pin.Ref{Name: "actions/checkout", Version: sha}
-	pinnedValue, _, _, err := s.ResolveUpdate(context.Background(), ref)
+	pinnedValue, _, _, err := s.ResolveUpdate(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,4 +444,3 @@ func testResolver(refs []refEntry) *Resolver {
 	}
 	return r
 }
-

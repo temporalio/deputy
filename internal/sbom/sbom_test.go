@@ -919,7 +919,7 @@ SOFTWARE.`
 		doc.NodeList.Nodes = append(doc.NodeList.Nodes, root)
 		doc.NodeList.RootElements = append(doc.NodeList.RootElements, root.Id)
 
-		err := enrichProtobomLicensesScanLocal(context.Background(), doc, ws)
+		err := enrichProtobomLicensesScanLocal(t.Context(), doc, ws)
 		if err != nil {
 			t.Fatalf("enrichProtobomLicensesScanLocal: %v", err)
 		}
@@ -935,7 +935,7 @@ SOFTWARE.`
 
 	t.Run("handles nil workspace gracefully", func(t *testing.T) {
 		doc := sbom.NewDocument()
-		err := enrichProtobomLicensesScanLocal(context.Background(), doc, nil)
+		err := enrichProtobomLicensesScanLocal(t.Context(), doc, nil)
 		if err != nil {
 			t.Errorf("expected no error for nil workspace, got %v", err)
 		}
@@ -944,7 +944,7 @@ SOFTWARE.`
 	t.Run("handles nil document gracefully", func(t *testing.T) {
 		ws := workspace.NewMemory()
 		defer ws.Close()
-		err := enrichProtobomLicensesScanLocal(context.Background(), nil, ws)
+		err := enrichProtobomLicensesScanLocal(t.Context(), nil, ws)
 		if err != nil {
 			t.Errorf("expected no error for nil document, got %v", err)
 		}
@@ -962,7 +962,7 @@ SOFTWARE.`
 		doc.NodeList.Nodes = append(doc.NodeList.Nodes, root)
 		doc.NodeList.RootElements = append(doc.NodeList.RootElements, root.Id)
 
-		err := enrichProtobomLicensesScanLocal(context.Background(), doc, ws)
+		err := enrichProtobomLicensesScanLocal(t.Context(), doc, ws)
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
@@ -975,7 +975,7 @@ SOFTWARE.`
 func Test_enrichProtobomLicensesScanWithFetcher_nilHandling(t *testing.T) {
 	t.Run("handles nil document", func(t *testing.T) {
 		fetcher := &remoteFetcher{Timeout: time.Second}
-		err := enrichProtobomLicensesScanWithFetcher(context.Background(), nil, fetcher)
+		err := enrichProtobomLicensesScanWithFetcher(t.Context(), nil, fetcher)
 		if err != nil {
 			t.Errorf("expected no error for nil document, got %v", err)
 		}
@@ -983,7 +983,7 @@ func Test_enrichProtobomLicensesScanWithFetcher_nilHandling(t *testing.T) {
 
 	t.Run("handles nil fetcher", func(t *testing.T) {
 		doc := sbom.NewDocument()
-		err := enrichProtobomLicensesScanWithFetcher(context.Background(), doc, nil)
+		err := enrichProtobomLicensesScanWithFetcher(t.Context(), doc, nil)
 		if err != nil {
 			t.Errorf("expected no error for nil fetcher, got %v", err)
 		}
@@ -1003,7 +1003,7 @@ func Test_enrichProtobomLicensesScanWithFetcher_nilHandling(t *testing.T) {
 		doc.NodeList.Nodes = append(doc.NodeList.Nodes, node)
 
 		fetcher := &remoteFetcher{Timeout: time.Second}
-		err := enrichProtobomLicensesScanWithFetcher(context.Background(), doc, fetcher)
+		err := enrichProtobomLicensesScanWithFetcher(t.Context(), doc, fetcher)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}

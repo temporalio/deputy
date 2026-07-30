@@ -23,7 +23,7 @@ func TestHarness_GetInfo(t *testing.T) {
 	}
 
 	harness := sandboxtest.NewHarness(t, handler)
-	info := harness.GetInfo(context.Background())
+	info := harness.GetInfo(t.Context())
 
 	if info.GetName() != "test-runtime" {
 		t.Errorf("Name: got %q, want %q", info.GetName(), "test-runtime")
@@ -48,7 +48,7 @@ func TestHarness_Execute_Success(t *testing.T) {
 	}
 
 	harness := sandboxtest.NewHarness(t, handler)
-	result := harness.Execute(context.Background(), &sandboxv1.ExecuteRequest{
+	result := harness.Execute(t.Context(), &sandboxv1.ExecuteRequest{
 		Command: []string{"echo", "hello", "world"},
 	})
 
@@ -71,7 +71,7 @@ func TestHarness_Execute_NonZeroExit(t *testing.T) {
 	}
 
 	harness := sandboxtest.NewHarness(t, handler)
-	result := harness.Execute(context.Background(), &sandboxv1.ExecuteRequest{
+	result := harness.Execute(t.Context(), &sandboxv1.ExecuteRequest{
 		Command: []string{"false"},
 	})
 
@@ -91,7 +91,7 @@ func TestHarness_Execute_FatalError(t *testing.T) {
 	}
 
 	harness := sandboxtest.NewHarness(t, handler)
-	result := harness.Execute(context.Background(), &sandboxv1.ExecuteRequest{
+	result := harness.Execute(t.Context(), &sandboxv1.ExecuteRequest{
 		Command: []string{"xyz"},
 	})
 
@@ -107,7 +107,7 @@ func TestHarness_Execute_DefaultMockBehavior(t *testing.T) {
 	handler := &sandboxtest.MockHandler{}
 
 	harness := sandboxtest.NewHarness(t, handler)
-	result := harness.Execute(context.Background(), &sandboxv1.ExecuteRequest{
+	result := harness.Execute(t.Context(), &sandboxv1.ExecuteRequest{
 		Command: []string{"echo", "test"},
 	})
 
@@ -157,7 +157,7 @@ func TestFakeCommandRunner(t *testing.T) {
 	var stdout, stderr strings.Builder
 
 	// Test echo
-	exitCode, err := runner.Run(context.Background(), []string{"echo", "hello"}, nil, &stdout, &stderr, nil, "")
+	exitCode, err := runner.Run(t.Context(), []string{"echo", "hello"}, nil, &stdout, &stderr, nil, "")
 	if err != nil {
 		t.Fatalf("Run(echo) error: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestFakeCommandRunner(t *testing.T) {
 	// Reset and test false
 	stdout.Reset()
 	stderr.Reset()
-	exitCode, err = runner.Run(context.Background(), []string{"false"}, nil, &stdout, &stderr, nil, "")
+	exitCode, err = runner.Run(t.Context(), []string{"false"}, nil, &stdout, &stderr, nil, "")
 	if err != nil {
 		t.Fatalf("Run(false) error: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestFakeCommandRunner_UnknownCommand(t *testing.T) {
 		Results: map[string]*sandboxtest.FakeResult{},
 	}
 
-	_, err := runner.Run(context.Background(), []string{"unknown"}, nil, nil, nil, nil, "")
+	_, err := runner.Run(t.Context(), []string{"unknown"}, nil, nil, nil, nil, "")
 	if err == nil {
 		t.Fatal("expected error for unknown command")
 	}
@@ -245,7 +245,7 @@ func TestExamplePlugin(t *testing.T) {
 	harness := sandboxtest.NewHarness(t, &examplePlugin{})
 
 	// Test GetInfo
-	info := harness.GetInfo(context.Background())
+	info := harness.GetInfo(t.Context())
 	if info.GetName() != "example" {
 		t.Errorf("Name: got %q, want %q", info.GetName(), "example")
 	}
@@ -254,7 +254,7 @@ func TestExamplePlugin(t *testing.T) {
 	}
 
 	// Test successful execution
-	result := harness.Execute(context.Background(), &sandboxv1.ExecuteRequest{
+	result := harness.Execute(t.Context(), &sandboxv1.ExecuteRequest{
 		Command: []string{"echo", "hello", "sandbox"},
 	})
 	result.
@@ -262,7 +262,7 @@ func TestExamplePlugin(t *testing.T) {
 		AssertStdoutEquals("hello sandbox\n")
 
 	// Test command not found
-	result = harness.Execute(context.Background(), &sandboxv1.ExecuteRequest{
+	result = harness.Execute(t.Context(), &sandboxv1.ExecuteRequest{
 		Command: []string{"nonexistent"},
 	})
 	result.AssertFatalErrorCode("COMMAND_NOT_FOUND")

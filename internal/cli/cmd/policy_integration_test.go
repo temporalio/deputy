@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,7 +22,7 @@ func TestPolicyIntegration_ComposedBundleSbomComponent(t *testing.T) {
 			"licenses": []any{"AgPl-3.0-only", "MIT"},
 		},
 	}
-	_, err := evaluatePoliciesForCommand(context.Background(), []string{bundlePath}, payload, "sbom", policy.EntrypointSBOMComponent, &bytes.Buffer{})
+	_, err := evaluatePoliciesForCommand(t.Context(), []string{bundlePath}, payload, "sbom", policy.EntrypointSBOMComponent, &bytes.Buffer{})
 	if err == nil {
 		t.Fatalf("expected denial error from composed bundle, got nil")
 	}
@@ -37,7 +36,7 @@ func TestPolicyIntegration_ComposedBundleSbomComponent_AllowsPermissive(t *testi
 			"licenses": []any{"MIT"},
 		},
 	}
-	actions, err := evaluatePoliciesForCommand(context.Background(), []string{bundlePath}, payload, "sbom", policy.EntrypointSBOMComponent, &bytes.Buffer{})
+	actions, err := evaluatePoliciesForCommand(t.Context(), []string{bundlePath}, payload, "sbom", policy.EntrypointSBOMComponent, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("evaluatePoliciesForCommand: %v", err)
 	}
@@ -58,7 +57,7 @@ func TestPolicyIntegration_ComposedBundleScanReport_NoDeny(t *testing.T) {
 			"licenses": []any{}, // empty licenses, but scan command is not in_scope
 		},
 	}
-	actions, err := evaluatePoliciesForCommand(context.Background(), []string{bundlePath}, payload, "scan", policy.EntrypointScanReport, &bytes.Buffer{})
+	actions, err := evaluatePoliciesForCommand(t.Context(), []string{bundlePath}, payload, "scan", policy.EntrypointScanReport, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("evaluatePoliciesForCommand: %v", err)
 	}
@@ -77,7 +76,7 @@ func TestPolicyIntegration_FixStepCommandAllowlist_Deny(t *testing.T) {
 			"executable": true,
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "fix", policy.EntrypointFixPlanStep, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "fix", policy.EntrypointFixPlanStep, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial error for unsafe fix step")
 	}
 }
@@ -90,7 +89,7 @@ func TestPolicyIntegration_NewDependencyReview_Deny(t *testing.T) {
 			"name": "github.com/unknown/mod",
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "diff", policy.EntrypointDiffDependencyChange, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "diff", policy.EntrypointDiffDependencyChange, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial error for unapproved dependency addition")
 	}
 }
@@ -107,7 +106,7 @@ func TestPolicyIntegration_PypiPrefixAllowlist(t *testing.T) {
 			"name": "randompkg",
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, denyPayload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, denyPayload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial error for unapproved pypi package")
 	}
 
@@ -120,7 +119,7 @@ func TestPolicyIntegration_PypiPrefixAllowlist(t *testing.T) {
 			"name": "acme_toolkit",
 		},
 	}
-	if actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, allowPayload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{}); err != nil {
+	if actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, allowPayload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{}); err != nil {
 		t.Fatalf("unexpected error for approved pypi package: %v", err)
 	} else {
 		for _, a := range actions {
@@ -139,14 +138,14 @@ func TestPolicyIntegration_RuntimeCriticalBaseline(t *testing.T) {
 			"name": "github.com/sirupsen/logrus",
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "diff", policy.EntrypointDiffDependencyChange, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "diff", policy.EntrypointDiffDependencyChange, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial error for removing critical module")
 	}
 }
 
 func TestPolicyIntegration_ExploitAvailableBlocker(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "exploit-available-blocker.yaml"))
-	
+
 	payload := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -157,14 +156,14 @@ func TestPolicyIntegration_ExploitAvailableBlocker(t *testing.T) {
 			},
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial error for exploit-available vulnerability")
 	}
 }
 
 func TestPolicyIntegration_DeprecatedModuleBlock(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "deprecated-module-block.yaml"))
-	
+
 	payload := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -172,7 +171,7 @@ func TestPolicyIntegration_DeprecatedModuleBlock(t *testing.T) {
 			},
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial error for deprecated module")
 	}
 }
@@ -182,27 +181,27 @@ func TestPolicyIntegration_DependencyCountGuard(t *testing.T) {
 	payload := map[string]any{
 		"changes": make([]any, 80),
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "diff", policy.EntrypointDiffReport, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "diff", policy.EntrypointDiffReport, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial for oversized diff change set")
 	}
 }
 
 func TestPolicyIntegration_LicensePresentBlocker(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "license-present-blocker.yaml"))
-	
+
 	payload := map[string]any{
 		"pkg": &dependencyv1.Package{
 			Licenses: []string{}, // Empty licenses
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "proxy", policy.EntrypointGoArtifactRequest, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "proxy", policy.EntrypointGoArtifactRequest, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial for missing license metadata")
 	}
 }
 
 func TestPolicyIntegration_NoFixEscalator(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "no-fix-escalator.yaml"))
-	
+
 	payload := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Package: &dependencyv1.Package{
@@ -216,7 +215,7 @@ func TestPolicyIntegration_NoFixEscalator(t *testing.T) {
 			},
 		},
 	}
-	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
+	actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -227,7 +226,7 @@ func TestPolicyIntegration_NoFixEscalator(t *testing.T) {
 
 func TestPolicyIntegration_ProdManifestGate(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "prod-manifest-gate.yaml"))
-	
+
 	payload := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -242,20 +241,20 @@ func TestPolicyIntegration_ProdManifestGate(t *testing.T) {
 			},
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial for prod manifest vuln")
 	}
 }
 
 func TestPolicyIntegration_DomainBrandedPackageGuard(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "domain-branded-package-guard.yaml"))
-	
+
 	payload := map[string]any{
 		"request": &policyv1.ProxyRequest{
 			Package: "aws-helper",
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial for branded package name")
 	}
 }
@@ -269,7 +268,7 @@ func TestPolicyIntegration_CriticalRuntimePinning(t *testing.T) {
 		},
 		"pkg": &dependencyv1.Package{Name: "golang.org/x/crypto", Version: "v0.24.0", Ecosystem: "go"},
 	}
-	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "diff", policy.EntrypointDiffDependencyChange, &bytes.Buffer{})
+	actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "diff", policy.EntrypointDiffDependencyChange, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -284,7 +283,7 @@ func TestPolicyIntegration_SbomSizeShapeSanity(t *testing.T) {
 	payload := map[string]any{
 		"packages": packages,
 	}
-	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "sbom", policy.EntrypointSBOMReport, &bytes.Buffer{})
+	actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "sbom", policy.EntrypointSBOMReport, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -295,7 +294,7 @@ func TestPolicyIntegration_SbomSizeShapeSanity(t *testing.T) {
 
 func TestPolicyIntegration_CriticalTransitiveSpotlight(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "critical-transitive-spotlight.yaml"))
-	
+
 	payload := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -311,7 +310,7 @@ func TestPolicyIntegration_CriticalTransitiveSpotlight(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 	}
-	if actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err != nil {
+	if actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	} else {
 		if !slices.ContainsFunc(actions, func(a policy.Action) bool { return a.Type == "warn" }) {
@@ -333,7 +332,7 @@ func TestPolicyIntegration_TyposquatLevenshteinGuard(t *testing.T) {
 			Name: "lodas",
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial for typosquat package")
 	}
 
@@ -346,7 +345,7 @@ func TestPolicyIntegration_TyposquatLevenshteinGuard(t *testing.T) {
 			Name: "teamlib",
 		},
 	}
-	if actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, allowPayload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err != nil {
+	if actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, allowPayload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err != nil {
 		t.Fatalf("did not expect error for safe package: %v", err)
 	} else {
 		for _, a := range actions {
@@ -359,7 +358,7 @@ func TestPolicyIntegration_TyposquatLevenshteinGuard(t *testing.T) {
 
 func TestPolicyIntegration_CWEBlocker(t *testing.T) {
 	// Test that CWEs are accessible in vulnerability policies
-	
+
 	polContent := `
 policies:
   - name: block-injection-cwes
@@ -377,7 +376,6 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	
 	payloadWithCWE := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -389,11 +387,10 @@ policies:
 			},
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadWithCWE, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadWithCWE, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected denial for vulnerability with injection CWE")
 	}
 
-	
 	payloadSafeCWE := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -405,7 +402,7 @@ policies:
 			},
 		},
 	}
-	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadSafeCWE, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
+	actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadSafeCWE, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("unexpected error for safe CWEs: %v", err)
 	}
@@ -415,7 +412,6 @@ policies:
 		}
 	}
 
-	
 	payloadNoCWE := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -426,7 +422,7 @@ policies:
 			},
 		},
 	}
-	actions, err = evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadNoCWE, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
+	actions, err = evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadNoCWE, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("unexpected error for vulnerability without CWEs: %v", err)
 	}
@@ -439,7 +435,7 @@ policies:
 
 func TestPolicyIntegration_KEVBlocker(t *testing.T) {
 	// Test that KEV status is accessible in vulnerability policies
-	
+
 	polContent := `
 policies:
   - name: block-kev
@@ -456,7 +452,6 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	
 	inKEV := true
 	payloadInKEV := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
@@ -469,11 +464,10 @@ policies:
 			InKev: &inKEV,
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadInKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadInKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected denial for vulnerability in KEV")
 	}
 
-	
 	notInKEV := false
 	payloadNotInKEV := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
@@ -486,7 +480,7 @@ policies:
 			InKev: &notInKEV,
 		},
 	}
-	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadNotInKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
+	actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadNotInKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("unexpected error for vulnerability not in KEV: %v", err)
 	}
@@ -496,7 +490,6 @@ policies:
 		}
 	}
 
-	
 	payloadNoKEV := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -508,7 +501,7 @@ policies:
 			// InKev is nil (not set)
 		},
 	}
-	actions, err = evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadNoKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
+	actions, err = evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadNoKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("unexpected error for vulnerability without KEV status: %v", err)
 	}
@@ -521,7 +514,7 @@ policies:
 
 func TestPolicyIntegration_EPSSThreshold(t *testing.T) {
 	// Test that EPSS scores are accessible in vulnerability policies
-	
+
 	polContent := `
 policies:
   - name: block-high-epss
@@ -547,7 +540,6 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	
 	highEPSS := 0.15 // 15% exploitation probability
 	payloadHighEPSS := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
@@ -560,11 +552,10 @@ policies:
 			Epss: &highEPSS,
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadHighEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadHighEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected denial for vulnerability with high EPSS")
 	}
 
-	
 	mediumEPSS := 0.07 // 7% exploitation probability
 	payloadMediumEPSS := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
@@ -577,7 +568,7 @@ policies:
 			Epss: &mediumEPSS,
 		},
 	}
-	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadMediumEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
+	actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadMediumEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("unexpected error for vulnerability with medium EPSS: %v", err)
 	}
@@ -585,7 +576,6 @@ policies:
 		t.Fatalf("expected warn for vulnerability with medium EPSS, got %+v", actions)
 	}
 
-	
 	lowEPSS := 0.01 // 1% exploitation probability
 	payloadLowEPSS := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
@@ -598,7 +588,7 @@ policies:
 			Epss: &lowEPSS,
 		},
 	}
-	actions, err = evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadLowEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
+	actions, err = evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadLowEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("unexpected error for vulnerability with low EPSS: %v", err)
 	}
@@ -608,7 +598,6 @@ policies:
 		}
 	}
 
-	
 	payloadNoEPSS := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -620,7 +609,7 @@ policies:
 			// Epss is nil (not set)
 		},
 	}
-	actions, err = evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadNoEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
+	actions, err = evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadNoEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("unexpected error for vulnerability without EPSS: %v", err)
 	}
@@ -633,7 +622,7 @@ policies:
 
 func TestPolicyIntegration_CompositeRiskScore(t *testing.T) {
 	// Test composite risk scoring using multiple factors (KEV, EPSS, severity)
-	
+
 	polContent := `
 policies:
   - name: composite-risk
@@ -659,7 +648,6 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	
 	inKEV := true
 	epss03 := 0.3
 	payloadCriticalKEV := map[string]any{
@@ -674,11 +662,10 @@ policies:
 			Epss:  &epss03,
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadCriticalKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadCriticalKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected denial for Critical + KEV vulnerability")
 	}
 
-	
 	notInKEV := false
 	epss06 := 0.6
 	payloadHighEPSS := map[string]any{
@@ -693,11 +680,10 @@ policies:
 			Epss:  &epss06,
 		},
 	}
-	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadHighEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
+	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadHighEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected denial for High severity + very high EPSS")
 	}
 
-	
 	payloadMediumHighEPSS := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -710,7 +696,7 @@ policies:
 			Epss:  &epss06,
 		},
 	}
-	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadMediumHighEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
+	actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payloadMediumHighEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("unexpected error for Medium + high EPSS: %v", err)
 	}

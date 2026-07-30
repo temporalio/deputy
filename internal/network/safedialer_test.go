@@ -183,7 +183,7 @@ func TestSafeDialer_DialContext_BlocksPrivateIPs(t *testing.T) {
 	t.Parallel()
 
 	d := NewSafeDialer()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// These should all be blocked (direct IP addresses)
 	blockedAddrs := []string{
@@ -213,7 +213,7 @@ func TestSafeDialer_DialContext_BlocksMetadataHostnames(t *testing.T) {
 	t.Parallel()
 
 	d := NewSafeDialer()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// These hostnames should be blocked before DNS resolution
 	blockedHosts := []string{

@@ -2,7 +2,6 @@ package explain
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -202,7 +201,7 @@ func TestRenderJSON_GoldenShape(t *testing.T) {
 
 	r := NewRenderer(Config{Enrich: false})
 	var buf bytes.Buffer
-	if err := r.RenderJSON(context.Background(), &buf, vuln); err != nil {
+	if err := r.RenderJSON(t.Context(), &buf, vuln); err != nil {
 		t.Fatalf("RenderJSON: %v", err)
 	}
 
@@ -227,7 +226,7 @@ func TestRenderJSON_GoldenShape(t *testing.T) {
 func TestRender_NilVulnIsNoOp(t *testing.T) {
 	r := NewRenderer(Config{})
 	var buf bytes.Buffer
-	if err := r.Render(context.Background(), &buf, nil); err != nil {
+	if err := r.Render(t.Context(), &buf, nil); err != nil {
 		t.Fatalf("Render(nil): %v", err)
 	}
 	if buf.Len() != 0 {
@@ -249,7 +248,7 @@ func TestRender_TextSmoke(t *testing.T) {
 
 	r := NewRenderer(Config{Enrich: false})
 	var buf bytes.Buffer
-	if err := r.Render(context.Background(), &buf, vuln); err != nil {
+	if err := r.Render(t.Context(), &buf, vuln); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := buf.String()

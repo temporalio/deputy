@@ -203,7 +203,7 @@ func TestPin_BasicPinning(t *testing.T) {
 		},
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{SkipVerification: true}, strategy)
+	report, err := Pin(t.Context(), testRoot(t), Options{SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestPin_DryRun(t *testing.T) {
 		},
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{DryRun: true, SkipVerification: true}, strategy)
+	report, err := Pin(t.Context(), testRoot(t), Options{DryRun: true, SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +489,7 @@ func TestVerify_Basic(t *testing.T) {
 		},
 	}
 
-	report, err := Verify(context.Background(), testRoot(t), Options{}, strategy)
+	report, err := Verify(t.Context(), testRoot(t), Options{}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +518,7 @@ func TestVerify_Suspicious(t *testing.T) {
 		},
 	}
 
-	report, err := Verify(context.Background(), testRoot(t), Options{}, strategy)
+	report, err := Verify(t.Context(), testRoot(t), Options{}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -539,7 +539,7 @@ func TestVerify_NoVerifierAvailable(t *testing.T) {
 		},
 	}
 
-	report, err := Verify(context.Background(), testRoot(t), Options{}, strategy)
+	report, err := Verify(t.Context(), testRoot(t), Options{}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +576,7 @@ func TestVerify_Error(t *testing.T) {
 		verifyErr: fmt.Errorf("API rate limit exceeded"),
 	}
 
-	report, err := Verify(context.Background(), testRoot(t), Options{}, strategy)
+	report, err := Verify(t.Context(), testRoot(t), Options{}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +594,7 @@ func TestPin_AlreadyPinned(t *testing.T) {
 		},
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{SkipVerification: true}, strategy)
+	report, err := Pin(t.Context(), testRoot(t), Options{SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +611,7 @@ func TestPin_SkippedExpressionRef(t *testing.T) {
 		},
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{SkipVerification: true}, strategy)
+	report, err := Pin(t.Context(), testRoot(t), Options{SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,7 +632,7 @@ func TestPin_ResolutionError(t *testing.T) {
 		resolveErr: fmt.Errorf("rate limit exceeded"),
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{SkipVerification: true}, strategy)
+	report, err := Pin(t.Context(), testRoot(t), Options{SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -656,7 +656,7 @@ func TestPin_Suspicious(t *testing.T) {
 	}
 
 	// In error mode a flagged ref is left unpinned and counted suspicious.
-	report, err := Pin(context.Background(), testRoot(t), Options{Verification: VerificationError}, strategy)
+	report, err := Pin(t.Context(), testRoot(t), Options{Verification: VerificationError}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -679,7 +679,7 @@ func TestPin_MixedResults(t *testing.T) {
 		},
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{SkipVerification: true}, strategy)
+	report, err := Pin(t.Context(), testRoot(t), Options{SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -724,7 +724,7 @@ func TestRef_IsSHAPinned(t *testing.T) {
 }
 
 func TestPin_ContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // cancel immediately
 
 	strategy := &mockStrategy{
@@ -752,7 +752,7 @@ func TestPin_VerificationErrorReported(t *testing.T) {
 		verifyErr: fmt.Errorf("API rate limit exceeded"),
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{}, strategy)
+	report, err := Pin(t.Context(), testRoot(t), Options{}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -789,7 +789,7 @@ func TestOptions_Concurrency(t *testing.T) {
 
 func TestPin_EmptyRefs(t *testing.T) {
 	strategy := &mockStrategy{refs: nil}
-	report, err := Pin(context.Background(), testRoot(t), Options{}, strategy)
+	report, err := Pin(t.Context(), testRoot(t), Options{}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,7 +810,7 @@ func TestPin_MultipleStrategies(t *testing.T) {
 		},
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{SkipVerification: true}, s1, s2)
+	report, err := Pin(t.Context(), testRoot(t), Options{SkipVerification: true}, s1, s2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -830,7 +830,7 @@ func TestPin_WriteStrategyError(t *testing.T) {
 		rewriteErr: fmt.Errorf("permission denied"),
 	}
 
-	_, err := Pin(context.Background(), testRoot(t), Options{SkipVerification: true}, strategy)
+	_, err := Pin(t.Context(), testRoot(t), Options{SkipVerification: true}, strategy)
 	if err == nil {
 		t.Fatal("expected error from rewrite failure")
 	}
@@ -870,7 +870,7 @@ func TestPin_StrategyIsPinnedUsed(t *testing.T) {
 		},
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{SkipVerification: true}, strategy)
+	report, err := Pin(t.Context(), testRoot(t), Options{SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -894,7 +894,7 @@ func TestPin_StrategyShouldSkipUsed(t *testing.T) {
 		},
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{SkipVerification: true}, strategy)
+	report, err := Pin(t.Context(), testRoot(t), Options{SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -936,7 +936,7 @@ func TestCheck_AllPinned(t *testing.T) {
 		},
 	}
 
-	report, err := Check(context.Background(), testRoot(t), Options{}, strategy)
+	report, err := Check(t.Context(), testRoot(t), Options{}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -958,7 +958,7 @@ func TestCheck_HasUnpinned(t *testing.T) {
 		},
 	}
 
-	report, err := Check(context.Background(), testRoot(t), Options{}, strategy)
+	report, err := Check(t.Context(), testRoot(t), Options{}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -978,7 +978,7 @@ func TestCheck_WithExclude(t *testing.T) {
 		},
 	}
 
-	report, err := Check(context.Background(), testRoot(t), Options{
+	report, err := Check(t.Context(), testRoot(t), Options{
 		Exclude: []string{"actions/checkout"},
 	}, strategy)
 	if err != nil {
@@ -999,7 +999,7 @@ func TestCheck_SkipsExpressions(t *testing.T) {
 		},
 	}
 
-	report, err := Check(context.Background(), testRoot(t), Options{}, strategy)
+	report, err := Check(t.Context(), testRoot(t), Options{}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1022,7 +1022,7 @@ func TestUpdate_BasicUpdate(t *testing.T) {
 		},
 	}
 
-	report, err := PinUpdate(context.Background(), testRoot(t), Options{SkipVerification: true}, strategy)
+	report, err := PinUpdate(t.Context(), testRoot(t), Options{SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1048,7 +1048,7 @@ func TestUpdate_NoChange(t *testing.T) {
 		},
 	}
 
-	report, err := PinUpdate(context.Background(), testRoot(t), Options{SkipVerification: true}, strategy)
+	report, err := PinUpdate(t.Context(), testRoot(t), Options{SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1070,7 +1070,7 @@ func TestUpdate_SkipsUnpinned(t *testing.T) {
 		},
 	}
 
-	report, err := PinUpdate(context.Background(), testRoot(t), Options{SkipVerification: true}, strategy)
+	report, err := PinUpdate(t.Context(), testRoot(t), Options{SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1094,7 +1094,7 @@ func TestUpdate_DryRun(t *testing.T) {
 		},
 	}
 
-	report, err := PinUpdate(context.Background(), testRoot(t), Options{DryRun: true, SkipVerification: true}, strategy)
+	report, err := PinUpdate(t.Context(), testRoot(t), Options{DryRun: true, SkipVerification: true}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1114,7 +1114,7 @@ func TestUpdate_WithExclude(t *testing.T) {
 		},
 	}
 
-	report, err := PinUpdate(context.Background(), testRoot(t), Options{
+	report, err := PinUpdate(t.Context(), testRoot(t), Options{
 		SkipVerification: true,
 		Exclude:          []string{"actions/checkout"},
 	}, strategy)
@@ -1142,7 +1142,7 @@ func TestUpdate_Suspicious(t *testing.T) {
 	}
 
 	// In error mode a flagged update is left unpinned and counted suspicious.
-	report, err := PinUpdate(context.Background(), testRoot(t), Options{Verification: VerificationError}, strategy)
+	report, err := PinUpdate(t.Context(), testRoot(t), Options{Verification: VerificationError}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1197,7 +1197,7 @@ func TestPin_WithExclude(t *testing.T) {
 		},
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{
+	report, err := Pin(t.Context(), testRoot(t), Options{
 		SkipVerification: true,
 		Exclude:          []string{"actions/checkout"},
 	}, strategy)
@@ -1306,7 +1306,7 @@ jobs:
 		digest: digest,
 	}
 
-	report, err := Pin(context.Background(), root, Options{SkipVerification: true}, gha, ctr)
+	report, err := Pin(t.Context(), root, Options{SkipVerification: true}, gha, ctr)
 	if err != nil {
 		t.Fatal(err)
 	}

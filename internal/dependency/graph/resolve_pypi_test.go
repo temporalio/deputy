@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 )
 
@@ -42,8 +41,8 @@ requests = "^2.28"
 
 	files := &mockFileReader{
 		files: map[string][]byte{
-			"poetry.lock":     []byte(poetryLock),
-			"pyproject.toml":  []byte(pyprojectToml),
+			"poetry.lock":    []byte(poetryLock),
+			"pyproject.toml": []byte(pyprojectToml),
 		},
 	}
 
@@ -68,7 +67,7 @@ requests = "^2.28"
 	})
 
 	resolver := NewPyPIResolver()
-	err := resolver.ResolveEdges(context.Background(), g, files)
+	err := resolver.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges failed: %v", err)
 	}
@@ -146,7 +145,7 @@ pytest>=7.0.0
 	})
 
 	resolver := NewPyPIResolver()
-	err := resolver.ResolveEdges(context.Background(), g, files)
+	err := resolver.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges failed: %v", err)
 	}

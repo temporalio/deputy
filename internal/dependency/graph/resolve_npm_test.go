@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 )
 
@@ -72,7 +71,7 @@ func TestNpmResolver_ResolveEdges_PackageLockV3(t *testing.T) {
 	})
 
 	resolver := NewNpmResolver()
-	err := resolver.ResolveEdges(context.Background(), g, files)
+	err := resolver.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges failed: %v", err)
 	}
@@ -156,7 +155,7 @@ func TestNpmResolver_ResolveEdges_PackageLockV1(t *testing.T) {
 	})
 
 	resolver := NewNpmResolver()
-	err := resolver.ResolveEdges(context.Background(), g, files)
+	err := resolver.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges failed: %v", err)
 	}
@@ -216,7 +215,7 @@ func TestNpmResolver_ScopedPackages(t *testing.T) {
 	})
 
 	resolver := NewNpmResolver()
-	err := resolver.ResolveEdges(context.Background(), g, files)
+	err := resolver.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges failed: %v", err)
 	}
@@ -364,7 +363,7 @@ inherits@^2.0.3:
 	})
 
 	resolver := NewNpmResolver()
-	err := resolver.ResolveEdges(context.Background(), g, files)
+	err := resolver.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges failed: %v", err)
 	}
@@ -544,7 +543,7 @@ packages:
 	})
 
 	resolver := NewNpmResolver()
-	err := resolver.ResolveEdges(context.Background(), g, files)
+	err := resolver.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges failed: %v", err)
 	}

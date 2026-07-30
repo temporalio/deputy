@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +11,7 @@ import (
 )
 
 func TestExplainRenderer_Text(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("renders basic vulnerability", func(t *testing.T) {
 		out := &bytes.Buffer{}
@@ -189,7 +188,7 @@ func TestExplainRenderer_Text(t *testing.T) {
 }
 
 func TestExplainRenderer_JSON(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("renders valid JSON with core fields", func(t *testing.T) {
 		out := &bytes.Buffer{}

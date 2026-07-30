@@ -2,7 +2,6 @@ package otel
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log/slog"
 	"testing"
@@ -160,7 +159,7 @@ func TestMultiHandler_Enabled(t *testing.T) {
 	multi := NewMultiHandler(h1, h2)
 
 	// Should be enabled if any handler is enabled
-	if !multi.Enabled(context.Background(), slog.LevelInfo) {
+	if !multi.Enabled(t.Context(), slog.LevelInfo) {
 		t.Error("multi handler should be enabled for Info if any child is enabled")
 	}
 }

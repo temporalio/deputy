@@ -9,7 +9,7 @@ import (
 )
 
 func TestCheckRetry(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name       string
@@ -51,7 +51,7 @@ func TestCheckRetry(t *testing.T) {
 }
 
 func TestCheckRetryNilResp(t *testing.T) {
-	got, err := checkRetry(context.Background(), nil, nil)
+	got, err := checkRetry(t.Context(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestCheckRetryNilResp(t *testing.T) {
 }
 
 func TestCheckRetryConnectionError(t *testing.T) {
-	got, err := checkRetry(context.Background(), nil, &net.DNSError{})
+	got, err := checkRetry(t.Context(), nil, &net.DNSError{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestCheckRetryConnectionError(t *testing.T) {
 }
 
 func TestCheckRetryContextCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	got, err := checkRetry(ctx, nil, nil)

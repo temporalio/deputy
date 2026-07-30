@@ -14,7 +14,7 @@ import (
 // TestLSPDiagnosticsAndCodeActionsEndToEnd simulates a client talking to the LSP
 // over an in-memory net.Pipe to ensure initialize -> didOpen -> diagnostics -> codeAction flow works.
 func TestLSPDiagnosticsAndCodeActionsEndToEnd(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	serverSide, clientSide := net.Pipe()

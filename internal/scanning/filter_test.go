@@ -1,7 +1,6 @@
 package scanning
 
 import (
-	"context"
 	"testing"
 
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
@@ -249,7 +248,7 @@ func TestFilterByCEL(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -285,7 +284,7 @@ func TestFilterByCEL(t *testing.T) {
 }
 
 func TestFilterByCEL_EmptyResult(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	result := Result{
 		Findings:   []vulnerability.Finding{},
 		Advisories: map[string]*vulnerabilityv1.Advisory{},
@@ -302,7 +301,7 @@ func TestFilterByCEL_EmptyResult(t *testing.T) {
 }
 
 func TestFilterByCEL_StatsRecomputation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	result := testResult()
 
 	// Filter to only critical severity
@@ -332,7 +331,7 @@ func TestFilterByCEL_StatsRecomputation(t *testing.T) {
 }
 
 func TestFilterByCEL_AdvisoriesFiltered(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	result := testResult()
 
 	// Filter to only npm ecosystem (2 findings: critical-pkg and low-pkg)
@@ -361,7 +360,7 @@ func TestFilterByCEL_AdvisoriesFiltered(t *testing.T) {
 }
 
 func TestFilterByCEL_OriginalResultUnmodified(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	result := testResult()
 
 	originalCount := len(result.Findings)
@@ -385,7 +384,7 @@ func TestFilterByCEL_OriginalResultUnmodified(t *testing.T) {
 // TestFilterByCEL_DocumentedExamples tests the exact expressions documented in the CLI help
 // and documentation to ensure they work correctly.
 func TestFilterByCEL_DocumentedExamples(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	result := testResult()
 
 	// These are the exact examples from docs/commands/scan.md

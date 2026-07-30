@@ -31,7 +31,7 @@ func TestOCIProxy_PullImageThroughProxy(t *testing.T) {
 	// gcr.io/distroless/static-debian12 is tiny (~2MB) and doesn't require auth.
 	const testImage = "gcr.io/distroless/static-debian12:nonroot"
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	// Start a real upstream proxy that forwards to gcr.io
@@ -104,7 +104,7 @@ func TestOCIProxy_PullImageThroughProxy(t *testing.T) {
 // TestOCIProxy_PolicyBlocksLatestTag tests that the proxy correctly blocks
 // images with the :latest tag when configured with a policy that forbids it.
 func TestOCIProxy_PolicyBlocksLatestTag(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	// Create a mock upstream that returns valid OCI responses
@@ -176,7 +176,7 @@ func TestOCIProxy_PolicyBlocksLatestTag(t *testing.T) {
 // TestOCIProxy_PolicyAllowsSemverTag tests that the proxy allows images
 // with proper semver tags when the policy requires semver.
 func TestOCIProxy_PolicyAllowsSemverTag(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	// Create a mock upstream that returns valid OCI responses
@@ -241,7 +241,7 @@ func TestOCIProxy_PolicyAllowsSemverTag(t *testing.T) {
 // TestOCIProxy_VulnerabilityBlocksImage tests that the proxy blocks images
 // when vulnerabilities are detected and policy requires blocking.
 func TestOCIProxy_VulnerabilityBlocksImage(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -339,7 +339,7 @@ policies:
 // TestOCIProxy_ImageConfigAvailableInPolicy tests that image configuration
 // (user, env, etc.) is available for policy evaluation.
 func TestOCIProxy_ImageConfigAvailableInPolicy(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -429,7 +429,7 @@ func TestOCIProxy_RealGCRImage(t *testing.T) {
 		t.Skip("skipping real registry test in short mode")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	// Forward to gcr.io

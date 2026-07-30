@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 )
 
@@ -110,7 +109,7 @@ require github.com/pkg/errors v0.9.1
 		Ecosystem: "Go",
 	})
 
-	err := registry.ResolveAll(context.Background(), g, files)
+	err := registry.ResolveAll(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveAll failed: %v", err)
 	}

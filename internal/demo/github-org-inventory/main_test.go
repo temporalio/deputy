@@ -14,7 +14,7 @@ import (
 func TestCollectRowsFromPackages(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	pkgs := []*extractor.Package{
 		{
 			Name:      "github.com/example/foo",
@@ -93,7 +93,7 @@ func main() {}
 		return []string{"Test-License"}
 	}
 
-	rows, err := inventoryFromWorkspace(context.Background(), "demo-repo", ws, []string{"go"}, resolve)
+	rows, err := inventoryFromWorkspace(t.Context(), "demo-repo", ws, []string{"go"}, resolve)
 	if err != nil {
 		t.Fatalf("inventoryFromWorkspace: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestLooksLikeSHA(t *testing.T) {
 		{"v2.0.0", false},
 		{"main", false},
 		{"master", false},
-		{"b62528385c34dbc9f38e5f4225ac829252d1ea9", false},  // 39 chars
+		{"b62528385c34dbc9f38e5f4225ac829252d1ea9", false},   // 39 chars
 		{"b62528385c34dbc9f38e5f4225ac829252d1ea921", false}, // 41 chars
 		{"g62528385c34dbc9f38e5f4225ac829252d1ea92", false},  // non-hex char
 	}
@@ -289,12 +289,12 @@ func TestLooksLikeShortSHA(t *testing.T) {
 		{"abcdef1", true},
 
 		// Not short SHA
-		{"v4", false},        // starts with v + digit
-		{"v2.0.0", false},    // version with dots
-		{"1.2.3", false},     // has dots
-		{"abc", false},       // too short
-		{"abcdefg", false},   // has 'g' (non-hex)
-		{"main", false},      // has non-hex
+		{"v4", false},          // starts with v + digit
+		{"v2.0.0", false},      // version with dots
+		{"1.2.3", false},       // has dots
+		{"abc", false},         // too short
+		{"abcdefg", false},     // has 'g' (non-hex)
+		{"main", false},        // has non-hex
 		{"releases/v1", false}, // has slash
 	}
 

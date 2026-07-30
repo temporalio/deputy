@@ -189,7 +189,7 @@ func TestEnrichSpanWithRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tracer, recorder := testTracer(t)
-			ctx, span := startTestSpan(context.Background(), tracer, "test")
+			ctx, span := startTestSpan(t.Context(), tracer, "test")
 			EnrichSpanWithRequest(span, tt.info)
 			span.End()
 
@@ -249,7 +249,7 @@ func TestRecordAuthEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tracer, recorder := testTracer(t)
-			ctx, span := startTestSpan(context.Background(), tracer, "test")
+			ctx, span := startTestSpan(t.Context(), tracer, "test")
 			RecordAuthEvent(ctx, span, tt.data)
 			span.End()
 
@@ -276,7 +276,7 @@ func TestRecordAuthEvent(t *testing.T) {
 func TestRecordAuthHelpers(t *testing.T) {
 	t.Run("RecordAuthSuccess", func(t *testing.T) {
 		tracer, recorder := testTracer(t)
-		ctx, span := startTestSpan(context.Background(), tracer, "test")
+		ctx, span := startTestSpan(t.Context(), tracer, "test")
 		RecordAuthSuccess(ctx, span, "user:bob")
 		span.End()
 
@@ -289,7 +289,7 @@ func TestRecordAuthHelpers(t *testing.T) {
 
 	t.Run("RecordAuthAnonymous", func(t *testing.T) {
 		tracer, recorder := testTracer(t)
-		ctx, span := startTestSpan(context.Background(), tracer, "test")
+		ctx, span := startTestSpan(t.Context(), tracer, "test")
 		RecordAuthAnonymous(ctx, span)
 		span.End()
 
@@ -301,7 +301,7 @@ func TestRecordAuthHelpers(t *testing.T) {
 
 	t.Run("RecordAuthRejected", func(t *testing.T) {
 		tracer, recorder := testTracer(t)
-		ctx, span := startTestSpan(context.Background(), tracer, "test")
+		ctx, span := startTestSpan(t.Context(), tracer, "test")
 		RecordAuthRejected(ctx, span, "expired_token")
 		span.End()
 
@@ -346,7 +346,7 @@ func TestRecordPolicyEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tracer, recorder := testTracer(t)
-			ctx, span := startTestSpan(context.Background(), tracer, "test")
+			ctx, span := startTestSpan(t.Context(), tracer, "test")
 			RecordPolicyEvent(ctx, span, tt.data)
 			span.End()
 
@@ -372,7 +372,7 @@ func TestRecordPolicyEvent(t *testing.T) {
 func TestRecordPolicyHelpers(t *testing.T) {
 	t.Run("RecordPolicyAllow", func(t *testing.T) {
 		tracer, recorder := testTracer(t)
-		ctx, span := startTestSpan(context.Background(), tracer, "test")
+		ctx, span := startTestSpan(t.Context(), tracer, "test")
 		RecordPolicyAllow(ctx, span, "go_artifact_request", 2, 50*time.Millisecond)
 		span.End()
 
@@ -385,7 +385,7 @@ func TestRecordPolicyHelpers(t *testing.T) {
 
 	t.Run("RecordPolicyDeny", func(t *testing.T) {
 		tracer, recorder := testTracer(t)
-		ctx, span := startTestSpan(context.Background(), tracer, "test")
+		ctx, span := startTestSpan(t.Context(), tracer, "test")
 		RecordPolicyDeny(ctx, span, "npm_artifact_request", "block-critical", "has critical vuln", "npm", 30*time.Millisecond)
 		span.End()
 
@@ -431,7 +431,7 @@ func TestRecordCacheEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tracer, recorder := testTracer(t)
-			ctx, span := startTestSpan(context.Background(), tracer, "test")
+			ctx, span := startTestSpan(t.Context(), tracer, "test")
 			RecordCacheEvent(ctx, span, tt.data)
 			span.End()
 
@@ -450,7 +450,7 @@ func TestRecordCacheEvent(t *testing.T) {
 func TestRecordCacheHelpers(t *testing.T) {
 	t.Run("RecordOSVCacheHit", func(t *testing.T) {
 		tracer, recorder := testTracer(t)
-		ctx, span := startTestSpan(context.Background(), tracer, "test")
+		ctx, span := startTestSpan(t.Context(), tracer, "test")
 		RecordOSVCacheHit(ctx, span, "go|pkg@v1")
 		span.End()
 
@@ -462,7 +462,7 @@ func TestRecordCacheHelpers(t *testing.T) {
 
 	t.Run("RecordOSVCacheMiss", func(t *testing.T) {
 		tracer, recorder := testTracer(t)
-		ctx, span := startTestSpan(context.Background(), tracer, "test")
+		ctx, span := startTestSpan(t.Context(), tracer, "test")
 		RecordOSVCacheMiss(ctx, span, "go|pkg@v1")
 		span.End()
 
@@ -474,7 +474,7 @@ func TestRecordCacheHelpers(t *testing.T) {
 
 	t.Run("RecordLicenseCacheHit", func(t *testing.T) {
 		tracer, recorder := testTracer(t)
-		ctx, span := startTestSpan(context.Background(), tracer, "test")
+		ctx, span := startTestSpan(t.Context(), tracer, "test")
 		RecordLicenseCacheHit(ctx, span, "npm|pkg@1.0")
 		span.End()
 
@@ -486,7 +486,7 @@ func TestRecordCacheHelpers(t *testing.T) {
 
 	t.Run("RecordImageScanCacheHit", func(t *testing.T) {
 		tracer, recorder := testTracer(t)
-		ctx, span := startTestSpan(context.Background(), tracer, "test")
+		ctx, span := startTestSpan(t.Context(), tracer, "test")
 		RecordImageScanCacheHit(ctx, span, "registry|repo@sha256:deadbeef")
 		span.End()
 
@@ -499,7 +499,7 @@ func TestRecordCacheHelpers(t *testing.T) {
 
 func TestRecordVulnerabilityCount(t *testing.T) {
 	tracer, recorder := testTracer(t)
-	_, span := startTestSpan(context.Background(), tracer, "test")
+	_, span := startTestSpan(t.Context(), tracer, "test")
 	RecordVulnerabilityCount(span, 5)
 	span.End()
 
@@ -509,7 +509,7 @@ func TestRecordVulnerabilityCount(t *testing.T) {
 
 func TestProxyRequestRecorder(t *testing.T) {
 	// Just verify it doesn't panic; actual metric recording is tested elsewhere
-	ctx := context.Background()
+	ctx := t.Context()
 	recorder := NewProxyRequestRecorder(ctx, "go")
 
 	// Simulate some work
@@ -519,7 +519,7 @@ func TestProxyRequestRecorder(t *testing.T) {
 func TestMultipleEventsOnSameSpan(t *testing.T) {
 	// Test that multiple events can be recorded on the same span
 	tracer, recorder := testTracer(t)
-	ctx, span := startTestSpan(context.Background(), tracer, "test")
+	ctx, span := startTestSpan(t.Context(), tracer, "test")
 
 	// Record auth
 	RecordAuthSuccess(ctx, span, "user:alice")
@@ -561,7 +561,7 @@ func TestMultipleEventsOnSameSpan(t *testing.T) {
 func TestEnrichSpanWithRequest_EmptyStrings(t *testing.T) {
 	// Test that empty strings don't cause issues
 	tracer, recorder := testTracer(t)
-	_, span := startTestSpan(context.Background(), tracer, "test")
+	_, span := startTestSpan(t.Context(), tracer, "test")
 
 	EnrichSpanWithRequest(span, RequestInfo{
 		Ecosystem: "",
@@ -585,14 +585,14 @@ func TestAttributeKeyConsistency(t *testing.T) {
 
 	// Only check proxy-specific keys defined locally (not reused from central otel)
 	proxySpecificKeys := []attribute.Key{
-		attrProxyEcosystem, // Local: deputy.proxy.ecosystem
-		attrAuthResult,     // Local: deputy.proxy.auth.result
-		attrAuthSubject,    // Local: deputy.proxy.auth.subject
-		attrAuthErrorCode,  // Local: deputy.proxy.auth.error_code
-		attrAuthAnonymous,  // Local: deputy.proxy.auth.anonymous
-		attrPolicyResult,   // Local: deputy.proxy.policy.result
-		attrPolicyReason,   // Local: deputy.proxy.policy.reason
-		attrPolicyWarnings, // Local: deputy.proxy.policy.warnings
+		attrProxyEcosystem,     // Local: deputy.proxy.ecosystem
+		attrAuthResult,         // Local: deputy.proxy.auth.result
+		attrAuthSubject,        // Local: deputy.proxy.auth.subject
+		attrAuthErrorCode,      // Local: deputy.proxy.auth.error_code
+		attrAuthAnonymous,      // Local: deputy.proxy.auth.anonymous
+		attrPolicyResult,       // Local: deputy.proxy.policy.result
+		attrPolicyReason,       // Local: deputy.proxy.policy.reason
+		attrPolicyWarnings,     // Local: deputy.proxy.policy.warnings
 		attrVulnerabilityCount, // Local: deputy.proxy.vulnerability.count
 	}
 

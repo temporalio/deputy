@@ -1,7 +1,6 @@
 package auth_test
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,7 +19,7 @@ func TestIntegration_ConfusedDeputyPrevention(t *testing.T) {
 	}
 
 	store := auth.NewStore(auth.WithProvider(auth.NewStaticProvider(githubCred)))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name     string
@@ -108,7 +107,7 @@ func TestIntegration_ServiceIsolation(t *testing.T) {
 	)
 
 	store := auth.NewStore(auth.WithProvider(chain))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Anthropic API key should only go to api.anthropic.com
 	t.Run("anthropic key isolation", func(t *testing.T) {
@@ -160,7 +159,7 @@ func TestIntegration_HTTPSRequirement(t *testing.T) {
 	}
 
 	store := auth.NewStore(auth.WithProvider(auth.NewStaticProvider(cred)))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("HTTPS gets credentials", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
@@ -195,7 +194,7 @@ func TestIntegration_WildcardHostMatching(t *testing.T) {
 	}
 
 	store := auth.NewStore(auth.WithProvider(auth.NewStaticProvider(cred)))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		host     string

@@ -483,7 +483,7 @@ func TestJWKSServer(t *testing.T) {
 	defer cache.Close()
 
 	// Get key from cache
-	key, err := cache.GetKey(context.Background(), "test-key-1")
+	key, err := cache.GetKey(t.Context(), "test-key-1")
 	if err != nil {
 		t.Fatalf("failed to get key: %v", err)
 	}
@@ -558,7 +558,7 @@ func TestAuthenticator_WithStaticKey(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token.String())
 
 	// Authenticate
-	claims, err := auth.Authenticate(context.Background(), req)
+	claims, err := auth.Authenticate(t.Context(), req)
 	if err != nil {
 		t.Fatalf("authentication failed: %v", err)
 	}
@@ -627,7 +627,7 @@ func TestAuthenticator_ExpiredToken(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token.String())
 
 	// Authenticate should fail
-	_, err = auth.Authenticate(context.Background(), req)
+	_, err = auth.Authenticate(t.Context(), req)
 	if err == nil {
 		t.Fatal("expected authentication to fail for expired token")
 	}
@@ -697,7 +697,7 @@ func TestAuthenticator_InvalidIssuer(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token.String())
 
 	// Authenticate should fail
-	_, err = auth.Authenticate(context.Background(), req)
+	_, err = auth.Authenticate(t.Context(), req)
 	if err == nil {
 		t.Fatal("expected authentication to fail for invalid issuer")
 	}
@@ -745,7 +745,7 @@ func TestAuthenticator_NoToken(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 
 	// Authenticate should return nil claims (anonymous)
-	claims, err := auth.Authenticate(context.Background(), req)
+	claims, err := auth.Authenticate(t.Context(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -821,7 +821,7 @@ func TestAuthenticator_AllowedAlgorithms(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token.String())
 
 	// Authenticate should fail due to algorithm restriction
-	_, err = auth.Authenticate(context.Background(), req)
+	_, err = auth.Authenticate(t.Context(), req)
 	if err == nil {
 		t.Fatal("expected authentication to fail for disallowed algorithm")
 	}
@@ -918,7 +918,7 @@ func TestAuthenticator_NotBeforeToken(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token.String())
 
 	// Authenticate should fail
-	_, err = auth.Authenticate(context.Background(), req)
+	_, err = auth.Authenticate(t.Context(), req)
 	if err == nil {
 		t.Fatal("expected authentication to fail for not-yet-valid token")
 	}
@@ -985,7 +985,7 @@ func TestAuthenticator_NotBeforeValid(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token.String())
 
 	// Authenticate should succeed
-	claims, err := auth.Authenticate(context.Background(), req)
+	claims, err := auth.Authenticate(t.Context(), req)
 	if err != nil {
 		t.Fatalf("expected authentication to succeed, got error: %v", err)
 	}
@@ -1031,7 +1031,7 @@ func TestJWKSCache_ConcurrentAccess(t *testing.T) {
 	defer cache.Close()
 
 	// Pre-warm the cache so we're testing concurrent reads from memory
-	_, err = cache.GetKey(context.Background(), "test-key-1")
+	_, err = cache.GetKey(t.Context(), "test-key-1")
 	if err != nil {
 		t.Fatalf("failed to pre-warm cache: %v", err)
 	}
@@ -1047,7 +1047,7 @@ func TestJWKSCache_ConcurrentAccess(t *testing.T) {
 			go func() {
 				for range iterations {
 					// Access the already-cached key (no network I/O)
-					_, err := cache.GetKey(context.Background(), "test-key-1")
+					_, err := cache.GetKey(t.Context(), "test-key-1")
 					if err != nil {
 						errorCount.Add(1)
 					}
@@ -1125,7 +1125,7 @@ func TestAuthMetrics_ConcurrentAccess(t *testing.T) {
 
 func TestJWTClaimsFromContext(t *testing.T) {
 	t.Run("context without claims", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		claims := JWTClaimsFromContext(ctx)
 		if claims != nil {
 			t.Error("expected nil claims for context without claims")
@@ -1134,7 +1134,7 @@ func TestJWTClaimsFromContext(t *testing.T) {
 
 	t.Run("context with claims", func(t *testing.T) {
 		expected := &JWTClaims{Subject: "user123"}
-		ctx := ContextWithJWTClaims(context.Background(), expected)
+		ctx := ContextWithJWTClaims(t.Context(), expected)
 		claims := JWTClaimsFromContext(ctx)
 		if claims == nil {
 			t.Fatal("expected non-nil claims")
@@ -1201,7 +1201,7 @@ func TestAuthenticator_MalformedToken(t *testing.T) {
 			req := httptest.NewRequest("GET", "/test", nil)
 			req.Header.Set("Authorization", "Bearer "+tt.token)
 
-			_, err := auth.Authenticate(context.Background(), req)
+			_, err := auth.Authenticate(t.Context(), req)
 			if err == nil {
 				t.Fatal("expected authentication to fail for malformed token")
 			}
@@ -1325,7 +1325,7 @@ func TestAuthenticator_TokenSizeLimit(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("Authorization", "Bearer "+largeToken)
 
-	_, err = auth.Authenticate(context.Background(), req)
+	_, err = auth.Authenticate(t.Context(), req)
 	if err == nil {
 		t.Fatal("expected authentication to fail for oversized token")
 	}

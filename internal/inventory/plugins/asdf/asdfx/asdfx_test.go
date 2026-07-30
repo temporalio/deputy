@@ -1,7 +1,6 @@
 package asdfx
 
 import (
-	"context"
 	"io/fs"
 	"strings"
 	"testing"
@@ -49,7 +48,7 @@ func TestFileRequired(t *testing.T) {
 func TestExtract(t *testing.T) {
 	content := "nodejs 22.5.0\npython 3.11 3.12\nruby system\ngolang ref:abc\n"
 	ext := New()
-	inv, err := ext.Extract(context.Background(), &filesystem.ScanInput{
+	inv, err := ext.Extract(t.Context(), &filesystem.ScanInput{
 		Path:   ".tool-versions",
 		Reader: strings.NewReader(content),
 	})

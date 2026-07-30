@@ -44,7 +44,7 @@ func TestResolve_DockerMigration(t *testing.T) {
 		deflt: ExistsNo, // docker/docker@29.3.1 absent
 	}
 
-	v := Resolve(context.Background(), c, r, Options{Verify: true})
+	v := Resolve(t.Context(), c, r, Options{Verify: true})
 	if v == nil || v.Status != vulnerability.FixStatusMigration {
 		t.Fatalf("expected migration verdict, got %+v", v)
 	}
@@ -72,7 +72,7 @@ func TestResolve_MigrationWhenNoInPlaceClaim(t *testing.T) {
 	}
 	r := fakeResolver{exists: map[string]Existence{"github.com/moby/moby/v2@2.0.0-beta.14": ExistsYes}, deflt: ExistsNo}
 
-	v := Resolve(context.Background(), c, r, Options{Verify: true})
+	v := Resolve(t.Context(), c, r, Options{Verify: true})
 	if v == nil || v.Status != vulnerability.FixStatusMigration {
 		t.Fatalf("expected migration verdict, got %+v", v)
 	}
@@ -95,7 +95,7 @@ func TestResolve_MechanicalMajorBump(t *testing.T) {
 	}
 	r := fakeResolver{exists: map[string]Existence{"github.com/example/widget/v2@2.0.1": ExistsYes}, deflt: ExistsNo}
 
-	v := Resolve(context.Background(), c, r, Options{Verify: true})
+	v := Resolve(t.Context(), c, r, Options{Verify: true})
 	if v == nil || v.Status != vulnerability.FixStatusMigration {
 		t.Fatalf("expected migration verdict, got %+v", v)
 	}
@@ -113,7 +113,7 @@ func TestResolve_InPlaceVerified(t *testing.T) {
 	}
 	r := fakeResolver{exists: map[string]Existence{"golang.org/x/net@0.55.0": ExistsYes}}
 
-	v := Resolve(context.Background(), c, r, Options{Verify: true})
+	v := Resolve(t.Context(), c, r, Options{Verify: true})
 	if v == nil || v.Status != vulnerability.FixStatusInPlace {
 		t.Fatalf("expected in-place verdict, got %+v", v)
 	}
@@ -131,7 +131,7 @@ func TestResolve_UnverifiedWhenProxyUnknown(t *testing.T) {
 	}
 	r := fakeResolver{deflt: ExistsUnknown}
 
-	v := Resolve(context.Background(), c, r, Options{Verify: true})
+	v := Resolve(t.Context(), c, r, Options{Verify: true})
 	if v == nil || v.Status != vulnerability.FixStatusUnverified {
 		t.Fatalf("expected unverified verdict, got %+v", v)
 	}
@@ -149,7 +149,7 @@ func TestResolve_UnavailableWhenAbsentAndNoMigration(t *testing.T) {
 	}
 	r := fakeResolver{deflt: ExistsNo}
 
-	v := Resolve(context.Background(), c, r, Options{Verify: true})
+	v := Resolve(t.Context(), c, r, Options{Verify: true})
 	if v == nil || v.Status != vulnerability.FixStatusUnavailable {
 		t.Fatalf("expected unavailable verdict, got %+v", v)
 	}
@@ -162,11 +162,11 @@ func TestResolve_SkippedForNonGoAndDisabled(t *testing.T) {
 	c := vulnerability.Consolidated{Package: "left-pad", Version: "1.0.0", Ecosystem: "npm", FixedVersions: []string{"1.0.1"}}
 	r := fakeResolver{deflt: ExistsYes}
 
-	if v := Resolve(context.Background(), c, r, Options{Verify: true}); v != nil {
+	if v := Resolve(t.Context(), c, r, Options{Verify: true}); v != nil {
 		t.Errorf("expected nil for non-Go ecosystem, got %+v", v)
 	}
 	goC := vulnerability.Consolidated{Package: "golang.org/x/net", Version: "v0.47.0", Ecosystem: "Go", FixedVersions: []string{"0.55.0"}}
-	if v := Resolve(context.Background(), goC, r, Options{Verify: false}); v != nil {
+	if v := Resolve(t.Context(), goC, r, Options{Verify: false}); v != nil {
 		t.Errorf("expected nil when verification disabled, got %+v", v)
 	}
 }

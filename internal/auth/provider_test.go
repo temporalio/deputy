@@ -177,7 +177,7 @@ func TestChainProvider_Lookup_Error(t *testing.T) {
 		errorProvider{err: testErr},
 	)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := chain.Lookup(ctx, Scope{Host: "github.com"})
 	if err == nil {
 		t.Fatal("expected error")
@@ -195,7 +195,7 @@ func TestChainProvider_Lookup_SkipsErrNoCredential(t *testing.T) {
 
 	chain := NewChainProvider(noCredProvider, staticProvider)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	cred, err := chain.Lookup(ctx, Scope{Host: "github.com"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -208,7 +208,7 @@ func TestChainProvider_Lookup_SkipsErrNoCredential(t *testing.T) {
 func TestStaticProvider_NilCredential(t *testing.T) {
 	p := NewStaticProvider(nil)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	cred, err := p.Lookup(ctx, Scope{Host: "github.com"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

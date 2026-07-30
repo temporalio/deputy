@@ -12,11 +12,11 @@ func TestInit_DisabledByDefault(t *testing.T) {
 	resetGlobalProvider()
 
 	cfg := DefaultConfig()
-	provider, err := Init(context.Background(), cfg)
+	provider, err := Init(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
-	defer provider.Shutdown(context.Background())
+	defer provider.Shutdown(t.Context())
 
 	if provider.Enabled() {
 		t.Error("expected provider to be disabled by default")
@@ -36,11 +36,11 @@ func TestInit_EnvOverride(t *testing.T) {
 	cfg.Exporter.Insecure = true
 
 	// Environment should override
-	provider, err := Init(context.Background(), cfg)
+	provider, err := Init(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
-	defer provider.Shutdown(context.Background())
+	defer provider.Shutdown(t.Context())
 
 	// Note: The provider will be "enabled" from config perspective,
 	// but actual provider creation may fail without a collector.
@@ -61,11 +61,11 @@ func TestInit_EnvOverride_False(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Enabled = true // Config says enabled
 
-	provider, err := Init(context.Background(), cfg)
+	provider, err := Init(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
-	defer provider.Shutdown(context.Background())
+	defer provider.Shutdown(t.Context())
 
 	if provider.Enabled() {
 		t.Error("expected environment override to disable OTel")
@@ -78,12 +78,12 @@ func TestInit_MultipleCallsReturnSameProvider(t *testing.T) {
 
 	cfg := DefaultConfig()
 
-	p1, err := Init(context.Background(), cfg)
+	p1, err := Init(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("first Init failed: %v", err)
 	}
 
-	p2, err := Init(context.Background(), cfg)
+	p2, err := Init(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("second Init failed: %v", err)
 	}
@@ -92,20 +92,20 @@ func TestInit_MultipleCallsReturnSameProvider(t *testing.T) {
 		t.Error("expected same provider instance from multiple Init calls")
 	}
 
-	p1.Shutdown(context.Background())
+	p1.Shutdown(t.Context())
 }
 
 func TestProvider_Shutdown_NilSafe(t *testing.T) {
 	var p *Provider
 	// Should not panic
-	if err := p.Shutdown(context.Background()); err != nil {
+	if err := p.Shutdown(t.Context()); err != nil {
 		t.Errorf("nil provider shutdown should return nil, got: %v", err)
 	}
 }
 
 func TestProvider_Shutdown_DisabledSafe(t *testing.T) {
 	p := &Provider{enabled: false}
-	if err := p.Shutdown(context.Background()); err != nil {
+	if err := p.Shutdown(t.Context()); err != nil {
 		t.Errorf("disabled provider shutdown should return nil, got: %v", err)
 	}
 }
@@ -139,9 +139,9 @@ func TestIsEnabled(t *testing.T) {
 
 	// Test with disabled provider
 	cfg := DefaultConfig()
-	provider, _ := Init(context.Background(), cfg)
+	provider, _ := Init(t.Context(), cfg)
 	defer func() {
-		provider.Shutdown(context.Background())
+		provider.Shutdown(t.Context())
 		resetGlobalProvider()
 	}()
 

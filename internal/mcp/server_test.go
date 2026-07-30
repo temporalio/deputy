@@ -809,7 +809,7 @@ func TestMCPToolInputSchemasAvoidTopLevelComposition(t *testing.T) {
 
 func TestExplainVulnerabilityToolSchemas(t *testing.T) {
 	s := NewServer()
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	tools, err := clientSession.ListTools(ctx, nil)
@@ -915,7 +915,7 @@ func TestExplainVulnerabilitiesOmitsEmptyCollections(t *testing.T) {
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{
 		vulnerabilityHandler: &mockVulnerabilityHandler{osvClient: mockOSV},
 	})))
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	result, err := clientSession.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -954,7 +954,7 @@ func TestExplainVulnerabilitiesOmitsEmptyCollections(t *testing.T) {
 func TestScanPackageToolSchema(t *testing.T) {
 	mockScan := &mockScanHandler{scanResponse: emptyScanResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	tools, err := clientSession.ListTools(ctx, nil)
@@ -1081,7 +1081,7 @@ func TestScanPackageToolSchema(t *testing.T) {
 func TestScanContainerToolSchema(t *testing.T) {
 	mockScan := &mockScanHandler{scanResponse: emptyScanResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	tools, err := clientSession.ListTools(ctx, nil)
@@ -1175,7 +1175,7 @@ func TestDiffRefsToolSchema(t *testing.T) {
 		},
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	tools, err := clientSession.ListTools(ctx, nil)
@@ -1276,7 +1276,7 @@ func TestDiffRefsToolSchema(t *testing.T) {
 
 func TestLocalPathToolSchemasExposeAgentControls(t *testing.T) {
 	s := NewServer()
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	tools, err := clientSession.ListTools(ctx, nil)
@@ -1525,7 +1525,7 @@ func TestGraphToolsReturnStableEmptyCollections(t *testing.T) {
 		scanHandler:  mockScan,
 		graphHandler: mockGraph,
 	})))
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	tools, err := clientSession.ListTools(ctx, nil)
@@ -1596,7 +1596,7 @@ func TestGraphWhyCallToolReturnsMatchedNodeForPathlessPackage(t *testing.T) {
 		Stats: &graphv1.GraphStats{TotalNodes: 1, DisconnectedNodes: 1},
 	}}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	result, err := clientSession.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -1645,7 +1645,7 @@ func TestGraphWhyCallToolReturnsMatchedNodeForPathlessPackage(t *testing.T) {
 
 func TestToolAnnotationsExposeReadOnlySafetyHints(t *testing.T) {
 	s := NewServer()
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	tools, err := clientSession.ListTools(ctx, nil)
@@ -1691,7 +1691,7 @@ func TestLocalPathToolSchemasRejectInvalidRequiredStrings(t *testing.T) {
 		listHandler:  mockList,
 		graphHandler: mockGraph,
 	})))
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	tests := []struct {
@@ -1739,7 +1739,7 @@ func TestStringArrayToolSchemasRejectBlankItems(t *testing.T) {
 		listResponse: &listv1.ListPackagesResponse{Stats: &listv1.ListStats{}},
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{listHandler: mockList})))
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	tests := []struct {
@@ -1772,7 +1772,7 @@ func TestGeneratedToolSchemasRejectUnknownArguments(t *testing.T) {
 		listResponse: &listv1.ListPackagesResponse{Stats: &listv1.ListStats{}},
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{listHandler: mockList})))
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	result, err := clientSession.CallTool(ctx, &mcpsdk.CallToolParams{
@@ -1796,7 +1796,7 @@ func TestGeneratedToolSchemasRejectUnknownArguments(t *testing.T) {
 
 func TestGenerateSBOMToolContractRequiresLocalPath(t *testing.T) {
 	s := NewServer()
-	ctx := context.Background()
+	ctx := t.Context()
 	clientSession := connectMCPClientSession(t, ctx, s)
 
 	tools, err := clientSession.ListTools(ctx, nil)
@@ -2082,7 +2082,7 @@ func TestExplainVulnerability(t *testing.T) {
 		vulnerabilityHandler: &mockVulnerabilityHandler{osvClient: mockOSV},
 	})
 	s := NewServer(WithClients(mockClients))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("valid vulnerability", func(t *testing.T) {
 		result, err := callProtoTool(t, ctx, s.explainVulnerability,
@@ -2228,7 +2228,7 @@ func TestExplainVulnerabilities(t *testing.T) {
 		vulnerabilityHandler: &mockVulnerabilityHandler{osvClient: mockOSV},
 	})
 	s := NewServer(WithClients(mockClients))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("multiple vulnerabilities", func(t *testing.T) {
 		result, err := callProtoTool(t, ctx, s.explainVulnerabilities, &mcpv1.ExplainVulnerabilitiesRequest{
@@ -2387,7 +2387,7 @@ func TestExplainVulnerabilitiesUsesBatchAdvisoryLookup(t *testing.T) {
 func TestScanPackage(t *testing.T) {
 	mockScan := &mockScanHandler{scanResponse: emptyScanResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("missing name", func(t *testing.T) {
 		_, err := callProtoTool(t, ctx, s.scanPackage, &mcpv1.ScanPackageRequest{
@@ -2725,7 +2725,7 @@ func TestScanDirectory(t *testing.T) {
 	}
 
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("missing path", func(t *testing.T) {
 		_, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{}, &mcpv1.ScanDirectoryResult{})
@@ -2953,7 +2953,7 @@ func TestScanContainerDeduplicatesAdvisoryAliases(t *testing.T) {
 	}
 
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
-	result, err := callProtoTool(t, context.Background(), s.scanContainer, &mcpv1.ScanContainerRequest{Image: "debian:bookworm"}, &mcpv1.ScanContainerResult{})
+	result, err := callProtoTool(t, t.Context(), s.scanContainer, &mcpv1.ScanContainerRequest{Image: "debian:bookworm"}, &mcpv1.ScanContainerResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2976,7 +2976,7 @@ func TestScanContainerNormalizesImageAndPlatform(t *testing.T) {
 	mockScan := &mockScanHandler{scanResponse: emptyScanResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	result, err := callProtoTool(t, context.Background(), s.scanContainer, &mcpv1.ScanContainerRequest{
+	result, err := callProtoTool(t, t.Context(), s.scanContainer, &mcpv1.ScanContainerRequest{
 		Image:    " debian:bookworm ",
 		Platform: " linux/amd64\t",
 	}, &mcpv1.ScanContainerResult{})
@@ -3027,7 +3027,7 @@ func TestListDependencies(t *testing.T) {
 	}
 
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{listHandler: mockList})))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("missing path", func(t *testing.T) {
 		_, err := callProtoTool(t, ctx, s.listDependencies, &mcpv1.ListDependenciesRequest{}, &mcpv1.ListDependenciesResult{})
@@ -3141,7 +3141,7 @@ func TestListDependencies(t *testing.T) {
 
 func TestGenerateSBOM(t *testing.T) {
 	s := NewServer()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("missing path", func(t *testing.T) {
 		_, err := callProtoTool(t, ctx, s.generateSBOM, &mcpv1.GenerateSBOMRequest{}, &mcpv1.GenerateSBOMResult{})
@@ -3250,7 +3250,7 @@ func TestGetRemediation(t *testing.T) {
 	}
 
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("missing path", func(t *testing.T) {
 		_, err := callProtoTool(t, ctx, s.getRemediation, &mcpv1.GetRemediationRequest{}, &mcpv1.GetRemediationResult{})
@@ -3489,7 +3489,7 @@ func TestGetRemediation(t *testing.T) {
 func TestTriageVulnerabilitiesMigrationFix(t *testing.T) {
 	mockScan := &mockScanHandler{scanResponse: migrationOnlyScanResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	result, err := callProtoTool(t, ctx, s.triageVulnerabilities, &mcpv1.TriageRequest{Path: "/test/path"}, &mcpv1.TriageResult{})
 	if err != nil {
@@ -3700,7 +3700,7 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 	}
 
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan, graphHandler: mockGraph})))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("missing path", func(t *testing.T) {
 		_, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{}, &mcpv1.AnalyzeGraphResult{})
@@ -4070,7 +4070,7 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 func TestGraphWhyUsesGraphService(t *testing.T) {
 	mockGraph := &mockGraphHandler{buildResponse: testBuildGraphResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	result, err := callProtoTool(t, ctx, s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:         "/test/path",
@@ -4167,7 +4167,7 @@ func TestGraphWhyReturnsDirectPath(t *testing.T) {
 	mockGraph := &mockGraphHandler{buildResponse: testBuildGraphResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	result, err := callProtoTool(t, context.Background(), s.graphWhy, &mcpv1.GraphWhyRequest{
+	result, err := callProtoTool(t, t.Context(), s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:    "/test/path",
 		Package: "github.com/example/root",
 	}, &mcpv1.GraphWhyResult{})
@@ -4232,7 +4232,7 @@ require github.com/pkg/errors v0.9.1
 	}
 	s := NewServer(WithClients(clients))
 
-	result, err := callProtoTool(t, context.Background(), s.graphWhy, &mcpv1.GraphWhyRequest{
+	result, err := callProtoTool(t, t.Context(), s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:       tmpDir,
 		Package:    "github.com/pkg/errors",
 		Ecosystems: []string{"go"},
@@ -4264,7 +4264,7 @@ func TestGraphWhyAcceptsPURLQuery(t *testing.T) {
 	mockGraph := &mockGraphHandler{buildResponse: testBuildGraphResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	result, err := callProtoTool(t, context.Background(), s.graphWhy, &mcpv1.GraphWhyRequest{
+	result, err := callProtoTool(t, t.Context(), s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:    "/test/path",
 		Package: " " + testChildPURL + " ",
 	}, &mcpv1.GraphWhyResult{})
@@ -4299,7 +4299,7 @@ func TestGraphWhyAcceptsScanEmittedPURLWithEscapedVersion(t *testing.T) {
 	}}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	result, err := callProtoTool(t, context.Background(), s.graphWhy, &mcpv1.GraphWhyRequest{
+	result, err := callProtoTool(t, t.Context(), s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:    "/test/path",
 		Package: dockerPURL,
 	}, &mcpv1.GraphWhyResult{})
@@ -4335,7 +4335,7 @@ func TestGraphWhyExplainsDisconnectedMatchedNode(t *testing.T) {
 	}}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	result, err := callProtoTool(t, context.Background(), s.graphWhy, &mcpv1.GraphWhyRequest{
+	result, err := callProtoTool(t, t.Context(), s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:               "/test/path",
 		Package:            dockerPURL,
 		ResolveTransitives: true,
@@ -4373,7 +4373,7 @@ func TestGraphWhyExplainsDisconnectedMatchedNode(t *testing.T) {
 func TestGraphNeedsUsesGraphService(t *testing.T) {
 	mockGraph := &mockGraphHandler{buildResponse: testBuildGraphResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	result, err := callProtoTool(t, ctx, s.graphNeeds, &mcpv1.GraphNeedsRequest{
 		Path:         "/test/path",
@@ -4434,7 +4434,7 @@ func TestGraphNeedsSortsDependentsDeterministically(t *testing.T) {
 	}}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	result, err := callProtoTool(t, context.Background(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
+	result, err := callProtoTool(t, t.Context(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
 		Path:    "/test/path",
 		Package: targetPURL,
 	}, &mcpv1.GraphNeedsResult{})
@@ -4458,7 +4458,7 @@ func TestGraphNeedsPassesExtendedGraphOption(t *testing.T) {
 	mockGraph := &mockGraphHandler{buildResponse: testBuildGraphResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	_, err := callProtoTool(t, context.Background(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
+	_, err := callProtoTool(t, t.Context(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
 		Path:     "/test/path",
 		Package:  "github.com/example/child",
 		Extended: true,
@@ -4518,7 +4518,7 @@ func TestGraphNeedsExplainsEmptyDependents(t *testing.T) {
 			}}
 			s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-			result, err := callProtoTool(t, context.Background(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
+			result, err := callProtoTool(t, t.Context(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
 				Path:    "/test/path",
 				Package: tt.node.Purl,
 			}, &mcpv1.GraphNeedsResult{})
@@ -4547,7 +4547,7 @@ func TestGraphNeedsAcceptsVersionedPackageQuery(t *testing.T) {
 	mockGraph := &mockGraphHandler{buildResponse: testBuildGraphResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	result, err := callProtoTool(t, context.Background(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
+	result, err := callProtoTool(t, t.Context(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
 		Path:    "/test/path",
 		Package: "child@v2.0.0",
 	}, &mcpv1.GraphNeedsResult{})
@@ -4564,7 +4564,7 @@ func TestGraphNeedsAcceptsVersionedPackageQuery(t *testing.T) {
 		t.Fatalf("expected 1 direct dependent, got %d", result.GetDirectCount())
 	}
 
-	result, err = callProtoTool(t, context.Background(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
+	result, err = callProtoTool(t, t.Context(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
 		Path:    "/test/path",
 		Package: "child@v9.0.0",
 	}, &mcpv1.GraphNeedsResult{})
@@ -4871,7 +4871,7 @@ func TestDefaultExcludePathsApplyToMCPScans(t *testing.T) {
 		WithDefaultExcludePaths([]string{" .bin/** ", "", "**/testdata"}),
 	)
 
-	_, err := callProtoTool(t, context.Background(), s.scanDirectory, &mcpv1.ScanDirectoryRequest{
+	_, err := callProtoTool(t, t.Context(), s.scanDirectory, &mcpv1.ScanDirectoryRequest{
 		Path:         "/test/path",
 		ExcludePaths: []string{"**/testdata", "node_modules"},
 	}, &mcpv1.ScanDirectoryResult{})
@@ -4909,7 +4909,7 @@ func TestDiffGitRefsPreservesDirectness(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	result, err := s.diffGitRefs(context.Background(), &mcpv1.DiffRefsRequest{
+	result, err := s.diffGitRefs(t.Context(), &mcpv1.DiffRefsRequest{
 		Path:         "/test/path",
 		BaseRef:      "base",
 		TargetRef:    "target",
@@ -4955,7 +4955,7 @@ func TestDiffGitRefsNormalizesPath(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	result, err := s.diffGitRefs(context.Background(), &mcpv1.DiffRefsRequest{
+	result, err := s.diffGitRefs(t.Context(), &mcpv1.DiffRefsRequest{
 		Path:      " /test/path ",
 		BaseRef:   " base ",
 		TargetRef: "\ttarget ",
@@ -5009,7 +5009,7 @@ func TestDiffGitRefsUsesPURLIdentity(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	result, err := s.diffGitRefs(context.Background(), &mcpv1.DiffRefsRequest{
+	result, err := s.diffGitRefs(t.Context(), &mcpv1.DiffRefsRequest{
 		Path:      "/test/path",
 		BaseRef:   "base",
 		TargetRef: "target",
@@ -5071,7 +5071,7 @@ func TestDiffGitRefsDeduplicatesTargetVulnerabilities(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	result, err := s.diffGitRefs(context.Background(), &mcpv1.DiffRefsRequest{
+	result, err := s.diffGitRefs(t.Context(), &mcpv1.DiffRefsRequest{
 		Path:      "/test/path",
 		BaseRef:   "base",
 		TargetRef: "target",
@@ -5099,7 +5099,7 @@ func TestDiffRefsRoutesLocalhostRegistryAsContainer(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	result, err := callProtoTool(t, context.Background(), s.diffRefs, &mcpv1.DiffRefsRequest{
+	result, err := callProtoTool(t, t.Context(), s.diffRefs, &mcpv1.DiffRefsRequest{
 		BaseRef:   " localhost:5000/app:v1 ",
 		TargetRef: "\tlocalhost:5000/app:v2",
 	}, &mcpv1.DiffRefsResult{})
@@ -5132,7 +5132,7 @@ func TestDiffRefsValidationRequiresRefs(t *testing.T) {
 	// In production the SDK rejects these against the input schema using JSON
 	// property names; protovalidate guards direct invocations and names the
 	// proto fields.
-	_, err := callProtoTool(t, context.Background(), s.diffRefs, &mcpv1.DiffRefsRequest{
+	_, err := callProtoTool(t, t.Context(), s.diffRefs, &mcpv1.DiffRefsRequest{
 		TargetRef: "main",
 	}, &mcpv1.DiffRefsResult{})
 	if err == nil {
@@ -5142,7 +5142,7 @@ func TestDiffRefsValidationRequiresRefs(t *testing.T) {
 		t.Fatalf("missing baseRef error = %q", err)
 	}
 
-	_, err = callProtoTool(t, context.Background(), s.diffRefs, &mcpv1.DiffRefsRequest{
+	_, err = callProtoTool(t, t.Context(), s.diffRefs, &mcpv1.DiffRefsRequest{
 		BaseRef: "main",
 	}, &mcpv1.DiffRefsResult{})
 	if err == nil {
@@ -5162,7 +5162,7 @@ func TestDiffRefsPathlessCommonGitRefsRequirePath(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, err := callProtoTool(t, context.Background(), s.diffRefs, &mcpv1.DiffRefsRequest{
+	_, err := callProtoTool(t, t.Context(), s.diffRefs, &mcpv1.DiffRefsRequest{
 		BaseRef:   "main",
 		TargetRef: "develop",
 	}, &mcpv1.DiffRefsResult{})
@@ -5193,7 +5193,7 @@ func TestDiffRefsRejectsMixedContainerAndGitRefs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.GetBaseRef()+" to "+tt.GetTargetRef(), func(t *testing.T) {
-			_, err := callProtoTool(t, context.Background(), s.diffRefs, tt, &mcpv1.DiffRefsResult{})
+			_, err := callProtoTool(t, t.Context(), s.diffRefs, tt, &mcpv1.DiffRefsResult{})
 			if err == nil {
 				t.Fatal("expected mixed ref error")
 			}
@@ -5250,7 +5250,7 @@ func TestDiffContainerImagesReportsDeduplicatedVulnerabilityChanges(t *testing.T
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	result, err := s.diffContainerImages(context.Background(), &mcpv1.DiffRefsRequest{
+	result, err := s.diffContainerImages(t.Context(), &mcpv1.DiffRefsRequest{
 		BaseRef:   "example/app:v1",
 		TargetRef: "example/app:v2",
 	})
@@ -5296,7 +5296,7 @@ func TestDiffContainerImagesNormalizesAndForwardsPlatform(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	result, err := s.diffContainerImages(context.Background(), &mcpv1.DiffRefsRequest{
+	result, err := s.diffContainerImages(t.Context(), &mcpv1.DiffRefsRequest{
 		BaseRef:   " example/app:v1 ",
 		TargetRef: " example/app:v2 ",
 		Platform:  " linux/amd64\t",
@@ -5336,7 +5336,7 @@ func TestDiffRefsPrefersGitRefsInRepositoryContext(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	result, err := callProtoTool(t, context.Background(), s.diffRefs, &mcpv1.DiffRefsRequest{
+	result, err := callProtoTool(t, t.Context(), s.diffRefs, &mcpv1.DiffRefsRequest{
 		Path:      repo,
 		BaseRef:   "main",
 		TargetRef: "develop",
@@ -5540,7 +5540,7 @@ require golang.org/x/text v0.3.0
 	}
 
 	s := NewServer()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	result, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{Path: tmpDir}, &mcpv1.ScanDirectoryResult{})
 	if err != nil {
@@ -5571,7 +5571,7 @@ require golang.org/x/text v0.3.0
 	}
 
 	s := NewServer()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	result, err := callProtoTool(t, ctx, s.listDependencies, &mcpv1.ListDependenciesRequest{Path: tmpDir}, &mcpv1.ListDependenciesResult{})
 	if err != nil {

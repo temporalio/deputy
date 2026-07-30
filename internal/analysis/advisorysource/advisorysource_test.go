@@ -62,7 +62,7 @@ func TestRegistryRoutesAndReportsCoverage(t *testing.T) {
 	reg := NewRegistry(src)
 
 	dockerPkg := &dependencyv1.Package{Name: "alpine", Version: "3.19", Ecosystem: "docker", Purl: "pkg:docker/library/alpine@3.19"}
-	got, err := reg.Query(context.Background(), []*dependencyv1.Package{goPkg("github.com/foo/bar", "1.0.0"), dockerPkg})
+	got, err := reg.Query(t.Context(), []*dependencyv1.Package{goPkg("github.com/foo/bar", "1.0.0"), dockerPkg})
 	if err != nil {
 		t.Fatalf("Query error = %v, want nil (uncovered package must not fail the scan)", err)
 	}
@@ -92,7 +92,7 @@ func TestRegistryUnionWithProvenance(t *testing.T) {
 	}
 	reg := NewRegistry(a, b)
 
-	got, err := reg.Query(context.Background(), []*dependencyv1.Package{goPkg("github.com/foo/bar", "1.0.0")})
+	got, err := reg.Query(t.Context(), []*dependencyv1.Package{goPkg("github.com/foo/bar", "1.0.0")})
 	if err != nil {
 		t.Fatal(err)
 	}

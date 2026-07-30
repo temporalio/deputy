@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -22,7 +21,7 @@ func TestEvaluatePoliciesForCommand_SbomComponentLicenses(t *testing.T) {
 			"licenses": []any{"GPL-3.0"},
 		},
 	}
-	_, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "sbom", policy.EntrypointSBOMComponent, &bytes.Buffer{})
+	_, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "sbom", policy.EntrypointSBOMComponent, &bytes.Buffer{})
 	if err == nil {
 		t.Fatalf("expected policy denial error, got nil")
 	}
@@ -36,7 +35,7 @@ func TestEvaluatePoliciesForCommand_Scan_NoPanic(t *testing.T) {
 			"licenses": []any{}, // empty licenses - should trigger warn, not deny
 		},
 	}
-	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanReport, &bytes.Buffer{})
+	actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "scan", policy.EntrypointScanReport, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("evaluatePoliciesForCommand: %v", err)
 	}

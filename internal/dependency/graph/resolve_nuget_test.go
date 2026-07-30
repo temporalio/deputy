@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 )
 
@@ -71,7 +70,7 @@ func TestNuGetResolver_ResolveEdges_PackagesLockJSON(t *testing.T) {
 	g := New()
 	r := NewNuGetResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}
@@ -135,7 +134,7 @@ func TestNuGetResolver_ResolveEdges_PackagesConfig(t *testing.T) {
 	g := New()
 	r := NewNuGetResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}
@@ -183,7 +182,7 @@ func TestNuGetResolver_ResolveEdges_NoFiles(t *testing.T) {
 	g := New()
 	r := NewNuGetResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}

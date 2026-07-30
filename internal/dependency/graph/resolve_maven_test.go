@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 )
 
@@ -53,7 +52,7 @@ func TestMavenResolver_ResolveEdges_PomXML(t *testing.T) {
 	g := New()
 	r := NewMavenResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}
@@ -115,7 +114,7 @@ empty=`
 	g := New()
 	r := NewMavenResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}
@@ -181,7 +180,7 @@ func TestMavenResolver_ResolveEdges_ParentInheritance(t *testing.T) {
 	g := New()
 	r := NewMavenResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}
@@ -234,7 +233,7 @@ func TestMavenResolver_ResolveEdges_DependencyManagement(t *testing.T) {
 	g := New()
 	r := NewMavenResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}
@@ -254,7 +253,7 @@ func TestMavenResolver_ResolveEdges_NoFiles(t *testing.T) {
 	g := New()
 	r := NewMavenResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}

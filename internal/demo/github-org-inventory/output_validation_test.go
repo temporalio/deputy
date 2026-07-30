@@ -145,7 +145,7 @@ func sampleStrings(in []string, n int) []string {
 func TestPackagistLookup(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	cases := []struct {
 		name    string
 		version string
@@ -171,7 +171,7 @@ func TestPackagistLookup(t *testing.T) {
 func TestPubLookup(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	cases := []struct {
 		name    string
 		version string
@@ -196,7 +196,7 @@ func TestPubLookup(t *testing.T) {
 func TestCocoaPodsLookup(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	cases := []struct {
 		name    string
 		version string
@@ -220,7 +220,7 @@ func TestCocoaPodsLookup(t *testing.T) {
 func TestHexLookup(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	cases := []struct {
 		name    string
 		version string
@@ -246,7 +246,7 @@ func TestHexLookup(t *testing.T) {
 func TestCratesLookup(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	cases := []struct {
 		name    string
 		version string
@@ -303,7 +303,7 @@ func TestLicenseVerificationSample(t *testing.T) {
 			if len(rows) == 0 {
 				t.Skip("no rows to verify")
 			}
-			ctx := context.Background()
+			ctx := t.Context()
 			checked := 0
 			for _, r := range rows {
 				if r.License == "" || r.License == "?" {

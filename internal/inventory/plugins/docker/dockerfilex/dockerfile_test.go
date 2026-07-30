@@ -1,7 +1,6 @@
 package dockerfilex
 
 import (
-	"context"
 	"io/fs"
 	"strings"
 	"testing"
@@ -156,7 +155,7 @@ CMD ["/app"]
 				Reader: strings.NewReader(tt.content),
 			}
 
-			inv, err := ext.Extract(context.Background(), input)
+			inv, err := ext.Extract(t.Context(), input)
 			if err != nil {
 				t.Fatalf("Extract() error = %v", err)
 			}
@@ -193,7 +192,7 @@ func TestExtract_BaseImageMetadata(t *testing.T) {
 			Path:   "Dockerfile",
 			Reader: strings.NewReader("ARG ALPINE_TAG\nFROM alpine:${ALPINE_TAG}\n"),
 		}
-		inv, err := ext.Extract(context.Background(), input)
+		inv, err := ext.Extract(t.Context(), input)
 		if err != nil {
 			t.Fatalf("Extract() error = %v", err)
 		}
@@ -217,7 +216,7 @@ func TestExtract_BaseImageMetadata(t *testing.T) {
 			Path:   "Dockerfile",
 			Reader: strings.NewReader("FROM alpine:3.19\n"),
 		}
-		inv, err := ext.Extract(context.Background(), input)
+		inv, err := ext.Extract(t.Context(), input)
 		if err != nil {
 			t.Fatalf("Extract() error = %v", err)
 		}

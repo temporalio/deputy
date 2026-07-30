@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -61,7 +60,7 @@ func TestSecretsHandler_ListDetectors(t *testing.T) {
 		t.Fatalf("failed to create secrets handler: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := connect.NewRequest(&secretsv1.ListDetectorsRequest{
 		IncludeDisabled: true,
 	})
@@ -101,7 +100,7 @@ func TestSecretsHandler_ScanEmptyTarget(t *testing.T) {
 		t.Fatalf("failed to create secrets handler: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := connect.NewRequest(&secretsv1.ScanRequest{
 		Target: "", // Will default to "."
 	})
@@ -119,7 +118,7 @@ func TestSecretsHandler_RegisterDetector(t *testing.T) {
 		t.Fatalf("failed to create secrets handler: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := connect.NewRequest(&secretsv1.RegisterDetectorRequest{
 		Detector: &secretsv1.DetectorInfo{
 			Id:          "test-custom",
@@ -172,7 +171,7 @@ func TestSecretsHandler_RegisterDetector_InvalidPattern(t *testing.T) {
 		t.Fatalf("failed to create secrets handler: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := connect.NewRequest(&secretsv1.RegisterDetectorRequest{
 		Detector: &secretsv1.DetectorInfo{
 			Id:   "bad-detector",
@@ -193,7 +192,7 @@ func TestSecretsHandler_RegisterDetector_MissingPattern(t *testing.T) {
 		t.Fatalf("failed to create secrets handler: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := connect.NewRequest(&secretsv1.RegisterDetectorRequest{
 		Detector: &secretsv1.DetectorInfo{
 			Id:   "no-pattern",

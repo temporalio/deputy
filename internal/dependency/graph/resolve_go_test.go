@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 )
 
@@ -70,7 +69,7 @@ require (
 	})
 
 	resolver := NewGoResolver()
-	err := resolver.ResolveEdges(context.Background(), g, files)
+	err := resolver.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges failed: %v", err)
 	}
@@ -144,7 +143,7 @@ require github.com/pkg/errors v0.9.1
 	})
 
 	resolver := NewGoResolver()
-	err := resolver.ResolveEdges(context.Background(), g, files)
+	err := resolver.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges failed: %v", err)
 	}

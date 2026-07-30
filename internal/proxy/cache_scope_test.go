@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"context"
 	"testing"
 
 	"github.com/temporalio/deputy/internal/analysis/osv"
@@ -453,7 +452,7 @@ func TestCacheScopeFromContext(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			if tc.claims != nil {
 				ctx = jwt.ContextWithClaims(ctx, tc.claims)
 			}
@@ -546,11 +545,11 @@ func TestRequestScopedOSVCacheIsolation(t *testing.T) {
 	}
 
 	// Create contexts with different tenant claims
-	ctxTenantA := jwt.ContextWithClaims(context.Background(), &jwt.Claims{
+	ctxTenantA := jwt.ContextWithClaims(t.Context(), &jwt.Claims{
 		Subject: "user1",
 		Custom:  map[string]any{"tenant": "tenant-a"},
 	})
-	ctxTenantB := jwt.ContextWithClaims(context.Background(), &jwt.Claims{
+	ctxTenantB := jwt.ContextWithClaims(t.Context(), &jwt.Claims{
 		Subject: "user2",
 		Custom:  map[string]any{"tenant": "tenant-b"},
 	})
@@ -581,7 +580,7 @@ func TestRequestScopedOSVCacheIsolation(t *testing.T) {
 	}
 
 	// Verify anonymous context (no tenant) uses base scope only
-	ctxAnon := context.Background()
+	ctxAnon := t.Context()
 	_, ok = cache.GetWithContext(ctxAnon, "go|pkg@v1.0.0")
 	if ok {
 		t.Error("anonymous context should not see tenant-scoped entries")
@@ -599,10 +598,10 @@ func TestRequestScopedImageScanCacheIsolation(t *testing.T) {
 		t.Fatal("RequestScopedImageScanCache should implement ContextAwareImageScanCache")
 	}
 
-	ctxTenantA := jwt.ContextWithClaims(context.Background(), &jwt.Claims{
+	ctxTenantA := jwt.ContextWithClaims(t.Context(), &jwt.Claims{
 		Custom: map[string]any{"tenant": "tenant-a"},
 	})
-	ctxTenantB := jwt.ContextWithClaims(context.Background(), &jwt.Claims{
+	ctxTenantB := jwt.ContextWithClaims(t.Context(), &jwt.Claims{
 		Custom: map[string]any{"tenant": "tenant-b"},
 	})
 
@@ -636,10 +635,10 @@ func TestRequestScopedLicenseCacheIsolation(t *testing.T) {
 		t.Fatal("RequestScopedLicenseCache should implement ContextAwareLicenseCache")
 	}
 
-	ctxTenantA := jwt.ContextWithClaims(context.Background(), &jwt.Claims{
+	ctxTenantA := jwt.ContextWithClaims(t.Context(), &jwt.Claims{
 		Custom: map[string]any{"org_id": "org-a"},
 	})
-	ctxTenantB := jwt.ContextWithClaims(context.Background(), &jwt.Claims{
+	ctxTenantB := jwt.ContextWithClaims(t.Context(), &jwt.Claims{
 		Custom: map[string]any{"org_id": "org-b"},
 	})
 
@@ -668,10 +667,10 @@ func TestRequestScopedDigestResolutionCacheIsolation(t *testing.T) {
 		t.Fatal("RequestScopedDigestResolutionCache should implement ContextAwareDigestResolutionCache")
 	}
 
-	ctxTenantA := jwt.ContextWithClaims(context.Background(), &jwt.Claims{
+	ctxTenantA := jwt.ContextWithClaims(t.Context(), &jwt.Claims{
 		Subject: "sa-tenant-a",
 	})
-	ctxTenantB := jwt.ContextWithClaims(context.Background(), &jwt.Claims{
+	ctxTenantB := jwt.ContextWithClaims(t.Context(), &jwt.Claims{
 		Subject: "sa-tenant-b",
 	})
 
@@ -740,7 +739,7 @@ func TestTenantIDFromContext(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			if tc.claims != nil {
 				ctx = jwt.ContextWithClaims(ctx, tc.claims)
 			}

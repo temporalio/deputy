@@ -198,7 +198,7 @@ func TestStrategy_DiscoverDockerfile(t *testing.T) {
 	})
 
 	s := NewStrategy()
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestStrategy_DiscoverDockerfileWithPlatform(t *testing.T) {
 	})
 
 	s := NewStrategy()
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestStrategy_DiscoverDockerfileAlreadyPinned(t *testing.T) {
 	})
 
 	s := NewStrategy()
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestStrategy_DiscoverWorkflowDockerUses(t *testing.T) {
 	})
 
 	s := NewStrategy()
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestStrategy_DiscoverWorkflowContainer(t *testing.T) {
 	})
 
 	s := NewStrategy()
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestStrategy_DiscoverWorkflowContainerShortForm(t *testing.T) {
 	})
 
 	s := NewStrategy()
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestStrategy_DiscoverSkipsNonDockerfiles(t *testing.T) {
 	})
 
 	s := NewStrategy()
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestStrategy_DiscoverMixed(t *testing.T) {
 	})
 
 	s := NewStrategy()
-	refs, err := s.Discover(context.Background(), fsys)
+	refs, err := s.Discover(t.Context(), fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestStrategy_Resolve(t *testing.T) {
 		return "", fmt.Errorf("unknown image: %s", imageRef)
 	})
 
-	pinnedValue, versionTag, err := s.Resolve(context.Background(), pin.Ref{
+	pinnedValue, versionTag, err := s.Resolve(t.Context(), pin.Ref{
 		Name:    "alpine",
 		Version: "3.19",
 	})
@@ -488,7 +488,7 @@ func TestStrategy_ResolveUpdate_Changed(t *testing.T) {
 		return "", fmt.Errorf("unknown image: %s", imageRef)
 	})
 
-	pinnedValue, newTag, curTag, err := s.ResolveUpdate(context.Background(), pin.Ref{
+	pinnedValue, newTag, curTag, err := s.ResolveUpdate(t.Context(), pin.Ref{
 		Name:    "alpine",
 		Version: "3.19@" + oldDigest,
 	})
@@ -511,7 +511,7 @@ func TestStrategy_ResolveUpdate_NoChange(t *testing.T) {
 	})
 
 	ref := pin.Ref{Name: "alpine", Version: "3.19@" + digest}
-	pinnedValue, _, _, err := s.ResolveUpdate(context.Background(), ref)
+	pinnedValue, _, _, err := s.ResolveUpdate(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +529,7 @@ func TestStrategy_ResolveUpdate_DigestOnly(t *testing.T) {
 	})
 
 	ref := pin.Ref{Name: "alpine", Version: digest}
-	pinnedValue, _, _, err := s.ResolveUpdate(context.Background(), ref)
+	pinnedValue, _, _, err := s.ResolveUpdate(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,7 +540,7 @@ func TestStrategy_ResolveUpdate_DigestOnly(t *testing.T) {
 
 func TestStrategy_Verify_ReturnsNil(t *testing.T) {
 	s := NewStrategy()
-	v, err := s.Verify(context.Background(), pin.Ref{})
+	v, err := s.Verify(t.Context(), pin.Ref{})
 	if err != nil {
 		t.Fatal(err)
 	}

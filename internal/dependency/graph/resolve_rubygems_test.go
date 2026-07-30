@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 )
 
@@ -77,7 +76,7 @@ BUNDLED WITH
 	})
 
 	resolver := NewRubyGemsResolver()
-	err := resolver.ResolveEdges(context.Background(), g, files)
+	err := resolver.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges failed: %v", err)
 	}

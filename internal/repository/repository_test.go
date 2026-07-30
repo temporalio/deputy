@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -51,7 +50,7 @@ func TestOpen(t *testing.T) {
 
 func TestCloneInMemory_Local(t *testing.T) {
 	dir, _ := newTempRepo(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src, err := Clone(ctx, &git.CloneOptions{URL: dir, Depth: 1, SingleBranch: true, Tags: git.NoTags}, true)
 	if err != nil {
 		t.Fatalf("Clone in memory: %v", err)
@@ -67,7 +66,7 @@ func TestCloneInMemory_Local(t *testing.T) {
 
 func TestCloneToDir_Local(t *testing.T) {
 	dir, _ := newTempRepo(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	src, err := Clone(ctx, &git.CloneOptions{URL: dir, Depth: 1, SingleBranch: true, Tags: git.NoTags}, false)
 	if err != nil {
 		t.Fatalf("Clone to dir: %v", err)
