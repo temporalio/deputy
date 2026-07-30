@@ -23,9 +23,33 @@ type SourceConfig struct {
 func (c SourceConfig) key() string { return c.Program + "\x00" + c.URL }
 
 var (
-	configuredMu      sync.RWMutex
-	configuredSources []SourceConfig
+	configuredMu       sync.RWMutex
+	configuredSources  []SourceConfig
+	subprocessDisabled bool
 )
+
+// DisableSubprocessSources excludes program-backed (subprocess) advisory
+// sources from materialization for the rest of the process lifetime. Remote
+// server mode must not execute code (see AGENTS.md), and source configs are
+// process-global, reaching every scan a remote request triggers; the services
+// layer calls this when constructing remote-mode handlers so a configured
+// plugin binary or DEPUTY_ADVISORY_SOURCES entry can never execute. Each
+// excluded source is reported through the materialization error, so the
+// operator sees the reduced coverage instead of a silent gap. ConnectRPC (URL)
+// sources are unaffected. There is deliberately no way to re-enable.
+func DisableSubprocessSources() {
+	configuredMu.Lock()
+	defer configuredMu.Unlock()
+	subprocessDisabled = true
+}
+
+// subprocessSourcesDisabled reports whether program-backed sources are
+// excluded from materialization.
+func subprocessSourcesDisabled() bool {
+	configuredMu.RLock()
+	defer configuredMu.RUnlock()
+	return subprocessDisabled
+}
 
 // SetConfiguredSources replaces the process-wide declarative list of external
 // advisory sources, typically from the config file at CLI startup. Sources are
@@ -74,6 +98,10 @@ func materializeSources(ctx context.Context, cfgs []SourceConfig) ([]Source, err
 		case c.Program != "" && c.URL != "":
 			errs = append(errs, fmt.Errorf("advisory source config: set exactly one of program or url, got both (%q, %q)", c.Program, c.URL))
 		case c.Program != "":
+			if subprocessSourcesDisabled() {
+				errs = append(errs, fmt.Errorf("advisory source %q excluded: remote server mode does not execute local programs; serve it over ConnectRPC (url) instead", c.Program))
+				continue
+			}
 			src, err := NewPluginSource(ctx, c.Program)
 			if err != nil {
 				errs = append(errs, err)

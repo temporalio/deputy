@@ -595,8 +595,10 @@ no sandbox), it sees every package identity in your scan, and its findings feed
 policy and remediation decisions verbatim. Review and version-pin a plugin as
 you would any dependency, and prefer the ConnectRPC binding for feeds a team
 operates centrally. Because sources can see and shape security findings, Deputy
-**never auto-executes** binaries it merely finds on PATH. Name the sources you
-trust explicitly, via the environment:
+**never auto-executes** binaries it merely finds on PATH, and remote server
+mode excludes `program:` sources entirely (remote mode executes no code; each
+exclusion is logged). Name the sources you trust explicitly, via the
+environment:
 
 ```bash
 DEPUTY_ADVISORY_SOURCES=deputy-advisory-source-myfeed deputy scan .

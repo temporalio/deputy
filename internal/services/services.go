@@ -15,6 +15,7 @@ import (
 	"github.com/temporalio/deputy/gen/deputy/scan/v1/scanv1connect"
 	"github.com/temporalio/deputy/gen/deputy/secrets/v1/secretsv1connect"
 	"github.com/temporalio/deputy/gen/deputy/vulnerability/v1/vulnerabilityv1connect"
+	"github.com/temporalio/deputy/internal/analysis/advisorysource"
 	"github.com/temporalio/deputy/internal/server"
 )
 
@@ -86,7 +87,11 @@ func NewWithConfig(cfg Config) (*Services, error) {
 		}, nil
 	}
 
-	// Remote server mode - create handlers without local mode
+	// Remote server mode - create handlers without local mode.
+	// Remote mode must not execute code: program-backed advisory sources are
+	// subprocess plugins and the source config is process-global, so exclude
+	// them for the process lifetime before any scan can materialize one.
+	advisorysource.DisableSubprocessSources()
 	secretsHandler, err := server.NewSecretsHandler()
 	if err != nil {
 		return nil, err
@@ -217,4 +222,3 @@ func RemoteClients(httpClient connect.HTTPClient, baseURL string, opts ...connec
 		Policy:      policyv1connect.NewPolicyServiceClient(httpClient, baseURL, opts...),
 	}
 }
-

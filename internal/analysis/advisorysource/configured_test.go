@@ -45,3 +45,24 @@ func TestMaterializeSourcesValidatesConfigs(t *testing.T) {
 		}
 	}
 }
+
+// TestDisableSubprocessSourcesExcludesPrograms pins the remote-mode security
+// invariant: once subprocess sources are disabled, a program-backed config
+// must not execute (or even resolve) and must surface in the error report,
+// while URL configs remain eligible.
+func TestDisableSubprocessSourcesExcludesPrograms(t *testing.T) {
+	DisableSubprocessSources()
+	t.Cleanup(func() {
+		configuredMu.Lock()
+		subprocessDisabled = false
+		configuredMu.Unlock()
+	})
+
+	sources, err := materializeSources(t.Context(), []SourceConfig{{Program: "deputy-advisory-source-evil"}})
+	if len(sources) != 0 {
+		t.Fatalf("sources = %d, want 0: program sources must not materialize in remote mode", len(sources))
+	}
+	if err == nil || !strings.Contains(err.Error(), "remote server mode") {
+		t.Fatalf("error = %v, want exclusion naming remote server mode", err)
+	}
+}
