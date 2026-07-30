@@ -454,6 +454,51 @@ func TestRemoteModuleLicenseScan_GitHubVersionedUsesRequestedRef(t *testing.T) {
 	}
 }
 
+// TestRemoteModuleLicenseScan_GitHubSubmoduleUsesSubpathTag pins submodule
+// resolution: a module below the repo root resolves its subpath-prefixed tag
+// (sub/v1.2.3) and reads the license closest to the module directory, without
+// consulting the default-branch License API.
+func TestRemoteModuleLicenseScan_GitHubSubmoduleUsesSubpathTag(t *testing.T) {
+	resetLicenseTestState(t)
+
+	var mu sync.Mutex
+	var sawAPI bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/repos/owner/repo/license"):
+			mu.Lock()
+			sawAPI = true
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"license": map[string]any{"key": "apache-2.0", "spdx_id": "Apache-2.0", "name": "Apache License 2.0"},
+			})
+		case r.URL.Path == "/owner/repo/sub/v1.2.3/sub/LICENSE":
+			// The submodule tag with the submodule's own license file.
+			_, _ = w.Write([]byte(testMITLicenseText))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	restoreClient := swapGitHubHTTPClient(server)
+	defer restoreClient()
+	restoreHTTP := WithLicenseHTTPClient(server.Client())
+	defer restoreHTTP()
+	restoreBases := WithLicenseEndpoints(server.URL, cratesBase, packagistBase, pubBase, cocoapodsBase, hexpmBase)
+	defer restoreBases()
+
+	got := RemoteModuleLicenseScan(t.Context(), "github.com/owner/repo/sub", "v1.2.3")
+	if want := []string{"MIT"}; !slices.Equal(got, want) {
+		t.Fatalf("expected submodule-tag license %v, got %v", want, got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if sawAPI {
+		t.Fatal("versioned submodule lookup used default-branch License API")
+	}
+}
+
 func TestRemoteModuleLicenseScan_GitHubVersionedDoesNotFallBackToDefaultBranchLicense(t *testing.T) {
 	resetLicenseTestState(t)
 
@@ -517,7 +562,7 @@ func TestFetchLicensesFromGitHubRawUsesSHAWithoutVPrefix(t *testing.T) {
 	restoreClient := swapGitHubHTTPClient(server)
 	defer restoreClient()
 
-	got, err := fetchLicensesFromGitHubRaw(t.Context(), "owner", "repo", sha)
+	got, err := fetchLicensesFromGitHubRaw(t.Context(), "owner", "repo", "", sha)
 	if err != nil {
 		t.Fatalf("fetchLicensesFromGitHubRaw returned error: %v", err)
 	}
@@ -537,6 +582,7 @@ func TestGitHubLicenseRefCandidates(t *testing.T) {
 	tests := []struct {
 		name    string
 		version string
+		subpath string
 		want    []string
 	}{
 		{
@@ -564,11 +610,35 @@ func TestGitHubLicenseRefCandidates(t *testing.T) {
 			version: "v1.2.3+incompatible",
 			want:    []string{"v1.2.3"},
 		},
+		{
+			name:    "submodule_tags_first",
+			version: "v1.2.3",
+			subpath: "sub/dir",
+			want:    []string{"sub/dir/v1.2.3", "v1.2.3"},
+		},
+		{
+			name:    "submodule_without_v",
+			version: "1.2.3",
+			subpath: "sub",
+			want:    []string{"sub/v1.2.3", "sub/1.2.3", "v1.2.3", "1.2.3"},
+		},
+		{
+			name:    "submodule_sha_is_path_independent",
+			version: "fad22eb3fa582b7357fc0ea48af6645851b884fd",
+			subpath: "sub",
+			want:    []string{"fad22eb3fa582b7357fc0ea48af6645851b884fd"},
+		},
+		{
+			name:    "submodule_pseudo_version_is_path_independent",
+			version: "v0.0.0-20200622213623-75b288015ac9",
+			subpath: "sub",
+			want:    []string{"75b288015ac9"},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := githubLicenseRefCandidates(tc.version); !slices.Equal(got, tc.want) {
-				t.Fatalf("githubLicenseRefCandidates(%q) = %v, want %v", tc.version, got, tc.want)
+			if got := githubLicenseRefCandidates(tc.version, tc.subpath); !slices.Equal(got, tc.want) {
+				t.Fatalf("githubLicenseRefCandidates(%q, %q) = %v, want %v", tc.version, tc.subpath, got, tc.want)
 			}
 		})
 	}
