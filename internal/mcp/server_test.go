@@ -5421,6 +5421,29 @@ func TestIsContainerImageRef(t *testing.T) {
 	}
 }
 
+// TestExplicitContainerImageRejectsGitTimeSelectors guards diff_refs routing:
+// git's "<ref>@{<selector>}" revision grammar contains '@' but is a git
+// revision, not an image digest, and must stay on the git diff path.
+func TestExplicitContainerImageRejectsGitTimeSelectors(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want bool
+	}{
+		{ref: "main@{2.weeks.ago}", want: false},
+		{ref: "HEAD@{1}", want: false},
+		{ref: "@{upstream}", want: false},
+		{ref: "nginx@sha256:0123456789abcdef", want: true},
+		{ref: "ghcr.io/owner/app@sha256:0123456789abcdef", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.ref, func(t *testing.T) {
+			if got := looksLikeExplicitContainerImage(tt.ref); got != tt.want {
+				t.Fatalf("looksLikeExplicitContainerImage(%q) = %v, want %v", tt.ref, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCompareVersionsUsesSemverOrdering(t *testing.T) {
 	if got := compareVersions("1.9.0", "1.10.0"); got >= 0 {
 		t.Fatalf("compareVersions(1.9.0, 1.10.0) = %d, want < 0", got)

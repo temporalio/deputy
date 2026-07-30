@@ -2901,7 +2901,10 @@ func imageHost(ref string) string {
 }
 
 func hasExplicitTagOrDigest(ref string) bool {
-	if strings.Contains(ref, "@") {
+	// Git's time-selector/reflog grammar ("main@{2.weeks.ago}", "HEAD@{1}")
+	// also uses '@'; an image digest never has '{' after it. Keep those
+	// revisions on the git path instead of misrouting them to image scans.
+	if at := strings.Index(ref, "@"); at != -1 && !strings.HasPrefix(ref[at:], "@{") {
 		return true
 	}
 	colon := strings.LastIndex(ref, ":")
