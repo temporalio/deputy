@@ -380,6 +380,11 @@ flowchart TB
 
 The `--unchanged-threshold` flag controls when vulnerabilities in unchanged dependencies are shown:
 
+> Note: an advisory that already affected an updated package's base version
+> counts as pre-existing, not newly introduced; upgrading a package does not
+> re-flag advisories it carried before the change. If the base-version lookup
+> fails, the diff falls back to reporting every changed-package advisory.
+
 ```mermaid
 flowchart LR
     subgraph Threshold["--unchanged-threshold"]

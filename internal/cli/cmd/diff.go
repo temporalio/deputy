@@ -24,9 +24,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/advisorysource"
+	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/compare"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
@@ -622,6 +625,16 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 
 		changedVulns, unchangedVulns := splitVulnsByChange(reportVulns, changes)
 
+		// An advisory that already affected the base version of an updated
+		// package is not introduced by the change: the diff contract is
+		// vulnerability additions, removals, and fixes, and CI gates count
+		// the changed set as newly introduced. Reclassify those advisories
+		// into the pre-existing bucket.
+		if len(changedVulns) > 0 {
+			baseAffected := baseVersionAdvisories(ctx, changes, errW)
+			changedVulns, unchangedVulns = reclassifyPreexistingVulns(changedVulns, unchangedVulns, baseAffected)
+		}
+
 		_, unchangedStats := consolidateReportVulnerabilities(unchangedVulns)
 
 		// Decide whether to show unchanged set based on threshold
@@ -1014,6 +1027,105 @@ func splitVulnsByChange(vulns []report.Vulnerability, changes []compare.Change) 
 		}
 	}
 	return changed, unchanged
+}
+
+// baseVersionAdvisories queries the advisory sources for the base versions of
+// updated packages and returns, per canonical package name, the advisory IDs
+// (including aliases) that already affected the base version. A lookup failure
+// degrades to nil with a warning: the caller then treats every changed-package
+// advisory as newly introduced, failing toward reporting rather than hiding.
+func baseVersionAdvisories(ctx context.Context, changes []compare.Change, errW io.Writer) map[string]map[string]bool {
+	basePkgs := baseQueryPackages(changes)
+	if len(basePkgs) == 0 {
+		return nil
+	}
+
+	agg, err := advisorysource.NewDefaultRegistry(ctx, osv.NewClient()).Query(ctx, basePkgs)
+	if err != nil {
+		fmt.Fprintf(errW, "Warning: base-version advisory lookup failed; reporting all changed-package advisories as new: %v\n", err)
+		return nil
+	}
+
+	affected := map[string]map[string]bool{}
+	for _, f := range agg.Findings {
+		if f == nil || !f.GetAffected() {
+			continue
+		}
+		key := compare.ParseGoPackage(&extractor.Package{Name: f.GetPackage().GetName()}).CanonicalName
+		ids := affected[key]
+		if ids == nil {
+			ids = map[string]bool{}
+			affected[key] = ids
+		}
+		ids[f.GetAdvisoryId()] = true
+		if adv := agg.Advisories[f.GetAdvisoryId()]; adv != nil {
+			for _, alias := range adv.GetAliases() {
+				ids[alias] = true
+			}
+		}
+	}
+	return affected
+}
+
+// baseQueryPackages assembles the base-version packages whose advisories can
+// pre-date a change: version changes (updated, upgraded, downgraded) with a
+// known base version, queried under the base name when the package was
+// renamed. Added packages have no base to pre-date and removed packages have
+// no changed vulnerabilities to reclassify.
+func baseQueryPackages(changes []compare.Change) []*dependencyv1.Package {
+	var basePkgs []*dependencyv1.Package
+	for _, c := range changes {
+		switch c.ChangeType {
+		case compare.Updated, compare.Upgraded, compare.Downgraded:
+		default:
+			continue
+		}
+		if c.BaseVersion == "" {
+			continue
+		}
+		name := c.OldName
+		if name == "" {
+			name = c.Name
+		}
+		basePkgs = append(basePkgs, &dependencyv1.Package{
+			Name:      name,
+			Version:   c.BaseVersion,
+			Ecosystem: c.Ecosystem,
+		})
+	}
+	return basePkgs
+}
+
+// reclassifyPreexistingVulns moves changed-package vulnerabilities whose
+// advisory already affected the package's base version (matched by ID or any
+// alias) into the pre-existing bucket, leaving the changed set to carry only
+// what the change actually introduces. A nil baseAffected map reclassifies
+// nothing.
+func reclassifyPreexistingVulns(changed, unchanged []report.Vulnerability, baseAffected map[string]map[string]bool) (newChanged, newUnchanged []report.Vulnerability) {
+	if len(baseAffected) == 0 {
+		return changed, unchanged
+	}
+	newChanged = make([]report.Vulnerability, 0, len(changed))
+	newUnchanged = unchanged
+	for _, v := range changed {
+		key := compare.ParseGoPackage(&extractor.Package{Name: v.Package}).CanonicalName
+		ids := baseAffected[key]
+		preexisting := ids[v.ID]
+		if !preexisting {
+			for _, alias := range v.Aliases {
+				if ids[alias] {
+					preexisting = true
+					break
+				}
+			}
+		}
+		if preexisting {
+			newUnchanged = append(newUnchanged, v)
+			continue
+		}
+		newChanged = append(newChanged, v)
+	}
+	return newChanged, newUnchanged
 }
 
 func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scanning.Result, []vulnerability.Consolidated) {
