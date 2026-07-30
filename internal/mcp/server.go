@@ -143,7 +143,7 @@ const serverInstructions = "Deputy is a supply-chain security engine. Its tools 
 	"- A clean target reports `clean: true`; this is success, not an error.\n" +
 	"- Absent fields mean empty, zero, or not applicable: results omit empty lists, zero counts, and optional attributes (no `vulnerabilities` key = none found; no `kind` = ordinary vulnerability). Affirmative answers (`clean`, `found`, `direct`, `hasFix`, `migration`, `executable`, `depth`, `isContainerDiff`) are present whenever they apply, even when false or zero; severity count maps always carry all their keys.\n" +
 	"- A package absent from the graph is a normal `found: false` result (with a `matchedNode` when the package is present but has no paths), not an error.\n" +
-	"- Assessment results honor the target's vulnerability suppressions (`.deputyignore.yaml`); `ignoredCount` reports how many findings were excluded by rule.\n" +
+	"- Assessment results honor the target's vulnerability suppressions (`.deputyignore.yaml`); `ignoredCount` reports how many findings were excluded by rule. Directory tools load suppressions from the scanned path; container-image tools load them from the server's working directory.\n" +
 	"- Scan results include a `coverage` block: `covered` lists (ecosystem, artifact) combinations an advisory source answered for, `uncovered` lists those none could (e.g. container base images). Uncovered means not-checked, not safe. Findings carry `sources` (provenance, e.g. `[\"osv\"]`) and `kind` (`malware` vs vulnerability).\n" +
 	"\n" +
 	"Typical workflow\n" +
@@ -1883,7 +1883,12 @@ func (s *Server) annotateGraphVulnerabilities(ctx context.Context, targetPath, r
 		return err
 	}
 	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
-	depGraph.AnnotateVulns(scanResult.Findings, scanResult.Advisories)
+	// Honor the target's vulnerability suppressions like every other
+	// assessment tool: a finding suppressed in .deputyignore.yaml must not
+	// resurface as a vulnerable graph node when triage reports the target
+	// clean.
+	filtered, _ := scanning.FilterIgnored(*scanResult, ignoreRulesFor(ctx, targetPath))
+	depGraph.AnnotateVulns(filtered.Findings, filtered.Advisories)
 	return nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 	mcpv1 "github.com/temporalio/deputy/gen/deputy/mcp/v1"
 )
 
@@ -75,6 +76,34 @@ func TestMCPToolsHonorIgnoreRules(t *testing.T) {
 		}
 		if result.VulnerabilitiesFound != 0 || len(result.Steps) != 0 {
 			t.Fatalf("plan still covers suppressed findings: found %d, steps %d", result.VulnerabilitiesFound, len(result.Steps))
+		}
+	})
+
+	t.Run("analyze_dependency_graph", func(t *testing.T) {
+		mockScan := &mockScanHandler{scanResponse: migrationOnlyScanResponse()}
+		mockGraph := &mockGraphHandler{buildResponse: &graphv1.BuildGraphResponse{
+			Nodes: []*graphv1.Node{
+				{
+					Purl:      "pkg:golang/github.com/example/widget@v1.4.0",
+					Name:      "github.com/example/widget",
+					Version:   "v1.4.0",
+					Ecosystem: "go",
+					Direct:    true,
+				},
+			},
+			Stats: &graphv1.GraphStats{TotalNodes: 1, DirectNodes: 1},
+		}}
+		s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan, graphHandler: mockGraph})))
+
+		result, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{Path: dir}, &mcpv1.AnalyzeGraphResult{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := result.GetStats().GetVulnerableNodes(); got != 0 {
+			t.Fatalf("vulnerableNodes = %d, want 0: graph annotation must honor suppressions like every other assessment tool", got)
+		}
+		if got := result.GetVulnerablePathCount(); got != 0 {
+			t.Fatalf("vulnerablePathCount = %d, want 0 after suppression", got)
 		}
 	})
 

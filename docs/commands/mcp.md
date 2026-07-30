@@ -40,7 +40,9 @@ and severity count maps always carry all their keys so per-severity counts
 sum to the total. Assessment tools honor the target's vulnerability
 suppressions (`.deputyignore.yaml` and friends), exactly like the CLI:
 suppressed findings are excluded from results and counted in
-`ignoredCount`.
+`ignoredCount`. Directory tools load suppressions from the scanned path;
+container-image tools have no target directory, so they load them from the
+server process's working directory, matching a CLI image scan run there.
 
 ```mermaid
 flowchart LR
