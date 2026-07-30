@@ -97,7 +97,14 @@ func aggregatePackages(cons []vulnerability.Consolidated) []*triagev1.PackageSum
 		sevKey := severityBucket(v.Severity, v.SeverityType)
 		info.counts[sevKey]++
 		info.total++
-		if priority > info.priority {
+		// Severity alone does not decide the package's summary: fixability
+		// and directness feed the triage priority, so two findings of equal
+		// severity can rank differently (an unfixable critical is high, a
+		// fixable direct critical is critical). Break severity ties on the
+		// triage rank so arrival order cannot pick the weaker summary.
+		betterOnTie := priority == info.priority &&
+			vulnerability.TriagePriorityRank(triagePriority) < vulnerability.TriagePriorityRank(info.triagePriority)
+		if priority > info.priority || betterOnTie {
 			info.priority = priority
 			info.severity = v.Severity
 			info.severityT = v.SeverityType
