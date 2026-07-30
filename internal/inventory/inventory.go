@@ -75,6 +75,19 @@ func ScanPackagesWorking(ctx context.Context, ws workspace.FS, opts ScanOptions)
 // into an ephemeral in-memory workspace and scans it for packages. The workspace
 // is discarded after scanning.
 func ScanPackagesAtCommitSnapshot(ctx context.Context, repo *git.Repository, commitHash plumbing.Hash, opts ScanOptions) ([]*extractor.Package, error) {
+	ws, err := CommitSnapshotWorkspace(repo, commitHash)
+	if err != nil {
+		return nil, err
+	}
+	defer ws.Close()
+	return scanWorkspace(ctx, ws, opts)
+}
+
+// CommitSnapshotWorkspace materializes the commit's tree into an in-memory
+// workspace, giving a ref the same file access a working-tree scan gets from
+// its directory: package extraction and graph edge resolution both read from
+// it. The caller owns the workspace and must Close it.
+func CommitSnapshotWorkspace(repo *git.Repository, commitHash plumbing.Hash) (workspace.FS, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("git repository is required")
 	}
@@ -91,8 +104,7 @@ func ScanPackagesAtCommitSnapshot(ctx context.Context, repo *git.Repository, com
 		_ = ws.Close() // best-effort cleanup on error
 		return nil, err
 	}
-	defer ws.Close()
-	return scanWorkspace(ctx, ws, opts)
+	return ws, nil
 }
 
 // scanWorkspace runs the scalibr scan on the provided workspace.

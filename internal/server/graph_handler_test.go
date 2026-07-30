@@ -179,6 +179,12 @@ require github.com/google/uuid v1.6.0
 			if target.GetCommitHash() != firstHash.String() {
 				t.Fatalf("target.commit_hash = %q, want %q", target.GetCommitHash(), firstHash.String())
 			}
+			// Edges must resolve from the ref's snapshot workspace: a nil
+			// workspace silently downgrades ref builds to a disconnected
+			// basic graph with no dependency paths.
+			if len(resp.Msg.GetEdges()) == 0 {
+				t.Fatalf("BuildGraph() at ref resolved no edges; ref snapshot workspace missing")
+			}
 		})
 	}
 }

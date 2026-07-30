@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,5 +173,19 @@ func TestCollectRepositoryAtRefDetectsMultiEcosystemDirects(t *testing.T) {
 				t.Errorf("Direct[%q] = false, want true (direct at ref %s)", tt.key, hash)
 			}
 		})
+	}
+
+	// The snapshot workspace must survive collection: graph edge resolution
+	// reads the ref's manifests from it, and a nil workspace silently
+	// downgrades ref-based graphs to disconnected basic graphs.
+	if exec.Workspace == nil {
+		t.Fatal("Workspace = nil, want the ref's snapshot workspace")
+	}
+	data, err := exec.Workspace.ReadFile("go.mod")
+	if err != nil {
+		t.Fatalf("reading go.mod from snapshot workspace: %v", err)
+	}
+	if !strings.Contains(string(data), "example.com/app") {
+		t.Fatalf("snapshot go.mod = %q, want the committed manifest", data)
 	}
 }

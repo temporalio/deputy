@@ -521,8 +521,17 @@ func CollectAtCommit(ctx context.Context, repo *git.Repository, commitHash plumb
 		))
 	defer span.End()
 
-	pkgs, err := ScanPackagesAtCommitSnapshot(ctx, repo, commitHash, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	// Keep the snapshot workspace alive on the Execution: graph edge
+	// resolution reads the ref's manifests and lockfiles from it, the same
+	// way working-tree collection hands its directory workspace onward.
+	ws, err := CommitSnapshotWorkspace(repo, commitHash)
 	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+	pkgs, err := scanWorkspace(ctx, ws, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	if err != nil {
+		_ = ws.Close()
 		otel.SetSpanError(span, err)
 		return nil, err
 	}
@@ -547,7 +556,7 @@ func CollectAtCommit(ctx context.Context, repo *git.Repository, commitHash plumb
 		Direct:      direct,
 	}
 
-	return &Execution{Result: result}, nil
+	return &Execution{Result: result, Workspace: ws, cleanup: func() { _ = ws.Close() }}, nil
 }
 
 // CollectRepositoryAtRef extracts inventory from a git repository at a specific reference.
@@ -587,9 +596,17 @@ func CollectRepositoryAtRef(ctx context.Context, target, ref string, opts Option
 	}
 	span.SetAttributes(attribute.String("deputy.target.commit", hash.String()))
 
-	// Scan at the specific commit
-	pkgs, err := ScanPackagesAtCommitSnapshot(ctx, repo, *hash, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	// Scan at the specific commit, keeping the snapshot workspace alive on
+	// the Execution so graph edge resolution reads the ref's manifests and
+	// lockfiles instead of falling back to a disconnected basic graph.
+	ws, err := CommitSnapshotWorkspace(repo, *hash)
 	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, fmt.Errorf("failed to snapshot ref %q: %w", ref, err)
+	}
+	pkgs, err := scanWorkspace(ctx, ws, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	if err != nil {
+		_ = ws.Close()
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("failed to scan packages at ref %q: %w", ref, err)
 	}
@@ -629,7 +646,7 @@ func CollectRepositoryAtRef(ctx context.Context, target, ref string, opts Option
 		Direct:      direct,
 	}
 
-	return &Execution{Result: result}, nil
+	return &Execution{Result: result, Workspace: ws, cleanup: func() { _ = ws.Close() }}, nil
 }
 
 // CollectBinary extracts inventory from a Go or Rust binary file.
