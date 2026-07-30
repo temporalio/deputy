@@ -32,7 +32,7 @@ var variableMetadataByName = map[string]VariableMetadata{
 	"env":                   {Type: "policyv1.Environment", Description: "Execution environment context"},
 	"findings":              {Type: "list(object)", Description: "Triage findings"},
 	"from_node":             {Type: "graphv1.Node", Description: "Source node for the current graph edge"},
-	"graph":                 {Type: "graphv1.Graph", Description: "Dependency graph data"},
+	"graph":                 {Type: "object", Description: "Dependency graph data (nodes and edges)"},
 	"host":                  {Type: "string", Description: "Requested network host"},
 	"image":                 {Type: "object", Description: "Container image metadata"},
 	"image_info":            {Type: "object", Description: "Container image metadata"},

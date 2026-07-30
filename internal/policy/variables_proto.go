@@ -15,9 +15,11 @@ import (
 )
 
 // variableMessageTypes maps the proto type names used in variable metadata
-// (see variableMetadataByName) to their message descriptors, so tooling — LSP
-// completions today, docs generation tomorrow — derives field lists from the
+// (see variableMetadataByName) to their message descriptors, so tooling (LSP
+// completions today, docs generation tomorrow) derives field lists from the
 // proto source of truth instead of hand-maintained copies that drift.
+// TestProtoTypedVariableMetadataResolves keeps this map and the metadata table
+// in sync in both directions.
 var variableMessageTypes = map[string]protoreflect.MessageDescriptor{
 	"dependencyv1.Package":    (&dependencyv1.Package{}).ProtoReflect().Descriptor(),
 	"vulnerabilityv1.Finding": (&vulnerabilityv1.Finding{}).ProtoReflect().Descriptor(),
@@ -47,8 +49,8 @@ func VariableMessageDescriptor(typeName string) (protoreflect.MessageDescriptor,
 // "target.provenance", resolved by walking proto descriptors from the
 // variable's declared type. For list-typed variables it completes the element
 // type, matching how CEL comprehension variables and indexing expose elements.
-// ok is false when the path does not resolve to a proto message — for example
-// object-typed variables — letting callers fall back to hand-maintained lists.
+// ok is false when the path does not resolve to a proto message (for example
+// object-typed variables), letting callers fall back to hand-maintained lists.
 func VariableFieldCompletions(path string) (fields []string, ok bool) {
 	parts := strings.Split(strings.TrimSpace(path), ".")
 	if len(parts) == 0 || parts[0] == "" {

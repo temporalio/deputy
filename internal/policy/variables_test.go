@@ -1,7 +1,9 @@
 package policy
 
 import (
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -35,6 +37,45 @@ func TestVariableMetadataEntriesAreComplete(t *testing.T) {
 	for name, meta := range variableMetadataByName {
 		if meta.Type == "" || meta.Description == "" {
 			t.Errorf("variable metadata for %q is incomplete: %+v", name, meta)
+		}
+	}
+}
+
+// protoTypeNamePattern matches the versioned-package proto type names used in
+// variable metadata, e.g. "dependencyv1.Package" or "list(graphv1.Node)" after
+// the list wrapper is stripped.
+var protoTypeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*v\d+\.[A-Z]`)
+
+// TestProtoTypedVariableMetadataResolves keeps variableMetadataByName and
+// variableMessageTypes in sync in both directions: every metadata type that
+// claims to be proto-backed must resolve to a registered descriptor (a type
+// name that resolves nowhere renders as documentation for a type that does not
+// exist, and LSP completions silently fall back to nothing), and every
+// registered descriptor must be referenced by at least one variable so the map
+// cannot accumulate dead entries. It also pins each key's message name to its
+// descriptor to catch copy-paste mismatches.
+func TestProtoTypedVariableMetadataResolves(t *testing.T) {
+	referenced := make(map[string]bool)
+	for name, meta := range variableMetadataByName {
+		typ := meta.Type
+		if inner, isList := strings.CutPrefix(typ, "list("); isList {
+			typ = strings.TrimSuffix(inner, ")")
+		}
+		if !protoTypeNamePattern.MatchString(typ) {
+			continue
+		}
+		referenced[typ] = true
+		if _, ok := VariableMessageDescriptor(typ); !ok {
+			t.Errorf("variable %q declares proto type %q with no descriptor in variableMessageTypes; register it or use a non-proto type name", name, typ)
+		}
+	}
+	for key, md := range variableMessageTypes {
+		if !referenced[key] {
+			t.Errorf("variableMessageTypes entry %q is referenced by no variable metadata; remove it or add the variable", key)
+		}
+		wantName := key[strings.LastIndex(key, ".")+1:]
+		if got := string(md.Name()); got != wantName {
+			t.Errorf("variableMessageTypes[%q] maps to descriptor %q; key and message name must agree", key, got)
 		}
 	}
 }

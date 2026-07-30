@@ -266,7 +266,7 @@ Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`, `graphMatch()
 
 | Variable | Type | Required | Description |
 | --- | --- | --- | --- |
-| `graph` | `graphv1.Graph` | yes | Dependency graph data |
+| `graph` | `object` | yes | Dependency graph data (nodes and edges) |
 | `nodes` | `list(graphv1.Node)` | yes | Dependency graph nodes |
 | `edges` | `list(graphv1.Edge)` | yes | Dependency graph edges |
 | `stats` | `object` | yes | Summary statistics for the current report |
