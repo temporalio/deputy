@@ -90,9 +90,11 @@ func mergeOSVVulnerability(base *osvschema.Vulnerability, extra *osvschema.Vulne
 	if !extra.Modified.IsZero() && (base.Modified.IsZero() || extra.Modified.After(base.Modified)) {
 		base.Modified = extra.Modified
 	}
-	if base.Withdrawn.IsZero() {
-		base.Withdrawn = extra.Withdrawn
-	}
+	// Withdrawn deliberately never fills from an alias: withdrawal is a
+	// per-record statement, not a property of the alias set. GHSAs are often
+	// withdrawn as duplicates while the CVE they alias stays active; copying
+	// the alias's timestamp would mark a live advisory withdrawn and let
+	// downstream filters suppress a real vulnerability.
 
 	base.Aliases = mergeUniqueEqualFold(base.Aliases, []string{extra.ID})
 	base.Aliases = mergeUniqueEqualFold(base.Aliases, extra.Aliases)

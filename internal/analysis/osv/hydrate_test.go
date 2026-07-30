@@ -112,6 +112,35 @@ func TestHydrateSparseVulnerabilityAliases(t *testing.T) {
 	}
 }
 
+// TestHydrateDoesNotCopyAliasWithdrawal guards against hydration marking a
+// live advisory withdrawn: GHSAs are commonly withdrawn as duplicates while
+// the CVE they alias remains active, so an alias's Withdrawn timestamp must
+// never fill onto the base record.
+func TestHydrateDoesNotCopyAliasWithdrawal(t *testing.T) {
+	withdrawn := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)
+	client := &hydrateAliasClient{
+		vulns: map[string]*osvschema.Vulnerability{
+			"GHSA-with-draw-n1": {
+				ID:        "GHSA-with-draw-n1",
+				Summary:   "Withdrawn duplicate advisory",
+				Withdrawn: withdrawn,
+			},
+		},
+	}
+	base := &osvschema.Vulnerability{
+		ID:      "CVE-2025-0001",
+		Aliases: []string{"GHSA-with-draw-n1"},
+	}
+
+	got := HydrateSparseVulnerabilityAliases(t.Context(), client, base)
+	if !got.Withdrawn.IsZero() {
+		t.Fatalf("withdrawn = %s, want zero: alias withdrawal must not mark the base record withdrawn", got.Withdrawn)
+	}
+	if got.Summary == "" {
+		t.Fatal("expected summary still filled from alias")
+	}
+}
+
 func TestHydrateSparseVulnerabilityAliasesSkipsCompleteRecords(t *testing.T) {
 	client := &hydrateAliasClient{}
 	base := &osvschema.Vulnerability{
