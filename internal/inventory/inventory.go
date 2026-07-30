@@ -566,16 +566,25 @@ var manifestLockPairs = map[string]string{
 	"Cargo.toml": "Cargo.lock",
 }
 
-// preferLockfileResolutions drops manifest-derived package entries whose
-// manifest is resolved by an extracted lockfile. Matching requirement strings
-// against advisories as if they were exact versions produces false positives
-// (and misses) whenever the lockfile resolves to a different version. A
-// manifest counts as resolved when its paired lockfile exists in the same or
-// any ancestor directory (Cargo workspaces keep one lock at the root for all
-// member crates). Manifest-only projects keep their requirement-derived
-// entries: there is no resolution to prefer, and partial inventory beats none.
+// preferLockfileResolutions drops manifest-derived package entries that a
+// paired lockfile actually resolves. Matching requirement strings against
+// advisories as if they were exact versions produces false positives (and
+// misses) whenever the lockfile resolves to a different version. A manifest
+// entry yields only when the same package (name and PURL type) was also
+// extracted from the paired lockfile in the same or an ancestor directory
+// (Cargo workspaces keep one lock at the root for all member crates). The
+// per-package containment check matters: an ancestor lockfile can belong to
+// a workspace that excludes the manifest's project (a nested standalone
+// crate, a vendored manifest), in which case the lockfile extractor never
+// emitted the package and dropping the manifest entry would erase the package
+// from the inventory entirely. Manifest-only projects likewise keep their
+// requirement-derived entries: there is no resolution to prefer, and partial
+// inventory beats none.
 func preferLockfileResolutions(pkgs []*extractor.Package) []*extractor.Package {
-	lockDirs := make(map[string]map[string]struct{})
+	// lockContents maps a lockfile basename to the directories where that
+	// lockfile was extracted, and for each directory the identity keys of the
+	// packages the lockfile actually resolved.
+	lockContents := make(map[string]map[string]map[string]struct{})
 	for _, pkg := range pkgs {
 		if pkg == nil {
 			continue
@@ -583,32 +592,41 @@ func preferLockfileResolutions(pkgs []*extractor.Package) []*extractor.Package {
 		for _, loc := range pkg.Locations {
 			base := path.Base(loc)
 			for _, lock := range manifestLockPairs {
-				if base == lock {
-					if lockDirs[lock] == nil {
-						lockDirs[lock] = make(map[string]struct{})
-					}
-					lockDirs[lock][path.Dir(loc)] = struct{}{}
+				if base != lock {
+					continue
 				}
+				dirs := lockContents[lock]
+				if dirs == nil {
+					dirs = make(map[string]map[string]struct{})
+					lockContents[lock] = dirs
+				}
+				dir := path.Dir(loc)
+				if dirs[dir] == nil {
+					dirs[dir] = make(map[string]struct{})
+				}
+				dirs[dir][packageIdentityKey(pkg)] = struct{}{}
 			}
 		}
 	}
-	if len(lockDirs) == 0 {
+	if len(lockContents) == 0 {
 		return pkgs
 	}
 
-	// resolved reports whether a manifest location is covered by its paired
-	// lockfile in the same directory or an ancestor directory.
-	resolved := func(loc string) bool {
+	// resolved reports whether a manifest location's package is covered by
+	// its paired lockfile in the same directory or any ancestor directory.
+	// Only a lockfile that contains the package counts: the mere presence of
+	// an unrelated ancestor lockfile resolves nothing.
+	resolved := func(key, loc string) bool {
 		lock, ok := manifestLockPairs[path.Base(loc)]
 		if !ok {
 			return false
 		}
-		dirs := lockDirs[lock]
+		dirs := lockContents[lock]
 		if len(dirs) == 0 {
 			return false
 		}
 		for d := path.Dir(loc); ; d = path.Dir(d) {
-			if _, ok := dirs[d]; ok {
+			if _, ok := dirs[d][key]; ok {
 				return true
 			}
 			if d == "." || d == "/" {
@@ -623,7 +641,10 @@ func preferLockfileResolutions(pkgs []*extractor.Package) []*extractor.Package {
 			out = append(out, pkg)
 			continue
 		}
-		kept := slices.DeleteFunc(slices.Clone(pkg.Locations), resolved)
+		key := packageIdentityKey(pkg)
+		kept := slices.DeleteFunc(slices.Clone(pkg.Locations), func(loc string) bool {
+			return resolved(key, loc)
+		})
 		if len(kept) == 0 {
 			continue
 		}
@@ -631,6 +652,14 @@ func preferLockfileResolutions(pkgs []*extractor.Package) []*extractor.Package {
 		out = append(out, pkg)
 	}
 	return out
+}
+
+// packageIdentityKey identifies a package independent of its version, so a
+// manifest requirement entry (tokio = "1.26") can be matched against the
+// lockfile resolution of the same package (tokio 1.52.3). Name alone is not
+// enough: distinct ecosystems can share package names.
+func packageIdentityKey(pkg *extractor.Package) string {
+	return pkg.PURLType + "\x00" + pkg.Name
 }
 
 // deduplicatePackages collapses packages with identical PURLs, merging their locations.

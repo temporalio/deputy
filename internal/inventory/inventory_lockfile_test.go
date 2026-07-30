@@ -62,6 +62,49 @@ func TestPreferLockfileResolutions(t *testing.T) {
 			want: []string{"anyhow@1.0.103"},
 		},
 		{
+			// A workspace root Cargo.lock only covers member crates. A nested
+			// crate excluded from the workspace has no lock of its own, so its
+			// packages were never resolved by the root lock; dropping the
+			// manifest entry would erase them from the inventory entirely.
+			name: "workspace-excluded nested crate keeps its manifest entry",
+			input: []*extractor.Package{
+				{Name: "rand", Version: "0.8", PURLType: "cargo", Locations: []string{"tools/standalone/Cargo.toml"}},
+				{Name: "anyhow", Version: "1.0.103", PURLType: "cargo", Locations: []string{"Cargo.lock"}},
+			},
+			want: []string{"anyhow@1.0.103", "rand@0.8"},
+		},
+		{
+			name: "vendored crate manifest survives an unrelated root lock",
+			input: []*extractor.Package{
+				{Name: "libc", Version: "0.2", PURLType: "cargo", Locations: []string{"third_party/libc/Cargo.toml"}},
+				{Name: "anyhow", Version: "1.0.103", PURLType: "cargo", Locations: []string{"Cargo.lock"}},
+			},
+			want: []string{"anyhow@1.0.103", "libc@0.2"},
+		},
+		{
+			// The safe condition for dropping: an ancestor lock that actually
+			// contains the package resolved it, so the manifest entry yields
+			// even for a crate the workspace excludes (the exact version in
+			// the inventory beats a requirement string).
+			name: "manifest yields when an ancestor lock contains the same package",
+			input: []*extractor.Package{
+				{Name: "tokio", Version: "1.26", PURLType: "cargo", Locations: []string{"tools/standalone/Cargo.toml"}},
+				{Name: "tokio", Version: "1.52.3", PURLType: "cargo", Locations: []string{"Cargo.lock"}},
+			},
+			want: []string{"tokio@1.52.3"},
+		},
+		{
+			// Lockfile containment is keyed on name and PURL type together:
+			// a same-named package from another ecosystem must not count as
+			// a resolution.
+			name: "same-named package in another ecosystem does not resolve a manifest",
+			input: []*extractor.Package{
+				{Name: "shared-name", Version: "1.0", PURLType: "cargo", Locations: []string{"Cargo.toml"}},
+				{Name: "shared-name", Version: "2.0.0", PURLType: "npm", Locations: []string{"Cargo.lock"}},
+			},
+			want: []string{"shared-name@1.0", "shared-name@2.0.0"},
+		},
+		{
 			name: "non-cargo manifests are untouched",
 			input: []*extractor.Package{
 				{Name: "lodash", Version: "4.17.21", PURLType: "npm", Locations: []string{"package.json"}},
