@@ -540,9 +540,12 @@ given a set of packages, return the advisories (vulnerabilities and malware)
 affecting them. The built-in OSV source implements the same contract in-process;
 plugins let you add threat feeds, vendor databases, or internal allow/deny
 intelligence. Deputy aggregates all sources with union-with-provenance
-semantics — each finding records which source(s) reported it in `sources`, and
+semantics: each finding records which source(s) reported it in `sources`, and
 the scan's `coverage` block shows which (ecosystem, artifact) combinations each
-source answered for.
+source answered for. Advisory records (the shared descriptions keyed by
+advisory ID) merge first-source-wins in registration order, with the built-in
+OSV source first; a custom source cannot overwrite OSV's record for an ID OSV
+already returned, only add findings that reference it.
 
 ### Quick Start (Go)
 
@@ -586,9 +589,14 @@ erroring.
 
 ### Registration (explicit opt-in)
 
-Advisory sources can see and shape security findings, so Deputy **never
-auto-executes** binaries it merely finds on PATH. Name the sources you trust
-explicitly — via the environment:
+Advisory sources are trusted components. A `program:` source runs as a
+subprocess with the same operating-system privileges as Deputy itself (there is
+no sandbox), it sees every package identity in your scan, and its findings feed
+policy and remediation decisions verbatim. Review and version-pin a plugin as
+you would any dependency, and prefer the ConnectRPC binding for feeds a team
+operates centrally. Because sources can see and shape security findings, Deputy
+**never auto-executes** binaries it merely finds on PATH. Name the sources you
+trust explicitly, via the environment:
 
 ```bash
 DEPUTY_ADVISORY_SOURCES=deputy-advisory-source-myfeed deputy scan .
@@ -607,7 +615,7 @@ scan; the scan's `coverage` block shows which sources actually answered.
 
 ### Transport Bindings
 
-The `AdvisorySourceService` proto contract has three interchangeable bindings —
+The `AdvisorySourceService` proto contract has three interchangeable bindings;
 pick per source, the aggregation is identical:
 
 | Binding | Config | Cost per query | Right for |
