@@ -883,6 +883,60 @@ func TestEnsureGHACacheZip_UsesETagConditionalRequest(t *testing.T) {
 	}
 }
 
+// TestEnsureGHACacheZipDownloadCapBoundary pins the safety-cap boundary: a
+// body of exactly ghaDownloadLimit bytes is a complete download and must
+// succeed; only a body that exceeds the cap is truncated and must fail.
+func TestEnsureGHACacheZipDownloadCapBoundary(t *testing.T) {
+	body := mustGHATestZipBytes(t, map[string]osvschema.Vulnerability{
+		"GHSA-cap.json": {
+			ID: "GHSA-cap",
+			Affected: []osvschema.Affected{
+				{Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+			},
+		},
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	origURL := ghaAllZipURL
+	origClient := ghaHTTPClient
+	origTTL := ghaDownloadTTL
+	origLimit := ghaDownloadLimit
+	ghaAllZipURL = srv.URL
+	ghaHTTPClient = srv.Client()
+	ghaDownloadTTL = 0
+	t.Cleanup(func() {
+		ghaAllZipURL = origURL
+		ghaHTTPClient = origClient
+		ghaDownloadTTL = origTTL
+		ghaDownloadLimit = origLimit
+	})
+
+	t.Run("exactly at cap succeeds", func(t *testing.T) {
+		resetGHATestState()
+		restore := disk.SetBaseDirForTest(t.TempDir())
+		t.Cleanup(restore)
+		ghaDownloadLimit = int64(len(body))
+		if _, err := ensureGHACacheZip(t.Context()); err != nil {
+			t.Fatalf("ensureGHACacheZip at exact cap: %v", err)
+		}
+	})
+
+	t.Run("over cap fails loudly", func(t *testing.T) {
+		resetGHATestState()
+		restore := disk.SetBaseDirForTest(t.TempDir())
+		t.Cleanup(restore)
+		ghaDownloadLimit = int64(len(body)) - 1
+		if _, err := ensureGHACacheZip(t.Context()); err == nil {
+			t.Fatal("ensureGHACacheZip over cap: want safety-cap error, got nil")
+		}
+	})
+}
+
 func TestLoadGHAVulnIndex_RefreshesAfterTTL(t *testing.T) {
 	resetGHATestState()
 	tmp := t.TempDir()

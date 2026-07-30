@@ -819,16 +819,20 @@ func ensureGHACacheZip(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	limited := &io.LimitedReader{R: resp.Body, N: ghaDownloadLimit}
-	if _, err := io.Copy(f, limited); err != nil {
+	// Read one byte past the cap so a body of exactly ghaDownloadLimit bytes
+	// is distinguishable from a truncated one: N == 0 then means the body had
+	// more than the cap, not that it merely reached it.
+	limited := &io.LimitedReader{R: resp.Body, N: ghaDownloadLimit + 1}
+	written, err := io.Copy(f, limited)
+	if err != nil {
 		_ = f.Close()      // best-effort cleanup
 		_ = os.Remove(tmp) // best-effort cleanup
 		return "", err
 	}
-	if limited.N == 0 {
-		// The response hit the safety cap and was truncated; a partial zip has
-		// no valid central directory, so fail loudly instead of caching a file
-		// that zip.OpenReader would silently reject.
+	if written > ghaDownloadLimit {
+		// The response exceeded the safety cap and was truncated; a partial
+		// zip has no valid central directory, so fail loudly instead of
+		// caching a file that zip.OpenReader would silently reject.
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		return "", fmt.Errorf("GHA all.zip exceeds %d byte safety cap; increase ghaDownloadLimit", ghaDownloadLimit)
