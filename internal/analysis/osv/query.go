@@ -408,7 +408,13 @@ func osvAPIQueryable(p PkgInput) bool {
 			eco = pu.Type
 		}
 	}
-	return ecosystem.Parse(eco).OSVQueryable()
+	if ecosystem.Parse(eco).OSVQueryable() {
+		return true
+	}
+	// OS-package ecosystems (Alpine:v3.19, Debian:12, ...) live outside the
+	// package-manager ecosystem registry but are first-class in OSV.
+	_, ok := OSFamilyOSVName(eco)
+	return ok
 }
 
 // isGitHubActionsInput reports whether the given package should be queried against

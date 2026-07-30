@@ -188,6 +188,13 @@ func classify(p *dependencyv1.Package) (string, vulnerabilityv1.ArtifactKind) {
 	case isContainerImage(ecoRaw, purlType):
 		return canonicalEco(ecoRaw, purlType), vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_CONTAINER_IMAGE_REF
 	case isOSPackage(ecoRaw, purlType):
+		// OSV-covered OS families canonicalize to the family name (lowercased,
+		// release suffix stripped) so routing matches the OSV source's
+		// declared coverage; other OS packages keep the generic fallback and
+		// surface as uncovered.
+		if fam, ok := osv.OSFamilyOSVName(ecoRaw); ok {
+			return strings.ToLower(fam), vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_OS_PACKAGE
+		}
 		return canonicalEco(ecoRaw, purlType), vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_OS_PACKAGE
 	default:
 		return canonicalEco(ecoRaw, purlType), vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE
@@ -223,8 +230,14 @@ func isContainerImage(ecoRaw, purlType string) bool {
 		strings.EqualFold(purlType, "docker") || strings.EqualFold(purlType, "oci")
 }
 
+// isOSPackage reports whether the package is an operating-system package:
+// any OSV-covered OS family (release suffixes included), a few OS names OSV
+// does not index (still OS packages, just uncovered), or an OS purl type.
 func isOSPackage(ecoRaw, purlType string) bool {
-	osKinds := []string{"deb", "debian", "ubuntu", "apk", "alpine", "rpm", "redhat", "rhel", "suse", "wolfi", "chainguard"}
+	if _, ok := osv.OSFamilyOSVName(ecoRaw); ok {
+		return true
+	}
+	osKinds := []string{"deb", "apk", "rpm", "centos", "amazon", "amazon linux", "oracle", "oracle linux"}
 	v := strings.ToLower(ecoRaw)
 	t := strings.ToLower(purlType)
 	return slices.Contains(osKinds, v) || slices.Contains(osKinds, t)

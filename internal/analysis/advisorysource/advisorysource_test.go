@@ -124,6 +124,10 @@ func TestClassify(t *testing.T) {
 		{"docker eco", &dependencyv1.Package{Ecosystem: "docker"}, "docker", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_CONTAINER_IMAGE_REF},
 		{"docker purl", &dependencyv1.Package{Purl: "pkg:docker/library/alpine@3.19"}, "docker", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_CONTAINER_IMAGE_REF},
 		{"deb os pkg", &dependencyv1.Package{Ecosystem: "deb"}, "deb", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_OS_PACKAGE},
+		{"alpine release-qualified", &dependencyv1.Package{Ecosystem: "Alpine:v3.19"}, "alpine", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_OS_PACKAGE},
+		{"debian release-qualified", &dependencyv1.Package{Ecosystem: "Debian:12"}, "debian", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_OS_PACKAGE},
+		{"wolfi", &dependencyv1.Package{Ecosystem: "wolfi"}, "wolfi", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_OS_PACKAGE},
+		{"centos os but not osv-covered", &dependencyv1.Package{Ecosystem: "centos"}, "centos", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_OS_PACKAGE},
 		{"github actions eco", &dependencyv1.Package{Ecosystem: "github-actions"}, EcosystemGitHubActions, vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_GITHUB_ACTION},
 		{"gha alias", &dependencyv1.Package{Ecosystem: "gha"}, EcosystemGitHubActions, vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_GITHUB_ACTION},
 	}
@@ -167,6 +171,14 @@ func TestOSVSourceInfo(t *testing.T) {
 	}
 	if !slices.Contains(caps.GetEcosystems(), EcosystemGitHubActions) {
 		t.Errorf("ecosystems missing github-actions: %v", caps.GetEcosystems())
+	}
+	// Container-image OS packages classify to lowercase family names; the OSV
+	// source must declare them or every OS package routes to no source and
+	// container scans silently lose their OS-package findings.
+	for _, fam := range []string{"alpine", "debian", "ubuntu", "wolfi", "red hat"} {
+		if !slices.Contains(caps.GetEcosystems(), fam) {
+			t.Errorf("ecosystems missing OS family %q: %v", fam, caps.GetEcosystems())
+		}
 	}
 	if !slices.Contains(caps.GetArtifacts(), vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_GITHUB_ACTION) {
 		t.Errorf("artifacts missing GITHUB_ACTION: %v", caps.GetArtifacts())

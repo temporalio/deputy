@@ -51,6 +51,12 @@ func (s *osvSource) Info() *pluginv1.AdvisorySourceInfo {
 	// package registry, so it is not an OSVQueryable ecosystem; declare it
 	// explicitly so routing covers action refs.
 	ecos = append(ecos, EcosystemGitHubActions)
+	// OS-package families (Alpine, Debian, ...) also live outside the
+	// package-manager registry; declare them lowercased to match how classify
+	// canonicalizes OS packages, so container-image OS packages route here.
+	for _, fam := range osv.OSFamilies() {
+		ecos = append(ecos, strings.ToLower(fam))
+	}
 	slices.Sort(ecos)
 	return &pluginv1.AdvisorySourceInfo{
 		Name:        SourceNameOSV,
@@ -90,13 +96,8 @@ func (s *osvSource) Query(ctx context.Context, pkgs []*dependencyv1.Package) (*R
 // advisoryKind classifies an advisory as malware or vulnerability. OSV publishes
 // malicious-package records under the "MAL-" identifier prefix.
 func advisoryKind(adv *vulnerabilityv1.Advisory) vulnerabilityv1.FindingKind {
-	if isMalwareID(adv.GetId()) {
+	if isMalwareID(adv.GetId()) || slices.ContainsFunc(adv.GetAliases(), isMalwareID) {
 		return vulnerabilityv1.FindingKind_FINDING_KIND_MALWARE
-	}
-	for _, alias := range adv.GetAliases() {
-		if isMalwareID(alias) {
-			return vulnerabilityv1.FindingKind_FINDING_KIND_MALWARE
-		}
 	}
 	return vulnerabilityv1.FindingKind_FINDING_KIND_VULNERABILITY
 }
