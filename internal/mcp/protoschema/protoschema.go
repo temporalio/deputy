@@ -49,6 +49,8 @@ func ForMessage(md protoreflect.MessageDescriptor, opts Options) (*jsonschema.Sc
 }
 
 func messageSchema(md protoreflect.MessageDescriptor, opts Options, visiting map[protoreflect.FullName]bool) (*jsonschema.Schema, error) {
+	// visiting is deliberately shared (not cloned) across the recursion:
+	// cycle detection needs the full ancestor chain of the current walk.
 	if visiting[md.FullName()] {
 		return nil, fmt.Errorf("recursive message %s cannot be expressed without $ref", md.FullName())
 	}

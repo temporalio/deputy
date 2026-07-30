@@ -69,7 +69,7 @@ func TestCapabilitiesReferenceEntrypointCategories(t *testing.T) {
 	}
 	seen := make(map[Entrypoint]bool, len(AllEntrypoints))
 
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		cells := strings.Split(line, "|")
 		if len(cells) < 4 {
 			continue

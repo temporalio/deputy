@@ -579,7 +579,7 @@ func compareContainerLayers(baseInfo, targetInfo *image.Info) *diffv1.LayerDiffA
 	targetLen := len(targetInfo.History)
 	maxLen := max(targetLen, baseLen)
 
-	for i := 0; i < maxLen; i++ {
+	for i := range maxLen {
 		var change diffv1.LayerChange
 		change.Index = int32(i)
 

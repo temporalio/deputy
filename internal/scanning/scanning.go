@@ -522,6 +522,8 @@ const resolveSeverityLookups = 8
 // resolved Severity is normalized through the same path as record-carried
 // ratings and keeps its origin in type/raw. Advisories that stay unrated keep
 // severity UNKNOWN: absence of a rating anywhere is itself the answer.
+// The advisories map's values are mutated in place; the caller must not read
+// them concurrently with this call (reads after it returns are safe).
 func resolveUnratedSeverities(ctx context.Context, client osv.Client, advisories map[string]*vulnerabilityv1.Advisory) {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(resolveSeverityLookups)

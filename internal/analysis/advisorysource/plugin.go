@@ -71,8 +71,8 @@ func NewPluginSource(ctx context.Context, programName string, opts ...PluginOpti
 func (p *pluginSource) Info() *pluginv1.AdvisorySourceInfo { return p.info }
 
 // Query sends the covered packages to the plugin and returns its proto findings
-// verbatim — no conversion, because the plugin speaks exactly the aggregator's
-// types — stamping the plugin's name as provenance on each finding.
+// verbatim (no conversion, because the plugin speaks exactly the aggregator's
+// types), stamping the plugin's name as provenance on each finding.
 func (p *pluginSource) Query(ctx context.Context, pkgs []*dependencyv1.Package) (*Result, error) {
 	resp, err := p.client.Query(ctx, &pluginv1.AdvisoryQueryRequest{Packages: pkgs})
 	if err != nil {
@@ -117,7 +117,7 @@ const EnvAdvisorySources = "DEPUTY_ADVISORY_SOURCES"
 // and dropping empties.
 func parseProgramList(v string) []string {
 	var out []string
-	for _, part := range strings.Split(v, ",") {
+	for part := range strings.SplitSeq(v, ",") {
 		if p := strings.TrimSpace(part); p != "" {
 			out = append(out, p)
 		}
@@ -127,7 +127,7 @@ func parseProgramList(v string) []string {
 
 // DiscoverPluginPrograms returns advisory-source plugin program names found on
 // PATH (executables named deputy-advisory-source-*). Discovery only *lists*
-// candidates — for example for a future "deputy plugins list" UX — it never
+// candidates (for example for a future "deputy plugins list" UX); it never
 // executes them. To actually load a source, name it explicitly in
 // DEPUTY_ADVISORY_SOURCES; auto-running discovered binaries would let a dropped
 // executable forge or suppress findings.

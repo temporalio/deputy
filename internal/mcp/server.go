@@ -386,7 +386,10 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	w.Write(out)
+	if _, err := w.Write(out); err != nil {
+		// The header is already sent; nothing to return to the client.
+		logs.Warn(r.Context(), "writing /info response", "error", err)
+	}
 }
 
 // addTool is a helper that registers a tool and tracks its name for /info endpoint.
@@ -677,6 +680,9 @@ func validateLocalPath(path string) error {
 		return fmt.Errorf("path traversal not allowed: path contains '..' component")
 	}
 
+	// path.Clean (not filepath.Clean) on purpose: validation runs on the
+	// slash-normalized form so Windows-style paths are checked identically on
+	// every OS; filepath.Clean would reintroduce host-specific separators.
 	cleanPath := pathpkg.Clean(slashPath)
 	if cleanPath == "/" {
 		return fmt.Errorf("filesystem root is too broad to scan")
@@ -1371,7 +1377,6 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ra
 	return runTool(ctx, s, "scan_directory", s.toolTimeouts.Scan, &mcpv1.ScanDirectoryRequest{}, raw, s.scanDirectoryTool)
 }
 
-// scanDirectoryTool scans a local directory and summarizes consolidated findings with advisory-source coverage.
 // mcpEnrichOptions maps a tool's enrich flag to scan enrichment: one knob
 // that turns on every enrichment (severity resolution from alias records,
 // EPSS, KEV), matching the CLI's single --enrich flag. Nil when not requested
@@ -1383,6 +1388,8 @@ func mcpEnrichOptions(enrich bool) *scanv1.EnrichOptions {
 	return &scanv1.EnrichOptions{Enabled: true}
 }
 
+// scanDirectoryTool scans a local directory and summarizes consolidated
+// findings with advisory-source coverage.
 func (s *Server) scanDirectoryTool(ctx context.Context, args *mcpv1.ScanDirectoryRequest) (proto.Message, error) {
 	span := otel.SpanFromContext(ctx)
 	startTime := time.Now()
@@ -3184,6 +3191,9 @@ func referencesForMCP(values []string, limit int) ([]string, bool) {
 	return refs[:limit], true
 }
 
+// stringsForMCP clones a string list for a result proto. The empty return is
+// interchangeable with nil (protojson omits empty repeated fields either way);
+// the clone is what matters, so results never alias caller-owned slices.
 func stringsForMCP(values []string) []string {
 	if len(values) == 0 {
 		return []string{}

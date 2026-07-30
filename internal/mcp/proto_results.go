@@ -49,6 +49,8 @@ func marshalMCPResult(m proto.Message) (json.RawMessage, error) {
 // same contract) and rejects unknown fields, mirroring the schema's
 // additionalProperties: false.
 func unmarshalMCPRequest(raw json.RawMessage, m proto.Message) error {
+	// Empty raw means the tool was invoked with no arguments; validation
+	// still runs on the zero message so required fields reject as absent.
 	if len(raw) > 0 {
 		if err := (internalproto.MCPJSONUnmarshalOptions()).Unmarshal(raw, m); err != nil {
 			return fmt.Errorf("parse arguments: %w", err)

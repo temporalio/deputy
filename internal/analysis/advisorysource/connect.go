@@ -52,7 +52,9 @@ func WithConnectClientOptions(opts ...connect.ClientOption) ConnectOption {
 func NewConnectSource(ctx context.Context, baseURL string, opts ...ConnectOption) (Source, error) {
 	// Advisory queries sit on the scan critical path, so the default client
 	// carries a timeout; a hung remote source must not stall the whole scan.
-	// Callers with different needs supply their own via WithConnectHTTPClient.
+	// http.Client.Timeout bounds the full round trip, dial through reading
+	// the response body. Callers with different needs (per-request context
+	// deadlines, slow feeds) supply their own via WithConnectHTTPClient.
 	options := &connectOptions{httpClient: &http.Client{Timeout: 30 * time.Second}}
 	for _, opt := range opts {
 		opt(options)

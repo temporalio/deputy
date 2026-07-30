@@ -508,7 +508,6 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 		if i >= len(queries) || i >= len(meta) {
 			break
 		}
-		i, res := i, res
 		g.Go(func() error {
 			pkgMeta := meta[i]
 			ver := queries[i].Version
@@ -877,8 +876,10 @@ func versionInEcosystemRange(version, ecosystem string, r osvschema.Range) bool 
 			}
 		}
 		if e.Fixed != "" {
-			fixedVersion, err := semantic.Parse(e.Fixed, semanticEco)
-			if err != nil {
+			// An unparseable fixed version skips the event, leaving the
+			// introduced range open: the conservative reading of bad
+			// advisory data (report affected rather than assume fixed).
+			if _, err := semantic.Parse(e.Fixed, semanticEco); err != nil {
 				continue
 			}
 
@@ -901,7 +902,6 @@ func versionInEcosystemRange(version, ecosystem string, r osvschema.Range) bool 
 			// Reset introduced after processing a fixed event
 			introducedSet = false
 			introducedVersion = nil
-			_ = fixedVersion // silence unused warning
 		}
 	}
 

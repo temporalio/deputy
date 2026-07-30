@@ -192,6 +192,11 @@ func graphRefOrHEAD(ref string) string {
 	return ref
 }
 
+// graphBuilderOptions maps request options onto builder options. Resolution is
+// local-only by default: deps.dev transitive resolution deliberately rides the
+// use_proxy opt-in (a behavior change from the pre-refactor handlers, which
+// always reached deps.dev), so a default build makes no network calls. Pinned
+// by TestGraphBuilderOptions.
 func graphBuilderOptions(opts *graphv1.GraphOptions) graph.BuilderOptions {
 	if opts == nil {
 		return graph.BuilderOptions{}

@@ -51,7 +51,7 @@ func allSourceConfigs() []SourceConfig {
 	}
 
 	seen := make(map[string]bool, len(cfgs))
-	out := cfgs[:0]
+	out := make([]SourceConfig, 0, len(cfgs))
 	for _, c := range cfgs {
 		if seen[c.key()] {
 			continue
