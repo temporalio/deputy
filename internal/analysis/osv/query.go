@@ -135,9 +135,11 @@ func QueryProto(ctx context.Context, client Client, pkgs []*dependencyv1.Package
 		return nil, map[string]*vulnerabilityv1.Advisory{}, nil
 	}
 
-	// Convert proto packages to PkgInput for the existing query infrastructure
-	inputs := make([]PkgInput, len(pkgs))
-	for i, pkg := range pkgs {
+	// Convert proto packages to PkgInput for the existing query infrastructure.
+	// Nil packages are skipped entirely; a zero-value input slot would be
+	// counted (and reported) as a package dropped for missing a version.
+	inputs := make([]PkgInput, 0, len(pkgs))
+	for _, pkg := range pkgs {
 		if pkg == nil {
 			continue
 		}
@@ -154,7 +156,7 @@ func QueryProto(ctx context.Context, client Client, pkgs []*dependencyv1.Package
 			}
 		}
 
-		inputs[i] = PkgInput{
+		inputs = append(inputs, PkgInput{
 			QueryKey: QueryKey{
 				Name:      pkg.Name,
 				Version:   pkg.Version,
@@ -167,7 +169,7 @@ func QueryProto(ctx context.Context, client Client, pkgs []*dependencyv1.Package
 				ManifestRefs: manifestRefs,
 				LayerDetails: pkg.LayerDetails,
 			},
-		}
+		})
 	}
 
 	// Query using existing infrastructure
