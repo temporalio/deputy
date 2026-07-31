@@ -5,6 +5,7 @@ import (
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/compare"
@@ -128,12 +129,16 @@ func DiffStatsToProto(changes []compare.Change) *diffv1.DiffStats {
 	return stats
 }
 
-// GitDiffReportToProto creates a DiffVulnerabilitiesResponse from git diff data.
+// GitDiffReportToProto creates a DiffVulnerabilitiesResponse from git diff
+// data. This is the `deputy diff --format json` output contract: it carries
+// the dependency changes, vulnerability findings, and structured policy
+// results so consumers never parse rendered text.
 func GitDiffReportToProto(
 	repo, baseRef, targetRef string,
 	changes []compare.Change,
 	findings []vulnerability.Finding,
 	advisories map[string]*vulnerabilityv1.Advisory,
+	policyActions []*policyv1.Action,
 ) *diffv1.DiffVulnerabilitiesResponse {
 	resp := &diffv1.DiffVulnerabilitiesResponse{
 		BaseTarget: &targetv1.Target{
@@ -142,8 +147,11 @@ func GitDiffReportToProto(
 		TargetTarget: &targetv1.Target{
 			DisplayPath: targetRef,
 		},
-		GeneratedAt: timestamppb.Now(),
-		Advisories:  advisories,
+		GeneratedAt:   timestamppb.Now(),
+		Advisories:    advisories,
+		Changes:       PackageChangesToProto(changes),
+		ChangeStats:   DiffStatsToProto(changes),
+		PolicyActions: policyActions,
 	}
 
 	// All findings from the diff are considered "added" since we're scanning the target

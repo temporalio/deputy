@@ -26,6 +26,7 @@ import (
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/analysis/advisorysource"
@@ -385,7 +386,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 
 		if matcher != nil && !matcher.AnyMatch(changedFiles) {
 			if isJSON {
-				emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil)
+				emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil)
 				otel.SetSpanOK(span)
 				return outputDiffProtoJSON(outW, emptyResp)
 			}
@@ -516,7 +517,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	})
 	if len(changes) == 0 {
 		if isJSON {
-			emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil)
+			emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil)
 			return outputDiffProtoJSON(outW, emptyResp)
 		}
 		fmt.Fprintln(outW, "No package changes detected.")
@@ -611,16 +612,27 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 			Changes:         changes,
 			Vulnerabilities: reportVulns,
 		}
-		if err := runDiffPolicies(ctx, policyPaths, policyReport, errW); err != nil {
+		policyActions, err := runDiffPolicies(ctx, policyPaths, policyReport)
+		if err != nil {
 			otel.SetSpanError(span, err)
 			return err
 		}
 
 		// JSON output mode
 		if isJSON {
-			protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, result.Findings, result.Advisories)
+			protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, result.Findings, result.Advisories, policyActions)
+			if err := outputDiffProtoJSON(outW, protoResp); err != nil {
+				otel.SetSpanError(span, err)
+				return err
+			}
+			// A deny still fails the command, but only after the structured
+			// output is written so CI consumers get the full picture.
+			if denyErr := policyDenyError(policyActions); denyErr != nil {
+				otel.SetSpanError(span, denyErr)
+				return denyErr
+			}
 			otel.SetSpanOK(span)
-			return outputDiffProtoJSON(outW, protoResp)
+			return nil
 		}
 
 		changedVulns, unchangedVulns := splitVulnsByChange(reportVulns, changes)
@@ -719,13 +731,22 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 		} else {
 			render.VulnerabilitySummaryAndActions(outW, allCons, allResult.Stats)
 		}
+
+		render.PolicyActionsSection(outW, len(policyPaths), policyActions)
+
+		// A deny still fails the command, but only after the full report has
+		// rendered so the failure comes with its complete context.
+		if denyErr := policyDenyError(policyActions); denyErr != nil {
+			otel.SetSpanError(span, denyErr)
+			return denyErr
+		}
 		otel.SetSpanOK(span)
 		return nil
 	}
 
 	// No vulnerability scanning - output changes only
 	if isJSON {
-		protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, nil, nil)
+		protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, nil, nil, nil)
 		otel.SetSpanOK(span)
 		return outputDiffProtoJSON(outW, protoResp)
 	}
@@ -1203,18 +1224,33 @@ func mergeGoDirectMaps(maps ...map[string]bool) map[string]bool {
 	return merged
 }
 
-// runDiffPolicies evaluates the configured policies against the diff report.
-// Passes proto messages directly to CEL for type-safe evaluation.
-func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffPolicyReport, errW io.Writer) error {
-	if len(policyPaths) == 0 {
-		return nil
+// runDiffPolicies evaluates the configured policies against the diff report
+// and returns structured results attributed to the change or finding each
+// evaluation covered. Passes proto messages directly to CEL for type-safe
+// evaluation.
+//
+// It never prints and does not fail on denies: callers render the collected
+// results as one cohesive section after the report and gate on
+// policyDenyError afterwards, so a deny still produces complete output
+// before the command fails.
+func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffPolicyReport) ([]*policyv1.Action, error) {
+	evaluator, err := newPolicyEvaluator(policyPaths, "diff")
+	if evaluator == nil || err != nil {
+		return nil, err
 	}
 
 	// Convert to proto types for CEL evaluation
 	protoChanges := internalproto.PackageChangesToProto(diffReport.Changes)
 	protoFindings := report.VulnerabilitiesToFindings(diffReport.Vulnerabilities)
 
-	// Build report-level payload with proto messages
+	var results []*policyv1.Action
+	collect := func(actions []policy.Action, entrypoint policy.Entrypoint, subject *policyv1.Subject) {
+		for _, act := range actions {
+			results = append(results, internalproto.PolicyActionToProto(act, entrypoint.String(), subject))
+		}
+	}
+
+	// Report-level evaluation: no single subject applies.
 	payload := map[string]any{
 		"repo":            diffReport.Repo,
 		"baseRef":         diffReport.BaseRef,
@@ -1222,12 +1258,13 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 		"changes":         protoChanges,
 		"vulnerabilities": protoFindings,
 	}
-
-	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", policy.EntrypointDiffReport, errW); err != nil {
-		return err
+	actions, err := evaluator.evaluate(ctx, payload, policy.EntrypointDiffReport)
+	if err != nil {
+		return nil, err
 	}
+	collect(actions, policy.EntrypointDiffReport, nil)
 
-	// Evaluate per-change policies
+	// Per-change evaluations: the changed package is the subject.
 	for _, protoChange := range protoChanges {
 		changePayload := map[string]any{
 			"repo":       diffReport.Repo,
@@ -1237,12 +1274,14 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 			"pkg":        protoChange.Package, // Alias for consistency with scan entrypoints
 			"dependency": protoChange.Package, // Alias for consistency with fix entrypoints
 		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, changePayload, "diff", policy.EntrypointDiffDependencyChange, errW); err != nil {
-			return err
+		actions, err := evaluator.evaluate(ctx, changePayload, policy.EntrypointDiffDependencyChange)
+		if err != nil {
+			return nil, err
 		}
+		collect(actions, policy.EntrypointDiffDependencyChange, internalproto.PolicySubjectFromPackage(protoChange.Package))
 	}
 
-	// Evaluate per-vulnerability policies
+	// Per-vulnerability evaluations: the finding is the subject.
 	for _, finding := range protoFindings {
 		vulnPayload := map[string]any{
 			"repo":          diffReport.Repo,
@@ -1251,11 +1290,13 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 			"vulnerability": finding,
 			"pkg":           finding.Package, // Alias for consistency with scan entrypoints
 		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, vulnPayload, "diff", policy.EntrypointDiffVulnerability, errW); err != nil {
-			return err
+		actions, err := evaluator.evaluate(ctx, vulnPayload, policy.EntrypointDiffVulnerability)
+		if err != nil {
+			return nil, err
 		}
+		collect(actions, policy.EntrypointDiffVulnerability, internalproto.PolicySubjectFromFinding(finding))
 	}
-	return nil
+	return results, nil
 }
 
 // outputDiffProtoJSON writes a diff response as JSON using protojson.

@@ -529,6 +529,33 @@ $ deputy diff --policy policy/container-upgrade.yaml nginx:1.24 nginx:1.25
 
 See [Policy Examples](../../policy/examples/) for ready-to-use policies including [container-diff.yaml](../../policy/examples/container-diff.yaml) and [new-dependency-review.yaml](../../policy/examples/new-dependency-review.yaml).
 
+Policy results render as one **Policy Evaluation** section after the report,
+grouped by rule and deduplicated, with the evaluated packages or findings
+listed beneath each entry:
+
+```
+Policy Evaluation:
+  ! 1 policy file evaluated - 12 warned
+  • [WARN] pr-license-check policy/ci/pr-review.yaml (12 packages)
+    No license information detected
+      golang.org/x/crypto @ 0.53.0
+      golang.org/x/mod @ 0.37.0
+      … and 10 more
+    Remediation: Verify the dependency's license manually
+```
+
+A `deny` still fails the command (exit code `1`), but only after the full
+report and structured output are produced, so CI consumers always get the
+complete picture alongside the failure.
+
+With `--format json`, the same results appear as structured data: the
+response carries `changes` and `change_stats` (the dependency change set) and
+`policy_actions`, where each entry has the policy file (`policy_name`), rule
+(`rule_name`), `entrypoint`, action `type`, `reason`, `remediation`, and the
+evaluated `subject` (package, version, ecosystem, and advisory ID for
+vulnerability-scoped rules). CI tooling should consume these fields rather
+than parsing the rendered text.
+
 ## Output
 
 ```
