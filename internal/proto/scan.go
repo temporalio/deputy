@@ -1,17 +1,14 @@
 package proto
 
 import (
-	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
-	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
-	"github.com/temporalio/deputy/internal/policy"
 	"github.com/temporalio/deputy/internal/scanning"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
@@ -170,36 +167,4 @@ func StatsFromProto(s *vulnerabilityv1.Stats) *vulnerabilityv1.Stats {
 		return &vulnerabilityv1.Stats{}
 	}
 	return s
-}
-
-// PolicyActionsToProto converts internal policy.Action slice to proto Action slice.
-func PolicyActionsToProto(actions []policy.Action) []*policyv1.Action {
-	if len(actions) == 0 {
-		return nil
-	}
-	out := make([]*policyv1.Action, len(actions))
-	for i, a := range actions {
-		out[i] = &policyv1.Action{
-			Type:        policyActionTypeToProto(a.Type),
-			PolicyName:  a.Source,
-			RuleName:    "", // internal Action doesn't have a separate rule name
-			Reason:      a.Reason,
-			Remediation: a.Remediation,
-		}
-	}
-	return out
-}
-
-// policyActionTypeToProto converts action type string to proto enum.
-func policyActionTypeToProto(actionType string) policyv1.ActionType {
-	switch strings.ToLower(actionType) {
-	case "deny":
-		return policyv1.ActionType_ACTION_TYPE_DENY
-	case "warn":
-		return policyv1.ActionType_ACTION_TYPE_WARN
-	case "allow":
-		return policyv1.ActionType_ACTION_TYPE_ALLOW
-	default:
-		return policyv1.ActionType_ACTION_TYPE_UNSPECIFIED
-	}
 }

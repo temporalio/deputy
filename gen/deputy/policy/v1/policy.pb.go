@@ -83,20 +83,38 @@ func (ActionType) EnumDescriptor() ([]byte, []int) {
 }
 
 // Action captures a single policy evaluation result.
+//
+// Action is the surface-crossing shape for policy outcomes: scan and diff
+// carry it in their `--format json` output contracts, and CLI sections, CI
+// renderers, and MCP tools all consume the same message rather than scraping
+// rendered text.
 type Action struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Type is the action type (allow, deny, warn).
 	Type ActionType `protobuf:"varint,1,opt,name=type,proto3,enum=deputy.policy.v1.ActionType" json:"type,omitempty"`
-	// PolicyName is the name of the policy that triggered this action.
+	// PolicyName is the policy source that triggered this action,
+	// typically the bundle file path (e.g., "policy/ci/pr-review.yaml").
 	PolicyName string `protobuf:"bytes,2,opt,name=policy_name,json=policyName,proto3" json:"policy_name,omitempty"`
-	// RuleName is the name of the specific rule within the policy.
+	// RuleName is the name of the specific rule within the policy
+	// (e.g., "pr-license-check").
 	RuleName string `protobuf:"bytes,3,opt,name=rule_name,json=ruleName,proto3" json:"rule_name,omitempty"`
 	// Reason explains why this action was triggered.
 	Reason string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
 	// Remediation suggests how to resolve the issue.
 	Remediation string `protobuf:"bytes,5,opt,name=remediation,proto3" json:"remediation,omitempty"`
-	// Entrypoint is the policy entrypoint that evaluated this action.
-	Entrypoint    string `protobuf:"bytes,6,opt,name=entrypoint,proto3" json:"entrypoint,omitempty"`
+	// Entrypoint is the policy entrypoint that evaluated this action
+	// (e.g., "diff_dependency_change").
+	Entrypoint string `protobuf:"bytes,6,opt,name=entrypoint,proto3" json:"entrypoint,omitempty"`
+	// Message provides optional additional context from the rule beyond reason.
+	Message string `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
+	// Code is an optional machine-readable identifier for the finding type.
+	Code string `protobuf:"bytes,8,opt,name=code,proto3" json:"code,omitempty"`
+	// Subject identifies what the rule evaluated, when the entrypoint is
+	// subject-scoped (per-package, per-vulnerability). Report-level results
+	// leave it unset. Without a subject, a warning like "no license detected"
+	// is not actionable; with one, consumers can group, deduplicate, and point
+	// at the offending package.
+	Subject       *Subject `protobuf:"bytes,9,opt,name=subject,proto3" json:"subject,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -173,6 +191,113 @@ func (x *Action) GetEntrypoint() string {
 	return ""
 }
 
+func (x *Action) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *Action) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *Action) GetSubject() *Subject {
+	if x != nil {
+		return x.Subject
+	}
+	return nil
+}
+
+// Subject identifies the item a policy rule evaluated.
+//
+// Fields are flat and optional so the message stays within MCP client schema
+// constraints (no oneof); consumers treat an empty field as not applicable.
+type Subject struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Package is the evaluated package name (e.g., "google.golang.org/grpc").
+	Package string `protobuf:"bytes,1,opt,name=package,proto3" json:"package,omitempty"`
+	// Version is the evaluated package version.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// Ecosystem is the package ecosystem (e.g., "go", "npm").
+	Ecosystem string `protobuf:"bytes,3,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
+	// Purl is the Package URL for the evaluated package, when known.
+	Purl string `protobuf:"bytes,4,opt,name=purl,proto3" json:"purl,omitempty"`
+	// Advisory is the advisory ID when the subject is a vulnerability finding
+	// (e.g., "GHSA-xxxx-xxxx-xxxx", "CVE-2026-1234").
+	Advisory      string `protobuf:"bytes,5,opt,name=advisory,proto3" json:"advisory,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Subject) Reset() {
+	*x = Subject{}
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Subject) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Subject) ProtoMessage() {}
+
+func (x *Subject) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Subject.ProtoReflect.Descriptor instead.
+func (*Subject) Descriptor() ([]byte, []int) {
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Subject) GetPackage() string {
+	if x != nil {
+		return x.Package
+	}
+	return ""
+}
+
+func (x *Subject) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *Subject) GetEcosystem() string {
+	if x != nil {
+		return x.Ecosystem
+	}
+	return ""
+}
+
+func (x *Subject) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *Subject) GetAdvisory() string {
+	if x != nil {
+		return x.Advisory
+	}
+	return ""
+}
+
 // Environment provides context about the execution environment.
 type Environment struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -186,7 +311,7 @@ type Environment struct {
 
 func (x *Environment) Reset() {
 	*x = Environment{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[1]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -198,7 +323,7 @@ func (x *Environment) String() string {
 func (*Environment) ProtoMessage() {}
 
 func (x *Environment) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[1]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -211,7 +336,7 @@ func (x *Environment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Environment.ProtoReflect.Descriptor instead.
 func (*Environment) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{1}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Environment) GetCommand() string {
@@ -255,7 +380,7 @@ type JWTClaims struct {
 
 func (x *JWTClaims) Reset() {
 	*x = JWTClaims{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[2]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -267,7 +392,7 @@ func (x *JWTClaims) String() string {
 func (*JWTClaims) ProtoMessage() {}
 
 func (x *JWTClaims) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[2]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -280,7 +405,7 @@ func (x *JWTClaims) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JWTClaims.ProtoReflect.Descriptor instead.
 func (*JWTClaims) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{2}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *JWTClaims) GetAnonymous() bool {
@@ -365,7 +490,7 @@ type ProxyRequest struct {
 
 func (x *ProxyRequest) Reset() {
 	*x = ProxyRequest{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[3]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -377,7 +502,7 @@ func (x *ProxyRequest) String() string {
 func (*ProxyRequest) ProtoMessage() {}
 
 func (x *ProxyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[3]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -390,7 +515,7 @@ func (x *ProxyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProxyRequest.ProtoReflect.Descriptor instead.
 func (*ProxyRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{3}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ProxyRequest) GetPackage() string {
@@ -448,7 +573,7 @@ type ScanVulnerabilityPolicyInput struct {
 
 func (x *ScanVulnerabilityPolicyInput) Reset() {
 	*x = ScanVulnerabilityPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[4]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -460,7 +585,7 @@ func (x *ScanVulnerabilityPolicyInput) String() string {
 func (*ScanVulnerabilityPolicyInput) ProtoMessage() {}
 
 func (x *ScanVulnerabilityPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[4]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -473,7 +598,7 @@ func (x *ScanVulnerabilityPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanVulnerabilityPolicyInput.ProtoReflect.Descriptor instead.
 func (*ScanVulnerabilityPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{4}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ScanVulnerabilityPolicyInput) GetVulnerability() *v1.Finding {
@@ -533,7 +658,7 @@ type ScanReportPolicyInput struct {
 
 func (x *ScanReportPolicyInput) Reset() {
 	*x = ScanReportPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[5]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -545,7 +670,7 @@ func (x *ScanReportPolicyInput) String() string {
 func (*ScanReportPolicyInput) ProtoMessage() {}
 
 func (x *ScanReportPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[5]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -558,7 +683,7 @@ func (x *ScanReportPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanReportPolicyInput.ProtoReflect.Descriptor instead.
 func (*ScanReportPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{5}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ScanReportPolicyInput) GetVulnerabilities() []*v1.Finding {
@@ -623,7 +748,7 @@ type GoArtifactRequestPolicyInput struct {
 
 func (x *GoArtifactRequestPolicyInput) Reset() {
 	*x = GoArtifactRequestPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[6]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -635,7 +760,7 @@ func (x *GoArtifactRequestPolicyInput) String() string {
 func (*GoArtifactRequestPolicyInput) ProtoMessage() {}
 
 func (x *GoArtifactRequestPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[6]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -648,7 +773,7 @@ func (x *GoArtifactRequestPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GoArtifactRequestPolicyInput.ProtoReflect.Descriptor instead.
 func (*GoArtifactRequestPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{6}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GoArtifactRequestPolicyInput) GetRequest() *ProxyRequest {
@@ -706,7 +831,7 @@ type NpmArtifactRequestPolicyInput struct {
 
 func (x *NpmArtifactRequestPolicyInput) Reset() {
 	*x = NpmArtifactRequestPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[7]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -718,7 +843,7 @@ func (x *NpmArtifactRequestPolicyInput) String() string {
 func (*NpmArtifactRequestPolicyInput) ProtoMessage() {}
 
 func (x *NpmArtifactRequestPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[7]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -731,7 +856,7 @@ func (x *NpmArtifactRequestPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NpmArtifactRequestPolicyInput.ProtoReflect.Descriptor instead.
 func (*NpmArtifactRequestPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{7}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *NpmArtifactRequestPolicyInput) GetRequest() *ProxyRequest {
@@ -789,7 +914,7 @@ type PypiArtifactRequestPolicyInput struct {
 
 func (x *PypiArtifactRequestPolicyInput) Reset() {
 	*x = PypiArtifactRequestPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[8]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -801,7 +926,7 @@ func (x *PypiArtifactRequestPolicyInput) String() string {
 func (*PypiArtifactRequestPolicyInput) ProtoMessage() {}
 
 func (x *PypiArtifactRequestPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[8]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -814,7 +939,7 @@ func (x *PypiArtifactRequestPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PypiArtifactRequestPolicyInput.ProtoReflect.Descriptor instead.
 func (*PypiArtifactRequestPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{8}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *PypiArtifactRequestPolicyInput) GetRequest() *ProxyRequest {
@@ -872,7 +997,7 @@ type RubygemsArtifactRequestPolicyInput struct {
 
 func (x *RubygemsArtifactRequestPolicyInput) Reset() {
 	*x = RubygemsArtifactRequestPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[9]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -884,7 +1009,7 @@ func (x *RubygemsArtifactRequestPolicyInput) String() string {
 func (*RubygemsArtifactRequestPolicyInput) ProtoMessage() {}
 
 func (x *RubygemsArtifactRequestPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[9]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -897,7 +1022,7 @@ func (x *RubygemsArtifactRequestPolicyInput) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use RubygemsArtifactRequestPolicyInput.ProtoReflect.Descriptor instead.
 func (*RubygemsArtifactRequestPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{9}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RubygemsArtifactRequestPolicyInput) GetRequest() *ProxyRequest {
@@ -955,7 +1080,7 @@ type OciArtifactRequestPolicyInput struct {
 
 func (x *OciArtifactRequestPolicyInput) Reset() {
 	*x = OciArtifactRequestPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[10]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -967,7 +1092,7 @@ func (x *OciArtifactRequestPolicyInput) String() string {
 func (*OciArtifactRequestPolicyInput) ProtoMessage() {}
 
 func (x *OciArtifactRequestPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[10]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -980,7 +1105,7 @@ func (x *OciArtifactRequestPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OciArtifactRequestPolicyInput.ProtoReflect.Descriptor instead.
 func (*OciArtifactRequestPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{10}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *OciArtifactRequestPolicyInput) GetRequest() *ProxyRequest {
@@ -1034,7 +1159,7 @@ type SbomReportPolicyInput struct {
 
 func (x *SbomReportPolicyInput) Reset() {
 	*x = SbomReportPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[11]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1046,7 +1171,7 @@ func (x *SbomReportPolicyInput) String() string {
 func (*SbomReportPolicyInput) ProtoMessage() {}
 
 func (x *SbomReportPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[11]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1059,7 +1184,7 @@ func (x *SbomReportPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SbomReportPolicyInput.ProtoReflect.Descriptor instead.
 func (*SbomReportPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{11}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SbomReportPolicyInput) GetComponents() []*v11.Package {
@@ -1099,7 +1224,7 @@ type SbomComponentPolicyInput struct {
 
 func (x *SbomComponentPolicyInput) Reset() {
 	*x = SbomComponentPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[12]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1111,7 +1236,7 @@ func (x *SbomComponentPolicyInput) String() string {
 func (*SbomComponentPolicyInput) ProtoMessage() {}
 
 func (x *SbomComponentPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[12]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1124,7 +1249,7 @@ func (x *SbomComponentPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SbomComponentPolicyInput.ProtoReflect.Descriptor instead.
 func (*SbomComponentPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{12}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SbomComponentPolicyInput) GetPkg() *v11.Package {
@@ -1166,7 +1291,7 @@ type DiffReportPolicyInput struct {
 
 func (x *DiffReportPolicyInput) Reset() {
 	*x = DiffReportPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[13]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1178,7 +1303,7 @@ func (x *DiffReportPolicyInput) String() string {
 func (*DiffReportPolicyInput) ProtoMessage() {}
 
 func (x *DiffReportPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[13]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1191,7 +1316,7 @@ func (x *DiffReportPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffReportPolicyInput.ProtoReflect.Descriptor instead.
 func (*DiffReportPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{13}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DiffReportPolicyInput) GetChanges() []*DependencyChange {
@@ -1241,7 +1366,7 @@ type DependencyChange struct {
 
 func (x *DependencyChange) Reset() {
 	*x = DependencyChange{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[14]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1253,7 +1378,7 @@ func (x *DependencyChange) String() string {
 func (*DependencyChange) ProtoMessage() {}
 
 func (x *DependencyChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[14]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1266,7 +1391,7 @@ func (x *DependencyChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DependencyChange.ProtoReflect.Descriptor instead.
 func (*DependencyChange) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{14}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DependencyChange) GetPkg() *v11.Package {
@@ -1318,7 +1443,7 @@ type DiffDependencyChangePolicyInput struct {
 
 func (x *DiffDependencyChangePolicyInput) Reset() {
 	*x = DiffDependencyChangePolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[15]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1330,7 +1455,7 @@ func (x *DiffDependencyChangePolicyInput) String() string {
 func (*DiffDependencyChangePolicyInput) ProtoMessage() {}
 
 func (x *DiffDependencyChangePolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[15]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1343,7 +1468,7 @@ func (x *DiffDependencyChangePolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffDependencyChangePolicyInput.ProtoReflect.Descriptor instead.
 func (*DiffDependencyChangePolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{15}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DiffDependencyChangePolicyInput) GetChange() *DependencyChange {
@@ -1376,7 +1501,7 @@ type DiffVulnerabilityPolicyInput struct {
 
 func (x *DiffVulnerabilityPolicyInput) Reset() {
 	*x = DiffVulnerabilityPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[16]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1388,7 +1513,7 @@ func (x *DiffVulnerabilityPolicyInput) String() string {
 func (*DiffVulnerabilityPolicyInput) ProtoMessage() {}
 
 func (x *DiffVulnerabilityPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[16]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1401,7 +1526,7 @@ func (x *DiffVulnerabilityPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffVulnerabilityPolicyInput.ProtoReflect.Descriptor instead.
 func (*DiffVulnerabilityPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{16}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DiffVulnerabilityPolicyInput) GetVulnerability() *v1.Finding {
@@ -1446,7 +1571,7 @@ type ContainerDiffReportPolicyInput struct {
 
 func (x *ContainerDiffReportPolicyInput) Reset() {
 	*x = ContainerDiffReportPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[17]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1458,7 +1583,7 @@ func (x *ContainerDiffReportPolicyInput) String() string {
 func (*ContainerDiffReportPolicyInput) ProtoMessage() {}
 
 func (x *ContainerDiffReportPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[17]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1471,7 +1596,7 @@ func (x *ContainerDiffReportPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerDiffReportPolicyInput.ProtoReflect.Descriptor instead.
 func (*ContainerDiffReportPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{17}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ContainerDiffReportPolicyInput) GetPackageChanges() []*ContainerPackageChange {
@@ -1533,7 +1658,7 @@ type ContainerPackageChange struct {
 
 func (x *ContainerPackageChange) Reset() {
 	*x = ContainerPackageChange{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[18]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1545,7 +1670,7 @@ func (x *ContainerPackageChange) String() string {
 func (*ContainerPackageChange) ProtoMessage() {}
 
 func (x *ContainerPackageChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[18]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1558,7 +1683,7 @@ func (x *ContainerPackageChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerPackageChange.ProtoReflect.Descriptor instead.
 func (*ContainerPackageChange) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{18}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ContainerPackageChange) GetName() string {
@@ -1635,7 +1760,7 @@ type ContainerVulnerabilityChange struct {
 
 func (x *ContainerVulnerabilityChange) Reset() {
 	*x = ContainerVulnerabilityChange{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[19]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1647,7 +1772,7 @@ func (x *ContainerVulnerabilityChange) String() string {
 func (*ContainerVulnerabilityChange) ProtoMessage() {}
 
 func (x *ContainerVulnerabilityChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[19]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1660,7 +1785,7 @@ func (x *ContainerVulnerabilityChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerVulnerabilityChange.ProtoReflect.Descriptor instead.
 func (*ContainerVulnerabilityChange) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{19}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ContainerVulnerabilityChange) GetId() string {
@@ -1747,7 +1872,7 @@ type ContainerConfigDiff struct {
 
 func (x *ContainerConfigDiff) Reset() {
 	*x = ContainerConfigDiff{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[20]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1759,7 +1884,7 @@ func (x *ContainerConfigDiff) String() string {
 func (*ContainerConfigDiff) ProtoMessage() {}
 
 func (x *ContainerConfigDiff) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[20]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1772,7 +1897,7 @@ func (x *ContainerConfigDiff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerConfigDiff.ProtoReflect.Descriptor instead.
 func (*ContainerConfigDiff) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{20}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ContainerConfigDiff) GetUserChanged() bool {
@@ -1873,7 +1998,7 @@ type ContainerImageRef struct {
 
 func (x *ContainerImageRef) Reset() {
 	*x = ContainerImageRef{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[21]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1885,7 +2010,7 @@ func (x *ContainerImageRef) String() string {
 func (*ContainerImageRef) ProtoMessage() {}
 
 func (x *ContainerImageRef) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[21]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1898,7 +2023,7 @@ func (x *ContainerImageRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerImageRef.ProtoReflect.Descriptor instead.
 func (*ContainerImageRef) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{21}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ContainerImageRef) GetReference() string {
@@ -1947,7 +2072,7 @@ type ContainerDiffChangePolicyInput struct {
 
 func (x *ContainerDiffChangePolicyInput) Reset() {
 	*x = ContainerDiffChangePolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[22]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1959,7 +2084,7 @@ func (x *ContainerDiffChangePolicyInput) String() string {
 func (*ContainerDiffChangePolicyInput) ProtoMessage() {}
 
 func (x *ContainerDiffChangePolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[22]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1972,7 +2097,7 @@ func (x *ContainerDiffChangePolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerDiffChangePolicyInput.ProtoReflect.Descriptor instead.
 func (*ContainerDiffChangePolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{22}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ContainerDiffChangePolicyInput) GetChange() *ContainerPackageChange {
@@ -2000,7 +2125,7 @@ type ContainerDiffVulnerabilityPolicyInput struct {
 
 func (x *ContainerDiffVulnerabilityPolicyInput) Reset() {
 	*x = ContainerDiffVulnerabilityPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[23]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2012,7 +2137,7 @@ func (x *ContainerDiffVulnerabilityPolicyInput) String() string {
 func (*ContainerDiffVulnerabilityPolicyInput) ProtoMessage() {}
 
 func (x *ContainerDiffVulnerabilityPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[23]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2025,7 +2150,7 @@ func (x *ContainerDiffVulnerabilityPolicyInput) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use ContainerDiffVulnerabilityPolicyInput.ProtoReflect.Descriptor instead.
 func (*ContainerDiffVulnerabilityPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{23}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ContainerDiffVulnerabilityPolicyInput) GetVulnerabilityChange() *ContainerVulnerabilityChange {
@@ -2053,7 +2178,7 @@ type ContainerDiffLayerPolicyInput struct {
 
 func (x *ContainerDiffLayerPolicyInput) Reset() {
 	*x = ContainerDiffLayerPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[24]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2065,7 +2190,7 @@ func (x *ContainerDiffLayerPolicyInput) String() string {
 func (*ContainerDiffLayerPolicyInput) ProtoMessage() {}
 
 func (x *ContainerDiffLayerPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[24]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2078,7 +2203,7 @@ func (x *ContainerDiffLayerPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerDiffLayerPolicyInput.ProtoReflect.Descriptor instead.
 func (*ContainerDiffLayerPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{24}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ContainerDiffLayerPolicyInput) GetLayerChange() *LayerChange {
@@ -2108,7 +2233,7 @@ type LayerChange struct {
 
 func (x *LayerChange) Reset() {
 	*x = LayerChange{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[25]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2120,7 +2245,7 @@ func (x *LayerChange) String() string {
 func (*LayerChange) ProtoMessage() {}
 
 func (x *LayerChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[25]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2133,7 +2258,7 @@ func (x *LayerChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LayerChange.ProtoReflect.Descriptor instead.
 func (*LayerChange) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{25}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *LayerChange) GetIndex() int32 {
@@ -2175,7 +2300,7 @@ type ContainerDiffConfigPolicyInput struct {
 
 func (x *ContainerDiffConfigPolicyInput) Reset() {
 	*x = ContainerDiffConfigPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[26]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2187,7 +2312,7 @@ func (x *ContainerDiffConfigPolicyInput) String() string {
 func (*ContainerDiffConfigPolicyInput) ProtoMessage() {}
 
 func (x *ContainerDiffConfigPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[26]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2200,7 +2325,7 @@ func (x *ContainerDiffConfigPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerDiffConfigPolicyInput.ProtoReflect.Descriptor instead.
 func (*ContainerDiffConfigPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{26}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ContainerDiffConfigPolicyInput) GetConfigDiff() *ContainerConfigDiff {
@@ -2243,7 +2368,7 @@ type SecretFinding struct {
 
 func (x *SecretFinding) Reset() {
 	*x = SecretFinding{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[27]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2255,7 +2380,7 @@ func (x *SecretFinding) String() string {
 func (*SecretFinding) ProtoMessage() {}
 
 func (x *SecretFinding) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[27]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2268,7 +2393,7 @@ func (x *SecretFinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecretFinding.ProtoReflect.Descriptor instead.
 func (*SecretFinding) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{27}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SecretFinding) GetType() string {
@@ -2344,7 +2469,7 @@ type SecretStats struct {
 
 func (x *SecretStats) Reset() {
 	*x = SecretStats{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[28]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2356,7 +2481,7 @@ func (x *SecretStats) String() string {
 func (*SecretStats) ProtoMessage() {}
 
 func (x *SecretStats) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[28]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2369,7 +2494,7 @@ func (x *SecretStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecretStats.ProtoReflect.Descriptor instead.
 func (*SecretStats) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{28}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *SecretStats) GetTotal() int32 {
@@ -2417,7 +2542,7 @@ type SecretsReportPolicyInput struct {
 
 func (x *SecretsReportPolicyInput) Reset() {
 	*x = SecretsReportPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[29]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2429,7 +2554,7 @@ func (x *SecretsReportPolicyInput) String() string {
 func (*SecretsReportPolicyInput) ProtoMessage() {}
 
 func (x *SecretsReportPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[29]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2442,7 +2567,7 @@ func (x *SecretsReportPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecretsReportPolicyInput.ProtoReflect.Descriptor instead.
 func (*SecretsReportPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{29}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *SecretsReportPolicyInput) GetFindings() []*SecretFinding {
@@ -2486,7 +2611,7 @@ type SecretsFindingPolicyInput struct {
 
 func (x *SecretsFindingPolicyInput) Reset() {
 	*x = SecretsFindingPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[30]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2498,7 +2623,7 @@ func (x *SecretsFindingPolicyInput) String() string {
 func (*SecretsFindingPolicyInput) ProtoMessage() {}
 
 func (x *SecretsFindingPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[30]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2511,7 +2636,7 @@ func (x *SecretsFindingPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecretsFindingPolicyInput.ProtoReflect.Descriptor instead.
 func (*SecretsFindingPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{30}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *SecretsFindingPolicyInput) GetFinding() *SecretFinding {
@@ -2549,7 +2674,7 @@ type GraphReportPolicyInput struct {
 
 func (x *GraphReportPolicyInput) Reset() {
 	*x = GraphReportPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[31]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2561,7 +2686,7 @@ func (x *GraphReportPolicyInput) String() string {
 func (*GraphReportPolicyInput) ProtoMessage() {}
 
 func (x *GraphReportPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[31]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2574,7 +2699,7 @@ func (x *GraphReportPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphReportPolicyInput.ProtoReflect.Descriptor instead.
 func (*GraphReportPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{31}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *GraphReportPolicyInput) GetNodes() []*GraphNode {
@@ -2636,7 +2761,7 @@ type GraphNode struct {
 
 func (x *GraphNode) Reset() {
 	*x = GraphNode{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[32]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2648,7 +2773,7 @@ func (x *GraphNode) String() string {
 func (*GraphNode) ProtoMessage() {}
 
 func (x *GraphNode) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[32]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2661,7 +2786,7 @@ func (x *GraphNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphNode.ProtoReflect.Descriptor instead.
 func (*GraphNode) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{32}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *GraphNode) GetPurl() string {
@@ -2733,7 +2858,7 @@ type GraphEdge struct {
 
 func (x *GraphEdge) Reset() {
 	*x = GraphEdge{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[33]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2745,7 +2870,7 @@ func (x *GraphEdge) String() string {
 func (*GraphEdge) ProtoMessage() {}
 
 func (x *GraphEdge) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[33]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2758,7 +2883,7 @@ func (x *GraphEdge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphEdge.ProtoReflect.Descriptor instead.
 func (*GraphEdge) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{33}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *GraphEdge) GetFrom() string {
@@ -2804,7 +2929,7 @@ type GraphStats struct {
 
 func (x *GraphStats) Reset() {
 	*x = GraphStats{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[34]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2816,7 +2941,7 @@ func (x *GraphStats) String() string {
 func (*GraphStats) ProtoMessage() {}
 
 func (x *GraphStats) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[34]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2829,7 +2954,7 @@ func (x *GraphStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphStats.ProtoReflect.Descriptor instead.
 func (*GraphStats) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{34}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *GraphStats) GetTotalNodes() int32 {
@@ -2885,7 +3010,7 @@ type GraphNodePolicyInput struct {
 
 func (x *GraphNodePolicyInput) Reset() {
 	*x = GraphNodePolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[35]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2897,7 +3022,7 @@ func (x *GraphNodePolicyInput) String() string {
 func (*GraphNodePolicyInput) ProtoMessage() {}
 
 func (x *GraphNodePolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[35]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2910,7 +3035,7 @@ func (x *GraphNodePolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphNodePolicyInput.ProtoReflect.Descriptor instead.
 func (*GraphNodePolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{35}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *GraphNodePolicyInput) GetNode() *GraphNode {
@@ -2940,7 +3065,7 @@ type GraphEdgePolicyInput struct {
 
 func (x *GraphEdgePolicyInput) Reset() {
 	*x = GraphEdgePolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[36]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2952,7 +3077,7 @@ func (x *GraphEdgePolicyInput) String() string {
 func (*GraphEdgePolicyInput) ProtoMessage() {}
 
 func (x *GraphEdgePolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[36]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2965,7 +3090,7 @@ func (x *GraphEdgePolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphEdgePolicyInput.ProtoReflect.Descriptor instead.
 func (*GraphEdgePolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{36}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *GraphEdgePolicyInput) GetEdge() *GraphEdge {
@@ -3011,7 +3136,7 @@ type FixPlanPolicyInput struct {
 
 func (x *FixPlanPolicyInput) Reset() {
 	*x = FixPlanPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[37]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3023,7 +3148,7 @@ func (x *FixPlanPolicyInput) String() string {
 func (*FixPlanPolicyInput) ProtoMessage() {}
 
 func (x *FixPlanPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[37]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3036,7 +3161,7 @@ func (x *FixPlanPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FixPlanPolicyInput.ProtoReflect.Descriptor instead.
 func (*FixPlanPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{37}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *FixPlanPolicyInput) GetCommands() []*RemediationCommand {
@@ -3075,7 +3200,7 @@ type RemediationCommand struct {
 
 func (x *RemediationCommand) Reset() {
 	*x = RemediationCommand{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[38]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3087,7 +3212,7 @@ func (x *RemediationCommand) String() string {
 func (*RemediationCommand) ProtoMessage() {}
 
 func (x *RemediationCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[38]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3100,7 +3225,7 @@ func (x *RemediationCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemediationCommand.ProtoReflect.Descriptor instead.
 func (*RemediationCommand) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{38}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *RemediationCommand) GetManager() string {
@@ -3156,7 +3281,7 @@ type FixPlanStepPolicyInput struct {
 
 func (x *FixPlanStepPolicyInput) Reset() {
 	*x = FixPlanStepPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[39]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3168,7 +3293,7 @@ func (x *FixPlanStepPolicyInput) String() string {
 func (*FixPlanStepPolicyInput) ProtoMessage() {}
 
 func (x *FixPlanStepPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[39]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3181,7 +3306,7 @@ func (x *FixPlanStepPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FixPlanStepPolicyInput.ProtoReflect.Descriptor instead.
 func (*FixPlanStepPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{39}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *FixPlanStepPolicyInput) GetStep() *RemediationCommand {
@@ -3215,7 +3340,7 @@ type TriageReportPolicyInput struct {
 
 func (x *TriageReportPolicyInput) Reset() {
 	*x = TriageReportPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[40]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3227,7 +3352,7 @@ func (x *TriageReportPolicyInput) String() string {
 func (*TriageReportPolicyInput) ProtoMessage() {}
 
 func (x *TriageReportPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[40]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3240,7 +3365,7 @@ func (x *TriageReportPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriageReportPolicyInput.ProtoReflect.Descriptor instead.
 func (*TriageReportPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{40}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *TriageReportPolicyInput) GetTopPackages() []*TriagePackageSummary {
@@ -3287,7 +3412,7 @@ type TriagePackageSummary struct {
 
 func (x *TriagePackageSummary) Reset() {
 	*x = TriagePackageSummary{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[41]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3299,7 +3424,7 @@ func (x *TriagePackageSummary) String() string {
 func (*TriagePackageSummary) ProtoMessage() {}
 
 func (x *TriagePackageSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[41]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3312,7 +3437,7 @@ func (x *TriagePackageSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriagePackageSummary.ProtoReflect.Descriptor instead.
 func (*TriagePackageSummary) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{41}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *TriagePackageSummary) GetPackage() string {
@@ -3375,7 +3500,7 @@ type TriageClusterPolicyInput struct {
 
 func (x *TriageClusterPolicyInput) Reset() {
 	*x = TriageClusterPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[42]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3387,7 +3512,7 @@ func (x *TriageClusterPolicyInput) String() string {
 func (*TriageClusterPolicyInput) ProtoMessage() {}
 
 func (x *TriageClusterPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[42]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3400,7 +3525,7 @@ func (x *TriageClusterPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriageClusterPolicyInput.ProtoReflect.Descriptor instead.
 func (*TriageClusterPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{42}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *TriageClusterPolicyInput) GetCluster() *TriagePackageSummary {
@@ -3432,7 +3557,7 @@ type DockerfileReportPolicyInput struct {
 
 func (x *DockerfileReportPolicyInput) Reset() {
 	*x = DockerfileReportPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[43]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3444,7 +3569,7 @@ func (x *DockerfileReportPolicyInput) String() string {
 func (*DockerfileReportPolicyInput) ProtoMessage() {}
 
 func (x *DockerfileReportPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[43]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3457,7 +3582,7 @@ func (x *DockerfileReportPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerfileReportPolicyInput.ProtoReflect.Descriptor instead.
 func (*DockerfileReportPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{43}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *DockerfileReportPolicyInput) GetDockerfile() *DockerfileInfo {
@@ -3494,7 +3619,7 @@ type DockerfileInfo struct {
 
 func (x *DockerfileInfo) Reset() {
 	*x = DockerfileInfo{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[44]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3506,7 +3631,7 @@ func (x *DockerfileInfo) String() string {
 func (*DockerfileInfo) ProtoMessage() {}
 
 func (x *DockerfileInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[44]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3519,7 +3644,7 @@ func (x *DockerfileInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerfileInfo.ProtoReflect.Descriptor instead.
 func (*DockerfileInfo) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{44}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *DockerfileInfo) GetPath() string {
@@ -3573,7 +3698,7 @@ type DockerfileStage struct {
 
 func (x *DockerfileStage) Reset() {
 	*x = DockerfileStage{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[45]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3585,7 +3710,7 @@ func (x *DockerfileStage) String() string {
 func (*DockerfileStage) ProtoMessage() {}
 
 func (x *DockerfileStage) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[45]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3598,7 +3723,7 @@ func (x *DockerfileStage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerfileStage.ProtoReflect.Descriptor instead.
 func (*DockerfileStage) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{45}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *DockerfileStage) GetIndex() int32 {
@@ -3712,7 +3837,7 @@ type ImageReference struct {
 
 func (x *ImageReference) Reset() {
 	*x = ImageReference{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[46]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3724,7 +3849,7 @@ func (x *ImageReference) String() string {
 func (*ImageReference) ProtoMessage() {}
 
 func (x *ImageReference) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[46]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3737,7 +3862,7 @@ func (x *ImageReference) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageReference.ProtoReflect.Descriptor instead.
 func (*ImageReference) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{46}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ImageReference) GetRegistry() string {
@@ -3784,7 +3909,7 @@ type DockerfileAnalysis struct {
 
 func (x *DockerfileAnalysis) Reset() {
 	*x = DockerfileAnalysis{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[47]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3796,7 +3921,7 @@ func (x *DockerfileAnalysis) String() string {
 func (*DockerfileAnalysis) ProtoMessage() {}
 
 func (x *DockerfileAnalysis) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[47]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3809,7 +3934,7 @@ func (x *DockerfileAnalysis) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerfileAnalysis.ProtoReflect.Descriptor instead.
 func (*DockerfileAnalysis) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{47}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *DockerfileAnalysis) GetStageCount() int32 {
@@ -3873,7 +3998,7 @@ type DockerfileStagePolicyInput struct {
 
 func (x *DockerfileStagePolicyInput) Reset() {
 	*x = DockerfileStagePolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[48]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3885,7 +4010,7 @@ func (x *DockerfileStagePolicyInput) String() string {
 func (*DockerfileStagePolicyInput) ProtoMessage() {}
 
 func (x *DockerfileStagePolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[48]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3898,7 +4023,7 @@ func (x *DockerfileStagePolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerfileStagePolicyInput.ProtoReflect.Descriptor instead.
 func (*DockerfileStagePolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{48}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *DockerfileStagePolicyInput) GetStage() *DockerfileStage {
@@ -3935,7 +4060,7 @@ type ServiceRequest struct {
 
 func (x *ServiceRequest) Reset() {
 	*x = ServiceRequest{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[49]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3947,7 +4072,7 @@ func (x *ServiceRequest) String() string {
 func (*ServiceRequest) ProtoMessage() {}
 
 func (x *ServiceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[49]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3960,7 +4085,7 @@ func (x *ServiceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceRequest.ProtoReflect.Descriptor instead.
 func (*ServiceRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{49}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ServiceRequest) GetProcedure() string {
@@ -3990,7 +4115,7 @@ type ServiceScanRequestPolicyInput struct {
 
 func (x *ServiceScanRequestPolicyInput) Reset() {
 	*x = ServiceScanRequestPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[50]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4002,7 +4127,7 @@ func (x *ServiceScanRequestPolicyInput) String() string {
 func (*ServiceScanRequestPolicyInput) ProtoMessage() {}
 
 func (x *ServiceScanRequestPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[50]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4015,7 +4140,7 @@ func (x *ServiceScanRequestPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceScanRequestPolicyInput.ProtoReflect.Descriptor instead.
 func (*ServiceScanRequestPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{50}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ServiceScanRequestPolicyInput) GetJwt() *JWTClaims {
@@ -4059,7 +4184,7 @@ type ServiceListRequestPolicyInput struct {
 
 func (x *ServiceListRequestPolicyInput) Reset() {
 	*x = ServiceListRequestPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[51]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4071,7 +4196,7 @@ func (x *ServiceListRequestPolicyInput) String() string {
 func (*ServiceListRequestPolicyInput) ProtoMessage() {}
 
 func (x *ServiceListRequestPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[51]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4084,7 +4209,7 @@ func (x *ServiceListRequestPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceListRequestPolicyInput.ProtoReflect.Descriptor instead.
 func (*ServiceListRequestPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{51}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ServiceListRequestPolicyInput) GetJwt() *JWTClaims {
@@ -4128,7 +4253,7 @@ type ServiceSbomRequestPolicyInput struct {
 
 func (x *ServiceSbomRequestPolicyInput) Reset() {
 	*x = ServiceSbomRequestPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[52]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4140,7 +4265,7 @@ func (x *ServiceSbomRequestPolicyInput) String() string {
 func (*ServiceSbomRequestPolicyInput) ProtoMessage() {}
 
 func (x *ServiceSbomRequestPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[52]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4153,7 +4278,7 @@ func (x *ServiceSbomRequestPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceSbomRequestPolicyInput.ProtoReflect.Descriptor instead.
 func (*ServiceSbomRequestPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{52}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *ServiceSbomRequestPolicyInput) GetJwt() *JWTClaims {
@@ -4198,7 +4323,7 @@ type ServiceDiffRequestPolicyInput struct {
 
 func (x *ServiceDiffRequestPolicyInput) Reset() {
 	*x = ServiceDiffRequestPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[53]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4210,7 +4335,7 @@ func (x *ServiceDiffRequestPolicyInput) String() string {
 func (*ServiceDiffRequestPolicyInput) ProtoMessage() {}
 
 func (x *ServiceDiffRequestPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[53]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4223,7 +4348,7 @@ func (x *ServiceDiffRequestPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceDiffRequestPolicyInput.ProtoReflect.Descriptor instead.
 func (*ServiceDiffRequestPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{53}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ServiceDiffRequestPolicyInput) GetJwt() *JWTClaims {
@@ -4274,7 +4399,7 @@ type ServiceSecretsRequestPolicyInput struct {
 
 func (x *ServiceSecretsRequestPolicyInput) Reset() {
 	*x = ServiceSecretsRequestPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[54]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4286,7 +4411,7 @@ func (x *ServiceSecretsRequestPolicyInput) String() string {
 func (*ServiceSecretsRequestPolicyInput) ProtoMessage() {}
 
 func (x *ServiceSecretsRequestPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[54]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4299,7 +4424,7 @@ func (x *ServiceSecretsRequestPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceSecretsRequestPolicyInput.ProtoReflect.Descriptor instead.
 func (*ServiceSecretsRequestPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{54}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *ServiceSecretsRequestPolicyInput) GetJwt() *JWTClaims {
@@ -4343,7 +4468,7 @@ type ServiceGraphRequestPolicyInput struct {
 
 func (x *ServiceGraphRequestPolicyInput) Reset() {
 	*x = ServiceGraphRequestPolicyInput{}
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[55]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4355,7 +4480,7 @@ func (x *ServiceGraphRequestPolicyInput) String() string {
 func (*ServiceGraphRequestPolicyInput) ProtoMessage() {}
 
 func (x *ServiceGraphRequestPolicyInput) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_policy_v1_policy_proto_msgTypes[55]
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4368,7 +4493,7 @@ func (x *ServiceGraphRequestPolicyInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceGraphRequestPolicyInput.ProtoReflect.Descriptor instead.
 func (*ServiceGraphRequestPolicyInput) Descriptor() ([]byte, []int) {
-	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{55}
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *ServiceGraphRequestPolicyInput) GetJwt() *JWTClaims {
@@ -4403,7 +4528,7 @@ var File_deputy_policy_v1_policy_proto protoreflect.FileDescriptor
 
 const file_deputy_policy_v1_policy_proto_rawDesc = "" +
 	"\n" +
-	"\x1ddeputy/policy/v1/policy.proto\x12\x10deputy.policy.v1\x1a#deputy/container/v1/container.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/target/v1/target.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\"\xd2\x01\n" +
+	"\x1ddeputy/policy/v1/policy.proto\x12\x10deputy.policy.v1\x1a#deputy/container/v1/container.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/target/v1/target.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\"\xb5\x02\n" +
 	"\x06Action\x120\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x1c.deputy.policy.v1.ActionTypeR\x04type\x12\x1f\n" +
 	"\vpolicy_name\x18\x02 \x01(\tR\n" +
@@ -4413,7 +4538,16 @@ const file_deputy_policy_v1_policy_proto_rawDesc = "" +
 	"\vremediation\x18\x05 \x01(\tR\vremediation\x12\x1e\n" +
 	"\n" +
 	"entrypoint\x18\x06 \x01(\tR\n" +
-	"entrypoint\"G\n" +
+	"entrypoint\x12\x18\n" +
+	"\amessage\x18\a \x01(\tR\amessage\x12\x12\n" +
+	"\x04code\x18\b \x01(\tR\x04code\x123\n" +
+	"\asubject\x18\t \x01(\v2\x19.deputy.policy.v1.SubjectR\asubject\"\x8b\x01\n" +
+	"\aSubject\x12\x18\n" +
+	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1c\n" +
+	"\tecosystem\x18\x03 \x01(\tR\tecosystem\x12\x12\n" +
+	"\x04purl\x18\x04 \x01(\tR\x04purl\x12\x1a\n" +
+	"\badvisory\x18\x05 \x01(\tR\badvisory\"G\n" +
 	"\vEnvironment\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x1e\n" +
 	"\n" +
@@ -4804,219 +4938,221 @@ func file_deputy_policy_v1_policy_proto_rawDescGZIP() []byte {
 }
 
 var file_deputy_policy_v1_policy_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_deputy_policy_v1_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
+var file_deputy_policy_v1_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 62)
 var file_deputy_policy_v1_policy_proto_goTypes = []any{
 	(ActionType)(0),                               // 0: deputy.policy.v1.ActionType
 	(*Action)(nil),                                // 1: deputy.policy.v1.Action
-	(*Environment)(nil),                           // 2: deputy.policy.v1.Environment
-	(*JWTClaims)(nil),                             // 3: deputy.policy.v1.JWTClaims
-	(*ProxyRequest)(nil),                          // 4: deputy.policy.v1.ProxyRequest
-	(*ScanVulnerabilityPolicyInput)(nil),          // 5: deputy.policy.v1.ScanVulnerabilityPolicyInput
-	(*ScanReportPolicyInput)(nil),                 // 6: deputy.policy.v1.ScanReportPolicyInput
-	(*GoArtifactRequestPolicyInput)(nil),          // 7: deputy.policy.v1.GoArtifactRequestPolicyInput
-	(*NpmArtifactRequestPolicyInput)(nil),         // 8: deputy.policy.v1.NpmArtifactRequestPolicyInput
-	(*PypiArtifactRequestPolicyInput)(nil),        // 9: deputy.policy.v1.PypiArtifactRequestPolicyInput
-	(*RubygemsArtifactRequestPolicyInput)(nil),    // 10: deputy.policy.v1.RubygemsArtifactRequestPolicyInput
-	(*OciArtifactRequestPolicyInput)(nil),         // 11: deputy.policy.v1.OciArtifactRequestPolicyInput
-	(*SbomReportPolicyInput)(nil),                 // 12: deputy.policy.v1.SbomReportPolicyInput
-	(*SbomComponentPolicyInput)(nil),              // 13: deputy.policy.v1.SbomComponentPolicyInput
-	(*DiffReportPolicyInput)(nil),                 // 14: deputy.policy.v1.DiffReportPolicyInput
-	(*DependencyChange)(nil),                      // 15: deputy.policy.v1.DependencyChange
-	(*DiffDependencyChangePolicyInput)(nil),       // 16: deputy.policy.v1.DiffDependencyChangePolicyInput
-	(*DiffVulnerabilityPolicyInput)(nil),          // 17: deputy.policy.v1.DiffVulnerabilityPolicyInput
-	(*ContainerDiffReportPolicyInput)(nil),        // 18: deputy.policy.v1.ContainerDiffReportPolicyInput
-	(*ContainerPackageChange)(nil),                // 19: deputy.policy.v1.ContainerPackageChange
-	(*ContainerVulnerabilityChange)(nil),          // 20: deputy.policy.v1.ContainerVulnerabilityChange
-	(*ContainerConfigDiff)(nil),                   // 21: deputy.policy.v1.ContainerConfigDiff
-	(*ContainerImageRef)(nil),                     // 22: deputy.policy.v1.ContainerImageRef
-	(*ContainerDiffChangePolicyInput)(nil),        // 23: deputy.policy.v1.ContainerDiffChangePolicyInput
-	(*ContainerDiffVulnerabilityPolicyInput)(nil), // 24: deputy.policy.v1.ContainerDiffVulnerabilityPolicyInput
-	(*ContainerDiffLayerPolicyInput)(nil),         // 25: deputy.policy.v1.ContainerDiffLayerPolicyInput
-	(*LayerChange)(nil),                           // 26: deputy.policy.v1.LayerChange
-	(*ContainerDiffConfigPolicyInput)(nil),        // 27: deputy.policy.v1.ContainerDiffConfigPolicyInput
-	(*SecretFinding)(nil),                         // 28: deputy.policy.v1.SecretFinding
-	(*SecretStats)(nil),                           // 29: deputy.policy.v1.SecretStats
-	(*SecretsReportPolicyInput)(nil),              // 30: deputy.policy.v1.SecretsReportPolicyInput
-	(*SecretsFindingPolicyInput)(nil),             // 31: deputy.policy.v1.SecretsFindingPolicyInput
-	(*GraphReportPolicyInput)(nil),                // 32: deputy.policy.v1.GraphReportPolicyInput
-	(*GraphNode)(nil),                             // 33: deputy.policy.v1.GraphNode
-	(*GraphEdge)(nil),                             // 34: deputy.policy.v1.GraphEdge
-	(*GraphStats)(nil),                            // 35: deputy.policy.v1.GraphStats
-	(*GraphNodePolicyInput)(nil),                  // 36: deputy.policy.v1.GraphNodePolicyInput
-	(*GraphEdgePolicyInput)(nil),                  // 37: deputy.policy.v1.GraphEdgePolicyInput
-	(*FixPlanPolicyInput)(nil),                    // 38: deputy.policy.v1.FixPlanPolicyInput
-	(*RemediationCommand)(nil),                    // 39: deputy.policy.v1.RemediationCommand
-	(*FixPlanStepPolicyInput)(nil),                // 40: deputy.policy.v1.FixPlanStepPolicyInput
-	(*TriageReportPolicyInput)(nil),               // 41: deputy.policy.v1.TriageReportPolicyInput
-	(*TriagePackageSummary)(nil),                  // 42: deputy.policy.v1.TriagePackageSummary
-	(*TriageClusterPolicyInput)(nil),              // 43: deputy.policy.v1.TriageClusterPolicyInput
-	(*DockerfileReportPolicyInput)(nil),           // 44: deputy.policy.v1.DockerfileReportPolicyInput
-	(*DockerfileInfo)(nil),                        // 45: deputy.policy.v1.DockerfileInfo
-	(*DockerfileStage)(nil),                       // 46: deputy.policy.v1.DockerfileStage
-	(*ImageReference)(nil),                        // 47: deputy.policy.v1.ImageReference
-	(*DockerfileAnalysis)(nil),                    // 48: deputy.policy.v1.DockerfileAnalysis
-	(*DockerfileStagePolicyInput)(nil),            // 49: deputy.policy.v1.DockerfileStagePolicyInput
-	(*ServiceRequest)(nil),                        // 50: deputy.policy.v1.ServiceRequest
-	(*ServiceScanRequestPolicyInput)(nil),         // 51: deputy.policy.v1.ServiceScanRequestPolicyInput
-	(*ServiceListRequestPolicyInput)(nil),         // 52: deputy.policy.v1.ServiceListRequestPolicyInput
-	(*ServiceSbomRequestPolicyInput)(nil),         // 53: deputy.policy.v1.ServiceSbomRequestPolicyInput
-	(*ServiceDiffRequestPolicyInput)(nil),         // 54: deputy.policy.v1.ServiceDiffRequestPolicyInput
-	(*ServiceSecretsRequestPolicyInput)(nil),      // 55: deputy.policy.v1.ServiceSecretsRequestPolicyInput
-	(*ServiceGraphRequestPolicyInput)(nil),        // 56: deputy.policy.v1.ServiceGraphRequestPolicyInput
-	nil,                                           // 57: deputy.policy.v1.JWTClaims.CustomClaimsEntry
-	nil,                                           // 58: deputy.policy.v1.GraphStats.EcosystemsEntry
-	nil,                                           // 59: deputy.policy.v1.DockerfileInfo.ArgsEntry
-	nil,                                           // 60: deputy.policy.v1.DockerfileStage.EnvVarsEntry
-	nil,                                           // 61: deputy.policy.v1.DockerfileStage.LabelsEntry
-	(*v1.Finding)(nil),                            // 62: deputy.vulnerability.v1.Finding
-	(*v11.Package)(nil),                           // 63: deputy.dependency.v1.Package
-	(*v12.Target)(nil),                            // 64: deputy.target.v1.Target
-	(*v13.ImageInfo)(nil),                         // 65: deputy.container.v1.ImageInfo
-	(*v1.Stats)(nil),                              // 66: deputy.vulnerability.v1.Stats
-	(*v13.LayerDetails)(nil),                      // 67: deputy.container.v1.LayerDetails
+	(*Subject)(nil),                               // 2: deputy.policy.v1.Subject
+	(*Environment)(nil),                           // 3: deputy.policy.v1.Environment
+	(*JWTClaims)(nil),                             // 4: deputy.policy.v1.JWTClaims
+	(*ProxyRequest)(nil),                          // 5: deputy.policy.v1.ProxyRequest
+	(*ScanVulnerabilityPolicyInput)(nil),          // 6: deputy.policy.v1.ScanVulnerabilityPolicyInput
+	(*ScanReportPolicyInput)(nil),                 // 7: deputy.policy.v1.ScanReportPolicyInput
+	(*GoArtifactRequestPolicyInput)(nil),          // 8: deputy.policy.v1.GoArtifactRequestPolicyInput
+	(*NpmArtifactRequestPolicyInput)(nil),         // 9: deputy.policy.v1.NpmArtifactRequestPolicyInput
+	(*PypiArtifactRequestPolicyInput)(nil),        // 10: deputy.policy.v1.PypiArtifactRequestPolicyInput
+	(*RubygemsArtifactRequestPolicyInput)(nil),    // 11: deputy.policy.v1.RubygemsArtifactRequestPolicyInput
+	(*OciArtifactRequestPolicyInput)(nil),         // 12: deputy.policy.v1.OciArtifactRequestPolicyInput
+	(*SbomReportPolicyInput)(nil),                 // 13: deputy.policy.v1.SbomReportPolicyInput
+	(*SbomComponentPolicyInput)(nil),              // 14: deputy.policy.v1.SbomComponentPolicyInput
+	(*DiffReportPolicyInput)(nil),                 // 15: deputy.policy.v1.DiffReportPolicyInput
+	(*DependencyChange)(nil),                      // 16: deputy.policy.v1.DependencyChange
+	(*DiffDependencyChangePolicyInput)(nil),       // 17: deputy.policy.v1.DiffDependencyChangePolicyInput
+	(*DiffVulnerabilityPolicyInput)(nil),          // 18: deputy.policy.v1.DiffVulnerabilityPolicyInput
+	(*ContainerDiffReportPolicyInput)(nil),        // 19: deputy.policy.v1.ContainerDiffReportPolicyInput
+	(*ContainerPackageChange)(nil),                // 20: deputy.policy.v1.ContainerPackageChange
+	(*ContainerVulnerabilityChange)(nil),          // 21: deputy.policy.v1.ContainerVulnerabilityChange
+	(*ContainerConfigDiff)(nil),                   // 22: deputy.policy.v1.ContainerConfigDiff
+	(*ContainerImageRef)(nil),                     // 23: deputy.policy.v1.ContainerImageRef
+	(*ContainerDiffChangePolicyInput)(nil),        // 24: deputy.policy.v1.ContainerDiffChangePolicyInput
+	(*ContainerDiffVulnerabilityPolicyInput)(nil), // 25: deputy.policy.v1.ContainerDiffVulnerabilityPolicyInput
+	(*ContainerDiffLayerPolicyInput)(nil),         // 26: deputy.policy.v1.ContainerDiffLayerPolicyInput
+	(*LayerChange)(nil),                           // 27: deputy.policy.v1.LayerChange
+	(*ContainerDiffConfigPolicyInput)(nil),        // 28: deputy.policy.v1.ContainerDiffConfigPolicyInput
+	(*SecretFinding)(nil),                         // 29: deputy.policy.v1.SecretFinding
+	(*SecretStats)(nil),                           // 30: deputy.policy.v1.SecretStats
+	(*SecretsReportPolicyInput)(nil),              // 31: deputy.policy.v1.SecretsReportPolicyInput
+	(*SecretsFindingPolicyInput)(nil),             // 32: deputy.policy.v1.SecretsFindingPolicyInput
+	(*GraphReportPolicyInput)(nil),                // 33: deputy.policy.v1.GraphReportPolicyInput
+	(*GraphNode)(nil),                             // 34: deputy.policy.v1.GraphNode
+	(*GraphEdge)(nil),                             // 35: deputy.policy.v1.GraphEdge
+	(*GraphStats)(nil),                            // 36: deputy.policy.v1.GraphStats
+	(*GraphNodePolicyInput)(nil),                  // 37: deputy.policy.v1.GraphNodePolicyInput
+	(*GraphEdgePolicyInput)(nil),                  // 38: deputy.policy.v1.GraphEdgePolicyInput
+	(*FixPlanPolicyInput)(nil),                    // 39: deputy.policy.v1.FixPlanPolicyInput
+	(*RemediationCommand)(nil),                    // 40: deputy.policy.v1.RemediationCommand
+	(*FixPlanStepPolicyInput)(nil),                // 41: deputy.policy.v1.FixPlanStepPolicyInput
+	(*TriageReportPolicyInput)(nil),               // 42: deputy.policy.v1.TriageReportPolicyInput
+	(*TriagePackageSummary)(nil),                  // 43: deputy.policy.v1.TriagePackageSummary
+	(*TriageClusterPolicyInput)(nil),              // 44: deputy.policy.v1.TriageClusterPolicyInput
+	(*DockerfileReportPolicyInput)(nil),           // 45: deputy.policy.v1.DockerfileReportPolicyInput
+	(*DockerfileInfo)(nil),                        // 46: deputy.policy.v1.DockerfileInfo
+	(*DockerfileStage)(nil),                       // 47: deputy.policy.v1.DockerfileStage
+	(*ImageReference)(nil),                        // 48: deputy.policy.v1.ImageReference
+	(*DockerfileAnalysis)(nil),                    // 49: deputy.policy.v1.DockerfileAnalysis
+	(*DockerfileStagePolicyInput)(nil),            // 50: deputy.policy.v1.DockerfileStagePolicyInput
+	(*ServiceRequest)(nil),                        // 51: deputy.policy.v1.ServiceRequest
+	(*ServiceScanRequestPolicyInput)(nil),         // 52: deputy.policy.v1.ServiceScanRequestPolicyInput
+	(*ServiceListRequestPolicyInput)(nil),         // 53: deputy.policy.v1.ServiceListRequestPolicyInput
+	(*ServiceSbomRequestPolicyInput)(nil),         // 54: deputy.policy.v1.ServiceSbomRequestPolicyInput
+	(*ServiceDiffRequestPolicyInput)(nil),         // 55: deputy.policy.v1.ServiceDiffRequestPolicyInput
+	(*ServiceSecretsRequestPolicyInput)(nil),      // 56: deputy.policy.v1.ServiceSecretsRequestPolicyInput
+	(*ServiceGraphRequestPolicyInput)(nil),        // 57: deputy.policy.v1.ServiceGraphRequestPolicyInput
+	nil,                                           // 58: deputy.policy.v1.JWTClaims.CustomClaimsEntry
+	nil,                                           // 59: deputy.policy.v1.GraphStats.EcosystemsEntry
+	nil,                                           // 60: deputy.policy.v1.DockerfileInfo.ArgsEntry
+	nil,                                           // 61: deputy.policy.v1.DockerfileStage.EnvVarsEntry
+	nil,                                           // 62: deputy.policy.v1.DockerfileStage.LabelsEntry
+	(*v1.Finding)(nil),                            // 63: deputy.vulnerability.v1.Finding
+	(*v11.Package)(nil),                           // 64: deputy.dependency.v1.Package
+	(*v12.Target)(nil),                            // 65: deputy.target.v1.Target
+	(*v13.ImageInfo)(nil),                         // 66: deputy.container.v1.ImageInfo
+	(*v1.Stats)(nil),                              // 67: deputy.vulnerability.v1.Stats
+	(*v13.LayerDetails)(nil),                      // 68: deputy.container.v1.LayerDetails
 }
 var file_deputy_policy_v1_policy_proto_depIdxs = []int32{
 	0,   // 0: deputy.policy.v1.Action.type:type_name -> deputy.policy.v1.ActionType
-	57,  // 1: deputy.policy.v1.JWTClaims.custom_claims:type_name -> deputy.policy.v1.JWTClaims.CustomClaimsEntry
-	62,  // 2: deputy.policy.v1.ScanVulnerabilityPolicyInput.vulnerability:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 3: deputy.policy.v1.ScanVulnerabilityPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
-	2,   // 4: deputy.policy.v1.ScanVulnerabilityPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 5: deputy.policy.v1.ScanVulnerabilityPolicyInput.target:type_name -> deputy.target.v1.Target
-	65,  // 6: deputy.policy.v1.ScanVulnerabilityPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
-	62,  // 7: deputy.policy.v1.ScanReportPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 8: deputy.policy.v1.ScanReportPolicyInput.packages:type_name -> deputy.dependency.v1.Package
-	2,   // 9: deputy.policy.v1.ScanReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 10: deputy.policy.v1.ScanReportPolicyInput.target:type_name -> deputy.target.v1.Target
-	66,  // 11: deputy.policy.v1.ScanReportPolicyInput.stats:type_name -> deputy.vulnerability.v1.Stats
-	65,  // 12: deputy.policy.v1.ScanReportPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
-	4,   // 13: deputy.policy.v1.GoArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
-	3,   // 14: deputy.policy.v1.GoArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
-	2,   // 15: deputy.policy.v1.GoArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 16: deputy.policy.v1.GoArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 17: deputy.policy.v1.GoArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
-	4,   // 18: deputy.policy.v1.NpmArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
-	3,   // 19: deputy.policy.v1.NpmArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
-	2,   // 20: deputy.policy.v1.NpmArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 21: deputy.policy.v1.NpmArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 22: deputy.policy.v1.NpmArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
-	4,   // 23: deputy.policy.v1.PypiArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
-	3,   // 24: deputy.policy.v1.PypiArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
-	2,   // 25: deputy.policy.v1.PypiArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 26: deputy.policy.v1.PypiArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 27: deputy.policy.v1.PypiArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
-	4,   // 28: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
-	3,   // 29: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
-	2,   // 30: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 31: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 32: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
-	4,   // 33: deputy.policy.v1.OciArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
-	3,   // 34: deputy.policy.v1.OciArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
-	2,   // 35: deputy.policy.v1.OciArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 36: deputy.policy.v1.OciArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	65,  // 37: deputy.policy.v1.OciArtifactRequestPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
-	63,  // 38: deputy.policy.v1.SbomReportPolicyInput.components:type_name -> deputy.dependency.v1.Package
-	2,   // 39: deputy.policy.v1.SbomReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 40: deputy.policy.v1.SbomReportPolicyInput.target:type_name -> deputy.target.v1.Target
-	63,  // 41: deputy.policy.v1.SbomComponentPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
-	2,   // 42: deputy.policy.v1.SbomComponentPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 43: deputy.policy.v1.SbomComponentPolicyInput.target:type_name -> deputy.target.v1.Target
-	15,  // 44: deputy.policy.v1.DiffReportPolicyInput.changes:type_name -> deputy.policy.v1.DependencyChange
-	64,  // 45: deputy.policy.v1.DiffReportPolicyInput.base_target:type_name -> deputy.target.v1.Target
-	64,  // 46: deputy.policy.v1.DiffReportPolicyInput.target_target:type_name -> deputy.target.v1.Target
-	2,   // 47: deputy.policy.v1.DiffReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	63,  // 48: deputy.policy.v1.DependencyChange.pkg:type_name -> deputy.dependency.v1.Package
-	15,  // 49: deputy.policy.v1.DiffDependencyChangePolicyInput.change:type_name -> deputy.policy.v1.DependencyChange
-	2,   // 50: deputy.policy.v1.DiffDependencyChangePolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 51: deputy.policy.v1.DiffVulnerabilityPolicyInput.vulnerability:type_name -> deputy.vulnerability.v1.Finding
-	2,   // 52: deputy.policy.v1.DiffVulnerabilityPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	19,  // 53: deputy.policy.v1.ContainerDiffReportPolicyInput.package_changes:type_name -> deputy.policy.v1.ContainerPackageChange
-	20,  // 54: deputy.policy.v1.ContainerDiffReportPolicyInput.vulnerability_changes:type_name -> deputy.policy.v1.ContainerVulnerabilityChange
-	21,  // 55: deputy.policy.v1.ContainerDiffReportPolicyInput.config_changes:type_name -> deputy.policy.v1.ContainerConfigDiff
-	22,  // 56: deputy.policy.v1.ContainerDiffReportPolicyInput.base_image:type_name -> deputy.policy.v1.ContainerImageRef
-	22,  // 57: deputy.policy.v1.ContainerDiffReportPolicyInput.target_image:type_name -> deputy.policy.v1.ContainerImageRef
-	2,   // 58: deputy.policy.v1.ContainerDiffReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	67,  // 59: deputy.policy.v1.ContainerPackageChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
-	67,  // 60: deputy.policy.v1.ContainerPackageChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
-	19,  // 61: deputy.policy.v1.ContainerDiffChangePolicyInput.change:type_name -> deputy.policy.v1.ContainerPackageChange
-	2,   // 62: deputy.policy.v1.ContainerDiffChangePolicyInput.env:type_name -> deputy.policy.v1.Environment
-	20,  // 63: deputy.policy.v1.ContainerDiffVulnerabilityPolicyInput.vulnerability_change:type_name -> deputy.policy.v1.ContainerVulnerabilityChange
-	2,   // 64: deputy.policy.v1.ContainerDiffVulnerabilityPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	26,  // 65: deputy.policy.v1.ContainerDiffLayerPolicyInput.layer_change:type_name -> deputy.policy.v1.LayerChange
-	2,   // 66: deputy.policy.v1.ContainerDiffLayerPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	21,  // 67: deputy.policy.v1.ContainerDiffConfigPolicyInput.config_diff:type_name -> deputy.policy.v1.ContainerConfigDiff
-	2,   // 68: deputy.policy.v1.ContainerDiffConfigPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	28,  // 69: deputy.policy.v1.SecretsReportPolicyInput.findings:type_name -> deputy.policy.v1.SecretFinding
-	29,  // 70: deputy.policy.v1.SecretsReportPolicyInput.stats:type_name -> deputy.policy.v1.SecretStats
-	2,   // 71: deputy.policy.v1.SecretsReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 72: deputy.policy.v1.SecretsReportPolicyInput.target:type_name -> deputy.target.v1.Target
-	28,  // 73: deputy.policy.v1.SecretsFindingPolicyInput.finding:type_name -> deputy.policy.v1.SecretFinding
-	2,   // 74: deputy.policy.v1.SecretsFindingPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	33,  // 75: deputy.policy.v1.GraphReportPolicyInput.nodes:type_name -> deputy.policy.v1.GraphNode
-	34,  // 76: deputy.policy.v1.GraphReportPolicyInput.edges:type_name -> deputy.policy.v1.GraphEdge
-	35,  // 77: deputy.policy.v1.GraphReportPolicyInput.stats:type_name -> deputy.policy.v1.GraphStats
-	2,   // 78: deputy.policy.v1.GraphReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 79: deputy.policy.v1.GraphReportPolicyInput.target:type_name -> deputy.target.v1.Target
-	62,  // 80: deputy.policy.v1.GraphNode.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	58,  // 81: deputy.policy.v1.GraphStats.ecosystems:type_name -> deputy.policy.v1.GraphStats.EcosystemsEntry
-	33,  // 82: deputy.policy.v1.GraphNodePolicyInput.node:type_name -> deputy.policy.v1.GraphNode
-	2,   // 83: deputy.policy.v1.GraphNodePolicyInput.env:type_name -> deputy.policy.v1.Environment
-	34,  // 84: deputy.policy.v1.GraphEdgePolicyInput.edge:type_name -> deputy.policy.v1.GraphEdge
-	33,  // 85: deputy.policy.v1.GraphEdgePolicyInput.from_node:type_name -> deputy.policy.v1.GraphNode
-	33,  // 86: deputy.policy.v1.GraphEdgePolicyInput.to_node:type_name -> deputy.policy.v1.GraphNode
-	2,   // 87: deputy.policy.v1.GraphEdgePolicyInput.env:type_name -> deputy.policy.v1.Environment
-	39,  // 88: deputy.policy.v1.FixPlanPolicyInput.commands:type_name -> deputy.policy.v1.RemediationCommand
-	2,   // 89: deputy.policy.v1.FixPlanPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 90: deputy.policy.v1.FixPlanPolicyInput.target:type_name -> deputy.target.v1.Target
-	39,  // 91: deputy.policy.v1.FixPlanStepPolicyInput.step:type_name -> deputy.policy.v1.RemediationCommand
-	2,   // 92: deputy.policy.v1.FixPlanStepPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	42,  // 93: deputy.policy.v1.TriageReportPolicyInput.top_packages:type_name -> deputy.policy.v1.TriagePackageSummary
-	66,  // 94: deputy.policy.v1.TriageReportPolicyInput.stats:type_name -> deputy.vulnerability.v1.Stats
-	2,   // 95: deputy.policy.v1.TriageReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 96: deputy.policy.v1.TriageReportPolicyInput.target:type_name -> deputy.target.v1.Target
-	42,  // 97: deputy.policy.v1.TriageClusterPolicyInput.cluster:type_name -> deputy.policy.v1.TriagePackageSummary
-	2,   // 98: deputy.policy.v1.TriageClusterPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	45,  // 99: deputy.policy.v1.DockerfileReportPolicyInput.dockerfile:type_name -> deputy.policy.v1.DockerfileInfo
-	48,  // 100: deputy.policy.v1.DockerfileReportPolicyInput.dockerfile_analysis:type_name -> deputy.policy.v1.DockerfileAnalysis
-	2,   // 101: deputy.policy.v1.DockerfileReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	46,  // 102: deputy.policy.v1.DockerfileInfo.stages:type_name -> deputy.policy.v1.DockerfileStage
-	46,  // 103: deputy.policy.v1.DockerfileInfo.final_stage:type_name -> deputy.policy.v1.DockerfileStage
-	59,  // 104: deputy.policy.v1.DockerfileInfo.args:type_name -> deputy.policy.v1.DockerfileInfo.ArgsEntry
-	47,  // 105: deputy.policy.v1.DockerfileStage.base_image_resolved:type_name -> deputy.policy.v1.ImageReference
-	60,  // 106: deputy.policy.v1.DockerfileStage.env_vars:type_name -> deputy.policy.v1.DockerfileStage.EnvVarsEntry
-	61,  // 107: deputy.policy.v1.DockerfileStage.labels:type_name -> deputy.policy.v1.DockerfileStage.LabelsEntry
-	46,  // 108: deputy.policy.v1.DockerfileStagePolicyInput.stage:type_name -> deputy.policy.v1.DockerfileStage
-	45,  // 109: deputy.policy.v1.DockerfileStagePolicyInput.dockerfile:type_name -> deputy.policy.v1.DockerfileInfo
-	2,   // 110: deputy.policy.v1.DockerfileStagePolicyInput.env:type_name -> deputy.policy.v1.Environment
-	3,   // 111: deputy.policy.v1.ServiceScanRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
-	50,  // 112: deputy.policy.v1.ServiceScanRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 113: deputy.policy.v1.ServiceScanRequestPolicyInput.target:type_name -> deputy.target.v1.Target
-	2,   // 114: deputy.policy.v1.ServiceScanRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	3,   // 115: deputy.policy.v1.ServiceListRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
-	50,  // 116: deputy.policy.v1.ServiceListRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 117: deputy.policy.v1.ServiceListRequestPolicyInput.target:type_name -> deputy.target.v1.Target
-	2,   // 118: deputy.policy.v1.ServiceListRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	3,   // 119: deputy.policy.v1.ServiceSbomRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
-	50,  // 120: deputy.policy.v1.ServiceSbomRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 121: deputy.policy.v1.ServiceSbomRequestPolicyInput.target:type_name -> deputy.target.v1.Target
-	2,   // 122: deputy.policy.v1.ServiceSbomRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	3,   // 123: deputy.policy.v1.ServiceDiffRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
-	50,  // 124: deputy.policy.v1.ServiceDiffRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 125: deputy.policy.v1.ServiceDiffRequestPolicyInput.base_target:type_name -> deputy.target.v1.Target
-	64,  // 126: deputy.policy.v1.ServiceDiffRequestPolicyInput.target_target:type_name -> deputy.target.v1.Target
-	2,   // 127: deputy.policy.v1.ServiceDiffRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	3,   // 128: deputy.policy.v1.ServiceSecretsRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
-	50,  // 129: deputy.policy.v1.ServiceSecretsRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 130: deputy.policy.v1.ServiceSecretsRequestPolicyInput.target:type_name -> deputy.target.v1.Target
-	2,   // 131: deputy.policy.v1.ServiceSecretsRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	3,   // 132: deputy.policy.v1.ServiceGraphRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
-	50,  // 133: deputy.policy.v1.ServiceGraphRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 134: deputy.policy.v1.ServiceGraphRequestPolicyInput.target:type_name -> deputy.target.v1.Target
-	2,   // 135: deputy.policy.v1.ServiceGraphRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	136, // [136:136] is the sub-list for method output_type
-	136, // [136:136] is the sub-list for method input_type
-	136, // [136:136] is the sub-list for extension type_name
-	136, // [136:136] is the sub-list for extension extendee
-	0,   // [0:136] is the sub-list for field type_name
+	2,   // 1: deputy.policy.v1.Action.subject:type_name -> deputy.policy.v1.Subject
+	58,  // 2: deputy.policy.v1.JWTClaims.custom_claims:type_name -> deputy.policy.v1.JWTClaims.CustomClaimsEntry
+	63,  // 3: deputy.policy.v1.ScanVulnerabilityPolicyInput.vulnerability:type_name -> deputy.vulnerability.v1.Finding
+	64,  // 4: deputy.policy.v1.ScanVulnerabilityPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	3,   // 5: deputy.policy.v1.ScanVulnerabilityPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	65,  // 6: deputy.policy.v1.ScanVulnerabilityPolicyInput.target:type_name -> deputy.target.v1.Target
+	66,  // 7: deputy.policy.v1.ScanVulnerabilityPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
+	63,  // 8: deputy.policy.v1.ScanReportPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	64,  // 9: deputy.policy.v1.ScanReportPolicyInput.packages:type_name -> deputy.dependency.v1.Package
+	3,   // 10: deputy.policy.v1.ScanReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	65,  // 11: deputy.policy.v1.ScanReportPolicyInput.target:type_name -> deputy.target.v1.Target
+	67,  // 12: deputy.policy.v1.ScanReportPolicyInput.stats:type_name -> deputy.vulnerability.v1.Stats
+	66,  // 13: deputy.policy.v1.ScanReportPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
+	5,   // 14: deputy.policy.v1.GoArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
+	4,   // 15: deputy.policy.v1.GoArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	3,   // 16: deputy.policy.v1.GoArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	63,  // 17: deputy.policy.v1.GoArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	64,  // 18: deputy.policy.v1.GoArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	5,   // 19: deputy.policy.v1.NpmArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
+	4,   // 20: deputy.policy.v1.NpmArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	3,   // 21: deputy.policy.v1.NpmArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	63,  // 22: deputy.policy.v1.NpmArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	64,  // 23: deputy.policy.v1.NpmArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	5,   // 24: deputy.policy.v1.PypiArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
+	4,   // 25: deputy.policy.v1.PypiArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	3,   // 26: deputy.policy.v1.PypiArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	63,  // 27: deputy.policy.v1.PypiArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	64,  // 28: deputy.policy.v1.PypiArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	5,   // 29: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
+	4,   // 30: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	3,   // 31: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	63,  // 32: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	64,  // 33: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	5,   // 34: deputy.policy.v1.OciArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
+	4,   // 35: deputy.policy.v1.OciArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	3,   // 36: deputy.policy.v1.OciArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	63,  // 37: deputy.policy.v1.OciArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	66,  // 38: deputy.policy.v1.OciArtifactRequestPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
+	64,  // 39: deputy.policy.v1.SbomReportPolicyInput.components:type_name -> deputy.dependency.v1.Package
+	3,   // 40: deputy.policy.v1.SbomReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	65,  // 41: deputy.policy.v1.SbomReportPolicyInput.target:type_name -> deputy.target.v1.Target
+	64,  // 42: deputy.policy.v1.SbomComponentPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	3,   // 43: deputy.policy.v1.SbomComponentPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	65,  // 44: deputy.policy.v1.SbomComponentPolicyInput.target:type_name -> deputy.target.v1.Target
+	16,  // 45: deputy.policy.v1.DiffReportPolicyInput.changes:type_name -> deputy.policy.v1.DependencyChange
+	65,  // 46: deputy.policy.v1.DiffReportPolicyInput.base_target:type_name -> deputy.target.v1.Target
+	65,  // 47: deputy.policy.v1.DiffReportPolicyInput.target_target:type_name -> deputy.target.v1.Target
+	3,   // 48: deputy.policy.v1.DiffReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	64,  // 49: deputy.policy.v1.DependencyChange.pkg:type_name -> deputy.dependency.v1.Package
+	16,  // 50: deputy.policy.v1.DiffDependencyChangePolicyInput.change:type_name -> deputy.policy.v1.DependencyChange
+	3,   // 51: deputy.policy.v1.DiffDependencyChangePolicyInput.env:type_name -> deputy.policy.v1.Environment
+	63,  // 52: deputy.policy.v1.DiffVulnerabilityPolicyInput.vulnerability:type_name -> deputy.vulnerability.v1.Finding
+	3,   // 53: deputy.policy.v1.DiffVulnerabilityPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	20,  // 54: deputy.policy.v1.ContainerDiffReportPolicyInput.package_changes:type_name -> deputy.policy.v1.ContainerPackageChange
+	21,  // 55: deputy.policy.v1.ContainerDiffReportPolicyInput.vulnerability_changes:type_name -> deputy.policy.v1.ContainerVulnerabilityChange
+	22,  // 56: deputy.policy.v1.ContainerDiffReportPolicyInput.config_changes:type_name -> deputy.policy.v1.ContainerConfigDiff
+	23,  // 57: deputy.policy.v1.ContainerDiffReportPolicyInput.base_image:type_name -> deputy.policy.v1.ContainerImageRef
+	23,  // 58: deputy.policy.v1.ContainerDiffReportPolicyInput.target_image:type_name -> deputy.policy.v1.ContainerImageRef
+	3,   // 59: deputy.policy.v1.ContainerDiffReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	68,  // 60: deputy.policy.v1.ContainerPackageChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
+	68,  // 61: deputy.policy.v1.ContainerPackageChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
+	20,  // 62: deputy.policy.v1.ContainerDiffChangePolicyInput.change:type_name -> deputy.policy.v1.ContainerPackageChange
+	3,   // 63: deputy.policy.v1.ContainerDiffChangePolicyInput.env:type_name -> deputy.policy.v1.Environment
+	21,  // 64: deputy.policy.v1.ContainerDiffVulnerabilityPolicyInput.vulnerability_change:type_name -> deputy.policy.v1.ContainerVulnerabilityChange
+	3,   // 65: deputy.policy.v1.ContainerDiffVulnerabilityPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	27,  // 66: deputy.policy.v1.ContainerDiffLayerPolicyInput.layer_change:type_name -> deputy.policy.v1.LayerChange
+	3,   // 67: deputy.policy.v1.ContainerDiffLayerPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	22,  // 68: deputy.policy.v1.ContainerDiffConfigPolicyInput.config_diff:type_name -> deputy.policy.v1.ContainerConfigDiff
+	3,   // 69: deputy.policy.v1.ContainerDiffConfigPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	29,  // 70: deputy.policy.v1.SecretsReportPolicyInput.findings:type_name -> deputy.policy.v1.SecretFinding
+	30,  // 71: deputy.policy.v1.SecretsReportPolicyInput.stats:type_name -> deputy.policy.v1.SecretStats
+	3,   // 72: deputy.policy.v1.SecretsReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	65,  // 73: deputy.policy.v1.SecretsReportPolicyInput.target:type_name -> deputy.target.v1.Target
+	29,  // 74: deputy.policy.v1.SecretsFindingPolicyInput.finding:type_name -> deputy.policy.v1.SecretFinding
+	3,   // 75: deputy.policy.v1.SecretsFindingPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	34,  // 76: deputy.policy.v1.GraphReportPolicyInput.nodes:type_name -> deputy.policy.v1.GraphNode
+	35,  // 77: deputy.policy.v1.GraphReportPolicyInput.edges:type_name -> deputy.policy.v1.GraphEdge
+	36,  // 78: deputy.policy.v1.GraphReportPolicyInput.stats:type_name -> deputy.policy.v1.GraphStats
+	3,   // 79: deputy.policy.v1.GraphReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	65,  // 80: deputy.policy.v1.GraphReportPolicyInput.target:type_name -> deputy.target.v1.Target
+	63,  // 81: deputy.policy.v1.GraphNode.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	59,  // 82: deputy.policy.v1.GraphStats.ecosystems:type_name -> deputy.policy.v1.GraphStats.EcosystemsEntry
+	34,  // 83: deputy.policy.v1.GraphNodePolicyInput.node:type_name -> deputy.policy.v1.GraphNode
+	3,   // 84: deputy.policy.v1.GraphNodePolicyInput.env:type_name -> deputy.policy.v1.Environment
+	35,  // 85: deputy.policy.v1.GraphEdgePolicyInput.edge:type_name -> deputy.policy.v1.GraphEdge
+	34,  // 86: deputy.policy.v1.GraphEdgePolicyInput.from_node:type_name -> deputy.policy.v1.GraphNode
+	34,  // 87: deputy.policy.v1.GraphEdgePolicyInput.to_node:type_name -> deputy.policy.v1.GraphNode
+	3,   // 88: deputy.policy.v1.GraphEdgePolicyInput.env:type_name -> deputy.policy.v1.Environment
+	40,  // 89: deputy.policy.v1.FixPlanPolicyInput.commands:type_name -> deputy.policy.v1.RemediationCommand
+	3,   // 90: deputy.policy.v1.FixPlanPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	65,  // 91: deputy.policy.v1.FixPlanPolicyInput.target:type_name -> deputy.target.v1.Target
+	40,  // 92: deputy.policy.v1.FixPlanStepPolicyInput.step:type_name -> deputy.policy.v1.RemediationCommand
+	3,   // 93: deputy.policy.v1.FixPlanStepPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	43,  // 94: deputy.policy.v1.TriageReportPolicyInput.top_packages:type_name -> deputy.policy.v1.TriagePackageSummary
+	67,  // 95: deputy.policy.v1.TriageReportPolicyInput.stats:type_name -> deputy.vulnerability.v1.Stats
+	3,   // 96: deputy.policy.v1.TriageReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	65,  // 97: deputy.policy.v1.TriageReportPolicyInput.target:type_name -> deputy.target.v1.Target
+	43,  // 98: deputy.policy.v1.TriageClusterPolicyInput.cluster:type_name -> deputy.policy.v1.TriagePackageSummary
+	3,   // 99: deputy.policy.v1.TriageClusterPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	46,  // 100: deputy.policy.v1.DockerfileReportPolicyInput.dockerfile:type_name -> deputy.policy.v1.DockerfileInfo
+	49,  // 101: deputy.policy.v1.DockerfileReportPolicyInput.dockerfile_analysis:type_name -> deputy.policy.v1.DockerfileAnalysis
+	3,   // 102: deputy.policy.v1.DockerfileReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	47,  // 103: deputy.policy.v1.DockerfileInfo.stages:type_name -> deputy.policy.v1.DockerfileStage
+	47,  // 104: deputy.policy.v1.DockerfileInfo.final_stage:type_name -> deputy.policy.v1.DockerfileStage
+	60,  // 105: deputy.policy.v1.DockerfileInfo.args:type_name -> deputy.policy.v1.DockerfileInfo.ArgsEntry
+	48,  // 106: deputy.policy.v1.DockerfileStage.base_image_resolved:type_name -> deputy.policy.v1.ImageReference
+	61,  // 107: deputy.policy.v1.DockerfileStage.env_vars:type_name -> deputy.policy.v1.DockerfileStage.EnvVarsEntry
+	62,  // 108: deputy.policy.v1.DockerfileStage.labels:type_name -> deputy.policy.v1.DockerfileStage.LabelsEntry
+	47,  // 109: deputy.policy.v1.DockerfileStagePolicyInput.stage:type_name -> deputy.policy.v1.DockerfileStage
+	46,  // 110: deputy.policy.v1.DockerfileStagePolicyInput.dockerfile:type_name -> deputy.policy.v1.DockerfileInfo
+	3,   // 111: deputy.policy.v1.DockerfileStagePolicyInput.env:type_name -> deputy.policy.v1.Environment
+	4,   // 112: deputy.policy.v1.ServiceScanRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	51,  // 113: deputy.policy.v1.ServiceScanRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
+	65,  // 114: deputy.policy.v1.ServiceScanRequestPolicyInput.target:type_name -> deputy.target.v1.Target
+	3,   // 115: deputy.policy.v1.ServiceScanRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	4,   // 116: deputy.policy.v1.ServiceListRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	51,  // 117: deputy.policy.v1.ServiceListRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
+	65,  // 118: deputy.policy.v1.ServiceListRequestPolicyInput.target:type_name -> deputy.target.v1.Target
+	3,   // 119: deputy.policy.v1.ServiceListRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	4,   // 120: deputy.policy.v1.ServiceSbomRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	51,  // 121: deputy.policy.v1.ServiceSbomRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
+	65,  // 122: deputy.policy.v1.ServiceSbomRequestPolicyInput.target:type_name -> deputy.target.v1.Target
+	3,   // 123: deputy.policy.v1.ServiceSbomRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	4,   // 124: deputy.policy.v1.ServiceDiffRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	51,  // 125: deputy.policy.v1.ServiceDiffRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
+	65,  // 126: deputy.policy.v1.ServiceDiffRequestPolicyInput.base_target:type_name -> deputy.target.v1.Target
+	65,  // 127: deputy.policy.v1.ServiceDiffRequestPolicyInput.target_target:type_name -> deputy.target.v1.Target
+	3,   // 128: deputy.policy.v1.ServiceDiffRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	4,   // 129: deputy.policy.v1.ServiceSecretsRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	51,  // 130: deputy.policy.v1.ServiceSecretsRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
+	65,  // 131: deputy.policy.v1.ServiceSecretsRequestPolicyInput.target:type_name -> deputy.target.v1.Target
+	3,   // 132: deputy.policy.v1.ServiceSecretsRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	4,   // 133: deputy.policy.v1.ServiceGraphRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	51,  // 134: deputy.policy.v1.ServiceGraphRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
+	65,  // 135: deputy.policy.v1.ServiceGraphRequestPolicyInput.target:type_name -> deputy.target.v1.Target
+	3,   // 136: deputy.policy.v1.ServiceGraphRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	137, // [137:137] is the sub-list for method output_type
+	137, // [137:137] is the sub-list for method input_type
+	137, // [137:137] is the sub-list for extension type_name
+	137, // [137:137] is the sub-list for extension extendee
+	0,   // [0:137] is the sub-list for field type_name
 }
 
 func init() { file_deputy_policy_v1_policy_proto_init() }
@@ -5030,7 +5166,7 @@ func file_deputy_policy_v1_policy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_policy_v1_policy_proto_rawDesc), len(file_deputy_policy_v1_policy_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   61,
+			NumMessages:   62,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
