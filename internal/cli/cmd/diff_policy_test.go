@@ -133,3 +133,38 @@ func TestRunDiffPolicies_DenyGatesAfterCollection(t *testing.T) {
 		}
 	}
 }
+
+// TestRunDiffPolicies_LicenseDataReachesPolicies verifies the license hoist:
+// changes enriched with license data must satisfy pkg.licenses rules, so a
+// package whose license the report displays no longer produces a
+// false-positive "no license information" warning.
+func TestRunDiffPolicies_LicenseDataReachesPolicies(t *testing.T) {
+	bundlePath := writeDiffTestBundle(t)
+	diffReport := DiffPolicyReport{
+		Repo:      "example.com/repo",
+		BaseRef:   "main",
+		TargetRef: "feature",
+		Changes: []compare.Change{
+			{Name: "golang.org/x/crypto", Ecosystem: "go", BaseVersion: "0.52.0", TargetVersion: "0.53.0", ChangeType: compare.Upgraded, Licenses: []string{"BSD-3-Clause"}},
+			{Name: "example.com/unlicensed", Ecosystem: "go", TargetVersion: "1.0.0", ChangeType: compare.Added},
+		},
+	}
+
+	results, err := runDiffPolicies(t.Context(), []string{bundlePath}, diffReport)
+	if err != nil {
+		t.Fatalf("runDiffPolicies: %v", err)
+	}
+
+	var warns []*policyv1.Action
+	for _, r := range results {
+		if r.GetType() == policyv1.ActionType_ACTION_TYPE_WARN {
+			warns = append(warns, r)
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("expected exactly one warn (the unlicensed package), got %d: %v", len(warns), warns)
+	}
+	if got := warns[0].GetSubject().GetPackage(); got != "example.com/unlicensed" {
+		t.Errorf("warn subject = %q, want example.com/unlicensed", got)
+	}
+}

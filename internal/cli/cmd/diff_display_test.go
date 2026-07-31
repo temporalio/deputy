@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,8 +12,9 @@ import (
 )
 
 // Ensure scan-mode enrichment pulls licenses via best-effort sources (e.g., crates.io)
-// and surfaces them in the diff output when deps.dev metadata is absent.
-func TestDisplayDetailedDependencyChanges_ScanUsesBestEffortLicenses(t *testing.T) {
+// onto the change set, and that the renderer surfaces them, when deps.dev
+// metadata is absent.
+func TestEnrichChangeLicenses_ScanUsesBestEffortLicenses(t *testing.T) {
 	license.ResetLicenseCachesForTest(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,8 +39,13 @@ func TestDisplayDetailedDependencyChanges_ScanUsesBestEffortLicenses(t *testing.
 		IsDirect:      true,
 	}}
 
+	enriched := enrichChangeLicenses(t.Context(), nil, changes, "scan")
+	if len(enriched) != 1 || len(enriched[0].Licenses) == 0 || enriched[0].Licenses[0] != "MIT" {
+		t.Fatalf("expected enrichment to attach MIT license, got: %+v", enriched)
+	}
+
 	var buf bytes.Buffer
-	displayDetailedDependencyChanges(t.Context(), nil, changes, true, "scan", &buf, io.Discard)
+	displayDetailedDependencyChanges(enriched, &buf)
 
 	out := buf.String()
 	if !strings.Contains(out, "MIT") {

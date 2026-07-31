@@ -55,6 +55,7 @@ func PackageChangeToProto(c compare.Change) *diffv1.PackageChange {
 			Name:      c.Name,
 			Version:   c.TargetVersion,
 			Ecosystem: c.Ecosystem,
+			Licenses:  c.Licenses,
 		},
 		ChangeKind:    ChangeKindToProto(c.ChangeType),
 		BaseVersion:   c.BaseVersion,
@@ -79,6 +80,7 @@ func PackageChangeFromProto(pc *diffv1.PackageChange) compare.Change {
 	if pc.Package != nil {
 		c.Name = pc.Package.Name
 		c.Ecosystem = pc.Package.Ecosystem
+		c.Licenses = pc.Package.Licenses
 	}
 	return c
 }

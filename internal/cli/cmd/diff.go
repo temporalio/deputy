@@ -2,27 +2,22 @@ package cmd
 
 import (
 	"context"
-	"crypto/x509"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 
 	"connectrpc.com/connect"
 	pb "deps.dev/api/v3"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sync/errgroup"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
@@ -37,7 +32,6 @@ import (
 	"github.com/temporalio/deputy/internal/ignore"
 	"github.com/temporalio/deputy/internal/inputs"
 	inv "github.com/temporalio/deputy/internal/inventory"
-	"github.com/temporalio/deputy/internal/license"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/output"
 	"github.com/temporalio/deputy/internal/policy"
@@ -45,7 +39,6 @@ import (
 	"github.com/temporalio/deputy/internal/report"
 	"github.com/temporalio/deputy/internal/report/render"
 	"github.com/temporalio/deputy/internal/repository"
-	"github.com/temporalio/deputy/internal/repository/workspace"
 	"github.com/temporalio/deputy/internal/scanning"
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
@@ -528,10 +521,16 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	// Normalize license source
 	licenseSource = flags.NormalizeLicenseSource(licenseSource)
 
-	// Detailed dependency change rendering (legacy style) with optional enrichment
+	// Resolve license data onto the change set before anything consumes it:
+	// the rendered report, policy evaluation (pkg.licenses), and structured
+	// output must all see the same licenses.
+	if enrichLicenses {
+		changes = enrichChangeLicenses(ctx, repoSrc.Workspace(), changes, licenseSource)
+	}
+
 	// Skip text rendering in JSON mode
 	if !isJSON {
-		displayDetailedDependencyChanges(ctx, repoSrc.Workspace(), changes, enrichLicenses, licenseSource, outW, errW)
+		displayDetailedDependencyChanges(changes, outW)
 	}
 
 	// Scan for vulnerabilities if enabled
@@ -790,154 +789,23 @@ func licenseScanConcurrency(total int) int {
 	return parallel
 }
 
-// displayDetailedDependencyChanges renders dependency changes with symbols, arrows,
-// license lookups via deps.dev and a concise summary similar to the original tool output.
-func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, changes []compare.Change, enrich bool, licenseSource string, outW io.Writer, errW io.Writer) {
+// displayDetailedDependencyChanges renders the Dependency Changes section and
+// summary for the (possibly license-enriched) change set. It is a pure
+// renderer: license data comes from Change.Licenses, populated by
+// enrichChangeLicenses before policy evaluation and output conversion, so
+// every surface shows the same licenses.
+func displayDetailedDependencyChanges(changes []compare.Change, outW io.Writer) {
 	if len(changes) == 0 {
 		return
 	}
 	fmt.Fprintln(outW)
 	fmt.Fprintln(outW, ui.StyleHeader.Render("Dependency Changes:"))
 
-	// Open deps.dev gRPC client (best‑effort). Failures degrade gracefully.
-	var client pb.InsightsClient
-	if certPool, err := x509.SystemCertPool(); err == nil {
-		if conn, err := grpc.NewClient("api.deps.dev:443", grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certPool, ""))); err == nil {
-			client = pb.NewInsightsClient(conn)
-			// closing conn when context done (fire and forget); rely on GC otherwise
-			go func() { <-ctx.Done(); _ = conn.Close() }()
-		}
-	}
-
-	// Pre-fetch deps.dev licenses in parallel when requested
-	type pkgKey struct {
-		ecosystem string
-		name      string
-		version   string
-	}
-	resolveEcosystem := func(raw string) string {
-		eco := strings.ToLower(strings.TrimSpace(raw))
-		if eco == "" {
-			return "go"
-		}
-		return eco
-	}
-	licMap := map[pkgKey][]string{}
-	if client != nil && enrich && (licenseSource == flags.LicenseSourceDepsDev || licenseSource == flags.LicenseSourceBoth) {
-		var mu sync.Mutex
-		g, gctx := errgroup.WithContext(ctx)
-		for _, c := range changes {
-			if c.ChangeType == compare.Removed || c.TargetVersion == "" {
-				continue
-			}
-			pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
-			if _, ok := licMap[pk]; ok {
-				continue
-			}
-			pkCopy := pk
-			g.Go(func() error {
-				l := license.FetchLicensesForEcosystem(gctx, depsClient{client}, pkCopy.ecosystem, pkCopy.name, pkCopy.version)
-				mu.Lock()
-				licMap[pkCopy] = l
-				mu.Unlock()
-				return nil
-			})
-		}
-		_ = g.Wait()
-	}
-
-	var localScan []string
-	if enrich && (licenseSource == flags.LicenseSourceScan || licenseSource == flags.LicenseSourceBoth) {
-		localScan = license.LocalRepoLicenseScan(ws)
-	}
-
-	var remoteFetchers map[pkgKey]chan []string
-	var remoteCache map[pkgKey][]string
-	var remoteTasks []pkgKey
-	if enrich && (licenseSource == flags.LicenseSourceScan || licenseSource == flags.LicenseSourceBoth) {
-		required := map[pkgKey]struct{}{}
-		for _, c := range changes {
-			if c.ChangeType == compare.Removed || c.TargetVersion == "" {
-				continue
-			}
-			pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
-			if _, ok := required[pk]; ok {
-				continue
-			}
-			required[pk] = struct{}{}
-		}
-		if len(required) > 0 {
-			remoteFetchers = make(map[pkgKey]chan []string, len(required))
-			remoteCache = make(map[pkgKey][]string, len(required))
-			remoteTasks = make([]pkgKey, 0, len(required))
-			seen := map[pkgKey]struct{}{}
-			for _, c := range changes {
-				if c.ChangeType == compare.Removed || c.TargetVersion == "" {
-					continue
-				}
-				pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
-				if _, ok := seen[pk]; ok {
-					continue
-				}
-				seen[pk] = struct{}{}
-				ch := make(chan []string, 1)
-				remoteFetchers[pk] = ch
-				remoteTasks = append(remoteTasks, pk)
-			}
-			concurrency := max(licenseScanConcurrency(len(remoteTasks)), 1)
-			sem := make(chan struct{}, concurrency)
-			for _, task := range remoteTasks {
-				t := task
-				ch := remoteFetchers[t]
-				go func() {
-					defer close(ch)
-					select {
-					case sem <- struct{}{}:
-					case <-ctx.Done():
-						return
-					}
-					defer func() { <-sem }()
-					lics := license.LookupLicensesBestEffort(ctx, t.ecosystem, t.name, t.version)
-					ch <- lics
-				}()
-			}
-		}
-	}
-
 	// Counters
 	var addedN, removedN, updatedN, upgradedN, downgradedN int
 
 	for _, c := range changes {
-		// Build the license and direct/indirect annotation in the new format: [License1, License2] (direct/indirect)
-		pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
-		licenses := []string{"?"}
-		if l, ok := licMap[pk]; ok && len(l) > 0 {
-			licenses = l
-		}
-		if c.ChangeType != compare.Removed && c.TargetVersion != "" && enrich && (licenseSource == flags.LicenseSourceScan || licenseSource == flags.LicenseSourceBoth) {
-			if len(localScan) > 0 {
-				licenses = license.MergeLicenseSources(licenses, localScan)
-			}
-			if remoteFetchers != nil {
-				switch {
-				case remoteCache[pk] != nil:
-					licenses = license.MergeLicenseSources(licenses, remoteCache[pk])
-				case remoteFetchers[pk] != nil:
-					ch := remoteFetchers[pk]
-					select {
-					case rc, ok := <-ch:
-						if ok && len(rc) > 0 {
-							remoteCache[pk] = rc
-							licenses = license.MergeLicenseSources(licenses, rc)
-						} else {
-							remoteCache[pk] = nil
-						}
-					case <-ctx.Done():
-						remoteCache[pk] = nil
-					}
-				}
-			}
-		}
+		licenses := c.Licenses
 
 		// Format the combined license and direct/indirect annotation
 		var licAndDepStr string
@@ -948,7 +816,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			directnessStr = ui.StyleIndirect.Render("[indirect]")
 		}
 
-		if len(licenses) > 0 && licenses[0] != "?" {
+		if len(licenses) > 0 {
 			licenseStr := strings.Join(licenses, ", ")
 			licAndDepStr = ui.StyleLicense.Render("["+licenseStr+"]") + " " + directnessStr
 		} else {
