@@ -10,6 +10,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
@@ -280,19 +281,19 @@ require (
 
 	var added, removed, upgraded bool
 	for _, c := range changes {
-		switch c.ChangeType {
-		case Added:
-			if c.Name != "github.com/new/added" || c.TargetVersion != "v1.0.0" || !c.IsDirect || c.Ecosystem != "Go" {
+		switch c.GetChangeKind() {
+		case diffv1.ChangeKind_CHANGE_KIND_ADDED:
+			if c.GetPackage().GetName() != "github.com/new/added" || c.GetTargetVersion() != "v1.0.0" || !c.GetIsDirect() || c.GetPackage().GetEcosystem() != "Go" {
 				t.Fatalf("bad added: %+v", c)
 			}
 			added = true
-		case Removed:
-			if c.Name != "github.com/old/removed" || c.BaseVersion != "v0.9.0" || c.Ecosystem != "Go" {
+		case diffv1.ChangeKind_CHANGE_KIND_REMOVED:
+			if c.GetPackage().GetName() != "github.com/old/removed" || c.GetBaseVersion() != "v0.9.0" || c.GetPackage().GetEcosystem() != "Go" {
 				t.Fatalf("bad removed: %+v", c)
 			}
 			removed = true
-		case Upgraded:
-			if c.Name != "github.com/keep/updated" || c.BaseVersion != "v1.0.0" || c.TargetVersion != "v1.1.0" || !c.IsDirect || c.Ecosystem != "Go" {
+		case diffv1.ChangeKind_CHANGE_KIND_UPGRADED:
+			if c.GetPackage().GetName() != "github.com/keep/updated" || c.GetBaseVersion() != "v1.0.0" || c.GetTargetVersion() != "v1.1.0" || !c.GetIsDirect() || c.GetPackage().GetEcosystem() != "Go" {
 				t.Fatalf("bad upgraded: %+v", c)
 			}
 			upgraded = true
@@ -320,24 +321,24 @@ func TestComparePackages_DowngradeAndRename(t *testing.T) {
 	if len(changes) != 2 {
 		t.Fatalf("expected 2 changes got %d: %+v", len(changes), changes)
 	}
-	seen := map[ChangeType]bool{}
+	seen := map[diffv1.ChangeKind]bool{}
 	for _, c := range changes {
-		switch c.ChangeType {
-		case Downgraded:
-			seen[Downgraded] = true
-			if c.Name != "github.com/example/down" || c.BaseVersion != "v1.2.0" || c.TargetVersion != "v1.1.0" || c.Ecosystem != "Go" {
+		switch c.GetChangeKind() {
+		case diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED:
+			seen[diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED] = true
+			if c.GetPackage().GetName() != "github.com/example/down" || c.GetBaseVersion() != "v1.2.0" || c.GetTargetVersion() != "v1.1.0" || c.GetPackage().GetEcosystem() != "Go" {
 				t.Fatalf("unexpected downgrade change: %+v", c)
 			}
-		case Updated:
-			seen[Updated] = true
-			if c.Name != "github.com/example/rename/v2" || c.OldName != "github.com/example/rename" || c.Ecosystem != "Go" {
+		case diffv1.ChangeKind_CHANGE_KIND_UPDATED:
+			seen[diffv1.ChangeKind_CHANGE_KIND_UPDATED] = true
+			if c.GetPackage().GetName() != "github.com/example/rename/v2" || c.GetOldName() != "github.com/example/rename" || c.GetPackage().GetEcosystem() != "Go" {
 				t.Fatalf("unexpected rename change: %+v", c)
 			}
 		default:
-			t.Fatalf("unexpected change type %v", c.ChangeType)
+			t.Fatalf("unexpected change type %v", c.GetChangeKind())
 		}
 	}
-	if !seen[Downgraded] || !seen[Updated] {
+	if !seen[diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED] || !seen[diffv1.ChangeKind_CHANGE_KIND_UPDATED] {
 		t.Fatalf("missing expected change types: %+v", seen)
 	}
 }
@@ -356,22 +357,22 @@ func TestComparePackages_NonGo(t *testing.T) {
 	}
 	var added, updated bool
 	for _, c := range changes {
-		if c.Ecosystem != scalpurl.TypeNPM {
+		if c.GetPackage().GetEcosystem() != scalpurl.TypeNPM {
 			t.Fatalf("unexpected ecosystem for npm package: %+v", c)
 		}
-		switch c.ChangeType {
-		case Added:
-			if c.Name != "colors" || c.TargetVersion != "2.0.0" || c.IsDirect {
+		switch c.GetChangeKind() {
+		case diffv1.ChangeKind_CHANGE_KIND_ADDED:
+			if c.GetPackage().GetName() != "colors" || c.GetTargetVersion() != "2.0.0" || c.GetIsDirect() {
 				t.Fatalf("unexpected added change: %+v", c)
 			}
 			added = true
-		case Upgraded:
-			if c.Name != "left-pad" || c.BaseVersion != "1.0.0" || c.TargetVersion != "1.1.0" || c.IsDirect {
+		case diffv1.ChangeKind_CHANGE_KIND_UPGRADED:
+			if c.GetPackage().GetName() != "left-pad" || c.GetBaseVersion() != "1.0.0" || c.GetTargetVersion() != "1.1.0" || c.GetIsDirect() {
 				t.Fatalf("unexpected upgraded change: %+v", c)
 			}
 			updated = true
 		default:
-			t.Fatalf("unexpected change type %v", c.ChangeType)
+			t.Fatalf("unexpected change type %v", c.GetChangeKind())
 		}
 	}
 	if !added || !updated {
@@ -420,8 +421,8 @@ func TestComparePackages_PyPINameNormalization(t *testing.T) {
 	if len(changes) != 1 {
 		t.Fatalf("expected 1 change (upgrade) got %d: %+v", len(changes), changes)
 	}
-	if changes[0].ChangeType != Upgraded {
-		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
+	if changes[0].GetChangeKind() != diffv1.ChangeKind_CHANGE_KIND_UPGRADED {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].GetChangeKind(), changes[0])
 	}
 	if changes[0].BaseVersion != "1.0.0" || changes[0].TargetVersion != "1.1.0" {
 		t.Fatalf("unexpected versions: %+v", changes[0])
@@ -466,8 +467,8 @@ func TestComparePackages_GoMajorVersionUpgrade(t *testing.T) {
 	if len(changes) != 1 {
 		t.Fatalf("expected 1 change got %d: %+v", len(changes), changes)
 	}
-	if changes[0].ChangeType != Upgraded {
-		t.Fatalf("expected Upgraded, got %v: %+v", changes[0].ChangeType, changes[0])
+	if changes[0].GetChangeKind() != diffv1.ChangeKind_CHANGE_KIND_UPGRADED {
+		t.Fatalf("expected Upgraded, got %v: %+v", changes[0].GetChangeKind(), changes[0])
 	}
 }
 
@@ -485,8 +486,8 @@ func TestComparePackages_GoGopkgInNormalization(t *testing.T) {
 	if len(changes) != 1 {
 		t.Fatalf("expected 1 change got %d: %+v", len(changes), changes)
 	}
-	if changes[0].ChangeType != Upgraded {
-		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
+	if changes[0].GetChangeKind() != diffv1.ChangeKind_CHANGE_KIND_UPGRADED {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].GetChangeKind(), changes[0])
 	}
 	if changes[0].OldName != "gopkg.in/yaml.v3" {
 		t.Fatalf("expected OldName to be gopkg.in/yaml.v3, got %q", changes[0].OldName)
@@ -531,8 +532,8 @@ func TestComparePackages_CargoNameNormalization(t *testing.T) {
 	if len(changes) != 1 {
 		t.Fatalf("expected 1 change (upgrade) got %d: %+v", len(changes), changes)
 	}
-	if changes[0].ChangeType != Upgraded {
-		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
+	if changes[0].GetChangeKind() != diffv1.ChangeKind_CHANGE_KIND_UPGRADED {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].GetChangeKind(), changes[0])
 	}
 	if changes[0].BaseVersion != "1.0.0" || changes[0].TargetVersion != "1.1.0" {
 		t.Fatalf("unexpected versions: %+v", changes[0])
@@ -553,8 +554,8 @@ func TestComparePackages_NpmCaseNormalization(t *testing.T) {
 	if len(changes) != 1 {
 		t.Fatalf("expected 1 change (upgrade) got %d: %+v", len(changes), changes)
 	}
-	if changes[0].ChangeType != Upgraded {
-		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
+	if changes[0].GetChangeKind() != diffv1.ChangeKind_CHANGE_KIND_UPGRADED {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].GetChangeKind(), changes[0])
 	}
 }
 
@@ -792,21 +793,21 @@ func TestComparePackages_PackageMatching(t *testing.T) {
 
 	var upgraded, added, removed int
 	for _, c := range changes {
-		switch c.ChangeType {
-		case Upgraded:
+		switch c.GetChangeKind() {
+		case diffv1.ChangeKind_CHANGE_KIND_UPGRADED:
 			upgraded++
-			if c.Name != "curl" && c.Name != "openssl" {
-				t.Errorf("unexpected upgraded package: %s", c.Name)
+			if c.GetPackage().GetName() != "curl" && c.GetPackage().GetName() != "openssl" {
+				t.Errorf("unexpected upgraded package: %s", c.GetPackage().GetName())
 			}
-		case Added:
+		case diffv1.ChangeKind_CHANGE_KIND_ADDED:
 			added++
-			if c.Name != "new-pkg" {
-				t.Errorf("unexpected added package: %s", c.Name)
+			if c.GetPackage().GetName() != "new-pkg" {
+				t.Errorf("unexpected added package: %s", c.GetPackage().GetName())
 			}
-		case Removed:
+		case diffv1.ChangeKind_CHANGE_KIND_REMOVED:
 			removed++
-			if c.Name != "removed-pkg" {
-				t.Errorf("unexpected removed package: %s", c.Name)
+			if c.GetPackage().GetName() != "removed-pkg" {
+				t.Errorf("unexpected removed package: %s", c.GetPackage().GetName())
 			}
 		}
 	}
@@ -898,8 +899,8 @@ func TestComparePackagesWithOptions_ExcludeMainModule(t *testing.T) {
 	if len(changesWithExclude) != 1 {
 		t.Fatalf("expected 1 change with exclusion, got %d: %+v", len(changesWithExclude), changesWithExclude)
 	}
-	if changesWithExclude[0].Name != "github.com/dep/a" {
-		t.Errorf("expected dep/a change, got %s", changesWithExclude[0].Name)
+	if changesWithExclude[0].GetPackage().GetName() != "github.com/dep/a" {
+		t.Errorf("expected dep/a change, got %s", changesWithExclude[0].GetPackage().GetName())
 	}
 }
 
@@ -921,7 +922,7 @@ func TestComparePackagesWithOptions_GoToolchainNotFiltered(t *testing.T) {
 	if len(changes) != 1 {
 		t.Fatalf("expected 1 change (go toolchain added), got %d: %+v", len(changes), changes)
 	}
-	if changes[0].Name != "go" || changes[0].ChangeType != Added {
+	if changes[0].GetPackage().GetName() != "go" || changes[0].GetChangeKind() != diffv1.ChangeKind_CHANGE_KIND_ADDED {
 		t.Errorf("expected go toolchain as added, got: %+v", changes[0])
 	}
 }

@@ -17,8 +17,7 @@ func Test_CompareGoPackageVersions(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			chg := Change{BaseVersion: c.base, TargetVersion: c.target}
-			got := CompareGoPackageVersions(chg)
+			got := CompareGoPackageVersions(c.base, c.target)
 			if got != c.want {
 				t.Fatalf("CompareGoPackageVersions(%q→%q)=%d want %d", c.base, c.target, got, c.want)
 			}

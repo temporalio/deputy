@@ -9,6 +9,8 @@ import (
 	"github.com/google/osv-scalibr/semantic"
 	"golang.org/x/mod/semver"
 
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/repository/workspace"
 )
@@ -54,22 +56,45 @@ func (c ChangeType) String() string {
 	}
 }
 
-// Change captures a single dependency delta between two scans. For Added
-// entries BaseVersion/OldName are empty. For Removed entries TargetVersion is
-// empty. Updated entries record both old and new identifying information.
-//
-// Ecosystem is currently always "go" but is modeled for future multi-ecosystem
-// support. IsDirect is true when the module root appears explicitly (without
-// "// indirect" annotation) in go.mod of the target workspace.
-type Change struct {
-	Name          string     `json:"name"`               // canonical or full import path in target inventory
-	OldName       string     `json:"oldName"`            // previous path (may differ after canonicalization)
-	TargetVersion string     `json:"targetVersion"`      // version in target inventory (for Added/Updated)
-	BaseVersion   string     `json:"baseVersion"`        // version in base inventory (for Removed/Updated)
-	ChangeType    ChangeType `json:"changeType"`         // classification of the change
-	Ecosystem     string     `json:"ecosystem"`          // e.g. "go", "npm"
-	IsDirect      bool       `json:"isDirect"`           // true if a direct dependency when known (currently Go)
-	Licenses      []string   `json:"licenses,omitempty"` // SPDX identifiers for the target version, when license enrichment ran
+// Dependency changes use deputy.diff.v1.PackageChange as their domain type:
+// the same message every surface (JSON output, MCP, policy inputs) already
+// speaks, so nothing converts or drifts in between. ChangeType remains the
+// internal classification enum for container-image comparisons; Kind bridges
+// it onto the proto vocabulary.
+
+// Kind converts the internal classification to the proto ChangeKind.
+func (c ChangeType) Kind() diffv1.ChangeKind {
+	switch c {
+	case Added:
+		return diffv1.ChangeKind_CHANGE_KIND_ADDED
+	case Removed:
+		return diffv1.ChangeKind_CHANGE_KIND_REMOVED
+	case Upgraded:
+		return diffv1.ChangeKind_CHANGE_KIND_UPGRADED
+	case Downgraded:
+		return diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED
+	case Updated:
+		return diffv1.ChangeKind_CHANGE_KIND_UPDATED
+	default:
+		return diffv1.ChangeKind_CHANGE_KIND_UNSPECIFIED
+	}
+}
+
+// newPackageChange builds a dependency change record. Package.Version carries
+// the target version (empty for removals), matching what consumers act on.
+func newPackageChange(kind ChangeType, name, oldName, baseVersion, targetVersion, ecosystem string, direct bool) *diffv1.PackageChange {
+	return &diffv1.PackageChange{
+		Package: &dependencyv1.Package{
+			Name:      name,
+			Version:   targetVersion,
+			Ecosystem: ecosystem,
+		},
+		ChangeKind:    kind.Kind(),
+		BaseVersion:   baseVersion,
+		TargetVersion: targetVersion,
+		OldName:       oldName,
+		IsDirect:      direct,
+	}
 }
 
 // GoPackageInfo represents a parsed interpretation of an import path possibly
@@ -269,12 +294,12 @@ func ParseGoPackage(pkg *extractor.Package) GoPackageInfo {
 	return info
 }
 
-// CompareGoPackageVersions compares BaseVersion and TargetVersion of a Change
-// returning 1 if TargetVersion is a semantic upgrade, -1 if a downgrade, and 0
-// if versions are identical or unparsable.
-func CompareGoPackageVersions(c Change) int {
-	oldV := normalizeGoVersion(c.BaseVersion)
-	newV := normalizeGoVersion(c.TargetVersion)
+// CompareGoPackageVersions compares a base and target Go version, returning 1
+// if target is a semantic upgrade, -1 if a downgrade, and 0 if versions are
+// identical or unparsable.
+func CompareGoPackageVersions(baseVersion, targetVersion string) int {
+	oldV := normalizeGoVersion(baseVersion)
+	newV := normalizeGoVersion(targetVersion)
 	return semver.Compare(newV, oldV)
 }
 
@@ -672,7 +697,7 @@ type CompareOptions struct {
 //
 // If deps is nil, direct dependencies are inferred from go.mod in the supplied
 // workspace.
-func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]bool, pkgDirect map[string]bool, ws workspace.ReadableFS) []Change {
+func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]bool, pkgDirect map[string]bool, ws workspace.ReadableFS) []*diffv1.PackageChange {
 	return ComparePackagesWithOptions(oldPkgs, newPkgs, CompareOptions{
 		GoDirect:  goDirect,
 		PkgDirect: pkgDirect,
@@ -681,7 +706,7 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]
 }
 
 // ComparePackagesWithOptions computes the dependency delta with configurable options.
-func ComparePackagesWithOptions(oldPkgs, newPkgs []*extractor.Package, opts CompareOptions) []Change {
+func ComparePackagesWithOptions(oldPkgs, newPkgs []*extractor.Package, opts CompareOptions) []*diffv1.PackageChange {
 	if len(oldPkgs) == 0 && len(newPkgs) == 0 {
 		return nil
 	}
@@ -710,66 +735,52 @@ func ComparePackagesWithOptions(oldPkgs, newPkgs []*extractor.Package, opts Comp
 		goDirect = GetDirectDependencies(opts.Workspace)
 	}
 	pkgDirect := opts.PkgDirect
-	var changes []Change
+	var changes []*diffv1.PackageChange
 	for key, oldMeta := range oldMap {
 		newMeta, ok := newMap[key]
 		if !ok {
-			changes = append(changes, Change{
-				Name:        oldMeta.pkg.Name,
-				BaseVersion: oldMeta.pkg.Version,
-				ChangeType:  Removed,
-				Ecosystem:   oldMeta.ecosystemName(),
-				IsDirect:    isDirectForSummary(oldMeta, goDirect, pkgDirect),
-			})
+			changes = append(changes, newPackageChange(Removed,
+				oldMeta.pkg.Name, "", oldMeta.pkg.Version, "",
+				oldMeta.ecosystemName(), isDirectForSummary(oldMeta, goDirect, pkgDirect)))
 			continue
 		}
 		if oldMeta.pkg.Version != newMeta.pkg.Version || oldMeta.pkg.Name != newMeta.pkg.Name {
 			ct := selectChangeType(newMeta.ecosystemName(), oldMeta.pkg.Version, newMeta.pkg.Version)
-			changes = append(changes, Change{
-				Name:          newMeta.pkg.Name,
-				OldName:       oldMeta.pkg.Name,
-				BaseVersion:   oldMeta.pkg.Version,
-				TargetVersion: newMeta.pkg.Version,
-				ChangeType:    ct,
-				Ecosystem:     newMeta.ecosystemName(),
-				IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
-			})
+			changes = append(changes, newPackageChange(ct,
+				newMeta.pkg.Name, oldMeta.pkg.Name, oldMeta.pkg.Version, newMeta.pkg.Version,
+				newMeta.ecosystemName(), isDirectForSummary(newMeta, goDirect, pkgDirect)))
 		}
 	}
 	for key, newMeta := range newMap {
 		if _, ok := oldMap[key]; ok {
 			continue
 		}
-		changes = append(changes, Change{
-			Name:          newMeta.pkg.Name,
-			TargetVersion: newMeta.pkg.Version,
-			ChangeType:    Added,
-			Ecosystem:     newMeta.ecosystemName(),
-			IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
-		})
+		changes = append(changes, newPackageChange(Added,
+			newMeta.pkg.Name, "", "", newMeta.pkg.Version,
+			newMeta.ecosystemName(), isDirectForSummary(newMeta, goDirect, pkgDirect)))
 	}
 
 	// Sort changes for consistent output: by change type priority, then name
-	slices.SortFunc(changes, func(a, b Change) int {
-		// Sort by change type: Upgraded, Downgraded, Added, Removed, Updated
-		typePriority := func(ct ChangeType) int {
-			switch ct {
-			case Upgraded:
+	slices.SortFunc(changes, func(a, b *diffv1.PackageChange) int {
+		// Sort by change kind: Upgraded, Downgraded, Added, Removed, Updated
+		kindPriority := func(ck diffv1.ChangeKind) int {
+			switch ck {
+			case diffv1.ChangeKind_CHANGE_KIND_UPGRADED:
 				return 0
-			case Downgraded:
+			case diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED:
 				return 1
-			case Added:
+			case diffv1.ChangeKind_CHANGE_KIND_ADDED:
 				return 2
-			case Removed:
+			case diffv1.ChangeKind_CHANGE_KIND_REMOVED:
 				return 3
 			default:
 				return 4
 			}
 		}
-		if n := cmp.Compare(typePriority(a.ChangeType), typePriority(b.ChangeType)); n != 0 {
+		if n := cmp.Compare(kindPriority(a.GetChangeKind()), kindPriority(b.GetChangeKind())); n != 0 {
 			return n
 		}
-		return cmp.Compare(a.Name, b.Name)
+		return cmp.Compare(a.GetPackage().GetName(), b.GetPackage().GetName())
 	})
 
 	return changes

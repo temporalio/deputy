@@ -130,7 +130,7 @@ func (h *DiffHandler) DiffPackages(
 			DisplayPath: targetExec.Result.Target.DisplayPath,
 		},
 		GeneratedAt: timestamppb.Now(),
-		Changes:     internalproto.PackageChangesToProto(changes),
+		Changes:     changes,
 		Stats:       internalproto.DiffStatsToProto(changes),
 	}
 

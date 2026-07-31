@@ -146,20 +146,21 @@ func compareContainerPackagesFromScanning(baseResult, targetResult *scanning.Res
 	// Convert to proto
 	changes := make([]*diffv1.ContainerPackageChange, 0, len(baseChanges))
 	for _, c := range baseChanges {
+		name := c.GetPackage().GetName()
 		change := &diffv1.ContainerPackageChange{
-			Name:               c.Name,
-			Ecosystem:          c.Ecosystem,
-			ChangeKind:         convertChangeKind(c.ChangeType),
-			BaseVersion:        c.BaseVersion,
-			TargetVersion:      c.TargetVersion,
-			OldName:            c.OldName,
-			IsDirect:           c.IsDirect,
-			BaseLayerDetails:   baseLayerMap[c.Name],
-			TargetLayerDetails: targetLayerMap[c.Name],
+			Name:               name,
+			Ecosystem:          c.GetPackage().GetEcosystem(),
+			ChangeKind:         c.GetChangeKind(),
+			BaseVersion:        c.GetBaseVersion(),
+			TargetVersion:      c.GetTargetVersion(),
+			OldName:            c.GetOldName(),
+			IsDirect:           c.GetIsDirect(),
+			BaseLayerDetails:   baseLayerMap[name],
+			TargetLayerDetails: targetLayerMap[name],
 		}
 		// For removed packages, use old name if different
-		if c.ChangeType == compare.Removed && c.OldName != "" {
-			change.BaseLayerDetails = baseLayerMap[c.OldName]
+		if c.GetChangeKind() == diffv1.ChangeKind_CHANGE_KIND_REMOVED && c.GetOldName() != "" {
+			change.BaseLayerDetails = baseLayerMap[c.GetOldName()]
 		}
 		changes = append(changes, change)
 	}
@@ -683,15 +684,13 @@ func ContainerDiffResponseToReport(resp *diffv1.DiffContainerImagesResponse) *co
 	// Convert package changes
 	for _, pc := range resp.PackageChanges {
 		report.PackageChanges = append(report.PackageChanges, compare.ImagePackageChange{
-			Change: compare.Change{
-				Name:          pc.Name,
-				Ecosystem:     pc.Ecosystem,
-				ChangeType:    protoChangeKindToCompare(pc.ChangeKind),
-				BaseVersion:   pc.BaseVersion,
-				TargetVersion: pc.TargetVersion,
-				OldName:       pc.OldName,
-				IsDirect:      pc.IsDirect,
-			},
+			Name:          pc.Name,
+			Ecosystem:     pc.Ecosystem,
+			ChangeType:    protoChangeKindToCompare(pc.ChangeKind),
+			BaseVersion:   pc.BaseVersion,
+			TargetVersion: pc.TargetVersion,
+			OldName:       pc.OldName,
+			IsDirect:      pc.IsDirect,
 			BaseLayerDetails:   pc.BaseLayerDetails,
 			TargetLayerDetails: pc.TargetLayerDetails,
 		})
@@ -911,7 +910,7 @@ func ImageDiffReportToProto(report *compare.ImageDiffReport) *diffv1.DiffContain
 		resp.PackageChanges = append(resp.PackageChanges, &diffv1.ContainerPackageChange{
 			Name:               pc.Name,
 			Ecosystem:          pc.Ecosystem,
-			ChangeKind:         ChangeKindToProto(pc.ChangeType),
+			ChangeKind:         pc.ChangeType.Kind(),
 			BaseVersion:        pc.BaseVersion,
 			TargetVersion:      pc.TargetVersion,
 			OldName:            pc.OldName,
@@ -971,7 +970,7 @@ func ImageDiffReportToProto(report *compare.ImageDiffReport) *diffv1.DiffContain
 		for _, ec := range cc.EnvChanges {
 			resp.ConfigChanges.EnvChanges = append(resp.ConfigChanges.EnvChanges, &diffv1.EnvChange{
 				Name:        ec.Name,
-				ChangeKind:  ChangeKindToProto(ec.ChangeType),
+				ChangeKind:  ec.ChangeType.Kind(),
 				BaseValue:   ec.BaseValue,
 				TargetValue: ec.TargetValue,
 				IsSensitive: ec.IsSensitive,
@@ -980,7 +979,7 @@ func ImageDiffReportToProto(report *compare.ImageDiffReport) *diffv1.DiffContain
 		for _, lc := range cc.LabelChanges {
 			resp.ConfigChanges.LabelChanges = append(resp.ConfigChanges.LabelChanges, &diffv1.LabelChange{
 				Key:         lc.Key,
-				ChangeKind:  ChangeKindToProto(lc.ChangeType),
+				ChangeKind:  lc.ChangeType.Kind(),
 				BaseValue:   lc.BaseValue,
 				TargetValue: lc.TargetValue,
 			})

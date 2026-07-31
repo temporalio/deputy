@@ -7,7 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/temporalio/deputy/internal/compare"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	"github.com/temporalio/deputy/internal/license"
 )
 
@@ -31,16 +32,10 @@ func TestEnrichChangeLicenses_ScanUsesBestEffortLicenses(t *testing.T) {
 	restoreBases := license.WithLicenseEndpoints(server.URL, server.URL, server.URL, server.URL, server.URL, server.URL)
 	defer restoreBases()
 
-	changes := []compare.Change{{
-		Name:          "serde",
-		TargetVersion: "1.0.0",
-		ChangeType:    compare.Added,
-		Ecosystem:     "rust",
-		IsDirect:      true,
-	}}
+	changes := []*diffv1.PackageChange{{Package: &dependencyv1.Package{Name: "serde", Version: "1.0.0", Ecosystem: "rust"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_ADDED, TargetVersion: "1.0.0", IsDirect: true}}
 
 	enriched := enrichChangeLicenses(t.Context(), changes, "scan")
-	if len(enriched) != 1 || len(enriched[0].Licenses) == 0 || enriched[0].Licenses[0] != "MIT" {
+	if len(enriched) != 1 || len(enriched[0].GetPackage().GetLicenses()) == 0 || enriched[0].GetPackage().GetLicenses()[0] != "MIT" {
 		t.Fatalf("expected enrichment to attach MIT license, got: %+v", enriched)
 	}
 
@@ -73,11 +68,10 @@ func TestEnrichChangeLicenses_DoesNotInheritRepositoryLicense(t *testing.T) {
 	restoreBases := license.WithLicenseEndpoints(server.URL, server.URL, server.URL, server.URL, server.URL, server.URL)
 	defer restoreBases()
 
-	changes := []compare.Change{{
-		Name:          "example.com/unlicensed",
+	changes := []*diffv1.PackageChange{{
+		Package:       &dependencyv1.Package{Name: "example.com/unlicensed", Version: "1.0.0", Ecosystem: "go"},
+		ChangeKind:    diffv1.ChangeKind_CHANGE_KIND_ADDED,
 		TargetVersion: "1.0.0",
-		ChangeType:    compare.Added,
-		Ecosystem:     "go",
 	}}
 
 	for _, source := range []string{"scan", "both"} {
@@ -86,7 +80,7 @@ func TestEnrichChangeLicenses_DoesNotInheritRepositoryLicense(t *testing.T) {
 			if len(enriched) != 1 {
 				t.Fatalf("expected 1 change, got %d", len(enriched))
 			}
-			if got := enriched[0].Licenses; len(got) != 0 {
+			if got := enriched[0].GetPackage().GetLicenses(); len(got) != 0 {
 				t.Errorf("dependency inherited licenses it does not declare: %v", got)
 			}
 		})
