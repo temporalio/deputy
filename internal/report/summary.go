@@ -64,6 +64,9 @@ func BuildSummary(cons []vulnerability.Consolidated, stats *vulnerabilityv1.Stat
 	migration := int(stats.FixViaMigration)
 	unfixed := max(int(stats.Unique)-int(stats.FixAvailable)-migration-commandFixable, 0)
 	commands, stdlibRec := remediation.CommandsFromConsolidated(cons)
+	// The summary renders on the CLI, so hints name deputy commands rather
+	// than the generic dependency-graph phrasing.
+	commands = remediation.ApplyGuidance(commands, remediation.CLIGuidance())
 	// Choose a header verb that matches the actions actually recommended.
 	// "Upgrade" fits when every fix is an in-place version bump; once any
 	// finding requires a module migration (which may resolve via a direct

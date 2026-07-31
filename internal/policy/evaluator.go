@@ -45,6 +45,9 @@ var (
 		"component",
 		"findings",
 		"change",
+		"top_packages", // Triage package summaries, most urgent first
+		"base_ref",     // Diff base reference
+		"target_ref",   // Diff target reference
 		// Container diff specific variables
 		"base_image",
 		"target_image",

@@ -157,11 +157,12 @@ func (h *PolicyHandler) ListEntrypoints(
 	req *connect.Request[policyv1.ListEntrypointsRequest],
 ) (*connect.Response[policyv1.ListEntrypointsResponse], error) {
 	msg := req.Msg
+	category := policy.NormalizeCategory(msg.Category)
 
 	var infos []*policyv1.EntrypointInfo
 	for _, ep := range policy.AllEntrypoints {
 		cat := ep.Category()
-		if msg.Category != "" && cat != msg.Category {
+		if category != "" && cat != category {
 			continue
 		}
 
@@ -327,122 +328,40 @@ func extractMetadataFromSource(body string) policyMeta {
 }
 
 func getEntrypointDescription(ep policy.Entrypoint) string {
-	descriptions := map[policy.Entrypoint]string{
-		policy.EntrypointScanReport:              "Evaluated after a vulnerability scan completes with the full report",
-		policy.EntrypointScanVulnerability:       "Evaluated for each vulnerability found during a scan",
-		policy.EntrypointGoArtifactRequest:       "Evaluated when the proxy handles a Go module request",
-		policy.EntrypointNpmArtifactRequest:      "Evaluated when the proxy handles an npm package request",
-		policy.EntrypointPypiArtifactRequest:     "Evaluated when the proxy handles a PyPI package request",
-		policy.EntrypointRubygemsArtifactRequest: "Evaluated when the proxy handles a RubyGems package request",
-		policy.EntrypointOCIArtifactRequest:      "Evaluated when the proxy handles an OCI artifact request",
-		policy.EntrypointGraphReport:             "Evaluated after dependency graph resolution",
-		policy.EntrypointGraphNode:               "Evaluated for each node in the dependency graph",
-		policy.EntrypointGraphEdge:               "Evaluated for each edge in the dependency graph",
-		policy.EntrypointDockerfileReport:        "Evaluated after Dockerfile analysis",
-		policy.EntrypointDockerfileStage:         "Evaluated for each stage in a Dockerfile",
-		policy.EntrypointSecretsReport:           "Evaluated after secrets scanning",
-		policy.EntrypointSecretsFinding:          "Evaluated for each secret found",
-		policy.EntrypointSBOMComponent:           "Evaluated for each component in an SBOM",
-		policy.EntrypointDiffDependencyChange:    "Evaluated for each dependency change in a diff",
-	}
-	if desc, ok := descriptions[ep]; ok {
-		return desc
+	if profile := policy.GetBindingProfile(ep); profile != nil && profile.Description != "" {
+		return profile.Description
 	}
 	return fmt.Sprintf("Policy entrypoint for %s", ep)
 }
 
 func getEntrypointVariables(ep policy.Entrypoint) []*policyv1.VariableInfo {
-	switch ep {
-	case policy.EntrypointScanVulnerability:
-		return []*policyv1.VariableInfo{
-			{Name: "vulnerability", Type: "vulnerabilityv1.Finding", Description: "The vulnerability being evaluated"},
-			{Name: "pkg", Type: "dependencyv1.Package", Description: "The affected package"},
-			{Name: "env", Type: "policyv1.Environment", Description: "Execution environment context"},
-			{Name: "target", Type: "targetv1.Target", Description: "What was scanned"},
-		}
-	case policy.EntrypointScanReport:
-		return []*policyv1.VariableInfo{
-			{Name: "vulnerabilities", Type: "list(vulnerabilityv1.Finding)", Description: "All vulnerabilities found"},
-			{Name: "packages", Type: "list(dependencyv1.Package)", Description: "All packages scanned"},
-			{Name: "stats", Type: "vulnerabilityv1.Stats", Description: "Vulnerability counts by severity"},
-			{Name: "env", Type: "policyv1.Environment", Description: "Execution environment context"},
-			{Name: "target", Type: "targetv1.Target", Description: "What was scanned"},
-		}
-	case policy.EntrypointGraphReport:
-		return []*policyv1.VariableInfo{
-			{Name: "nodes", Type: "list(graphv1.Node)", Description: "All dependency graph nodes"},
-			{Name: "edges", Type: "list(graphv1.Edge)", Description: "All dependency relationships"},
-			{Name: "stats", Type: "graphv1.GraphStats", Description: "Graph statistics"},
-			{Name: "roots", Type: "list(string)", Description: "Direct dependency PURLs"},
-		}
-	case policy.EntrypointGraphNode:
-		return []*policyv1.VariableInfo{
-			{Name: "node", Type: "graphv1.Node", Description: "The current graph node"},
-			{Name: "ancestors", Type: "list(graphv1.Node)", Description: "Ancestor nodes"},
-			{Name: "descendants", Type: "list(graphv1.Node)", Description: "Descendant nodes"},
-		}
-	case policy.EntrypointGraphEdge:
-		return []*policyv1.VariableInfo{
-			{Name: "edge", Type: "graphv1.Edge", Description: "The current graph edge"},
-			{Name: "from_node", Type: "graphv1.Node", Description: "Source node of the edge"},
-			{Name: "to_node", Type: "graphv1.Node", Description: "Target node of the edge"},
-		}
-	case policy.EntrypointGoArtifactRequest, policy.EntrypointNpmArtifactRequest,
-		policy.EntrypointPypiArtifactRequest, policy.EntrypointRubygemsArtifactRequest:
-		return []*policyv1.VariableInfo{
-			{Name: "request", Type: "policyv1.ProxyRequest", Description: "The package request being evaluated"},
-			{Name: "jwt", Type: "policyv1.JWTClaims", Description: "JWT claims from authenticated requests"},
-			{Name: "vulnerabilities", Type: "list(vulnerabilityv1.Finding)", Description: "Known vulnerabilities for the package"},
-			{Name: "env", Type: "policyv1.Environment", Description: "Execution environment context"},
-		}
-	case policy.EntrypointOCIArtifactRequest:
-		return []*policyv1.VariableInfo{
-			{Name: "request", Type: "policyv1.ProxyRequest", Description: "The OCI artifact request"},
-			{Name: "image", Type: "map", Description: "Container image metadata"},
-			{Name: "jwt", Type: "policyv1.JWTClaims", Description: "JWT claims from authenticated requests"},
-			{Name: "vulnerabilities", Type: "list(vulnerabilityv1.Finding)", Description: "Known vulnerabilities"},
-		}
-	case policy.EntrypointDockerfileReport:
-		return []*policyv1.VariableInfo{
-			{Name: "dockerfile", Type: "map", Description: "Parsed Dockerfile structure"},
-			{Name: "dockerfile_analysis", Type: "map", Description: "Dockerfile analysis results"},
-		}
-	case policy.EntrypointDockerfileStage:
-		return []*policyv1.VariableInfo{
-			{Name: "stage", Type: "map", Description: "Current Dockerfile stage"},
-			{Name: "dockerfile", Type: "map", Description: "Full Dockerfile structure"},
-		}
-	case policy.EntrypointSecretsReport:
-		return []*policyv1.VariableInfo{
-			{Name: "secrets", Type: "list(map)", Description: "All secrets found"},
-			{Name: "report", Type: "map", Description: "Secrets scan report"},
-		}
-	case policy.EntrypointSecretsFinding:
-		return []*policyv1.VariableInfo{
-			{Name: "secret", Type: "map", Description: "The current secret finding"},
-		}
-	default:
+	profile := policy.GetBindingProfile(ep)
+	if profile == nil {
 		return nil
+	}
+	vars := make([]*policyv1.VariableInfo, 0, len(profile.Required)+len(profile.Optional))
+	for _, name := range profile.Required {
+		vars = append(vars, variableInfoForPolicyBinding(name, true))
+	}
+	for _, name := range profile.Optional {
+		vars = append(vars, variableInfoForPolicyBinding(name, false))
+	}
+	return vars
+}
+
+// variableInfoForPolicyBinding combines binding-profile requiredness with the
+// display metadata owned by the policy package (the single source of truth
+// shared with the MCP tool and the LSP).
+func variableInfoForPolicyBinding(name string, required bool) *policyv1.VariableInfo {
+	meta := policy.VariableInfoOrDefault(name)
+	return &policyv1.VariableInfo{
+		Name:        name,
+		Type:        meta.Type,
+		Description: meta.Description,
+		Required:    required,
 	}
 }
 
 func getEntrypointHelpers(ep policy.Entrypoint) []string {
-	// Common helpers available at all entrypoints
-	common := []string{"now()", "age()", "levenshtein()", "levenshteinWithin()"}
-
-	switch ep.Category() {
-	case "scan":
-		return append(common, "ssvc()", "hasFix()", "inKEV()", "epssScore()")
-	case "graph":
-		return append(common, "graphMatch()", "isDirectDep()", "nodeDepth()", "nodeEcosystem()",
-			"hasVulnerabilities()", "vulnerabilityCount()", "pathLength()", "pathContains()")
-	case "proxy":
-		return append(common, "imageRef()", "baseImage()")
-	case "dockerfile":
-		return common
-	case "secrets":
-		return common
-	default:
-		return common
-	}
+	return policy.EntrypointHelpers(ep)
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -142,6 +143,126 @@ func TestGraphFormatConstants(t *testing.T) {
 	}
 }
 
+func TestWriteNeedsJSONIncludesStatusAndCounts(t *testing.T) {
+	t.Parallel()
+
+	match := &graph.Node{
+		Purl:      "pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible",
+		Name:      "github.com/docker/docker",
+		Version:   "28.5.2+incompatible",
+		Ecosystem: "go",
+		Direct:    true,
+		Depth:     0,
+	}
+
+	var buf bytes.Buffer
+	if err := writeNeedsJSON(&buf, match, nil, nil, false); err != nil {
+		t.Fatalf("writeNeedsJSON error: %v", err)
+	}
+
+	got := decodeGraphJSON(t, buf.Bytes())
+	if got["found"] != true {
+		t.Fatalf("found = %v, want true", got["found"])
+	}
+	if got["direct"] != true {
+		t.Fatalf("direct = %v, want true", got["direct"])
+	}
+	if got["direct_count"] != float64(0) {
+		t.Fatalf("direct_count = %v, want 0", got["direct_count"])
+	}
+	if got["transitive_count"] != float64(0) {
+		t.Fatalf("transitive_count = %v, want 0", got["transitive_count"])
+	}
+	if message, ok := got["message"].(string); !ok || !strings.Contains(message, "direct/root dependency") {
+		t.Fatalf("message = %v, want direct/root dependency explanation", got["message"])
+	}
+}
+
+func TestWriteNeedsJSONIncludesDependentIdentity(t *testing.T) {
+	t.Parallel()
+
+	match := &graph.Node{
+		Purl:    "pkg:npm/lodash@4.17.21",
+		Name:    "lodash",
+		Version: "4.17.21",
+	}
+	ancestors := []*graph.Node{
+		{
+			Purl:      "pkg:npm/body-parser@1.20.2",
+			Name:      "body-parser",
+			Version:   "1.20.2",
+			Ecosystem: "npm",
+			Depth:     1,
+			Locations: []string{"package-lock.json"},
+		},
+		{
+			Purl:      "pkg:npm/express@4.18.2",
+			Name:      "express",
+			Version:   "4.18.2",
+			Ecosystem: "npm",
+			Direct:    true,
+			Depth:     0,
+			Locations: []string{"package.json"},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := writeNeedsJSON(&buf, match, ancestors, nil, false); err != nil {
+		t.Fatalf("writeNeedsJSON error: %v", err)
+	}
+
+	got := decodeGraphJSON(t, buf.Bytes())
+	if got["direct_count"] != float64(1) {
+		t.Fatalf("direct_count = %v, want 1", got["direct_count"])
+	}
+	if got["transitive_count"] != float64(1) {
+		t.Fatalf("transitive_count = %v, want 1", got["transitive_count"])
+	}
+	dependents, ok := got["dependents"].([]any)
+	if !ok {
+		t.Fatalf("dependents has type %T, want []any", got["dependents"])
+	}
+	if len(dependents) != 2 {
+		t.Fatalf("dependents length = %d, want 2", len(dependents))
+	}
+	first, ok := dependents[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first dependent has type %T, want map[string]any", dependents[0])
+	}
+	if first["name"] != "express" {
+		t.Fatalf("first dependent name = %v, want express", first["name"])
+	}
+	if first["ecosystem"] != "npm" {
+		t.Fatalf("first dependent ecosystem = %v, want npm", first["ecosystem"])
+	}
+	if first["purl"] != "pkg:npm/express@4.18.2" {
+		t.Fatalf("first dependent purl = %v, want pkg:npm/express@4.18.2", first["purl"])
+	}
+	if first["direct"] != true {
+		t.Fatalf("first dependent direct = %v, want true", first["direct"])
+	}
+}
+
+func TestWriteNeedsNotFoundJSON(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	if err := writeNeedsNotFoundJSON(&buf, " missing-package "); err != nil {
+		t.Fatalf("writeNeedsNotFoundJSON error: %v", err)
+	}
+
+	got := decodeGraphJSON(t, buf.Bytes())
+	if got["package"] != "missing-package" {
+		t.Fatalf("package = %v, want missing-package", got["package"])
+	}
+	if found, ok := got["found"].(bool); !ok || found {
+		t.Fatalf("found = %v, want false", got["found"])
+	}
+	if message, ok := got["message"].(string); !ok || !strings.Contains(message, "not found") {
+		t.Fatalf("message = %v, want not found explanation", got["message"])
+	}
+}
+
 func TestDeduplicatePaths(t *testing.T) {
 	t.Parallel()
 
@@ -191,6 +312,16 @@ func TestDeduplicatePaths(t *testing.T) {
 			}
 		})
 	}
+}
+
+func decodeGraphJSON(t *testing.T, data []byte) map[string]any {
+	t.Helper()
+
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("invalid JSON %q: %v", data, err)
+	}
+	return got
 }
 
 func TestFormatNodeLabel(t *testing.T) {
@@ -250,9 +381,9 @@ func TestMatchScore(t *testing.T) {
 		{"github.com/go-git/go-git/v5", "go-git", 2},
 
 		// Substring matches (score 1)
-		{"github.com/goccy/go-yaml", "yaml", 1},     // yaml is substring but not final segment
-		{"network-utils", "net", 1},                  // substring match
-		{"gopkg.in/yaml.v3", "yaml", 1},             // yaml.v3 as segment, not yaml alone
+		{"github.com/goccy/go-yaml", "yaml", 1}, // yaml is substring but not final segment
+		{"network-utils", "net", 1},             // substring match
+		{"gopkg.in/yaml.v3", "yaml", 1},         // yaml.v3 as segment, not yaml alone
 	}
 
 	for _, tt := range tests {
@@ -279,6 +410,7 @@ func TestFindMatchingNodes(t *testing.T) {
 	g.AddNode(&graph.Node{Purl: "pkg:golang/go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@0.63.0", Name: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp", Version: "0.63.0"})
 	g.AddNode(&graph.Node{Purl: "pkg:golang/github.com/spf13/cobra@1.10.0", Name: "github.com/spf13/cobra", Version: "1.10.0"})
 	g.AddNode(&graph.Node{Purl: "pkg:golang/github.com/muesli/mango-cobra@1.2.0", Name: "github.com/muesli/mango-cobra", Version: "1.2.0"})
+	g.AddNode(&graph.Node{Purl: "pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible", Name: "github.com/docker/docker", Version: "28.5.2+incompatible"})
 
 	tests := []struct {
 		query       string
@@ -300,6 +432,8 @@ func TestFindMatchingNodes(t *testing.T) {
 		{"otelhttp", "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp", 1, "final segment match"},
 		// "cobra" should prefer spf13/cobra (final segment) over mango-cobra (substring)
 		{"cobra", "github.com/spf13/cobra", 2, "final segment cobra wins over substring"},
+		// Exact PURLs emitted by scans should round-trip into graph queries.
+		{"pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible", "github.com/docker/docker", 1, "scan purl query"},
 	}
 
 	for _, tt := range tests {

@@ -13,9 +13,9 @@ import (
 
 	"connectrpc.com/connect"
 	git "github.com/go-git/go-git/v5"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/spf13/cobra"
+
 	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
 	"github.com/temporalio/deputy/internal/container/image"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
@@ -742,12 +742,7 @@ func isBinaryContent(content []byte) bool {
 
 // outputSecretsProtoJSON writes a secrets response as JSON using protojson.
 func outputSecretsProtoJSON(w io.Writer, resp *secretsv1.ScanResponse) error {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal proto to JSON: %w", err)

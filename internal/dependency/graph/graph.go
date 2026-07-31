@@ -231,6 +231,9 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 		if purlObj == nil {
 			continue
 		}
+		if purlObj.Type == "golang" && compare.IsRelativePathModule(goPackageModulePath(pkg, purlObj.Namespace, purlObj.Name)) {
+			continue
+		}
 		purl := purlObj.String()
 		if purl == "" {
 			continue
@@ -248,14 +251,7 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 			// but "foo/loader" as indirect, "foo/loader" should be indirect.
 			if purlObj.Type == "golang" {
 				// Reconstruct module path from PURL namespace + name
-				modulePath := pkg.Name
-				if modulePath == "" {
-					if purlObj.Namespace != "" {
-						modulePath = purlObj.Namespace + "/" + purlObj.Name
-					} else {
-						modulePath = purlObj.Name
-					}
-				}
+				modulePath := goPackageModulePath(pkg, purlObj.Namespace, purlObj.Name)
 				// First check exact module path (handles submodules correctly)
 				if val, exists := direct[modulePath]; exists {
 					isDirect = val
@@ -301,6 +297,16 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 	}
 
 	return g
+}
+
+func goPackageModulePath(pkg *extractor.Package, namespace, name string) string {
+	if pkg != nil && pkg.Name != "" {
+		return pkg.Name
+	}
+	if namespace != "" {
+		return namespace + "/" + name
+	}
+	return name
 }
 
 // AddNode adds a node to the graph. If a node with the same PURL exists, it is replaced.
@@ -640,14 +646,11 @@ func (g *Graph) Stats() *graphv1.GraphStats {
 			stats.TransitiveNodes++
 		}
 
-		// Track max depth across all nodes (including disconnected)
-		if depth > stats.MaxDepth {
+		// Track max resolved depth. Disconnected nodes carry the internal
+		// DepthDisconnected sentinel and synthetic roots carry -1; neither is a
+		// dependency depth, so neither may leak into the reported maximum.
+		if depth != DepthDisconnected && depth >= 0 && depth > stats.MaxDepth {
 			stats.MaxDepth = depth
-		}
-
-		// Track max connected depth (exclude disconnected nodes with depth=999)
-		if depth != DepthDisconnected && depth >= 0 && depth > stats.MaxConnectedDepth {
-			stats.MaxConnectedDepth = depth
 		}
 
 		// Count disconnected nodes
@@ -681,6 +684,10 @@ func (g *Graph) Stats() *graphv1.GraphStats {
 	if hasImportStatus {
 		stats.ImportStatusCounts = importCounts
 	}
+
+	// Kept equal to MaxDepth for wire compatibility with releases where
+	// max_depth still included the disconnected sentinel.
+	stats.MaxConnectedDepth = stats.MaxDepth
 
 	return stats
 }

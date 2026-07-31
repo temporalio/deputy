@@ -44,19 +44,21 @@ func BuildTriageResponse(
 // aggregatePackages aggregates consolidated vulnerabilities into package summaries.
 func aggregatePackages(cons []vulnerability.Consolidated) []*triagev1.PackageSummary {
 	type aggInfo struct {
-		pkg        string
-		version    string
-		severity   string
-		severityT  string
-		priority   int
-		fix        string
-		summary    string
-		ids        []string
-		isDirect   bool
-		imports    []*vulnerabilityv1.AffectedImport
-		dbSpecific map[string]string
-		counts     map[string]int32
-		total      int32
+		pkg            string
+		version        string
+		severity       string
+		severityT      string
+		priority       int
+		triagePriority string
+		triageReason   string
+		fix            string
+		summary        string
+		ids            []string
+		isDirect       bool
+		imports        []*vulnerabilityv1.AffectedImport
+		dbSpecific     map[string]string
+		counts         map[string]int32
+		total          int32
 	}
 
 	pkgMap := map[string]*aggInfo{}
@@ -66,17 +68,20 @@ func aggregatePackages(cons []vulnerability.Consolidated) []*triagev1.PackageSum
 			continue
 		}
 		priority := severityPriority(v.Severity, v.SeverityType)
+		triagePriority, triageReason := vulnerability.ConsolidatedTriagePriority(v)
 		info, ok := pkgMap[key]
 		if !ok {
 			info = &aggInfo{
-				pkg:       v.Package,
-				version:   v.Version,
-				severity:  v.Severity,
-				severityT: v.SeverityType,
-				priority:  priority,
-				fix:       bestFix(v),
-				summary:   v.Summary,
-				isDirect:  v.IsDirect,
+				pkg:            v.Package,
+				version:        v.Version,
+				severity:       v.Severity,
+				severityT:      v.SeverityType,
+				priority:       priority,
+				triagePriority: triagePriority,
+				triageReason:   triageReason,
+				fix:            bestFix(v),
+				summary:        v.Summary,
+				isDirect:       v.IsDirect,
 			}
 			pkgMap[key] = info
 		}
@@ -92,10 +97,19 @@ func aggregatePackages(cons []vulnerability.Consolidated) []*triagev1.PackageSum
 		sevKey := severityBucket(v.Severity, v.SeverityType)
 		info.counts[sevKey]++
 		info.total++
-		if priority > info.priority {
+		// Severity alone does not decide the package's summary: fixability
+		// and directness feed the triage priority, so two findings of equal
+		// severity can rank differently (an unfixable critical is high, a
+		// fixable direct critical is critical). Break severity ties on the
+		// triage rank so arrival order cannot pick the weaker summary.
+		betterOnTie := priority == info.priority &&
+			vulnerability.TriagePriorityRank(triagePriority) < vulnerability.TriagePriorityRank(info.triagePriority)
+		if priority > info.priority || betterOnTie {
 			info.priority = priority
 			info.severity = v.Severity
 			info.severityT = v.SeverityType
+			info.triagePriority = triagePriority
+			info.triageReason = triageReason
 			info.fix = bestFix(v)
 			if v.Summary != "" {
 				info.summary = v.Summary
@@ -111,10 +125,14 @@ func aggregatePackages(cons []vulnerability.Consolidated) []*triagev1.PackageSum
 	list := make([]*triagev1.PackageSummary, 0, len(pkgMap))
 	for _, info := range pkgMap {
 		list = append(list, &triagev1.PackageSummary{
-			Package:            info.pkg,
-			Version:            info.version,
-			Severity:           info.severity,
+			Package: info.pkg,
+			Version: info.version,
+			// Normalize raw advisory severities (GHSA MODERATE, CVSS vectors)
+			// to the canonical labels every Deputy surface shares.
+			Severity:           severityLabel(info.severity, info.severityT),
 			SeverityType:       info.severityT,
+			Priority:           info.triagePriority,
+			PriorityReason:     info.triageReason,
 			FixVersion:         info.fix,
 			IsDirect:           info.isDirect,
 			Summary:            info.summary,
@@ -127,6 +145,11 @@ func aggregatePackages(cons []vulnerability.Consolidated) []*triagev1.PackageSum
 	}
 
 	slices.SortFunc(list, func(a, b *triagev1.PackageSummary) int {
+		// The proto contract promises priority-ladder order, the same ladder
+		// the MCP triage tool sorts by.
+		if c := cmp.Compare(vulnerability.TriagePriorityRank(a.Priority), vulnerability.TriagePriorityRank(b.Priority)); c != 0 {
+			return c
+		}
 		pa := severityRank(a.Severity)
 		pb := severityRank(b.Severity)
 		if pa != pb {
@@ -154,42 +177,36 @@ func aggregatePackages(cons []vulnerability.Consolidated) []*triagev1.PackageSum
 
 // severityBucket normalizes severities into coarse buckets for counting.
 func severityBucket(sev, sevType string) string {
-	up := strings.ToUpper(strings.TrimSpace(sev))
-	if sevType == "GHSA" {
-		switch up {
-		case "CRITICAL":
-			return "CRITICAL"
-		case "HIGH":
-			return "HIGH"
-		case "MEDIUM", "MODERATE":
-			return "MED"
-		case "LOW":
-			return "LOW"
-		}
-	}
-	switch up {
+	switch strings.ToUpper(strings.TrimSpace(sev)) {
 	case "CRITICAL":
-		return "CRITICAL"
+		return "critical"
 	case "HIGH":
-		return "HIGH"
+		return "high"
 	case "MEDIUM", "MODERATE":
-		return "MED"
+		return "medium"
 	case "LOW":
-		return "LOW"
+		return "low"
 	}
 	score := cvss.ParseScore(sev)
 	switch {
 	case score >= 9.0:
-		return "CRITICAL"
+		return "critical"
 	case score >= 7.0:
-		return "HIGH"
+		return "high"
 	case score >= 4.0:
-		return "MED"
+		return "medium"
 	case score >= 0.0:
-		return "LOW"
+		return "low"
 	default:
-		return "UNKNOWN"
+		return "unknown"
 	}
+}
+
+// severityLabel normalizes a raw advisory severity (GHSA MODERATE, CVSS
+// vectors or scores) to the canonical CRITICAL/HIGH/MEDIUM/LOW/UNKNOWN label
+// shared across Deputy's surfaces.
+func severityLabel(sev, sevType string) string {
+	return strings.ToUpper(severityBucket(sev, sevType))
 }
 
 // severityRank returns a numeric rank for a severity string.

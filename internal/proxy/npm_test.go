@@ -46,7 +46,7 @@ func TestNPMHandlerBlocksVulnerability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newNPMHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.vulnLookup = func(ctx context.Context, pkg, version string) ([]osv.Vulnerability, error) {
 		return []osv.Vulnerability{{ID: "OSV-crit", Severity: "CRITICAL", Package: pkg, Version: version}}, nil
 	}
@@ -74,7 +74,7 @@ func TestNPMHandlerBlocksLicense(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newNPMHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = func(ctx context.Context, pkg, version string) ([]string, error) {
 		return []string{"GPL-3.0"}, nil
 	}
@@ -118,7 +118,7 @@ func TestNPMHandlerForwardsRequestBodyAndHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newNPMHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/-/npm/v1/security/audits/quick?foo=bar", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer secret")
@@ -171,7 +171,7 @@ func TestNPMHandlerEndToEndPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newNPMHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = func(ctx context.Context, pkg, version string) ([]string, error) {
 		return nil, nil
 	}
@@ -202,7 +202,7 @@ func TestNPMHandlerIgnoresMissingVersionForVersionPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newNPMHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = nil
 
 	// Metadata (no version) should not be denied just because version is empty.

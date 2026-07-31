@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/advisorysource"
 	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/cache/memory"
 	"github.com/temporalio/deputy/internal/license"
@@ -446,14 +448,16 @@ func GetCachedDigestResolutionWithContext(ctx context.Context, c DigestResolutio
 	return cached, true, false
 }
 
-// cachedOSVLookupWithCache queries the OSV database using the provided cache.
-// This allows tests to inject isolated cache instances.
+// cachedOSVLookupWithCache queries the configured advisory sources (built-in
+// OSV plus any configured plugins/services) using the provided cache. This
+// allows tests to inject isolated cache instances. The cache sits in front of
+// all sources, so per-request source cost is paid only on a miss.
 //
 // Multi-tenant support: If the cache implements ContextAwareOSVCache, tenant ID
 // is extracted from the request context (JWT claims) to scope cache keys.
 //
 // Span enrichment: Records cache access events (hit/miss) on the current span.
-func cachedOSVLookupWithCache(ctx context.Context, client osv.Client, c OSVCache, ecosystem, name, version string) ([]osv.Vulnerability, error) {
+func cachedOSVLookupWithCache(ctx context.Context, sources *advisorysource.Registry, c OSVCache, ecosystem, name, version string) ([]osv.Vulnerability, error) {
 	span := trace.SpanFromContext(ctx)
 	osvCache := getOSVCache(c)
 	key := pkgCacheKey(ecosystem, name, version)
@@ -474,18 +478,16 @@ func cachedOSVLookupWithCache(ctx context.Context, client osv.Client, c OSVCache
 	}
 	RecordOSVCacheMiss(ctx, span, key)
 	slog.Debug("osv cache miss", "package", name, "version", version, "ecosystem", ecosystem)
-	inputs := []osv.PkgInput{{
-		QueryKey: osv.QueryKey{
-			Name:      name,
-			Version:   version,
-			Ecosystem: ecosystem,
-		},
-	}}
-	vulns, err := osv.QueryRaw(ctx, client, inputs)
+	agg, err := sources.Query(ctx, []*dependencyv1.Package{{
+		Name:      name,
+		Version:   version,
+		Ecosystem: ecosystem,
+	}})
 	if err != nil {
-		slog.Debug("osv query failed", "package", name, "version", version, "ecosystem", ecosystem, "error", err)
+		slog.Debug("advisory query failed", "package", name, "version", version, "ecosystem", ecosystem, "error", err)
 		return nil, err
 	}
+	vulns := osv.VulnerabilitiesFromProto(agg.Findings, agg.Advisories)
 
 	// Use context-aware cache operations if available (for tenant isolation)
 	if ctxCache, isCtxAware := osvCache.(ContextAwareOSVCache); isCtxAware {
@@ -540,9 +542,9 @@ func cachedLicenseLookupWithCache(ctx context.Context, c LicenseCache, ecosystem
 // handlerLookups holds the lookup functions for vulnerability and license data.
 // This allows dependency injection for testing and custom lookup strategies.
 type handlerLookups struct {
-	osvClient     osv.Client
-	vulnLookup    func(context.Context, string, string) ([]osv.Vulnerability, error)
-	licenseLookup func(context.Context, string, string) ([]string, error)
+	advisorySources *advisorysource.Registry
+	vulnLookup      func(context.Context, string, string) ([]osv.Vulnerability, error)
+	licenseLookup   func(context.Context, string, string) ([]string, error)
 }
 
 // lookupVulnerabilities queries for vulnerabilities and returns proto Finding messages.
@@ -556,20 +558,21 @@ func lookupVulnerabilities(ctx context.Context, lookups handlerLookups, ecosyste
 	switch {
 	case lookups.vulnLookup != nil:
 		vulns, err = lookups.vulnLookup(ctx, name, version)
-	case lookups.osvClient != nil:
-		inputs := []osv.PkgInput{{
-			QueryKey: osv.QueryKey{
-				Name:      name,
-				Version:   version,
-				Ecosystem: ecosystem,
-			},
-		}}
-		vulns, err = osv.QueryRaw(ctx, lookups.osvClient, inputs)
+	case lookups.advisorySources != nil:
+		var agg *advisorysource.AggregateResult
+		agg, err = lookups.advisorySources.Query(ctx, []*dependencyv1.Package{{
+			Name:      name,
+			Version:   version,
+			Ecosystem: ecosystem,
+		}})
+		if err == nil {
+			vulns = osv.VulnerabilitiesFromProto(agg.Findings, agg.Advisories)
+		}
 	default:
 		return nil
 	}
 	if err != nil {
-		slog.Warn("osv lookup failed", "package", name, "version", version, "error", err)
+		slog.Warn("advisory lookup failed", "package", name, "version", version, "error", err)
 		return nil
 	}
 

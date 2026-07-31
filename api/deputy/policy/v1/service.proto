@@ -65,6 +65,7 @@ message EvaluateRequest {
 
 // PolicySource specifies where to load a policy from.
 message PolicySource {
+  // Source carries the policy content by value or by reference.
   oneof source {
     // Inline YAML policy content.
     string inline = 1;
@@ -191,6 +192,11 @@ message VariableInfo {
 
   // Fields lists notable sub-fields for complex types.
   repeated FieldInfo fields = 4;
+
+  // Required is true when the variable is always available at this entrypoint.
+  // Optional variables may be absent and should be guarded with CEL optional
+  // access or presence checks.
+  bool required = 5;
 }
 
 // FieldInfo describes a field within a variable.

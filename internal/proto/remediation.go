@@ -1,6 +1,8 @@
 package proto
 
 import (
+	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -14,17 +16,25 @@ import (
 // RemediationCommandToStep converts internal remediation.Command to proto Step.
 func RemediationCommandToStep(c remediation.Command, id string) *remediationv1.Step {
 	step := &remediationv1.Step{
-		Id:           id,
-		Kind:         detectStepKind(c),
-		Title:        buildStepTitle(c),
-		Description:  buildStepDescription(c),
-		PackageName:  extractPackageName(c),
-		Manager:      c.Manager,
-		ManifestPath: c.Path,
-		Command:      c.Command,
-		Hint:         c.Hint,
-		Executable:   c.Executable,
-		RiskLevel:    detectRiskLevel(c),
+		Id:                      id,
+		Kind:                    detectStepKind(c),
+		Title:                   buildStepTitle(c),
+		Description:             buildStepDescription(c),
+		PackageName:             extractPackageName(c),
+		CurrentVersion:          c.Version,
+		TargetVersion:           c.TargetVersion,
+		Manager:                 c.Manager,
+		ManifestPath:            c.Path,
+		Command:                 c.Command,
+		Hint:                    c.Hint,
+		Executable:              c.Executable,
+		RiskLevel:               detectRiskLevel(c),
+		Purl:                    c.PURL,
+		TargetModule:            c.TargetModule,
+		Migration:               c.Migration,
+		Direct:                  c.IsDirect,
+		Groups:                  c.Groups,
+		AffectedVulnerabilities: c.Vulnerabilities,
 	}
 	return step
 }
@@ -36,11 +46,20 @@ func RemediationStepFromProto(s *remediationv1.Step) remediation.Command {
 		return remediation.Command{}
 	}
 	return remediation.Command{
-		Manager:    s.Manager,
-		Command:    s.Command,
-		Path:       s.ManifestPath,
-		Hint:       s.Hint,
-		Executable: s.Executable,
+		Package:         s.PackageName,
+		Version:         s.CurrentVersion,
+		TargetVersion:   s.TargetVersion,
+		Manager:         s.Manager,
+		Command:         s.Command,
+		Path:            s.ManifestPath,
+		Hint:            s.Hint,
+		Executable:      s.Executable,
+		PURL:            s.Purl,
+		TargetModule:    s.TargetModule,
+		Migration:       s.Migration,
+		IsDirect:        s.GetDirect(),
+		Groups:          s.Groups,
+		Vulnerabilities: s.AffectedVulnerabilities,
 	}
 }
 
@@ -68,19 +87,19 @@ func RemediationStepsFromProto(steps []*remediationv1.Step) []remediation.Comman
 	return commands
 }
 
-// detectStepKind determines the StepKind based on command content.
+// detectStepKind determines the StepKind based on command content. A step
+// with a target version is a version upgrade regardless of executability:
+// kind describes the remediation, executable describes actionability.
 func detectStepKind(c remediation.Command) remediationv1.StepKind {
-	cmd := c.Command
-	if len(cmd) > 0 {
-		// Deputy internal commands
-		if len(cmd) > 7 && cmd[:7] == "deputy:" {
-			if len(cmd) > 21 && cmd[:21] == "deputy:action:update " {
-				return remediationv1.StepKind_STEP_KIND_ACTION_UPDATE
-			}
-			if len(cmd) > 25 && cmd[:25] == "deputy:dockerfile:update " {
-				return remediationv1.StepKind_STEP_KIND_DOCKERFILE_UPDATE
-			}
-		}
+	if strings.HasPrefix(c.Command, "deputy:action:update ") {
+		return remediationv1.StepKind_STEP_KIND_ACTION_UPDATE
+	}
+	if strings.HasPrefix(c.Command, "deputy:dockerfile:update ") {
+		return remediationv1.StepKind_STEP_KIND_DOCKERFILE_UPDATE
+	}
+
+	if c.TargetVersion != "" || c.TargetModule != "" {
+		return remediationv1.StepKind_STEP_KIND_VERSION_UPGRADE
 	}
 
 	// Default to shell command for executable commands
@@ -94,24 +113,49 @@ func detectStepKind(c remediation.Command) remediationv1.StepKind {
 
 // buildStepTitle creates a human-readable title for the step.
 func buildStepTitle(c remediation.Command) string {
-	if c.Manager != "" {
+	switch {
+	case c.Migration && c.Package != "" && c.TargetModule != "":
+		return "Migrate " + c.Package + " to " + c.TargetModule
+	case c.Package != "" && c.TargetVersion != "":
+		return "Upgrade " + c.Package + " to " + c.TargetVersion
+	case c.Manager != "":
 		return "Update " + c.Manager + " dependency"
+	default:
+		return "Apply remediation"
 	}
-	return "Apply remediation"
 }
 
-// buildStepDescription creates a description for the step.
+// buildStepDescription creates a description for the step: what the change is,
+// composed from the fix shape. The hint stays in its own field, so the two do
+// not duplicate each other.
 func buildStepDescription(c remediation.Command) string {
-	if c.Hint != "" {
+	switch {
+	case c.Migration && c.Package != "" && c.TargetModule != "":
+		desc := c.Package
+		if c.Version != "" {
+			desc += " " + c.Version
+		}
+		desc = "Migrate " + desc + " to " + c.TargetModule
+		if c.TargetVersion != "" {
+			desc += " " + c.TargetVersion
+		}
+		return desc
+	case c.Package != "" && c.TargetVersion != "":
+		desc := "Upgrade " + c.Package
+		if c.Version != "" {
+			desc += " from " + c.Version
+		}
+		return desc + " to " + c.TargetVersion
+	case c.Hint != "":
 		return c.Hint
+	default:
+		return c.Command
 	}
-	return c.Command
 }
 
 // extractPackageName attempts to extract the package name from the command.
 func extractPackageName(c remediation.Command) string {
-	// This is a simplified extraction; real implementation would parse the command
-	return ""
+	return c.Package
 }
 
 // detectRiskLevel determines the risk level based on command characteristics.
@@ -127,30 +171,7 @@ func detectRiskLevel(c remediation.Command) remediationv1.RiskLevel {
 
 // stepID generates a step ID from an index.
 func stepID(i int) string {
-	return "step-" + itoa(i+1)
-}
-
-// itoa converts an integer to a string without importing strconv.
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	var b [20]byte
-	pos := len(b)
-	neg := i < 0
-	if neg {
-		i = -i
-	}
-	for i > 0 {
-		pos--
-		b[pos] = byte('0' + i%10)
-		i /= 10
-	}
-	if neg {
-		pos--
-		b[pos] = '-'
-	}
-	return string(b[pos:])
+	return "step-" + strconv.Itoa(i+1)
 }
 
 // AgentInfoToProto converts internal ai.Provider to proto AgentInfo.

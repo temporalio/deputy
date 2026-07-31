@@ -55,7 +55,7 @@ func TestNormalizeGitHubActionsInput_Table(t *testing.T) {
 		{
 			name: "derive from purl",
 			in:   PkgInput{QueryKey: QueryKey{PURL: "pkg:github/owner/repo@v2"}},
-			want: PkgInput{QueryKey: QueryKey{Name: "owner/repo", PURL: "pkg:github/owner/repo@v2", Ecosystem: "GitHub Actions"}},
+			want: PkgInput{QueryKey: QueryKey{Name: "owner/repo", Version: "v2", PURL: "pkg:github/owner/repo@v2", Ecosystem: "GitHub Actions"}},
 		},
 	}
 	for _, tc := range tests {
@@ -93,7 +93,9 @@ func TestVersionAffectedByGHARanges_Table(t *testing.T) {
 		{"1.0.5", true},
 		{"1.0.6", false},
 		{"0.9.0", true},
-		{"not-semver", true}, // falls back to name/ecosystem match
+		{"not-semver", false}, // unresolved refs are not assumed affected by semver ranges
+		{"v1", false},         // unresolved moving tags are not interpreted as v1.0.0
+		{"v1.2", false},       // unresolved moving minor tags are not interpreted as v1.2.0
 	}
 	for _, tc := range tests {
 		t.Run(tc.version, func(t *testing.T) {
@@ -105,28 +107,111 @@ func TestVersionAffectedByGHARanges_Table(t *testing.T) {
 	}
 }
 
-func TestParseGHAMajorRef_Table(t *testing.T) {
+func TestVersionAffectedByGHARanges_LastAffected(t *testing.T) {
+	// Advisory bounded with last_affected rather than fixed: versions above the
+	// bound must not be reported as affected via the open-ended fallback.
+	vuln := osvschema.Vulnerability{
+		ID: "GHSA-lastaffected",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{{
+					Type:   osvschema.RangeEcosystem,
+					Events: []osvschema.Event{{Introduced: "0"}, {LastAffected: "1.0.6"}},
+				}},
+			},
+		},
+	}
 	tests := []struct {
-		in   string
-		want int
-		ok   bool
+		version string
+		want    bool
 	}{
-		{"v4", 4, true},
-		{"4", 4, true},
-		{" v4 ", 4, true},
-		{"v04", 4, true},
-		{"v0", 0, false},
-		{"0", 0, false},
-		{"v4.2.0", 0, false},
-		{"4.2.0", 0, false},
-		{"", 0, false},
-		{"deadbeef", 0, false},
+		{"1.0.5", true},
+		{"1.0.6", true},  // last_affected is inclusive
+		{"1.0.7", false}, // above the bound: not affected
+		{"2.0.0", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.version, func(t *testing.T) {
+			pkg := PkgInput{QueryKey: QueryKey{Name: "owner/repo", Version: tc.version, Ecosystem: "GitHub Actions"}}
+			if got := versionAffectedByGHARanges(vuln, pkg, tc.version); got != tc.want {
+				t.Fatalf("versionAffectedByGHARanges(%q) = %v, want %v", tc.version, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestVersionAffectedByGHARanges_UnresolvedRefMatchesOnlyPackageLevelOrOpenEndedAdvisories(t *testing.T) {
+	pkg := PkgInput{QueryKey: QueryKey{Name: "owner/repo", Version: "abcdef1", Ecosystem: "GitHub Actions"}}
+
+	ranged := osvschema.Vulnerability{
+		ID: "GHSA-ranged",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{{
+					Type:   osvschema.RangeEcosystem,
+					Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "1.0.74"}},
+				}},
+			},
+		},
+	}
+	if versionAffectedByGHARanges(ranged, pkg, pkg.Version) {
+		t.Fatal("unresolved SHA ref matched a semver range; want unknown rather than affected")
+	}
+
+	unranged := osvschema.Vulnerability{
+		ID: "GHSA-unranged",
+		Affected: []osvschema.Affected{
+			{Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+		},
+	}
+	if !versionAffectedByGHARanges(unranged, pkg, pkg.Version) {
+		t.Fatal("unresolved SHA ref did not match unranged advisory; want package-level advisory to apply")
+	}
+
+	openEnded := osvschema.Vulnerability{
+		ID: "GHSA-open-ended",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{{
+					Type:   osvschema.RangeEcosystem,
+					Events: []osvschema.Event{{Introduced: "0"}},
+				}},
+			},
+		},
+	}
+	if !versionAffectedByGHARanges(openEnded, pkg, pkg.Version) {
+		t.Fatal("unresolved SHA ref did not match open-ended advisory introduced at 0")
+	}
+}
+
+func TestParseGHAFloatingRefPrefix_Table(t *testing.T) {
+	tests := []struct {
+		in         string
+		wantPrefix string
+		ok         bool
+	}{
+		{"v4", "v4.", true},
+		{"4", "v4.", true},
+		{" v4 ", "v4.", true},
+		{"v04", "v4.", true},
+		{"v4.2", "v4.2.", true},
+		{"4.2", "v4.2.", true},
+		{"v4.02", "v4.2.", true},
+		{"v0", "", false},
+		{"0", "", false},
+		{"v4.2.0", "", false},
+		{"4.2.0", "", false},
+		{"", "", false},
+		{"deadbeef", "", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.in, func(t *testing.T) {
-			got, ok := parseGHAMajorRef(tc.in)
-			if ok != tc.ok || got != tc.want {
-				t.Fatalf("parseGHAMajorRef(%q) = %d,%v want %d,%v", tc.in, got, ok, tc.want, tc.ok)
+			got, ok := parseGHAFloatingRefPrefix(tc.in)
+			if ok != tc.ok || got != tc.wantPrefix {
+				t.Fatalf("parseGHAFloatingRefPrefix(%q) = %q,%v want %q,%v", tc.in, got, ok, tc.wantPrefix, tc.ok)
 			}
 		})
 	}
@@ -134,66 +219,124 @@ func TestParseGHAMajorRef_Table(t *testing.T) {
 
 func TestResolveGitHubActionsVersion_Table(t *testing.T) {
 	origList := ghaListRemoteRefs
-	t.Cleanup(func() { ghaListRemoteRefs = origList })
+	origListWithHashes := ghaListRemoteRefsWithHashes
+	t.Cleanup(func() {
+		ghaListRemoteRefs = origList
+		ghaListRemoteRefsWithHashes = origListWithHashes
+	})
 
 	tests := []struct {
-		name       string
-		repo       string
-		version    string
-		refs       []string
-		want       string
-		wantCalled bool
+		name                 string
+		repo                 string
+		version              string
+		refs                 []string
+		refsWithHashes       []ghaRemoteRef
+		want                 string
+		wantListCalled       bool
+		wantListHashesCalled bool
 	}{
 		{
-			name:       "fully specified semver skips lookup",
-			repo:       "owner/repo",
-			version:    "v4.2.0",
-			refs:       []string{"refs/tags/v4.3.0"},
-			want:       "",
-			wantCalled: false,
+			name:    "fully specified semver skips lookup",
+			repo:    "owner/repo",
+			version: "v4.2.0",
+			refs:    []string{"refs/tags/v4.3.0"},
+			want:    "",
 		},
 		{
-			name:       "rolling major resolves to highest patch",
-			repo:       "owner/repo",
-			version:    "v4",
-			refs:       []string{"refs/tags/v4", "refs/tags/v4.1.3", "refs/tags/v4.2.0", "refs/tags/v3.9.9"},
-			want:       "v4.2.0",
-			wantCalled: true,
+			name:           "rolling major resolves to highest patch",
+			repo:           "owner/repo",
+			version:        "v4",
+			refs:           []string{"refs/tags/v4", "refs/tags/v4.1.3", "refs/tags/v4.2.0", "refs/tags/v3.9.9"},
+			want:           "v4.2.0",
+			wantListCalled: true,
 		},
 		{
-			name:       "annotated tags are handled",
-			repo:       "owner/repo",
-			version:    "v4",
-			refs:       []string{"refs/tags/v4.2.0^{}", "refs/tags/v4.1.3"},
-			want:       "v4.2.0",
-			wantCalled: true,
+			name:           "annotated major tags are handled",
+			repo:           "owner/repo",
+			version:        "v4",
+			refs:           []string{"refs/tags/v4.2.0^{}", "refs/tags/v4.1.3"},
+			want:           "v4.2.0",
+			wantListCalled: true,
 		},
 		{
-			name:       "no matching tags yields empty",
-			repo:       "owner/repo",
-			version:    "v4",
-			refs:       []string{"refs/tags/v5.0.0"},
-			want:       "",
-			wantCalled: true,
+			name:           "no matching tags yields empty",
+			repo:           "owner/repo",
+			version:        "v4",
+			refs:           []string{"refs/tags/v5.0.0"},
+			want:           "",
+			wantListCalled: true,
+		},
+		{
+			name:           "rolling minor resolves to highest patch",
+			repo:           "owner/repo",
+			version:        "v4.2",
+			refs:           []string{"refs/tags/v4.2", "refs/tags/v4.2.1", "refs/tags/v4.2.3", "refs/tags/v4.3.0"},
+			want:           "v4.2.3",
+			wantListCalled: true,
+		},
+		{
+			name:    "commit sha resolves to highest semver tag pointing at commit",
+			repo:    "owner/repo",
+			version: "fad22eb3fa582b7357fc0ea48af6645851b884fd",
+			refsWithHashes: []ghaRemoteRef{
+				{Name: "refs/tags/v1.0.74", Hash: "fad22eb3fa582b7357fc0ea48af6645851b884fd"},
+				{Name: "refs/tags/v1.0.161", Hash: "fad22eb3fa582b7357fc0ea48af6645851b884fd"},
+				{Name: "refs/tags/v1.0.200", Hash: "0123456789abcdef0123456789abcdef01234567"},
+			},
+			want:                 "v1.0.161",
+			wantListHashesCalled: true,
+		},
+		{
+			name:    "commit sha resolves through peeled annotated tag",
+			repo:    "owner/repo",
+			version: "fad22eb",
+			refsWithHashes: []ghaRemoteRef{
+				{Name: "refs/tags/v1.0.161", Hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				{Name: "refs/tags/v1.0.161^{}", Hash: "fad22eb3fa582b7357fc0ea48af6645851b884fd"},
+			},
+			want:                 "v1.0.161",
+			wantListHashesCalled: true,
+		},
+		{
+			name:    "ambiguous short commit sha stays unresolved",
+			repo:    "owner/repo",
+			version: "fad22eb",
+			refsWithHashes: []ghaRemoteRef{
+				{Name: "refs/tags/v1.0.161", Hash: "fad22eb3fa582b7357fc0ea48af6645851b884fd"},
+				{Name: "refs/tags/v1.0.200", Hash: "fad22ebaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			},
+			want:                 "",
+			wantListHashesCalled: true,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			called := false
+			listCalled := false
+			listHashesCalled := false
 			ghaListRemoteRefs = func(_ context.Context, remoteURL string) ([]string, error) {
-				called = true
+				listCalled = true
 				if remoteURL != "https://github.com/"+tc.repo+".git" {
 					t.Fatalf("unexpected remoteURL %q", remoteURL)
 				}
 				return tc.refs, nil
 			}
+			ghaListRemoteRefsWithHashes = func(_ context.Context, remoteURL string) ([]ghaRemoteRef, error) {
+				listHashesCalled = true
+				if remoteURL != "https://github.com/"+tc.repo+".git" {
+					t.Fatalf("unexpected remoteURL %q", remoteURL)
+				}
+				return tc.refsWithHashes, nil
+			}
 			got := resolveGitHubActionsVersion(context.Background(), &sync.Map{}, tc.repo, tc.version)
 			if got != tc.want {
 				t.Fatalf("resolveGitHubActionsVersion(%q,%q)=%q want %q", tc.repo, tc.version, got, tc.want)
 			}
-			if called != tc.wantCalled {
-				t.Fatalf("called=%v want %v", called, tc.wantCalled)
+			if listCalled != tc.wantListCalled {
+				t.Fatalf("listCalled=%v want %v", listCalled, tc.wantListCalled)
+			}
+			if listHashesCalled != tc.wantListHashesCalled {
+				t.Fatalf("listHashesCalled=%v want %v", listHashesCalled, tc.wantListHashesCalled)
 			}
 		})
 	}
@@ -260,6 +403,63 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionAvoidsFalsePositive(t *testing
 	}
 }
 
+func TestQueryOSVGHABucketBatch_UnresolvedFloatingTagDoesNotDefaultToAffected(t *testing.T) {
+	resetGHATestState()
+	tmp := t.TempDir()
+	restore := disk.SetBaseDirForTest(tmp)
+	t.Cleanup(restore)
+
+	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
+	if err := os.MkdirAll(filepath.Dir(zipPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	vuln := osvschema.Vulnerability{
+		ID: "GHSA-floating-tag",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{
+					{
+						Type: osvschema.RangeEcosystem,
+						Events: []osvschema.Event{
+							{Introduced: "0"},
+							{Fixed: "4.2.0"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+		"GHSA-floating-tag.json": vuln,
+	}); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+	now := time.Now()
+	_ = os.Chtimes(zipPath, now, now)
+
+	origList := ghaListRemoteRefs
+	ghaListRemoteRefs = func(_ context.Context, remoteURL string) ([]string, error) {
+		if remoteURL != "https://github.com/actions/download-artifact.git" {
+			t.Fatalf("unexpected remoteURL %q", remoteURL)
+		}
+		return []string{"refs/tags/v5.0.0"}, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefs = origList })
+
+	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+		{QueryKey: QueryKey{Name: "actions/download-artifact", Version: "v4.1", Ecosystem: "GitHub Actions"}},
+	})
+	if err != nil {
+		t.Fatalf("queryOSVGHABucketBatch: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected unresolved floating ref to remain unknown, got vulnerabilities %#v", got)
+	}
+}
+
 func TestQueryOSVGHABucketBatch_MajorTagResolutionReportsEffectiveVersion(t *testing.T) {
 	resetGHATestState()
 	tmp := t.TempDir()
@@ -318,6 +518,242 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionReportsEffectiveVersion(t *tes
 	}
 	if got[0].Version != "v4.1.3" {
 		t.Fatalf("expected effective version v4.1.3, got %q", got[0].Version)
+	}
+}
+
+func TestQueryOSVGHABucketBatch_SHAResolutionAvoidsFalsePositive(t *testing.T) {
+	resetGHATestState()
+	tmp := t.TempDir()
+	restore := disk.SetBaseDirForTest(tmp)
+	t.Cleanup(restore)
+
+	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
+	if err := os.MkdirAll(filepath.Dir(zipPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	vuln := osvschema.Vulnerability{
+		ID:      "GHSA-8q5r-mmjf-575q",
+		Aliases: []string{"CVE-2026-47751"},
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "anthropics/claude-code-action", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{
+					{
+						Type: osvschema.RangeEcosystem,
+						Events: []osvschema.Event{
+							{Introduced: "0"},
+							{Fixed: "1.0.74"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+		"GHSA-8q5r-mmjf-575q.json": vuln,
+	}); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+	now := time.Now()
+	_ = os.Chtimes(zipPath, now, now)
+
+	sha := "fad22eb3fa582b7357fc0ea48af6645851b884fd"
+	origListWithHashes := ghaListRemoteRefsWithHashes
+	ghaListRemoteRefsWithHashes = func(_ context.Context, remoteURL string) ([]ghaRemoteRef, error) {
+		if remoteURL != "https://github.com/anthropics/claude-code-action.git" {
+			t.Fatalf("unexpected remoteURL %q", remoteURL)
+		}
+		return []ghaRemoteRef{
+			{Name: "refs/tags/v1.0.161", Hash: sha},
+			{Name: "refs/tags/v1.0.161^{}", Hash: sha},
+		}, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefsWithHashes = origListWithHashes })
+
+	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+		{QueryKey: QueryKey{Name: "anthropics/claude-code-action", Version: sha, Ecosystem: "GitHub Actions"}},
+	})
+	if err != nil {
+		t.Fatalf("queryOSVGHABucketBatch: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no vulnerabilities for SHA resolving to v1.0.161 >= v1.0.74, got %#v", got)
+	}
+}
+
+func TestQueryRaw_GitHubActionsPURLOnlySHAResolutionAvoidsFalsePositive(t *testing.T) {
+	resetGHATestState()
+	tmp := t.TempDir()
+	restore := disk.SetBaseDirForTest(tmp)
+	t.Cleanup(restore)
+
+	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
+	if err := os.MkdirAll(filepath.Dir(zipPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	vuln := osvschema.Vulnerability{
+		ID: "GHSA-8q5r-mmjf-575q",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "anthropics/claude-code-action", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{
+					{
+						Type: osvschema.RangeEcosystem,
+						Events: []osvschema.Event{
+							{Introduced: "0"},
+							{Fixed: "1.0.74"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+		"GHSA-8q5r-mmjf-575q.json": vuln,
+	}); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+	now := time.Now()
+	_ = os.Chtimes(zipPath, now, now)
+
+	sha := "fad22eb3fa582b7357fc0ea48af6645851b884fd"
+	origListWithHashes := ghaListRemoteRefsWithHashes
+	ghaListRemoteRefsWithHashes = func(_ context.Context, remoteURL string) ([]ghaRemoteRef, error) {
+		if remoteURL != "https://github.com/anthropics/claude-code-action.git" {
+			t.Fatalf("unexpected remoteURL %q", remoteURL)
+		}
+		return []ghaRemoteRef{{Name: "refs/tags/v1.0.161^{}", Hash: sha}}, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefsWithHashes = origListWithHashes })
+
+	got, err := QueryRaw(context.Background(), nil, []PkgInput{
+		{QueryKey: QueryKey{PURL: "pkg:githubactions/anthropics/claude-code-action@" + sha + "#sub/action.yml"}},
+	})
+	if err != nil {
+		t.Fatalf("QueryRaw: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no vulnerabilities for PURL-only SHA resolving to patched tag, got %#v", got)
+	}
+}
+
+func TestQueryOSVGHABucketBatch_SHAResolutionReportsEffectiveVersion(t *testing.T) {
+	resetGHATestState()
+	tmp := t.TempDir()
+	restore := disk.SetBaseDirForTest(tmp)
+	t.Cleanup(restore)
+
+	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
+	if err := os.MkdirAll(filepath.Dir(zipPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	vuln := osvschema.Vulnerability{
+		ID: "GHSA-sha-vuln",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{
+					{
+						Type: osvschema.RangeEcosystem,
+						Events: []osvschema.Event{
+							{Introduced: "0"},
+							{Fixed: "1.0.74"},
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+		"GHSA-sha-vuln.json": vuln,
+	}); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+	now := time.Now()
+	_ = os.Chtimes(zipPath, now, now)
+
+	sha := "1111111111111111111111111111111111111111"
+	origListWithHashes := ghaListRemoteRefsWithHashes
+	ghaListRemoteRefsWithHashes = func(_ context.Context, remoteURL string) ([]ghaRemoteRef, error) {
+		if remoteURL != "https://github.com/owner/repo.git" {
+			t.Fatalf("unexpected remoteURL %q", remoteURL)
+		}
+		return []ghaRemoteRef{{Name: "refs/tags/v1.0.73", Hash: sha}}, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefsWithHashes = origListWithHashes })
+
+	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+		{QueryKey: QueryKey{Name: "owner/repo", Version: sha, Ecosystem: "GitHub Actions"}},
+	})
+	if err != nil {
+		t.Fatalf("queryOSVGHABucketBatch: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 vulnerability, got %#v", got)
+	}
+	if got[0].Version != "v1.0.73" {
+		t.Fatalf("effective version = %q, want v1.0.73", got[0].Version)
+	}
+}
+
+func TestQueryOSVGHABucketBatch_UnresolvedSHADoesNotDefaultToAffected(t *testing.T) {
+	resetGHATestState()
+	tmp := t.TempDir()
+	restore := disk.SetBaseDirForTest(tmp)
+	t.Cleanup(restore)
+
+	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
+	if err := os.MkdirAll(filepath.Dir(zipPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	vuln := osvschema.Vulnerability{
+		ID: "GHSA-unresolved-sha",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{
+					{
+						Type: osvschema.RangeEcosystem,
+						Events: []osvschema.Event{
+							{Introduced: "0"},
+							{Fixed: "1.0.74"},
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+		"GHSA-unresolved-sha.json": vuln,
+	}); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+	now := time.Now()
+	_ = os.Chtimes(zipPath, now, now)
+
+	origListWithHashes := ghaListRemoteRefsWithHashes
+	ghaListRemoteRefsWithHashes = func(_ context.Context, remoteURL string) ([]ghaRemoteRef, error) {
+		if remoteURL != "https://github.com/owner/repo.git" {
+			t.Fatalf("unexpected remoteURL %q", remoteURL)
+		}
+		return []ghaRemoteRef{{Name: "refs/tags/v1.0.200", Hash: "2222222222222222222222222222222222222222"}}, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefsWithHashes = origListWithHashes })
+
+	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+		{QueryKey: QueryKey{Name: "owner/repo", Version: "1111111111111111111111111111111111111111", Ecosystem: "GitHub Actions"}},
+	})
+	if err != nil {
+		t.Fatalf("queryOSVGHABucketBatch: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected unresolved SHA to remain unknown, got vulnerabilities %#v", got)
 	}
 }
 
@@ -445,6 +881,60 @@ func TestEnsureGHACacheZip_UsesETagConditionalRequest(t *testing.T) {
 	if lastIfNone != `W/"abc"` {
 		t.Fatalf("If-None-Match=%q want=%q", lastIfNone, `W/"abc"`)
 	}
+}
+
+// TestEnsureGHACacheZipDownloadCapBoundary pins the safety-cap boundary: a
+// body of exactly ghaDownloadLimit bytes is a complete download and must
+// succeed; only a body that exceeds the cap is truncated and must fail.
+func TestEnsureGHACacheZipDownloadCapBoundary(t *testing.T) {
+	body := mustGHATestZipBytes(t, map[string]osvschema.Vulnerability{
+		"GHSA-cap.json": {
+			ID: "GHSA-cap",
+			Affected: []osvschema.Affected{
+				{Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+			},
+		},
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	origURL := ghaAllZipURL
+	origClient := ghaHTTPClient
+	origTTL := ghaDownloadTTL
+	origLimit := ghaDownloadLimit
+	ghaAllZipURL = srv.URL
+	ghaHTTPClient = srv.Client()
+	ghaDownloadTTL = 0
+	t.Cleanup(func() {
+		ghaAllZipURL = origURL
+		ghaHTTPClient = origClient
+		ghaDownloadTTL = origTTL
+		ghaDownloadLimit = origLimit
+	})
+
+	t.Run("exactly at cap succeeds", func(t *testing.T) {
+		resetGHATestState()
+		restore := disk.SetBaseDirForTest(t.TempDir())
+		t.Cleanup(restore)
+		ghaDownloadLimit = int64(len(body))
+		if _, err := ensureGHACacheZip(t.Context()); err != nil {
+			t.Fatalf("ensureGHACacheZip at exact cap: %v", err)
+		}
+	})
+
+	t.Run("over cap fails loudly", func(t *testing.T) {
+		resetGHATestState()
+		restore := disk.SetBaseDirForTest(t.TempDir())
+		t.Cleanup(restore)
+		ghaDownloadLimit = int64(len(body)) - 1
+		if _, err := ensureGHACacheZip(t.Context()); err == nil {
+			t.Fatal("ensureGHACacheZip over cap: want safety-cap error, got nil")
+		}
+	})
 }
 
 func TestLoadGHAVulnIndex_RefreshesAfterTTL(t *testing.T) {

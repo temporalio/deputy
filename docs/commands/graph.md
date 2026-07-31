@@ -146,6 +146,9 @@ Groups indicate node type:
 ### graph why
 
 Show why a package is in the dependency graph by tracing dependency paths.
+The package query accepts a package name, `name@version`, glob pattern, or
+Package URL (PURL). Prefer PURLs from `deputy scan`, `deputy list`, or MCP
+tool output when you need exact package identity.
 
 ```bash
 # Why is lodash in my dependencies?
@@ -154,11 +157,41 @@ deputy graph why lodash
 # Why is a specific version included?
 deputy graph why lodash@4.17.21
 
-# Show all dependency paths (not just shortest)
+# Trace an exact PURL emitted by scan/list output
+deputy graph why pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible
+
+# Include Go import-status metadata for pathless/disconnected matches
+deputy graph why pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible --extended --json
+
+# Show every resolved dependency path in text output
 deputy graph why yaml --all
 
 # JSON output for scripting
 deputy graph why protobuf --json
+```
+
+When JSON output finds a package but cannot resolve a path, the response still
+includes the matched `dependency_node`:
+
+```json
+{
+  "results": [
+    {
+      "dependency": "pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible",
+      "found": true,
+      "dependency_node": {
+        "purl": "pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible",
+        "name": "github.com/docker/docker",
+        "version": "28.5.2+incompatible",
+        "ecosystem": "Go",
+        "depth": 999,
+        "locations": ["go.mod"],
+        "import_status": "IMPORT_STATUS_REQUIRED"
+      },
+      "message": "Package is present as a required dependency, but no dependency path from a direct/root dependency was resolved"
+    }
+  ]
+}
 ```
 
 Example output:
@@ -181,8 +214,11 @@ Show what packages depend on a given package (reverse dependencies).
 # What depends on protobuf?
 deputy graph needs protobuf
 
-# Show all dependents
-deputy graph needs golang.org/x/net --all
+# JSON output for scripting and agent workflows
+deputy graph needs golang.org/x/net --json
+
+# Include Go import-status metadata in the graph used for reverse lookup
+deputy graph needs golang.org/x/net --extended --json
 ```
 
 Example output:
@@ -195,6 +231,30 @@ github.com/gogo/protobuf@1.3.2
   github.com/containerd/containerd@1.7.29
   ...
 ```
+
+JSON output always returns a structured object, including misses:
+
+```json
+{
+  "package": "github.com/docker/docker",
+  "version": "28.5.2+incompatible",
+  "purl": "pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible",
+  "found": true,
+  "direct": false,
+  "direct_count": 0,
+  "transitive_count": 0,
+  "message": "Package is present in the inventory but disconnected from dependency roots; no dependent packages were resolved"
+}
+```
+
+When `found` is `true` and `dependents` is empty, `message` explains whether
+the package is a direct/root dependency, a disconnected inventory item, or a
+local graph that may need `--resolve-transitives`. When `found` is `false`, the
+command still emits JSON instead of plain text.
+
+`graph why` and `graph needs` also accept `--extended`. For Go projects this
+adds import-status metadata to the graph, helping distinguish modules that are
+required in `go.mod` from declared-only modules in the broader module graph.
 
 ## Flags
 
@@ -210,8 +270,13 @@ github.com/gogo/protobuf@1.3.2
 | `--direction` | | `TB` | Graph direction: TB, LR, BT, RL |
 | `--focus` | | | Focus on a specific package (shows its subgraph) |
 | `--stats` | | `false` | Show only graph statistics |
+| `--resolve-transitives` | | `false` | Use package registry, deps.dev, and Git lookups for more precise transitive graph edges |
 | `--ecosystems` | | `all` | Ecosystems to include |
 | `--ref` | | `HEAD` | Git reference (commit, tag, branch) |
+
+By default, graph commands use local manifests and lockfiles only. Add
+`--resolve-transitives` when you need more complete transitive edges and can
+accept slower package registry, deps.dev, or Git lookups.
 
 ## Examples
 
@@ -239,6 +304,9 @@ deputy graph --depth 2
 
 # Focus on a specific package and its dependencies
 deputy graph --focus lodash
+
+# Resolve more precise transitive edges using registry/deps.dev/Git lookups
+deputy graph why golang.org/x/net --resolve-transitives
 
 # Filter by ecosystem
 deputy graph --ecosystems go
@@ -323,10 +391,10 @@ In DOT and Mermaid formats, nodes are styled based on their characteristics:
 
 ## See Also
 
-- [Scan command](scan.md) — Scan for vulnerabilities
-- [List command](list.md) — List dependencies
-- [SBOM command](sbom.md) — Generate SBOM
-- [Graph policies](../reference/policy-inputs.md#graph-entrypoints) — CEL policies for graph analysis
+- [Scan command](scan.md): Scan for vulnerabilities
+- [List command](list.md): List dependencies
+- [SBOM command](sbom.md): Generate SBOM
+- [Graph policies](../reference/policy-inputs.md#graph-entrypoints): CEL policies for graph analysis
 - [Graphviz Documentation](https://graphviz.org/documentation/)
 - [Mermaid.js Documentation](https://mermaid.js.org/)
 

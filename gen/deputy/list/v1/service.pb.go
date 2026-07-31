@@ -83,7 +83,7 @@ func (x *ListPackagesRequest) GetOptions() *ListOptions {
 // ListOptions configure package listing.
 type ListOptions struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// OnlyDirect filters to only direct dependencies.
+	// OnlyDirect filters returned packages to direct dependencies.
 	OnlyDirect bool `protobuf:"varint,1,opt,name=only_direct,json=onlyDirect,proto3" json:"only_direct,omitempty"`
 	// Ecosystems filters to specific ecosystems.
 	// Maximum 50 ecosystems to prevent abuse.
@@ -179,9 +179,11 @@ type ListPackagesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Target describes what was enumerated.
 	Target *v1.Target `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
-	// Packages lists all discovered packages.
+	// Packages lists discovered packages matching request filters.
+	// When only_direct is true, this list contains only direct dependencies.
 	Packages []*v11.Package `protobuf:"bytes,2,rep,name=packages,proto3" json:"packages,omitempty"`
-	// Stats summarizes the listing.
+	// Stats summarizes the discovered inventory after ecosystem and path filters.
+	// Stats are computed before only_direct filters the returned packages.
 	Stats         *ListStats `protobuf:"bytes,3,opt,name=stats,proto3" json:"stats,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -241,11 +243,11 @@ func (x *ListPackagesResponse) GetStats() *ListStats {
 // ListStats provides statistics about the listing.
 type ListStats struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// TotalPackages is the total count of packages.
+	// TotalPackages is the total discovered package count before only_direct filtering.
 	TotalPackages int32 `protobuf:"varint,1,opt,name=total_packages,json=totalPackages,proto3" json:"total_packages,omitempty"`
-	// DirectPackages is the count of direct dependencies.
+	// DirectPackages is the count of discovered direct dependencies.
 	DirectPackages int32 `protobuf:"varint,2,opt,name=direct_packages,json=directPackages,proto3" json:"direct_packages,omitempty"`
-	// TransitivePackages is the count of transitive dependencies.
+	// TransitivePackages is the count of discovered transitive dependencies.
 	TransitivePackages int32 `protobuf:"varint,3,opt,name=transitive_packages,json=transitivePackages,proto3" json:"transitive_packages,omitempty"`
 	// Ecosystems maps ecosystem names to package counts.
 	Ecosystems    map[string]int32 `protobuf:"bytes,4,rep,name=ecosystems,proto3" json:"ecosystems,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`

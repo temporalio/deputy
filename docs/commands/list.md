@@ -34,6 +34,7 @@ deputy ls [target] [flags]
 | `--format` | `-f` | `text` | Output format: `text`, `tsv`, `json` |
 | `--output` | `-o` | stdout | Output file path |
 | `--ecosystems` | | all | Filter by ecosystem |
+| `--direct` | | `false` | Alias for `--only-direct` |
 | `--only-direct` | | `false` | Only show direct dependencies |
 | `--no-header` | | `false` | Omit header in text/tsv formats |
 | `--source` | | | Target source type: `remote`, `docker-daemon`, `tarball`, `oci-archive`, `oci-layout` |
@@ -74,7 +75,7 @@ $ deputy list --source remote --platform linux/amd64 nginx:latest
 
 ```console
 # Only direct dependencies
-$ deputy list --only-direct
+$ deputy list --direct
 
 # Only Go and npm
 $ deputy list --ecosystems go,npm
@@ -84,7 +85,7 @@ $ deputy list --ecosystems go,npm
 
 ```console
 # JSON for scripting
-$ deputy list --format json | jq '.items[] | {purl: .purl, direct: .isDirect}'
+$ deputy list --format json | jq '.packages[] | {purl: .purl, direct: .direct}'
 
 # TSV for pipelines
 $ deputy list --format tsv --no-header | cut -f1
@@ -119,23 +120,42 @@ pkg:golang/github.com/other/dep@v2.0.0	false
 
 ```json
 {
-  "target": "/path/to/repo",
-  "ref": "HEAD",
-  "commit": "abc123d...",
-  "generated": "2025-01-15T10:30:00Z",
-  "count": 42,
-  "items": [
+  "target": {
+    "kind": "TARGET_KIND_GIT",
+    "display_path": "/path/to/repo",
+    "local_path": "/path/to/repo",
+    "ref": "HEAD",
+    "effective_ref": "HEAD~0",
+    "commit_hash": "abc123d..."
+  },
+  "packages": [
     {
-      "ecosystem": "go",
       "name": "github.com/example/pkg",
       "version": "v1.2.3",
-      "isDirect": true,
+      "ecosystem": "Go",
       "purl": "pkg:golang/github.com/example/pkg@v1.2.3",
-      "sources": "go.mod"
+      "direct": true,
+      "locations": ["go.mod"]
     }
-  ]
+  ],
+  "stats": {
+    "total_packages": 42,
+    "direct_packages": 12,
+    "transitive_packages": 30,
+    "ecosystems": {
+      "Go": 42
+    }
+  }
 }
 ```
+
+`packages` contains the returned packages after request filters. With
+`--direct` or `--only-direct`, `packages` contains only direct dependencies.
+`stats` summarizes the full discovered inventory after ecosystem and
+exclude-path filters, before direct-only filtering, so `stats.total_packages`
+can be larger than the length of `packages`. Packages are sorted by PURL, then
+directness, name, version, and ecosystem for stable CLI, JSON, API, and MCP
+output.
 
 ### Container Image Output
 
@@ -181,7 +201,7 @@ Unlike `deputy scan`, `list` does not query the OSV vulnerability database, maki
 ## See Also
 
 - [SBOM command](sbom.md)
-- [Scan command](scan.md) — vulnerability scanning with container support
+- [Scan command](scan.md): vulnerability scanning with container support
 - [Inventory concepts](../concepts/inventory-and-sboms.md)
 
 ## Code Pointers

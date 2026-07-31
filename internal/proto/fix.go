@@ -8,17 +8,16 @@ import (
 	"github.com/temporalio/deputy/internal/remediation"
 )
 
-// BuildFixResponse creates a FixResponse from internal types.
+// BuildFixResponse creates a FixResponse from internal types. The resolved
+// target is echoed as-is so ref, effectiveRef, and commit survive into fix
+// output, matching the other surfaces.
 func BuildFixResponse(
-	displayPath, ref, commit string,
+	target *targetv1.Target,
 	stdlibUpgrade string,
 	commands []remediation.Command,
 ) *fixv1.FixResponse {
 	resp := &fixv1.FixResponse{
-		Target: &targetv1.Target{
-			DisplayPath: displayPath,
-			CommitHash:  commit,
-		},
+		Target:        target,
 		StdlibUpgrade: stdlibUpgrade,
 		Commands:      RemediationCommandsToProto(commands),
 		GeneratedAt:   timestamppb.Now(),
@@ -36,14 +35,21 @@ func BuildFixResponse(
 // RemediationCommandToProto converts an internal remediation.Command to proto.
 func RemediationCommandToProto(c remediation.Command) *fixv1.RemediationCommand {
 	return &fixv1.RemediationCommand{
-		Manager:    c.Manager,
-		Command:    c.Command,
-		Path:       c.Path,
-		Groups:     c.Groups,
-		Hint:       c.Hint,
-		FollowUp:   c.FollowUp,
-		IsDirect:   c.IsDirect,
-		Executable: c.Executable,
+		Manager:         c.Manager,
+		Command:         c.Command,
+		Path:            c.Path,
+		Groups:          c.Groups,
+		Hint:            c.Hint,
+		FollowUp:        c.FollowUp,
+		IsDirect:        c.IsDirect,
+		Executable:      c.Executable,
+		Package:         c.Package,
+		Version:         c.Version,
+		Purl:            c.PURL,
+		TargetVersion:   c.TargetVersion,
+		TargetModule:    c.TargetModule,
+		Migration:       c.Migration,
+		Vulnerabilities: c.Vulnerabilities,
 	}
 }
 
@@ -65,14 +71,21 @@ func RemediationCommandFromProto(pc *fixv1.RemediationCommand) remediation.Comma
 		return remediation.Command{}
 	}
 	return remediation.Command{
-		Manager:    pc.Manager,
-		Command:    pc.Command,
-		Path:       pc.Path,
-		Groups:     pc.Groups,
-		Hint:       pc.Hint,
-		FollowUp:   pc.FollowUp,
-		IsDirect:   pc.IsDirect,
-		Executable: pc.Executable,
+		Manager:         pc.Manager,
+		Command:         pc.Command,
+		Path:            pc.Path,
+		Groups:          pc.Groups,
+		Hint:            pc.Hint,
+		FollowUp:        pc.FollowUp,
+		IsDirect:        pc.IsDirect,
+		Executable:      pc.Executable,
+		Package:         pc.Package,
+		Version:         pc.Version,
+		PURL:            pc.Purl,
+		TargetVersion:   pc.TargetVersion,
+		TargetModule:    pc.TargetModule,
+		Migration:       pc.Migration,
+		Vulnerabilities: pc.Vulnerabilities,
 	}
 }
 

@@ -15,10 +15,12 @@ import (
 	packageurl "github.com/package-url/packageurl-go"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
 
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/advisorysource"
 	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/container/image"
@@ -67,6 +69,11 @@ type Result struct {
 
 	// Stats contains vulnerability severity counts.
 	Stats *vulnerabilityv1.Stats
+
+	// Coverage reports which (ecosystem, artifact) combinations advisory sources
+	// answered for, and which had no coverage (e.g. container base images).
+	// Uncovered combinations are informational, not errors.
+	Coverage *vulnerabilityv1.ScanCoverage
 
 	// Graph contains the resolved dependency graph (when graph resolution is enabled).
 	Graph *graph.Graph
@@ -125,6 +132,14 @@ type Options struct {
 	// to fall back to trusting advisory-reported fixed versions verbatim.
 	VerifyFixes bool
 
+	// ResolveSeverities rates advisories whose matched record carries no
+	// severity by consulting their alias records (GHSA first, then CVE), before
+	// consolidation so stats and triage priorities reflect the resolved
+	// ratings. The resulting Severity keeps its origin in type/raw. Opt-in via
+	// scan enrichment: it adds network lookups and Deputy never substitutes an
+	// alias rating silently.
+	ResolveSeverities bool
+
 	// GoProxyURL overrides the Go module proxy used for fix verification.
 	// Empty uses the default (proxy.golang.org).
 	GoProxyURL string
@@ -159,7 +174,7 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -178,6 +193,7 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
+			Coverage:        coverage,
 			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
@@ -211,7 +227,7 @@ func ScanContainerImage(ctx context.Context, target string, targetOpts map[strin
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -230,6 +246,7 @@ func ScanContainerImage(ctx context.Context, target string, targetOpts map[strin
 			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
+			Coverage:        coverage,
 			ImageInfo:       invExec.Result.ImageInfo,
 			GeneratedAt:     time.Now().UTC(),
 		},
@@ -260,7 +277,7 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -279,6 +296,7 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
+			Coverage:        coverage,
 			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
@@ -309,7 +327,7 @@ func ScanVMImage(ctx context.Context, target string, targetOpts map[string]strin
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -328,6 +346,7 @@ func ScanVMImage(ctx context.Context, target string, targetOpts map[string]strin
 			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
+			Coverage:        coverage,
 			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
@@ -395,18 +414,14 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 	name := purlDisplayName(pu)
 	ecos := purlEcosystem(pu)
 
-	inputs := []osv.PkgInput{
-		osv.NewPkgInput(
-			osv.QueryKey{
-				Name:      name,
-				Version:   pu.Version,
-				Ecosystem: ecos,
-				PURL:      canonical,
-			},
-			osv.PackageContext{
-				IsDirect: true,
-			},
-		),
+	inputs := []*dependencyv1.Package{
+		{
+			Name:      name,
+			Version:   pu.Version,
+			Ecosystem: ecos,
+			Purl:      canonical,
+			Direct:    true,
+		},
 	}
 
 	pkgs := []*extractor.Package{
@@ -422,13 +437,15 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 		direct[canonical] = true
 	}
 
-	// Query OSV
-	client := osv.NewClient()
-	findings, advisories, err := osv.Query(ctx, client, inputs)
+	// Query advisory sources via the registry (OSV today).
+	agg, err := advisorysource.NewDefaultRegistry(ctx, osv.NewClient()).Query(ctx, inputs)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
 	}
+	// Convert proto findings to domain once, at the boundary where consolidation
+	// (a domain projection) begins. Everything upstream is proto.
+	findings, advisories, coverage := vulnerability.FindingsFromProto(agg.Findings), agg.Advisories, agg.Coverage
 
 	span.SetAttributes(attribute.Int("deputy.finding.count", len(findings)))
 
@@ -447,6 +464,7 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
+			Coverage:        coverage,
 			GeneratedAt:     time.Now().UTC(),
 		},
 	}, nil
@@ -481,6 +499,9 @@ func purlEcosystem(pu packageurl.PackageURL) string {
 // Go module proxy so downstream stats/rendering distinguish installable
 // in-place upgrades from module migrations and unreachable advisory versions.
 func consolidateAndResolve(ctx context.Context, findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory, opts Options) ([]vulnerability.Consolidated, *vulnerabilityv1.Stats) {
+	if opts.ResolveSeverities {
+		resolveUnratedSeverities(ctx, osv.NewClient(), advisories)
+	}
 	cons := vulnerability.Consolidate(findings, advisories)
 	if opts.VerifyFixes {
 		resolver := fixresolve.NewGoProxyResolver(opts.GoProxyURL)
@@ -490,6 +511,38 @@ func consolidateAndResolve(ctx context.Context, findings []vulnerability.Finding
 		persistFixVerdicts(cons, advisories)
 	}
 	return cons, vulnerability.StatsFromConsolidated(cons, len(findings))
+}
+
+// resolveSeverityLookups caps concurrent alias-record fetches during severity
+// resolution.
+const resolveSeverityLookups = 8
+
+// resolveUnratedSeverities rates advisories whose matched record carries no
+// severity by consulting their alias records in osv.SeverityAliasOrder. The
+// resolved Severity is normalized through the same path as record-carried
+// ratings and keeps its origin in type/raw. Advisories that stay unrated keep
+// severity UNKNOWN: absence of a rating anywhere is itself the answer.
+// The advisories map's values are mutated in place; the caller must not read
+// them concurrently with this call (reads after it returns are safe).
+func resolveUnratedSeverities(ctx context.Context, client osv.Client, advisories map[string]*vulnerabilityv1.Advisory) {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(resolveSeverityLookups)
+	for _, adv := range advisories {
+		if adv == nil || len(adv.GetAliases()) == 0 {
+			continue
+		}
+		if adv.GetSeverity().GetLevel() != vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_UNSPECIFIED {
+			continue
+		}
+		g.Go(func() error {
+			raw, rawType := osv.ResolveSeverityFromAliases(ctx, client, adv.GetAliases())
+			if raw != "" {
+				adv.Severity = vulnerability.NewSeverity(raw, rawType)
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
 }
 
 // persistFixVerdicts writes each consolidated finding's resolved fix verdict
@@ -511,7 +564,7 @@ func persistFixVerdicts(cons []vulnerability.Consolidated, advisories map[string
 
 // queryVulnerabilities queries OSV for vulnerabilities and checks for
 // supply-chain risks (e.g., unpinned GitHub Actions references).
-func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, originURL string) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
+func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, originURL string) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, *vulnerabilityv1.ScanCoverage, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.scanning.query_vulnerabilities",
 		trace.WithAttributes(
 			attribute.Int("deputy.package.count", len(pkgs)),
@@ -519,15 +572,20 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	defer span.End()
 
 	// Convert packages to OSV input format
-	inputs := packagesToInputs(pkgs, direct)
+	inputs := packagesToProto(pkgs, direct)
 
-	// Query OSV
-	client := osv.NewClient()
-	findings, advisories, err := osv.Query(ctx, client, inputs)
+	// Query advisory sources (OSV today; more via the registry in future).
+	// The registry routes each package only to sources that cover its ecosystem
+	// and artifact kind, so an ecosystem no source covers is reported in
+	// coverage rather than failing the scan.
+	agg, err := advisorysource.NewDefaultRegistry(ctx, osv.NewClient()).Query(ctx, inputs)
 	if err != nil {
 		otel.SetSpanError(span, err)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
+	// Convert proto findings to domain at the consolidation boundary; supply-chain
+	// findings below are already domain and append cleanly.
+	findings, advisories := vulnerability.FindingsFromProto(agg.Findings), agg.Advisories
 
 	// Check for supply-chain risks (unpinned actions, etc.)
 	scFindings, scAdvisories := checkSupplyChain(ctx, pkgs, direct, forge.RepoSlugFromURL(originURL))
@@ -540,12 +598,16 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	}
 
 	span.SetAttributes(attribute.Int("deputy.finding.count", len(findings)))
-	return findings, advisories, nil
+	return findings, advisories, agg.Coverage, nil
 }
 
-// packagesToInputs converts extractor packages to OSV query inputs.
-func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.PkgInput {
-	inputs := make([]osv.PkgInput, 0, len(pkgs))
+// packagesToProto converts extractor packages to the proto packages the
+// advisory-source registry queries. A proto Package carries both the query
+// coordinates (name/version/ecosystem/purl, possibly remapped for mise/asdf and
+// language runtimes) and the scan context (direct/locations/manifest refs/layer
+// details), so no separate query-input type is needed.
+func packagesToProto(pkgs []*extractor.Package, direct map[string]bool) []*dependencyv1.Package {
+	inputs := make([]*dependencyv1.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		if pkg == nil {
 			continue
@@ -597,22 +659,20 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 		copy(locs, pkg.Locations)
 
 		// Build manifest references from locations
-		var manifestRefs []dependencyv1.ManifestRef
+		var manifestRefs []*dependencyv1.ManifestRef
 		for _, loc := range pkg.Locations {
 			manager, manifestPath, ok := manifests.DetectManager(loc, pkg.PURLType)
 			if !ok {
 				continue
 			}
-			manifestRefs = append(manifestRefs, dependencyv1.ManifestRef{})
-			ref := &manifestRefs[len(manifestRefs)-1]
-			ref.Path = manifestPath
-			ref.Manager = manager
+			ref := &dependencyv1.ManifestRef{Path: manifestPath, Manager: manager}
 			// For mise/asdf, record the tool key as declared in the config so
 			// remediation targets the right entry even though the finding may be
 			// reported under a remapped canonical name (e.g. "stdlib", "lodash").
 			if manager == "mise" || manager == "asdf" {
 				dependency.SetManifestRefComponentKey(ref, pkg.Name)
 			}
+			manifestRefs = append(manifestRefs, ref)
 		}
 
 		// Convert layer details from SCALIBR for container image scans.
@@ -642,21 +702,26 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 			scanVersion = md.LockedVersion
 		}
 
-		pkgCtx := osv.PackageContext{
-			IsDirect:     isDirect,
-			Locations:    locs,
-			ManifestRefs: manifestRefs,
-			LayerDetails: layerDetails,
+		// mk builds a proto package for a query coordinate, carrying the shared
+		// scan context (direct/locations/manifests/layer) for this inventory item.
+		mk := func(name, version, eco, purlStr string) *dependencyv1.Package {
+			return &dependencyv1.Package{
+				Name:         name,
+				Version:      version,
+				Ecosystem:    eco,
+				Purl:         purlStr,
+				Direct:       isDirect,
+				Locations:    locs,
+				ManifestRefs: manifestRefs,
+				LayerDetails: layerDetails,
+			}
 		}
 
 		// Known language runtimes (e.g. the Go runtime) map to dedicated OSV
 		// coordinates (Go stdlib/toolchain), which may be more than one query.
 		if coords := mise.RuntimeScanCoords(purl.Type, pkg.Name, scanVersion); len(coords) > 0 {
 			for _, c := range coords {
-				inputs = append(inputs, osv.NewPkgInput(
-					osv.QueryKey{Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, PURL: c.PURL},
-					pkgCtx,
-				))
+				inputs = append(inputs, mk(c.Name, c.Version, c.Ecosystem, c.PURL))
 			}
 			continue
 		}
@@ -675,15 +740,7 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 			}
 		}
 
-		inputs = append(inputs, osv.NewPkgInput(
-			osv.QueryKey{
-				Name:      qName,
-				Version:   qVersion,
-				Ecosystem: qEcosystem,
-				PURL:      qPURL,
-			},
-			pkgCtx,
-		))
+		inputs = append(inputs, mk(qName, qVersion, qEcosystem, qPURL))
 	}
 	return inputs
 }

@@ -4,20 +4,14 @@ import (
 	"fmt"
 	"strings"
 
-	"google.golang.org/protobuf/encoding/protojson"
-
 	fixv1 "github.com/temporalio/deputy/gen/deputy/fix/v1"
+	internalproto "github.com/temporalio/deputy/internal/proto"
 )
 
 // buildFixPromptProto constructs a prompt for an AI agent to execute a remediation plan.
 // The prompt is provider-agnostic and works with any agentic LLM.
 func buildFixPromptProto(resp *fixv1.FixResponse) (string, error) {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return "", fmt.Errorf("encode plan: %w", err)

@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	"github.com/temporalio/deputy/internal/purlx"
 )
 
@@ -283,6 +284,45 @@ func TestExtractorPackagesFromProto(t *testing.T) {
 		pkgs, direct := ExtractorPackagesFromProto(nil)
 		if pkgs != nil || direct != nil {
 			t.Error("expected nil for empty slice")
+		}
+	})
+
+	t.Run("preserves go submodule directness for reconversion", func(t *testing.T) {
+		protoPkgs := []*dependencyv1.Package{
+			{
+				Name:    "github.com/bytedance/sonic",
+				Version: "v1.14.2",
+				Purl:    "pkg:golang/github.com/bytedance/sonic@v1.14.2",
+				Direct:  true,
+			},
+			{
+				Name:    "github.com/bytedance/sonic/loader",
+				Version: "v0.4.0",
+				Purl:    "pkg:golang/github.com/bytedance/sonic/loader@v0.4.0",
+				Direct:  false,
+			},
+		}
+
+		pkgs, direct := ExtractorPackagesFromProto(protoPkgs)
+		if len(pkgs) != 2 {
+			t.Fatalf("expected 2 packages, got %d", len(pkgs))
+		}
+		if pkgs[0].PURLType != "golang" || pkgs[1].PURLType != "golang" {
+			t.Fatalf("expected reconstructed golang PURL types, got %q and %q", pkgs[0].PURLType, pkgs[1].PURLType)
+		}
+		if !direct["github.com/bytedance/sonic"] {
+			t.Fatal("expected parent module to be direct")
+		}
+		if got, ok := direct["github.com/bytedance/sonic/loader"]; !ok || got {
+			t.Fatalf("expected nested module to be recorded as indirect, got value=%v present=%v", got, ok)
+		}
+
+		roundTripped := ExtractorPackagesToProto(pkgs, direct)
+		if !roundTripped[0].Direct {
+			t.Fatal("expected parent module to remain direct after reconversion")
+		}
+		if roundTripped[1].Direct {
+			t.Fatal("expected nested module to remain indirect after reconversion")
 		}
 	})
 }

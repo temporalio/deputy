@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -13,14 +12,14 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/spf13/cobra"
+
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	triagev1 "github.com/temporalio/deputy/gen/deputy/triage/v1"
-	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
+	"github.com/temporalio/deputy/internal/ignore"
 	"github.com/temporalio/deputy/internal/policy"
 	internalproto "github.com/temporalio/deputy/internal/proto"
-	"github.com/temporalio/deputy/internal/report"
 	"github.com/temporalio/deputy/internal/report/render"
 	"github.com/temporalio/deputy/internal/scanning"
 	"github.com/temporalio/deputy/internal/services"
@@ -80,12 +79,15 @@ AI ASSISTANCE:
 	}
 	triageCmd.Flags().String("report", "", "Path to JSON output from 'deputy scan --format json'; use '-' for stdin")
 	triageCmd.Flags().String("ref", "", "Git ref/commit to scan (defaults to HEAD or WORKING when inside a repo)")
-	triageCmd.Flags().StringSlice("ecosystems", nil, "Limit scanning to ecosystems: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
+	triageCmd.Flags().StringSlice("ecosystems", nil, "Limit scanning to ecosystems: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, mise, asdf, haskell, r, cpp (default: all)")
 	triageCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes when generating the summary")
+	triageCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, and severity ratings resolved from alias advisories for unrated records")
 	triageCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	triageCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	triageCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
 	triageCmd.Flags().StringP("format", "f", "text", "Output format (text, json)")
+	addExcludePathFlag(triageCmd)
+	triageCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	triageCmd.Flags().String("agent", "", "Use an AI agent to analyze the triage summary (e.g. 'codex')")
 	triageCmd.Flags().String("agent-model", "", "Model identifier to use when --agent is set")
 	triageCmd.Flags().String("agent-sandbox", "read-only", "Sandbox policy for AI agent (read-only|workspace-write|danger-full-access)")
@@ -138,6 +140,7 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 		if scanResult == nil {
 			return fmt.Errorf("failed to convert scan response")
 		}
+		*scanResult = applyTriageIgnoreRules(cmd, *scanResult, ".")
 		if ignoreUnfixed {
 			*scanResult = scanning.FilterUnfixed(*scanResult)
 		}
@@ -149,9 +152,11 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 			commit = scanResp.Target.CommitHash
 		}
 		triageResp = internalproto.BuildTriageResponse(displayPath, scanResult.Stats, cons, 10)
-		triageResp.Target = &targetv1.Target{
-			DisplayPath: displayPath,
-			CommitHash:  commit,
+		// Echo the scan's resolved target as-is so ref, effectiveRef, and
+		// commit survive into triage output, matching the MCP tool.
+		triageResp.Target = scanResp.Target
+		if triageResp.Target == nil {
+			triageResp.Target = &targetv1.Target{DisplayPath: displayPath, CommitHash: commit}
 		}
 	} else {
 		ref, _ := cmd.Flags().GetString("ref")
@@ -163,7 +168,8 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 
 		// Build scan request
 		scanOpts := &scanv1.ScanOptions{
-			Ecosystems: ecos,
+			Ecosystems:   ecos,
+			ExcludePaths: excludePathsFromCmd(cmd),
 		}
 		if !beforeT.IsZero() {
 			scanOpts.PublishedBefore = timestamppb.New(beforeT)
@@ -173,6 +179,9 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 		}
 		if ref != "" {
 			scanOpts.Ref = ref
+		}
+		if enrich, _ := cmd.Flags().GetBool("enrich"); enrich {
+			scanOpts.EnrichOptions = &scanv1.EnrichOptions{Enabled: true}
 		}
 
 		// Resolve target
@@ -205,17 +214,15 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 		}
 
 		repoPath = scanResult.Target.LocalPath
-		resultOut := *scanResult
+		resultOut := applyTriageIgnoreRules(cmd, *scanResult, repoPath)
 		if ignoreUnfixed {
 			resultOut = scanning.FilterUnfixed(resultOut)
 		}
 		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
 		triageResp = internalproto.BuildTriageResponse(scanResult.Target.DisplayPath, resultOut.Stats, cons, 10)
-		triageResp.Target = &targetv1.Target{
-			DisplayPath: scanResult.Target.DisplayPath,
-			LocalPath:   scanResult.Target.LocalPath,
-			CommitHash:  scanResult.Target.CommitHash,
-		}
+		// Echo the scan's resolved target so ref, effectiveRef, and commit
+		// survive into triage output, matching the MCP tool.
+		triageResp.Target = internalproto.InventoryTargetToProto(scanResult.Target)
 	}
 
 	if err := runTriagePoliciesProto(ctx, policyPaths, triageResp, cmd.ErrOrStderr()); err != nil {
@@ -286,12 +293,7 @@ func runTriagePoliciesProto(ctx context.Context, policyPaths []string, triageRes
 
 // outputTriageProtoJSON writes the triage response as JSON using protojson.
 func outputTriageProtoJSON(w io.Writer, resp *triagev1.TriageResponse) error {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal proto to JSON: %w", err)
@@ -303,63 +305,17 @@ func outputTriageProtoJSON(w io.Writer, resp *triagev1.TriageResponse) error {
 	return err
 }
 
-// renderTriageText outputs the triage response as human-readable text.
+// renderTriageText outputs the triage response as human-readable text. The
+// renderer consumes the deputy.triage.v1 proto directly (the same message the
+// JSON output marshals), so no view-model conversion is needed.
 func renderTriageText(w io.Writer, resp *triagev1.TriageResponse, showDBInfo bool) {
-	// Convert proto to the render format
-	triageReport := report.TriageReport{
-		Stats:             resp.Stats,
-		PackagesWithVulns: int(resp.PackagesWithVulns),
-	}
-	if resp.Target != nil {
-		triageReport.Target = report.Target{
-			Repo:   resp.Target.DisplayPath,
-			Commit: resp.Target.CommitHash,
-		}
-	}
-	for _, pkg := range resp.TopPackages {
-		summary := report.TriagePackageSummary{
-			Package:            pkg.Package,
-			Version:            pkg.Version,
-			Severity:           pkg.Severity,
-			SeverityType:       pkg.SeverityType,
-			FixVersion:         pkg.FixVersion,
-			IsDirect:           pkg.IsDirect,
-			Summary:            pkg.Summary,
-			SampleIDs:          pkg.SampleIds,
-			DatabaseSpecific:   pkg.DatabaseSpecific,
-			VulnerabilityCount: int(pkg.VulnerabilityCount),
-		}
-		if len(pkg.AffectedImports) > 0 {
-			for _, imp := range pkg.AffectedImports {
-				if imp == nil {
-					continue
-				}
-				summary.AffectedImports = append(summary.AffectedImports, vulnerabilityv1.AffectedImport{
-					Path:    imp.Path,
-					Symbols: slices.Clone(imp.Symbols),
-				})
-			}
-		}
-		if pkg.SeverityCounts != nil {
-			summary.SeverityCounts = make(map[string]int)
-			for k, v := range pkg.SeverityCounts {
-				summary.SeverityCounts[k] = int(v)
-			}
-		}
-		triageReport.TopPackages = append(triageReport.TopPackages, summary)
-	}
-	render.TriageSummary(w, triageReport, showDBInfo)
+	render.TriageSummary(w, resp, showDBInfo)
 }
 
 // buildTriagePromptProto creates a prompt for the AI agent from the proto triage response.
 func buildTriagePromptProto(resp *triagev1.TriageResponse) (string, error) {
 	// Use protojson for consistent formatting
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return "", err
@@ -373,4 +329,29 @@ Focus on:
 2. Potential exploit paths or attack vectors
 3. Quick wins (easy fixes with high impact)
 4. Any patterns or systemic issues`, string(data)), nil
+}
+
+// applyTriageIgnoreRules filters findings through the target's vulnerability
+// suppressions (--ignore-file, or auto-discovered .deputyignore.yaml and
+// friends), matching deputy scan, and notes how many findings were ignored.
+// Load failures degrade to no suppressions with a warning: triage should not
+// fail because a config file is malformed.
+func applyTriageIgnoreRules(cmd *cobra.Command, result scanning.Result, workDir string) scanning.Result {
+	ignoreFile, _ := cmd.Flags().GetString("ignore-file")
+	var rules *ignore.Rules
+	var err error
+	if ignoreFile != "" {
+		rules, err = ignore.LoadFromPath(ignoreFile)
+	} else {
+		rules, err = ignore.LoadFromDirectory(workDir)
+	}
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: loading ignore rules: %v\n", err)
+		return result
+	}
+	filtered, ignored := scanning.FilterIgnored(result, rules)
+	if ignored > 0 {
+		fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render(fmt.Sprintf("Note: %d vulnerability finding(s) ignored by rules", ignored)))
+	}
+	return filtered
 }

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/osv-scalibr/extractor"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -16,6 +17,7 @@ import (
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/container/image"
 	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/dockerfile"
 	"github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/policy"
@@ -998,6 +1000,26 @@ func TestScanningResultFromProto(t *testing.T) {
 
 func TestScanningResultRoundTrip(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
+	rootPURL := "pkg:npm/root@1.0.0"
+	childPURL := "pkg:npm/lodash@4.17.21"
+
+	depGraph := graph.New()
+	depGraph.AddNode(&graph.Node{
+		Purl:      rootPURL,
+		Name:      "root",
+		Version:   "1.0.0",
+		Ecosystem: "npm",
+		Direct:    true,
+		Depth:     0,
+	})
+	depGraph.AddNode(&graph.Node{
+		Purl:      childPURL,
+		Name:      "lodash",
+		Version:   "4.17.21",
+		Ecosystem: "npm",
+		Depth:     1,
+	})
+	depGraph.AddEdge(&graph.Edge{From: rootPURL, To: childPURL})
 
 	original := &scanning.Result{
 		Target: inventory.Target{
@@ -1009,7 +1031,14 @@ func TestScanningResultRoundTrip(t *testing.T) {
 			OriginURL:   "https://github.com/example/repo.git",
 			Cloned:      true,
 		},
+		Packages: []*extractor.Package{
+			{Name: "lodash", Version: "4.17.21", PURLType: "npm"},
+		},
 		PackagesScanned: 100,
+		Direct: map[string]bool{
+			"lodash": true,
+		},
+		Graph: depGraph,
 		Findings: []vulnerability.Finding{
 			{
 				AdvisoryID: "CVE-2021-44228",
@@ -1040,6 +1069,30 @@ func TestScanningResultRoundTrip(t *testing.T) {
 	}
 	if roundTripped.PackagesScanned != original.PackagesScanned {
 		t.Errorf("PackagesScanned: got %d, want %d", roundTripped.PackagesScanned, original.PackagesScanned)
+	}
+	if len(proto.Packages) != 1 {
+		t.Fatalf("proto Packages length: got %d, want 1", len(proto.Packages))
+	}
+	if proto.Graph == nil {
+		t.Fatal("expected proto graph to be preserved")
+	}
+	if len(roundTripped.Packages) != 1 {
+		t.Fatalf("round-tripped Packages length: got %d, want 1", len(roundTripped.Packages))
+	}
+	if roundTripped.Packages[0].Name != "lodash" {
+		t.Errorf("round-tripped package name: got %q, want lodash", roundTripped.Packages[0].Name)
+	}
+	if !roundTripped.Direct[childPURL] {
+		t.Errorf("round-tripped direct map missing %q", childPURL)
+	}
+	if roundTripped.Graph == nil {
+		t.Fatal("expected round-tripped graph")
+	}
+	if got := roundTripped.Graph.Stats().TotalNodes; got != 2 {
+		t.Errorf("round-tripped graph nodes: got %d, want 2", got)
+	}
+	if paths := roundTripped.Graph.PathsTo(childPURL); len(paths) != 1 {
+		t.Errorf("round-tripped graph paths to child: got %d, want 1", len(paths))
 	}
 	if len(roundTripped.Findings) != len(original.Findings) {
 		t.Errorf("Findings length: got %d, want %d", len(roundTripped.Findings), len(original.Findings))

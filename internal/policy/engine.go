@@ -66,7 +66,7 @@ func NewEngine(sources []Source) (*Engine, error) {
 			source:      src,
 			program:     prog,
 			entrypoints: collections.NewSetFunc(meta.Entrypoints, strings.TrimSpace),
-			commands:    collections.NewSetFunc(meta.Commands, strings.TrimSpace),
+			commands:    collections.NewSetFunc(meta.Commands, NormalizeCommand),
 			mode:        meta.Mode,
 		})
 	}
@@ -122,6 +122,8 @@ func (e *Engine) EvaluateAll(ctx context.Context, input proto.Message, command, 
 	if e == nil || len(e.compiled) == 0 {
 		return nil, nil
 	}
+	command = NormalizeCommand(command)
+
 	// Validate entrypoint at evaluation time if provided
 	if entrypoint != "" && !IsAllowedEntrypoint(entrypoint) {
 		return nil, fmt.Errorf("invalid entrypoint: %q", entrypoint)
@@ -230,6 +232,8 @@ func (e *Engine) EvaluateAllMap(ctx context.Context, payload map[string]any, com
 	if e == nil || len(e.compiled) == 0 {
 		return nil, nil
 	}
+	command = NormalizeCommand(command)
+
 	// Validate entrypoint at evaluation time if provided
 	if entrypoint != "" && !IsAllowedEntrypoint(entrypoint) {
 		return nil, fmt.Errorf("invalid entrypoint: %q", entrypoint)
@@ -332,6 +336,8 @@ func cloneMap(m map[string]any) map[string]any {
 // This implements AND semantics: BOTH command and entrypoint filters must pass for the policy to run.
 // Policies without restrictions (empty entrypoints/commands lists) always pass their respective checks.
 func shouldSkip(pol compiledPolicy, command, entrypoint string) bool {
+	command = NormalizeCommand(command)
+
 	// Check entrypoint filter
 	if entrypoint != "" && len(pol.entrypoints) > 0 {
 		if _, ok := pol.entrypoints[entrypoint]; !ok {

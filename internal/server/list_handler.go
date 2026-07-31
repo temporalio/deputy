@@ -1,8 +1,10 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -80,29 +82,11 @@ func (h *ListHandler) routeCollection(ctx context.Context, target, ref string, r
 			return inventory.CollectBinary(ctx, target, opts)
 		}
 
-		// Repository, directory, or unspecified
-		// Handle refs consistently with scan and diff:
-		// - WORKING/WORKTREE/WT/. → scan current working tree
-		// - HEAD → scan current working tree (when refProvided, equivalent to HEAD~0)
-		// - other refs (tags, branches, commits) → scan at that exact snapshot
-		if refProvided && ref != "" && !isWorkingTreeRef(ref) {
-			return inventory.CollectRepositoryAtRef(ctx, target, ref, opts)
-		}
-		// Otherwise scan the working tree
+		// Repository, directory, or unspecified. CollectRepository routes
+		// committed-snapshot refs to the at-ref collector itself (see
+		// gitutil.IsWorkingTreeRef for the working-tree vocabulary).
 		return inventory.CollectRepository(ctx, target, ref, refProvided, opts)
 	}
-}
-
-// isWorkingTreeRef reports whether the reference should be treated as
-// the current working tree rather than a specific commit snapshot.
-// This is consistent with how diff handles WORKING/WORKTREE/WT/. refs.
-func isWorkingTreeRef(ref string) bool {
-	r := strings.TrimSpace(ref)
-	if r == "" || r == "." {
-		return true
-	}
-	u := strings.ToUpper(r)
-	return u == "HEAD" || u == "WORKING" || u == "WORKTREE" || u == "WT"
 }
 
 // ListPackages enumerates packages in a target.
@@ -180,6 +164,7 @@ func (h *ListHandler) ListPackages(
 	// Convert packages to proto
 	direct := exec.Result.Direct
 	protoPackages := protoconv.ExtractorPackagesToProto(packages, direct)
+	sortListPackages(protoPackages)
 	allProtoPackages := protoPackages
 
 	// Filter to only direct dependencies if requested
@@ -231,6 +216,40 @@ func (h *ListHandler) ListPackages(
 	}
 
 	return connect.NewResponse(resp), nil
+}
+
+func sortListPackages(pkgs []*dependencyv1.Package) {
+	slices.SortFunc(pkgs, compareListPackages)
+}
+
+func compareListPackages(a, b *dependencyv1.Package) int {
+	switch {
+	case a == nil && b == nil:
+		return 0
+	case a == nil:
+		return 1
+	case b == nil:
+		return -1
+	}
+	if c := cmp.Compare(a.GetPurl(), b.GetPurl()); c != 0 {
+		return c
+	}
+	if a.GetDirect() != b.GetDirect() {
+		if a.GetDirect() {
+			return -1
+		}
+		return 1
+	}
+	if c := cmp.Compare(a.GetName(), b.GetName()); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.GetVersion(), b.GetVersion()); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.GetEcosystem(), b.GetEcosystem()); c != 0 {
+		return c
+	}
+	return cmp.Compare(strings.Join(a.GetLocations(), "\x00"), strings.Join(b.GetLocations(), "\x00"))
 }
 
 // ListEcosystems returns supported ecosystems with their file patterns.

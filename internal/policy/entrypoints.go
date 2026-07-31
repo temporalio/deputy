@@ -1,6 +1,10 @@
 package policy
 
-import "slices"
+import (
+	"maps"
+	"slices"
+	"strings"
+)
 
 // Entrypoint represents a canonical policy evaluation entrypoint.
 // Using a distinct type provides compile-time safety and makes entrypoint
@@ -52,6 +56,53 @@ func (e Entrypoint) Category() string {
 	default:
 		return ""
 	}
+}
+
+// categoryAliases maps legacy category inputs, kept for CLI/API/MCP
+// compatibility, to their canonical category. It is the single source of truth
+// for both NormalizeCategory and CategoryAliases.
+var categoryAliases = map[string]string{
+	"container": "container_diff",
+	"service":   "server",
+	"exec":      "sandbox",
+}
+
+// NormalizeCategory returns Deputy's canonical policy category for category,
+// resolving legacy aliases such as "container" -> "container_diff",
+// "service" -> "server", and "exec" -> "sandbox".
+func NormalizeCategory(category string) string {
+	c := strings.ToLower(strings.TrimSpace(category))
+	if canonical, ok := categoryAliases[c]; ok {
+		return canonical
+	}
+	return c
+}
+
+// Categories returns the sorted set of canonical policy categories, derived
+// from the registered entrypoints so callers (CLI/API/MCP) never hand-maintain
+// a parallel list.
+func Categories() []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(AllEntrypoints))
+	for _, ep := range AllEntrypoints {
+		c := ep.Category()
+		if c == "" {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// CategoryAliases returns a copy of the legacy category aliases mapped to their
+// canonical category, so surfaces can advertise the accepted inputs.
+func CategoryAliases() map[string]string {
+	return maps.Clone(categoryAliases)
 }
 
 // Canonical entrypoint constants. Use these typed values instead of raw strings.
@@ -244,7 +295,7 @@ var (
 	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets, EntrypointsGraph, EntrypointsService, EntrypointsSandbox)
 
 	allowedEntrypointsSet = buildEntrypointSet(AllEntrypoints)
-	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "graph", "server", "sandbox", "exec"}
+	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "graph", "server", "sandbox"}
 	allowedCommandsSet    = buildSet(allowedCommands)
 )
 
@@ -270,8 +321,25 @@ func IsAllowedEntrypoint(name string) bool {
 	return ok
 }
 
-// IsAllowedCommand reports whether the command is one of the known CLI/proxy commands.
+// NormalizeCommand returns Deputy's canonical policy command for command.
+// It accepts legacy aliases kept for policy bundle compatibility, such as
+// "exec" for the sandbox execution command.
+func NormalizeCommand(command string) string {
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "exec":
+		return "sandbox"
+	default:
+		return strings.ToLower(strings.TrimSpace(command))
+	}
+}
+
+// IsAllowedCommand reports whether the command is one of the known policy commands.
 func IsAllowedCommand(cmd string) bool {
-	_, ok := allowedCommandsSet[cmd]
+	_, ok := allowedCommandsSet[NormalizeCommand(cmd)]
 	return ok
+}
+
+// CanonicalCommands returns the canonical policy command names.
+func CanonicalCommands() []string {
+	return slices.Clone(allowedCommands)
 }

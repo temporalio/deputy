@@ -18,7 +18,7 @@ func hoverForLine(line string) string {
 	case strings.HasPrefix(line, "entrypoints"):
 		return "Limit policy to Deputy entrypoints (e.g., scan_vulnerability, go_artifact_request)."
 	case strings.HasPrefix(line, "commands"):
-		return "Limit policy to commands (proxy, scan, diff, sbom, fix, triage)."
+		return "Limit policy to canonical commands (proxy, scan, diff, sbom, fix, triage, secrets, graph, server, sandbox). Legacy exec is accepted as an alias for sandbox."
 	case strings.HasPrefix(line, "mode"):
 		return "`mode: advisory` downgrades deny -> warn for safe rollout; `enforce` is default."
 	case strings.HasPrefix(line, "vars"):
@@ -43,7 +43,10 @@ func celHover(exprLine string) string {
 	}
 	for _, v := range policy.DefaultVariableNames() {
 		if token == v {
-			return fmt.Sprintf("`%s` — standard policy variable available in CEL", v)
+			if meta, ok := policy.VariableInfo(v); ok {
+				return fmt.Sprintf("`%s` (%s): %s", v, meta.Type, meta.Description)
+			}
+			return fmt.Sprintf("`%s`: standard policy variable available in CEL", v)
 		}
 	}
 	for _, fn := range celFunctionCatalog() {

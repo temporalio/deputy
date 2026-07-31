@@ -48,7 +48,13 @@ func TriageSummaryDoc(target TargetSummary, stats *vulnerabilityv1.Stats, packag
 	doc.AddLine(output.Span{Text: fmt.Sprintf("  Critical/High: %d", stats.Critical+stats.High)})
 	doc.AddLine(output.Span{Text: fmt.Sprintf("  Medium: %d", stats.Medium)})
 	doc.AddLine(output.Span{Text: fmt.Sprintf("  Low: %d", stats.Low)})
-	doc.AddLine(output.Span{Text: fmt.Sprintf("  Fixable: %d", stats.FixAvailable)})
+	// Fixable counts every finding with a path forward, in-place or via a
+	// module migration, matching the triage ladder's notion of fixability.
+	fixLine := fmt.Sprintf("  Fix available: %d", stats.FixAvailable+stats.FixViaMigration)
+	if stats.FixViaMigration > 0 {
+		fixLine += fmt.Sprintf(" (in-place: %d, via migration: %d)", stats.FixAvailable, stats.FixViaMigration)
+	}
+	doc.AddLine(output.Span{Text: fixLine})
 	doc.AddLine(output.Span{Text: fmt.Sprintf("  Direct deps affected: %d", stats.DirectDeps)})
 	if packagesWithVulns > 0 {
 		line := fmt.Sprintf("  Packages with vulns: %d", packagesWithVulns)

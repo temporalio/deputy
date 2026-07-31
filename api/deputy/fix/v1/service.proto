@@ -91,6 +91,31 @@ message RemediationCommand {
 
   // Executable indicates if Command can be run directly (true) or requires manual action (false).
   bool executable = 8;
+
+  // Package is the vulnerable package this command remediates.
+  string package = 9;
+
+  // Version is the vulnerable package version when known.
+  string version = 10;
+
+  // Purl is the vulnerable package's Package URL when known.
+  string purl = 11;
+
+  // TargetVersion is the version to upgrade or migrate to.
+  string target_version = 12;
+
+  // TargetModule is the module/package path to migrate to when the fix
+  // requires changing package identity.
+  string target_module = 13;
+
+  // Migration indicates the fix moves to a different module/package path
+  // rather than an in-place version bump.
+  bool migration = 14;
+
+  // Vulnerabilities are the finding IDs this command remediates, sorted and
+  // unique; one command can address several findings because commands are
+  // deduplicated per package and manifest.
+  repeated string vulnerabilities = 15;
 }
 
 // RemediationStats provides statistics about the remediation plan.

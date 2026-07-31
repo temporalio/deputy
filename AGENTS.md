@@ -47,6 +47,7 @@ Deputy is designed to run in a variety of environments, including local develope
 ## Proto / RPC / Observability
 
 - Protos are the API boundary; generate code with Buf and keep proto changes paired with regenerated Go code. See [`api/deputy`](api/deputy), [`api/buf.gen.yaml`](api/buf.gen.yaml), and [`gen/`](gen/).
+- **Proto-first is the project direction**: anything that crosses a surface boundary (CLI JSON output, API, MCP tools, plugin wire, LSP, future TUI) is defined in proto, the ubiquitous domain language, and everything else derives from it. A hand-written Go struct with JSON tags for cross-surface output is a smell; a hand-maintained copy of proto-derivable data (field lists, enums, descriptions) is a bug waiting to drift. Precedents to follow: one proto service with multiple bindings (`AdvisorySourceService`: in-process, pluginrpc, ConnectRPC), tooling derived from descriptors (`policy.VariableFieldCompletions` powers LSP completions), output contracts as proto (`deputy.triage.v1` is what `deputy triage --format json` marshals), and MCP tool contracts as proto (`deputy.mcp.v1`: every tool's input/output schema derives from the descriptors via `internal/mcp/protoschema`, requests are protovalidate-enforced, and the SDK validates outputs; keep new messages within the MCP client constraints, no `oneOf/anyOf/allOf` anywhere, enums enforced client-side). Docs derive too: `internal/docsgen` renders the policy entrypoint reference in `docs/reference/policy-inputs.md` from the binding registry and proto descriptor comments (regenerate with `go generate ./internal/docsgen/...`; a drift test enforces freshness). Extend that pattern to other reference tables instead of hand-maintaining them.
 - ConnectRPC is the transport layer; keep handlers and clients consistent with ConnectRPC patterns in [`internal/services`](internal/services) and [`internal/server`](internal/server).
 - OpenTelemetry is used for metrics/logs/traces; avoid ad-hoc instrumentation and wire new spans/metrics through the OTel helpers in [`internal/otel`](internal/otel).
 - Preferred upstreams/tools: [Protovalidate](https://protovalidate.com/), [CEL](https://cel.dev/), [ConnectRPC](https://connectrpc.com/), [pluginrpc](https://github.com/pluginrpc), and [Buf CLI](https://buf.build/docs/cli/).
@@ -86,7 +87,7 @@ go build -o deputy .
 
 - New or changed CLI flags/output: update [`docs/commands/`](docs/commands/) and command help text.
 - New configuration/env vars: update [`docs/reference/configuration.md`](docs/reference/configuration.md) and [`docs/reference/README.md`](docs/reference/README.md).
-- New policy entrypoints/inputs: update [`docs/reference/policy-spec.md`](docs/reference/policy-spec.md) and [`docs/reference/policy-inputs.md`](docs/reference/policy-inputs.md).
+- New policy entrypoints/inputs: update [`docs/reference/policy-spec.md`](docs/reference/policy-spec.md); the entrypoint reference in [`docs/reference/policy-inputs.md`](docs/reference/policy-inputs.md) is generated, so run `go generate ./internal/docsgen/...`.
 - New ecosystems or inventory behavior: update [`docs/concepts`](docs/concepts) and [`docs/guides`](docs/guides).
 - New agent flows: update [`docs/guides/agents.md`](docs/guides/agents.md).
 

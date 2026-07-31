@@ -69,7 +69,7 @@ func TestPyPIHandlerPolicyBlocksVuln(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPyPIHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	blockedPackage := "vulnerablepkg"
 	handler.lookups.vulnLookup = func(ctx context.Context, pkg, version string) ([]osv.Vulnerability, error) {
 		if pkg == blockedPackage {
@@ -101,7 +101,7 @@ func TestPyPIHandlerLicensePolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPyPIHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = func(ctx context.Context, pkg, version string) ([]string, error) {
 		if strings.Contains(pkg, "blocked") {
 			return []string{"AGPL-3.0"}, nil
@@ -133,7 +133,7 @@ func TestPyPIHandlerIgnoresMissingVersionForVersionPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPyPIHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = nil
 
 	// simple index (no version) should pass
@@ -195,7 +195,7 @@ func TestPyPIHandlerForwardsRequestBodyAndHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPyPIHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/simple/search?foo=bar", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer secret")
@@ -249,7 +249,7 @@ func TestPyPIHandlerEndToEndPip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPyPIHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
 

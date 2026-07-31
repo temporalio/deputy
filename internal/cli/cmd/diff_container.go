@@ -10,7 +10,9 @@ import (
 	"connectrpc.com/connect"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/go-git/go-git/v5"
-	"google.golang.org/protobuf/encoding/protojson"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
@@ -22,8 +24,6 @@ import (
 	"github.com/temporalio/deputy/internal/report/render"
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // isContainerDiffInContext returns true if both arguments appear to be container image references,
@@ -31,11 +31,6 @@ import (
 // unless we have explicit container schemes (docker://, oci://, etc.) or refs that clearly look
 // like container images (contain : with a tag, or registry domain with /).
 func isContainerDiffInContext(base, target, repoPath string) bool {
-	// If either ref has an explicit image scheme, it's definitely a container diff
-	if isImageTargetScheme(base) || isImageTargetScheme(target) {
-		return true
-	}
-
 	// Check if we're in a Git repository
 	if repoPath != "" {
 		if _, err := git.PlainOpen(repoPath); err == nil {
@@ -63,6 +58,25 @@ func isContainerDiffInContext(base, target, repoPath string) bool {
 	return isContainerDiff(base, target)
 }
 
+// isMixedContainerDiffInContext returns true when exactly one ref is clearly a
+// container image and the other should be treated as a Git ref or invalid image
+// ref. Callers use this to fail fast instead of routing a mixed pair to either
+// Git or container diff.
+func isMixedContainerDiffInContext(base, target, repoPath string) bool {
+	if repoPath != "" {
+		if _, err := git.PlainOpen(repoPath); err == nil {
+			return isExplicitContainerSignal(base) != isExplicitContainerSignal(target)
+		}
+	}
+	baseImage := isContainerImageRef(base)
+	targetImage := isContainerImageRef(target)
+	return baseImage != targetImage
+}
+
+func isExplicitContainerSignal(ref string) bool {
+	return isImageTargetScheme(ref) || looksLikeExplicitContainerImage(ref)
+}
+
 // looksLikeExplicitContainerImage returns true if the ref looks unambiguously like a container
 // image reference (has a tag with :, has a registry domain, etc.) rather than something that
 // might be a git ref.
@@ -74,7 +88,7 @@ func looksLikeExplicitContainerImage(ref string) bool {
 
 	// Explicit schemes are definitely container images (handled by isImageTargetScheme earlier)
 	if strings.Contains(ref, "://") {
-		return true
+		return isImageTargetScheme(ref)
 	}
 
 	// Has a tag separator - likely a container image (nginx:1.25, alpine:latest)
@@ -261,12 +275,7 @@ func normalizeImageReference(ref string, useLocalDaemon bool) string {
 // renderContainerDiffProtoJSON outputs the container diff as JSON using protojson.
 // This uses the proto response directly for consistent, type-safe JSON output.
 func renderContainerDiffProtoJSON(w io.Writer, resp *diffv1.DiffContainerImagesResponse) error {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal proto to JSON: %w", err)

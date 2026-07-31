@@ -14,6 +14,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	scalibr "github.com/google/osv-scalibr"
 	"github.com/google/osv-scalibr/extractor"
@@ -44,6 +45,11 @@ func init() {
 // ScanOptions configures how scalibr scans a workspace.
 type ScanOptions struct {
 	Ecosystems []string
+	// UseGitignore applies .gitignore handling for real local source workspaces.
+	// Directory ignores are enforced before scanning; SCALIBR handles file-level
+	// ignores best-effort. The option is ignored for virtual workspaces because
+	// commit snapshots already represent exact tracked contents.
+	UseGitignore bool
 	// DetectBaseImage enables base image detection for container image scans.
 	// When true, the baseimage enricher queries deps.dev to determine if layers
 	// belong to known base images, populating LayerDetails.InBaseImage.
@@ -69,6 +75,19 @@ func ScanPackagesWorking(ctx context.Context, ws workspace.FS, opts ScanOptions)
 // into an ephemeral in-memory workspace and scans it for packages. The workspace
 // is discarded after scanning.
 func ScanPackagesAtCommitSnapshot(ctx context.Context, repo *git.Repository, commitHash plumbing.Hash, opts ScanOptions) ([]*extractor.Package, error) {
+	ws, err := CommitSnapshotWorkspace(repo, commitHash)
+	if err != nil {
+		return nil, err
+	}
+	defer ws.Close()
+	return scanWorkspace(ctx, ws, opts)
+}
+
+// CommitSnapshotWorkspace materializes the commit's tree into an in-memory
+// workspace, giving a ref the same file access a working-tree scan gets from
+// its directory: package extraction and graph edge resolution both read from
+// it. The caller owns the workspace and must Close it.
+func CommitSnapshotWorkspace(repo *git.Repository, commitHash plumbing.Hash) (workspace.FS, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("git repository is required")
 	}
@@ -85,8 +104,7 @@ func ScanPackagesAtCommitSnapshot(ctx context.Context, repo *git.Repository, com
 		_ = ws.Close() // best-effort cleanup on error
 		return nil, err
 	}
-	defer ws.Close()
-	return scanWorkspace(ctx, ws, opts)
+	return ws, nil
 }
 
 // scanWorkspace runs the scalibr scan on the provided workspace.
@@ -109,15 +127,28 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 	// Use the Scanner adapter to isolate scalibr dependencies
 	scanner := workspace.ToScanner(ws)
 	cfg := &scalibr.ScanConfig{ScanRoots: scanner.ScanRoots(), Plugins: plugins, Capabilities: cap}
+	if opts.UseGitignore && !ws.IsVirtual() {
+		cfg.UseGitignore = true
+	}
+
+	// Compile .gitignore once and reuse it for both directory pruning and
+	// post-scan package-location filtering, avoiding a second workspace walk.
+	var ignoredDirs gitignore.Matcher
+	if opts.UseGitignore && !ws.IsVirtual() {
+		ignoredDirs, err = compileWorkspaceGitignore(ws)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// Prune excluded directory subtrees from the walk (e.g., vendored tool
 	// binaries under .bin). Patterns are compiled up front so a malformed glob
 	// surfaces as a scan error rather than silently scanning everything.
-	if len(opts.ExcludePaths) > 0 {
-		skip, err := CompileExcludePaths(opts.ExcludePaths)
-		if err != nil {
-			return nil, err
-		}
+	skip, err := compileScanSkipDirGlob(ws, opts, ignoredDirs)
+	if err != nil {
+		return nil, err
+	}
+	if skip != nil {
 		cfg.SkipDirGlob = skip
 	}
 
@@ -130,6 +161,10 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 	if len(extras) > 0 {
 		pkgs = append(pkgs, extras...)
 	}
+	if ignoredDirs != nil {
+		pkgs = filterGitignoredPackageLocations(ws, pkgs, ignoredDirs)
+	}
+	pkgs = preferLockfileResolutions(pkgs)
 	if scanErr := summarizeScanFailures(results); scanErr != nil {
 		if len(pkgs) > 0 {
 			return deduplicatePackages(pkgs), scanErr
@@ -214,7 +249,7 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	includeGradle := shouldIncludeGradle(names)
 	includeMise := shouldIncludeMise(names)
 	includeAsdf := shouldIncludeAsdf(names)
-	scalibrNames := filterExternalEcosystems(names)
+	scalibrNames := scalibrEcosystemNames(filterExternalEcosystems(names))
 
 	var plugins []plugin.Plugin
 
@@ -224,7 +259,7 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 		var err error
 		plugins, err = pl.FromNames(scalibrNames)
 		if err != nil {
-			return nil, fmt.Errorf("error creating plugins: %w", err)
+			return nil, fmt.Errorf("unsupported ecosystem filter (expected names like go, npm, pypi, cargo): %w", err)
 		}
 		plugins = appendRegisteredPlugins(plugins)
 		plugins = plugin.FilterByCapabilities(plugins, cap)
@@ -457,6 +492,29 @@ func filterExternalEcosystems(names []string) []string {
 	return out
 }
 
+// scalibrEcosystemNames translates Deputy ecosystem names into the OSV-SCALIBR
+// plugin group names that upstream plugin resolution understands (cargo ->
+// rust, npm -> javascript, pypi -> python, maven -> java). Deputy's canonical
+// vocabulary is what every surface emits (purl types, finding ecosystems, CLI
+// help), so filters must accept it; a name the registry does not recognize
+// passes through verbatim so raw SCALIBR group names (haskell, r, cpp) and
+// exact plugin names keep working.
+func scalibrEcosystemNames(names []string) []string {
+	if names == nil {
+		return nil
+	}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if prefixes := ecosystem.Parse(name).ScalibrPrefixes(); len(prefixes) > 0 {
+			out = append(out, prefixes...)
+			continue
+		}
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
 // populateWorkspaceFromTree copies files from a git tree into the workspace.
 func populateWorkspaceFromTree(ws workspace.FS, tree *object.Tree) error {
 	if tree == nil {
@@ -510,6 +568,110 @@ func DefaultScanner() func(ctx context.Context, ws workspace.FS, ecosystems []st
 	return func(ctx context.Context, ws workspace.FS, ecosystems []string) ([]*extractor.Package, error) {
 		return ScanPackagesWorking(ctx, ws, ScanOptions{Ecosystems: ecosystems})
 	}
+}
+
+// manifestLockPairs maps dependency manifest basenames to the lockfile
+// basenames that fully resolve them. When both are extracted from the same
+// project, the manifest entries carry version requirements (tokio = "1.26"),
+// not resolutions, and must yield to the lockfile's exact versions.
+var manifestLockPairs = map[string]string{
+	"Cargo.toml": "Cargo.lock",
+}
+
+// preferLockfileResolutions drops manifest-derived package entries that a
+// paired lockfile actually resolves. Matching requirement strings against
+// advisories as if they were exact versions produces false positives (and
+// misses) whenever the lockfile resolves to a different version. A manifest
+// entry yields only when the same package (name and PURL type) was also
+// extracted from the paired lockfile in the same or an ancestor directory
+// (Cargo workspaces keep one lock at the root for all member crates). The
+// per-package containment check matters: an ancestor lockfile can belong to
+// a workspace that excludes the manifest's project (a nested standalone
+// crate, a vendored manifest), in which case the lockfile extractor never
+// emitted the package and dropping the manifest entry would erase the package
+// from the inventory entirely. Manifest-only projects likewise keep their
+// requirement-derived entries: there is no resolution to prefer, and partial
+// inventory beats none.
+func preferLockfileResolutions(pkgs []*extractor.Package) []*extractor.Package {
+	// lockContents maps a lockfile basename to the directories where that
+	// lockfile was extracted, and for each directory the identity keys of the
+	// packages the lockfile actually resolved.
+	lockContents := make(map[string]map[string]map[string]struct{})
+	for _, pkg := range pkgs {
+		if pkg == nil {
+			continue
+		}
+		for _, loc := range pkg.Locations {
+			base := path.Base(loc)
+			for _, lock := range manifestLockPairs {
+				if base != lock {
+					continue
+				}
+				dirs := lockContents[lock]
+				if dirs == nil {
+					dirs = make(map[string]map[string]struct{})
+					lockContents[lock] = dirs
+				}
+				dir := path.Dir(loc)
+				if dirs[dir] == nil {
+					dirs[dir] = make(map[string]struct{})
+				}
+				dirs[dir][packageIdentityKey(pkg)] = struct{}{}
+			}
+		}
+	}
+	if len(lockContents) == 0 {
+		return pkgs
+	}
+
+	// resolved reports whether a manifest location's package is covered by
+	// its paired lockfile in the same directory or any ancestor directory.
+	// Only a lockfile that contains the package counts: the mere presence of
+	// an unrelated ancestor lockfile resolves nothing.
+	resolved := func(key, loc string) bool {
+		lock, ok := manifestLockPairs[path.Base(loc)]
+		if !ok {
+			return false
+		}
+		dirs := lockContents[lock]
+		if len(dirs) == 0 {
+			return false
+		}
+		for d := path.Dir(loc); ; d = path.Dir(d) {
+			if _, ok := dirs[d][key]; ok {
+				return true
+			}
+			if d == "." || d == "/" {
+				return false
+			}
+		}
+	}
+
+	out := make([]*extractor.Package, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		if pkg == nil || len(pkg.Locations) == 0 {
+			out = append(out, pkg)
+			continue
+		}
+		key := packageIdentityKey(pkg)
+		kept := slices.DeleteFunc(slices.Clone(pkg.Locations), func(loc string) bool {
+			return resolved(key, loc)
+		})
+		if len(kept) == 0 {
+			continue
+		}
+		pkg.Locations = kept
+		out = append(out, pkg)
+	}
+	return out
+}
+
+// packageIdentityKey identifies a package independent of its version, so a
+// manifest requirement entry (tokio = "1.26") can be matched against the
+// lockfile resolution of the same package (tokio 1.52.3). Name alone is not
+// enough: distinct ecosystems can share package names.
+func packageIdentityKey(pkg *extractor.Package) string {
+	return pkg.PURLType + "\x00" + pkg.Name
 }
 
 // deduplicatePackages collapses packages with identical PURLs, merging their locations.

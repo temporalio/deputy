@@ -12,6 +12,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/temporalio/deputy/internal/analysis/advisorysource"
 	"github.com/temporalio/deputy/internal/cache"
 	"github.com/temporalio/deputy/internal/cli/cmd"
 	"github.com/temporalio/deputy/internal/config"
@@ -32,6 +33,10 @@ func Run(ctx context.Context) error {
 
 	// Apply local egress allowlists before services are initialized.
 	applyLocalEgressConfig(cfg)
+
+	// Declare configured advisory sources; they are materialized lazily when a
+	// scan builds its source registry, so non-scanning commands pay nothing.
+	applyAdvisorySourceConfig(cfg)
 
 	otelCfg := otel.DefaultConfig()
 	if cfg != nil {
@@ -61,6 +66,20 @@ func loadRuntimeConfig() *config.Config {
 		return nil
 	}
 	return cfg
+}
+
+// applyAdvisorySourceConfig hands the config file's advisory_sources entries to
+// the advisory-source registry as declarative configs. Materialization (and any
+// plugin exec or network Info call) happens lazily at scan time.
+func applyAdvisorySourceConfig(cfg *config.Config) {
+	if cfg == nil || len(cfg.AdvisorySources) == 0 {
+		return
+	}
+	declared := make([]advisorysource.SourceConfig, 0, len(cfg.AdvisorySources))
+	for _, s := range cfg.AdvisorySources {
+		declared = append(declared, advisorysource.SourceConfig{Program: s.Program, URL: s.URL})
+	}
+	advisorysource.SetConfiguredSources(declared)
 }
 
 func applyLocalEgressConfig(cfg *config.Config) {

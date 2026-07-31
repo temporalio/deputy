@@ -44,7 +44,7 @@ type Config struct {
 	RequiredClaims []string `yaml:"required_claims,omitempty"`
 
 	// ClockSkew allows for clock drift when validating exp/nbf/iat.
-	// Defaults to 0 (no skew allowed). Maximum 5 minutes.
+	// Defaults to 0 (no skew allowed). Must be non-negative. Maximum 5 minutes.
 	ClockSkew time.Duration `yaml:"clock_skew,omitempty"`
 
 	// AllowedAlgorithms restricts accepted signing algorithms.
@@ -126,6 +126,9 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate clock skew
+	if c.ClockSkew < 0 {
+		return NewError(CodeInvalidToken, "clock_skew must be non-negative")
+	}
 	if c.ClockSkew > MaxClockSkew {
 		return NewError(CodeInvalidToken, "clock_skew exceeds maximum allowed 5m")
 	}

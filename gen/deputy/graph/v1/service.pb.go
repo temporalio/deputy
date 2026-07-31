@@ -772,18 +772,16 @@ type GraphStats struct {
 	DirectNodes int32 `protobuf:"varint,2,opt,name=direct_nodes,json=directNodes,proto3" json:"direct_nodes,omitempty"`
 	// TransitiveNodes is the count of transitive dependencies.
 	TransitiveNodes int32 `protobuf:"varint,3,opt,name=transitive_nodes,json=transitiveNodes,proto3" json:"transitive_nodes,omitempty"`
-	// MaxDepth is the maximum dependency depth across all nodes.
-	// Note: Includes disconnected nodes (depth=999). Use max_connected_depth
-	// for the actual graph depth.
+	// MaxDepth is the maximum resolved dependency depth across connected nodes
+	// (0 when only roots are resolved). Disconnected nodes carry no dependency
+	// depth and are counted in disconnected_nodes instead.
 	MaxDepth int32 `protobuf:"varint,4,opt,name=max_depth,json=maxDepth,proto3" json:"max_depth,omitempty"`
 	// VulnerableNodes is the count of packages with vulnerabilities.
 	VulnerableNodes int32 `protobuf:"varint,5,opt,name=vulnerable_nodes,json=vulnerableNodes,proto3" json:"vulnerable_nodes,omitempty"`
 	// Ecosystems maps ecosystem names to package counts.
 	Ecosystems map[string]int32 `protobuf:"bytes,6,rep,name=ecosystems,proto3" json:"ecosystems,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	// MaxConnectedDepth is the maximum depth among connected nodes only.
-	// Excludes disconnected nodes (depth=999) which are packages discovered
-	// but not reachable from any direct dependency (e.g., GitHub Actions,
-	// container base images from Dockerfiles).
+	// MaxConnectedDepth equals max_depth. Retained for wire compatibility with
+	// releases where max_depth still included a disconnected-node sentinel.
 	MaxConnectedDepth int32 `protobuf:"varint,7,opt,name=max_connected_depth,json=maxConnectedDepth,proto3" json:"max_connected_depth,omitempty"`
 	// DisconnectedNodes is the count of packages with no path from any root.
 	// These are typically packages from non-dependency sources like GitHub
@@ -1034,7 +1032,13 @@ type WhyDependencyResponse struct {
 	// Found indicates whether the dependency was found.
 	Found bool `protobuf:"varint,4,opt,name=found,proto3" json:"found,omitempty"`
 	// Warnings contains non-fatal issues.
-	Warnings      []string `protobuf:"bytes,5,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	Warnings []string `protobuf:"bytes,5,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	// DependencyNode is the matched dependency node when found.
+	// Present even when no dependency path could be resolved, so clients can
+	// inspect exact PURL, directness, depth, locations, and import status.
+	DependencyNode *Node `protobuf:"bytes,6,opt,name=dependency_node,json=dependencyNode,proto3" json:"dependency_node,omitempty"`
+	// Message provides human-readable context for empty or not-found results.
+	Message       string `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1102,6 +1106,20 @@ func (x *WhyDependencyResponse) GetWarnings() []string {
 		return x.Warnings
 	}
 	return nil
+}
+
+func (x *WhyDependencyResponse) GetDependencyNode() *Node {
+	if x != nil {
+		return x.DependencyNode
+	}
+	return nil
+}
+
+func (x *WhyDependencyResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
 }
 
 // DependencyPath represents a path through the dependency graph.
@@ -1281,7 +1299,19 @@ type NeedsDependencyResponse struct {
 	// Purl is the Package URL of the queried package.
 	Purl string `protobuf:"bytes,3,opt,name=purl,proto3" json:"purl,omitempty"`
 	// Dependents are packages that depend on this package.
-	Dependents    []*Node `protobuf:"bytes,4,rep,name=dependents,proto3" json:"dependents,omitempty"`
+	Dependents []*Node `protobuf:"bytes,4,rep,name=dependents,proto3" json:"dependents,omitempty"`
+	// Found indicates whether the queried package was found in the graph.
+	// Always present (unlike WhyDependencyResponse.found, which predates
+	// explicit presence and stays a plain bool for wire compatibility).
+	Found *bool `protobuf:"varint,5,opt,name=found,proto3,oneof" json:"found,omitempty"`
+	// Direct indicates whether the queried package is a direct/root dependency.
+	Direct *bool `protobuf:"varint,6,opt,name=direct,proto3,oneof" json:"direct,omitempty"`
+	// DirectCount is the number of direct dependencies in dependents.
+	DirectCount *int32 `protobuf:"varint,7,opt,name=direct_count,json=directCount,proto3,oneof" json:"direct_count,omitempty"`
+	// TransitiveCount is the number of transitive dependencies in dependents.
+	TransitiveCount *int32 `protobuf:"varint,8,opt,name=transitive_count,json=transitiveCount,proto3,oneof" json:"transitive_count,omitempty"`
+	// Message provides human-readable context for empty or not-found results.
+	Message       string `protobuf:"bytes,9,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1342,6 +1372,41 @@ func (x *NeedsDependencyResponse) GetDependents() []*Node {
 		return x.Dependents
 	}
 	return nil
+}
+
+func (x *NeedsDependencyResponse) GetFound() bool {
+	if x != nil && x.Found != nil {
+		return *x.Found
+	}
+	return false
+}
+
+func (x *NeedsDependencyResponse) GetDirect() bool {
+	if x != nil && x.Direct != nil {
+		return *x.Direct
+	}
+	return false
+}
+
+func (x *NeedsDependencyResponse) GetDirectCount() int32 {
+	if x != nil && x.DirectCount != nil {
+		return *x.DirectCount
+	}
+	return 0
+}
+
+func (x *NeedsDependencyResponse) GetTransitiveCount() int32 {
+	if x != nil && x.TransitiveCount != nil {
+		return *x.TransitiveCount
+	}
+	return 0
+}
+
+func (x *NeedsDependencyResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
 }
 
 // QueryGraphRequest filters a dependency graph.
@@ -1682,7 +1747,7 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\n" +
 	"dependency\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
 	"dependency\x127\n" +
-	"\aoptions\x18\x03 \x01(\v2\x1d.deputy.graph.v1.GraphOptionsR\aoptions\"\xd2\x01\n" +
+	"\aoptions\x18\x03 \x01(\v2\x1d.deputy.graph.v1.GraphOptionsR\aoptions\"\xac\x02\n" +
 	"\x15WhyDependencyResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12\x1e\n" +
 	"\n" +
@@ -1690,7 +1755,9 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"dependency\x125\n" +
 	"\x05paths\x18\x03 \x03(\v2\x1f.deputy.graph.v1.DependencyPathR\x05paths\x12\x14\n" +
 	"\x05found\x18\x04 \x01(\bR\x05found\x12\x1a\n" +
-	"\bwarnings\x18\x05 \x03(\tR\bwarnings\"Y\n" +
+	"\bwarnings\x18\x05 \x03(\tR\bwarnings\x12>\n" +
+	"\x0fdependency_node\x18\x06 \x01(\v2\x15.deputy.graph.v1.NodeR\x0edependencyNode\x12\x18\n" +
+	"\amessage\x18\a \x01(\tR\amessage\"Y\n" +
 	"\x0eDependencyPath\x12/\n" +
 	"\x05nodes\x18\x01 \x03(\v2\x19.deputy.graph.v1.PathNodeR\x05nodes\x12\x16\n" +
 	"\x06length\x18\x02 \x01(\x05R\x06length\"L\n" +
@@ -1699,14 +1766,23 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\"]\n" +
 	"\x19WhyDependencyListResponse\x12@\n" +
-	"\aresults\x18\x01 \x03(\v2&.deputy.graph.v1.WhyDependencyResponseR\aresults\"\x98\x01\n" +
+	"\aresults\x18\x01 \x03(\v2&.deputy.graph.v1.WhyDependencyResponseR\aresults\"\xfd\x02\n" +
 	"\x17NeedsDependencyResponse\x12\x18\n" +
 	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
 	"\x04purl\x18\x03 \x01(\tR\x04purl\x125\n" +
 	"\n" +
 	"dependents\x18\x04 \x03(\v2\x15.deputy.graph.v1.NodeR\n" +
-	"dependents\"\x9a\x01\n" +
+	"dependents\x12\x19\n" +
+	"\x05found\x18\x05 \x01(\bH\x00R\x05found\x88\x01\x01\x12\x1b\n" +
+	"\x06direct\x18\x06 \x01(\bH\x01R\x06direct\x88\x01\x01\x12&\n" +
+	"\fdirect_count\x18\a \x01(\x05H\x02R\vdirectCount\x88\x01\x01\x12.\n" +
+	"\x10transitive_count\x18\b \x01(\x05H\x03R\x0ftransitiveCount\x88\x01\x01\x12\x18\n" +
+	"\amessage\x18\t \x01(\tR\amessageB\b\n" +
+	"\x06_foundB\t\n" +
+	"\a_directB\x0f\n" +
+	"\r_direct_countB\x13\n" +
+	"\x11_transitive_count\"\x9a\x01\n" +
 	"\x11QueryGraphRequest\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x127\n" +
 	"\aoptions\x18\x02 \x01(\v2\x1d.deputy.graph.v1.GraphOptionsR\aoptions\x124\n" +
@@ -1807,26 +1883,27 @@ var file_deputy_graph_v1_service_proto_depIdxs = []int32{
 	3,  // 13: deputy.graph.v1.WhyDependencyRequest.options:type_name -> deputy.graph.v1.GraphOptions
 	21, // 14: deputy.graph.v1.WhyDependencyResponse.target:type_name -> deputy.target.v1.Target
 	12, // 15: deputy.graph.v1.WhyDependencyResponse.paths:type_name -> deputy.graph.v1.DependencyPath
-	13, // 16: deputy.graph.v1.DependencyPath.nodes:type_name -> deputy.graph.v1.PathNode
-	11, // 17: deputy.graph.v1.WhyDependencyListResponse.results:type_name -> deputy.graph.v1.WhyDependencyResponse
-	5,  // 18: deputy.graph.v1.NeedsDependencyResponse.dependents:type_name -> deputy.graph.v1.Node
-	3,  // 19: deputy.graph.v1.QueryGraphRequest.options:type_name -> deputy.graph.v1.GraphOptions
-	17, // 20: deputy.graph.v1.QueryGraphRequest.filter:type_name -> deputy.graph.v1.GraphFilter
-	21, // 21: deputy.graph.v1.QueryGraphResponse.target:type_name -> deputy.target.v1.Target
-	5,  // 22: deputy.graph.v1.QueryGraphResponse.nodes:type_name -> deputy.graph.v1.Node
-	7,  // 23: deputy.graph.v1.QueryGraphResponse.edges:type_name -> deputy.graph.v1.Edge
-	8,  // 24: deputy.graph.v1.QueryGraphResponse.stats:type_name -> deputy.graph.v1.GraphStats
-	2,  // 25: deputy.graph.v1.GraphService.BuildGraph:input_type -> deputy.graph.v1.BuildGraphRequest
-	10, // 26: deputy.graph.v1.GraphService.WhyDependency:input_type -> deputy.graph.v1.WhyDependencyRequest
-	16, // 27: deputy.graph.v1.GraphService.QueryGraph:input_type -> deputy.graph.v1.QueryGraphRequest
-	4,  // 28: deputy.graph.v1.GraphService.BuildGraph:output_type -> deputy.graph.v1.BuildGraphResponse
-	11, // 29: deputy.graph.v1.GraphService.WhyDependency:output_type -> deputy.graph.v1.WhyDependencyResponse
-	18, // 30: deputy.graph.v1.GraphService.QueryGraph:output_type -> deputy.graph.v1.QueryGraphResponse
-	28, // [28:31] is the sub-list for method output_type
-	25, // [25:28] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	5,  // 16: deputy.graph.v1.WhyDependencyResponse.dependency_node:type_name -> deputy.graph.v1.Node
+	13, // 17: deputy.graph.v1.DependencyPath.nodes:type_name -> deputy.graph.v1.PathNode
+	11, // 18: deputy.graph.v1.WhyDependencyListResponse.results:type_name -> deputy.graph.v1.WhyDependencyResponse
+	5,  // 19: deputy.graph.v1.NeedsDependencyResponse.dependents:type_name -> deputy.graph.v1.Node
+	3,  // 20: deputy.graph.v1.QueryGraphRequest.options:type_name -> deputy.graph.v1.GraphOptions
+	17, // 21: deputy.graph.v1.QueryGraphRequest.filter:type_name -> deputy.graph.v1.GraphFilter
+	21, // 22: deputy.graph.v1.QueryGraphResponse.target:type_name -> deputy.target.v1.Target
+	5,  // 23: deputy.graph.v1.QueryGraphResponse.nodes:type_name -> deputy.graph.v1.Node
+	7,  // 24: deputy.graph.v1.QueryGraphResponse.edges:type_name -> deputy.graph.v1.Edge
+	8,  // 25: deputy.graph.v1.QueryGraphResponse.stats:type_name -> deputy.graph.v1.GraphStats
+	2,  // 26: deputy.graph.v1.GraphService.BuildGraph:input_type -> deputy.graph.v1.BuildGraphRequest
+	10, // 27: deputy.graph.v1.GraphService.WhyDependency:input_type -> deputy.graph.v1.WhyDependencyRequest
+	16, // 28: deputy.graph.v1.GraphService.QueryGraph:input_type -> deputy.graph.v1.QueryGraphRequest
+	4,  // 29: deputy.graph.v1.GraphService.BuildGraph:output_type -> deputy.graph.v1.BuildGraphResponse
+	11, // 30: deputy.graph.v1.GraphService.WhyDependency:output_type -> deputy.graph.v1.WhyDependencyResponse
+	18, // 31: deputy.graph.v1.GraphService.QueryGraph:output_type -> deputy.graph.v1.QueryGraphResponse
+	29, // [29:32] is the sub-list for method output_type
+	26, // [26:29] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_deputy_graph_v1_service_proto_init() }
@@ -1834,6 +1911,7 @@ func file_deputy_graph_v1_service_proto_init() {
 	if File_deputy_graph_v1_service_proto != nil {
 		return
 	}
+	file_deputy_graph_v1_service_proto_msgTypes[13].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

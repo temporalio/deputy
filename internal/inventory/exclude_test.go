@@ -1,6 +1,11 @@
 package inventory
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/temporalio/deputy/internal/repository/workspace"
+)
 
 func TestCompileExcludePaths(t *testing.T) {
 	tests := []struct {
@@ -93,6 +98,32 @@ func TestCompileExcludePaths_InvalidPattern(t *testing.T) {
 	// An unterminated character class is a malformed glob.
 	if _, err := CompileExcludePaths([]string{"[bad"}); err == nil {
 		t.Fatal("expected error for malformed glob pattern, got nil")
+	}
+}
+
+func TestCompileScanSkipDirGlob_MatchesRootRelativePaths(t *testing.T) {
+	dir := t.TempDir()
+	ws, err := workspace.NewDir(dir)
+	if err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	defer ws.Close()
+
+	g, err := compileScanSkipDirGlob(ws, ScanOptions{ExcludePaths: []string{".bin/**"}}, nil)
+	if err != nil {
+		t.Fatalf("compileScanSkipDirGlob: %v", err)
+	}
+	if g == nil {
+		t.Fatal("expected matcher")
+	}
+	if !g.Match(filepath.Join(dir, ".bin")) {
+		t.Fatalf("expected absolute .bin path to match")
+	}
+	if !g.Match(".bin") {
+		t.Fatalf("expected relative .bin path to match")
+	}
+	if g.Match(filepath.Join(dir, ".binary")) {
+		t.Fatalf("expected .binary path not to match")
 	}
 }
 

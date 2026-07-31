@@ -255,6 +255,12 @@ func TestGitHubActionsSHAPinnedVersions(t *testing.T) {
 	now := time.Now()
 	_ = os.Chtimes(zipPath, now, now)
 
+	origListWithHashes := ghaListRemoteRefsWithHashes
+	ghaListRemoteRefsWithHashes = func(context.Context, string) ([]ghaRemoteRef, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefsWithHashes = origListWithHashes })
+
 	tests := []struct {
 		name    string
 		version string
@@ -263,7 +269,7 @@ func TestGitHubActionsSHAPinnedVersions(t *testing.T) {
 		{
 			name:    "SHA commit hash",
 			version: "abc123def456789012345678901234567890abcd",
-			wantHit: true, // SHA without semver falls back to name/ecosystem match
+			wantHit: false, // unresolved SHA stays unknown instead of defaulting to vulnerable
 		},
 		{
 			name:    "vulnerable semver",
@@ -769,6 +775,18 @@ func TestGitHubActionsIntroducedZeroOpenEnded(t *testing.T) {
 	tmp := t.TempDir()
 	restore := disk.SetBaseDirForTest(tmp)
 	t.Cleanup(restore)
+
+	// Floating refs (v1, v2, v99) trigger remote-ref resolution. Stub it so the
+	// test never hits the network: an unresolved ref keeps the open-ended
+	// advisory firing, which is exactly what this test asserts.
+	origList := ghaListRemoteRefs
+	origListWithHashes := ghaListRemoteRefsWithHashes
+	ghaListRemoteRefs = func(_ context.Context, _ string) ([]string, error) { return nil, nil }
+	ghaListRemoteRefsWithHashes = func(_ context.Context, _ string) ([]ghaRemoteRef, error) { return nil, nil }
+	t.Cleanup(func() {
+		ghaListRemoteRefs = origList
+		ghaListRemoteRefsWithHashes = origListWithHashes
+	})
 
 	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
 	if err := os.MkdirAll(filepath.Dir(zipPath), 0o755); err != nil {

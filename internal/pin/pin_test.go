@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,6 +104,32 @@ func (m *mockStrategy) ResolveUpdate(_ context.Context, ref Ref) (string, string
 	return ref.Version, "v1.0.0", "v1.0.0", nil
 }
 
+type workflowRewriteStrategy struct {
+	mockStrategy
+}
+
+func (m *workflowRewriteStrategy) Rewrite(root *os.Root, relPath string, updates []Update) error {
+	content, err := fs.ReadFile(root.FS(), relPath)
+	if err != nil {
+		return err
+	}
+	contentStr := string(content)
+	for _, u := range updates {
+		from := u.Name + "@" + u.FromVersion
+		to := u.Name + "@" + u.PinnedValue + " # " + u.VersionTag
+		contentStr = strings.ReplaceAll(contentStr, from, to)
+	}
+	f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	_, writeErr := f.Write([]byte(contentStr))
+	if closeErr := f.Close(); writeErr == nil {
+		writeErr = closeErr
+	}
+	return writeErr
+}
+
 // containerMockStrategy mocks a container pinning strategy for orchestrator
 // tests. It does regex-based container rewriting (name:tag → name:tag@digest).
 type containerMockStrategy struct {
@@ -165,8 +194,8 @@ func (m *containerMockStrategy) Rewrite(root *os.Root, relPath string, updates [
 func TestPin_BasicPinning(t *testing.T) {
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "/tmp/ci.yml"},
-			{Ecosystem: "mock", Name: "actions/setup-go", Version: "v5", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "ci.yml"},
+			{Ecosystem: "mock", Name: "actions/setup-go", Version: "v5", FilePath: "ci.yml"},
 		},
 		resolved: map[string]struct{ sha, tag string }{
 			"actions/checkout@v4": {"aaa1111111111111111111111111111111111111", "v4.2.2"},
@@ -194,7 +223,7 @@ func TestPin_VerificationModes(t *testing.T) {
 	const sha = "aaa1111111111111111111111111111111111111"
 	newStrategy := func(v *Verification) *mockStrategy {
 		return &mockStrategy{
-			refs: []Ref{{Ecosystem: "mock", Name: "aws-actions/amazon-ecr-login", Version: "v1", FilePath: "/tmp/ci.yml"}},
+			refs: []Ref{{Ecosystem: "mock", Name: "aws-actions/amazon-ecr-login", Version: "v1", FilePath: "ci.yml"}},
 			resolved: map[string]struct{ sha, tag string }{
 				"aws-actions/amazon-ecr-login@v1": {sha, "v1.0.0"},
 			},
@@ -277,7 +306,7 @@ func TestPin_VerificationModes(t *testing.T) {
 func TestPin_DryRun(t *testing.T) {
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "ci.yml"},
 		},
 	}
 
@@ -294,12 +323,166 @@ func TestPin_DryRun(t *testing.T) {
 	}
 }
 
+func TestPin_ReportScopesPatchToIntentionalRewrites(t *testing.T) {
+	dir := t.TempDir()
+	workflowPath := ".github/workflows/prepend-slack-name-to-pr.yaml"
+	unrelatedPath := "omni/athena-prod/Misc/table.sql"
+	if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(workflowPath)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(unrelatedPath)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	workflow := `name: prepend slack name
+on: pull_request
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+`
+	if err := os.WriteFile(filepath.Join(dir, workflowPath), []byte(workflow), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, unrelatedPath), []byte("select 1;\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+
+	sha := strings.Repeat("a", 40)
+	strategy := &workflowRewriteStrategy{
+		mockStrategy: mockStrategy{
+			refs: []Ref{{
+				Ecosystem: "github-actions",
+				Name:      "actions/github-script",
+				Version:   "v7",
+				FilePath:  workflowPath,
+			}},
+			resolved: map[string]struct{ sha, tag string }{
+				"actions/github-script@v7": {sha: sha, tag: "v7.1.0"},
+			},
+		},
+	}
+
+	report, err := Pin(t.Context(), root, Options{Verification: VerificationOff}, strategy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(report.ChangedFiles, []string{workflowPath}) {
+		t.Fatalf("ChangedFiles = %v, want [%s]", report.ChangedFiles, workflowPath)
+	}
+	if got, want := report.Stats.FilesChanged, 1; got != want {
+		t.Fatalf("FilesChanged = %d, want %d", got, want)
+	}
+	if !strings.Contains(report.Patch, "diff --git a/"+workflowPath+" b/"+workflowPath) {
+		t.Fatalf("Patch missing workflow diff header:\n%s", report.Patch)
+	}
+	if !strings.Contains(report.Patch, "-      - uses: actions/github-script@v7") {
+		t.Fatalf("Patch missing original action ref:\n%s", report.Patch)
+	}
+	if !strings.Contains(report.Patch, "+      - uses: actions/github-script@"+sha+" # v7.1.0") {
+		t.Fatalf("Patch missing pinned action ref:\n%s", report.Patch)
+	}
+	if strings.Contains(report.Patch, "Misc") || strings.Contains(report.Patch, "table.sql") {
+		t.Fatalf("Patch included unrelated checkout churn:\n%s", report.Patch)
+	}
+
+	if _, err := exec.LookPath("git"); err == nil {
+		applyDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(applyDir, filepath.Dir(workflowPath)), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(applyDir, workflowPath), []byte(workflow), 0644); err != nil {
+			t.Fatal(err)
+		}
+		patchPath := filepath.Join(t.TempDir(), "pin.patch")
+		if err := os.WriteFile(patchPath, []byte(report.Patch), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("git", "apply", "--check", patchPath)
+		cmd.Dir = applyDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("generated patch is not git-apply compatible: %v\n%s\npatch:\n%s", err, out, report.Patch)
+		}
+	}
+}
+
+func TestUnifiedPatch_GitApplyCompatible(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	cases := []struct {
+		name          string
+		path          string
+		before, after fileSnapshot
+	}{
+		{
+			name:   "no trailing newline",
+			path:   "cfg.txt",
+			before: fileSnapshot{content: []byte("line1\nline2"), exists: true},
+			after:  fileSnapshot{content: []byte("line1\nLINE2"), exists: true},
+		},
+		{
+			name:   "trailing newline",
+			path:   "cfg.txt",
+			before: fileSnapshot{content: []byte("line1\nline2\n"), exists: true},
+			after:  fileSnapshot{content: []byte("line1\nLINE2\n"), exists: true},
+		},
+		{
+			name:   "new file",
+			path:   "new.txt",
+			before: fileSnapshot{},
+			after:  fileSnapshot{content: []byte("hello\n"), exists: true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			patch, err := unifiedPatch(tc.path, tc.before, tc.after)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			for _, c := range []*exec.Cmd{exec.Command("git", "init", "-q")} {
+				c.Dir = dir
+				if out, err := c.CombinedOutput(); err != nil {
+					t.Fatalf("git init: %v\n%s", err, out)
+				}
+			}
+			if tc.before.exists {
+				if err := os.WriteFile(filepath.Join(dir, tc.path), tc.before.content, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			patchPath := filepath.Join(t.TempDir(), "p.patch")
+			if err := os.WriteFile(patchPath, []byte(patch), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("git", "apply", "--check", patchPath)
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("patch not git-apply compatible: %v\n%s\npatch:\n%s", err, out, patch)
+			}
+		})
+	}
+}
+
+func TestUnifiedPatch_RejectsUnsafePath(t *testing.T) {
+	_, err := unifiedPatch("../escape.txt", fileSnapshot{content: []byte("a\n"), exists: true}, fileSnapshot{content: []byte("b\n"), exists: true})
+	if err == nil {
+		t.Fatal("expected error for traversal path, got nil")
+	}
+}
+
 func TestVerify_Basic(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "/tmp/ci.yml"},
-			{Ecosystem: "mock", Name: "actions/setup-go", Version: "v5", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "ci.yml"},
+			{Ecosystem: "mock", Name: "actions/setup-go", Version: "v5", FilePath: "ci.yml"},
 		},
 		verified: map[string]*Verification{
 			sha: {SignatureValid: true, OnBranch: true, BranchName: "main"},
@@ -328,7 +511,7 @@ func TestVerify_Suspicious(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "ci.yml"},
 		},
 		verified: map[string]*Verification{
 			sha: {IsForkCommit: true, Warnings: []string{"possible imposter commit"}},
@@ -347,11 +530,11 @@ func TestVerify_Suspicious(t *testing.T) {
 
 func TestVerify_NoVerifierAvailable(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
-	// A strategy where Verify returns (nil, nil) — no verifier configured.
+	// A strategy where Verify returns (nil, nil): no verifier configured.
 	strategy := &nilVerifyStrategy{
 		mockStrategy: mockStrategy{
 			refs: []Ref{
-				{Ecosystem: "mock", Name: "alpine", Version: sha, FilePath: "/tmp/Dockerfile"},
+				{Ecosystem: "mock", Name: "alpine", Version: sha, FilePath: "Dockerfile"},
 			},
 		},
 	}
@@ -361,7 +544,7 @@ func TestVerify_NoVerifierAvailable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Should NOT be counted as verified — should be already-pinned.
+	// Should NOT be counted as verified; should be already-pinned.
 	if report.Stats.Verified != 0 {
 		t.Errorf("expected 0 verified (no verifier), got %d", report.Stats.Verified)
 	}
@@ -388,7 +571,7 @@ func TestVerify_Error(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "ci.yml"},
 		},
 		verifyErr: fmt.Errorf("API rate limit exceeded"),
 	}
@@ -407,7 +590,7 @@ func TestPin_AlreadyPinned(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "ci.yml"},
 		},
 	}
 
@@ -424,7 +607,7 @@ func TestPin_AlreadyPinned(t *testing.T) {
 func TestPin_SkippedExpressionRef(t *testing.T) {
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "${{ matrix.version }}", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "${{ matrix.version }}", FilePath: "ci.yml"},
 		},
 	}
 
@@ -444,7 +627,7 @@ func TestPin_SkippedExpressionRef(t *testing.T) {
 func TestPin_ResolutionError(t *testing.T) {
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "ci.yml"},
 		},
 		resolveErr: fmt.Errorf("rate limit exceeded"),
 	}
@@ -462,7 +645,7 @@ func TestPin_ResolutionError(t *testing.T) {
 func TestPin_Suspicious(t *testing.T) {
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "ci.yml"},
 		},
 		verified: map[string]*Verification{
 			"abc123def456abc123def456abc123def456abc1": {
@@ -487,9 +670,9 @@ func TestPin_MixedResults(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "/tmp/ci.yml"},
-			{Ecosystem: "mock", Name: "actions/setup-go", Version: sha, FilePath: "/tmp/ci.yml"},
-			{Ecosystem: "mock", Name: "foo/bar", Version: "${{ inputs.ref }}", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "ci.yml"},
+			{Ecosystem: "mock", Name: "actions/setup-go", Version: sha, FilePath: "ci.yml"},
+			{Ecosystem: "mock", Name: "foo/bar", Version: "${{ inputs.ref }}", FilePath: "ci.yml"},
 		},
 		resolved: map[string]struct{ sha, tag string }{
 			"actions/checkout@v4": {"abc123def456abc123def456abc123def456abc1", "v4.2.2"},
@@ -546,7 +729,7 @@ func TestPin_ContextCancellation(t *testing.T) {
 
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "ci.yml"},
 		},
 	}
 
@@ -564,7 +747,7 @@ func TestPin_VerificationErrorReported(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "ci.yml"},
 		},
 		verifyErr: fmt.Errorf("API rate limit exceeded"),
 	}
@@ -618,12 +801,12 @@ func TestPin_EmptyRefs(t *testing.T) {
 func TestPin_MultipleStrategies(t *testing.T) {
 	s1 := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock1", Name: "actions/checkout", Version: "v4", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock1", Name: "actions/checkout", Version: "v4", FilePath: "ci.yml"},
 		},
 	}
 	s2 := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock2", Name: "docker/image", Version: "v1", FilePath: "/tmp/Dockerfile"},
+			{Ecosystem: "mock2", Name: "docker/image", Version: "v1", FilePath: "Dockerfile"},
 		},
 	}
 
@@ -642,7 +825,7 @@ func TestPin_MultipleStrategies(t *testing.T) {
 func TestPin_WriteStrategyError(t *testing.T) {
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "ci.yml"},
 		},
 		rewriteErr: fmt.Errorf("permission denied"),
 	}
@@ -681,8 +864,8 @@ func TestPin_StrategyIsPinnedUsed(t *testing.T) {
 	strategy := &customPinStrategy{
 		mockStrategy: mockStrategy{
 			refs: []Ref{
-				{Ecosystem: "custom", Name: "dep/a", Version: "PINNED", FilePath: "/tmp/f.yml"},
-				{Ecosystem: "custom", Name: "dep/b", Version: "v1", FilePath: "/tmp/f.yml"},
+				{Ecosystem: "custom", Name: "dep/a", Version: "PINNED", FilePath: "f.yml"},
+				{Ecosystem: "custom", Name: "dep/b", Version: "v1", FilePath: "f.yml"},
 			},
 		},
 	}
@@ -705,8 +888,8 @@ func TestPin_StrategyShouldSkipUsed(t *testing.T) {
 	strategy := &customPinStrategy{
 		mockStrategy: mockStrategy{
 			refs: []Ref{
-				{Ecosystem: "custom", Name: "dep/a", Version: "${VAR}", FilePath: "/tmp/f.yml"},
-				{Ecosystem: "custom", Name: "dep/b", Version: "v1", FilePath: "/tmp/f.yml"},
+				{Ecosystem: "custom", Name: "dep/a", Version: "${VAR}", FilePath: "f.yml"},
+				{Ecosystem: "custom", Name: "dep/b", Version: "v1", FilePath: "f.yml"},
 			},
 		},
 	}
@@ -748,8 +931,8 @@ func TestCheck_AllPinned(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "/tmp/ci.yml"},
-			{Ecosystem: "mock", Name: "actions/setup-go", Version: "aabbccdd11223344556677889900aabbccddeeff", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "ci.yml"},
+			{Ecosystem: "mock", Name: "actions/setup-go", Version: "aabbccdd11223344556677889900aabbccddeeff", FilePath: "ci.yml"},
 		},
 	}
 
@@ -769,9 +952,9 @@ func TestCheck_HasUnpinned(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "/tmp/ci.yml"},
-			{Ecosystem: "mock", Name: "actions/setup-go", Version: "v5", FilePath: "/tmp/ci.yml"},
-			{Ecosystem: "mock", Name: "actions/cache", Version: "main", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "ci.yml"},
+			{Ecosystem: "mock", Name: "actions/setup-go", Version: "v5", FilePath: "ci.yml"},
+			{Ecosystem: "mock", Name: "actions/cache", Version: "main", FilePath: "ci.yml"},
 		},
 	}
 
@@ -790,8 +973,8 @@ func TestCheck_HasUnpinned(t *testing.T) {
 func TestCheck_WithExclude(t *testing.T) {
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "/tmp/ci.yml"},
-			{Ecosystem: "mock", Name: "actions/setup-go", Version: "v5", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "ci.yml"},
+			{Ecosystem: "mock", Name: "actions/setup-go", Version: "v5", FilePath: "ci.yml"},
 		},
 	}
 
@@ -812,7 +995,7 @@ func TestCheck_WithExclude(t *testing.T) {
 func TestCheck_SkipsExpressions(t *testing.T) {
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "${{ matrix.v }}", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "${{ matrix.v }}", FilePath: "ci.yml"},
 		},
 	}
 
@@ -832,7 +1015,7 @@ func TestUpdate_BasicUpdate(t *testing.T) {
 	newSHA := "aabbccdd11223344556677889900aabbccddeeff"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: oldSHA, FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: oldSHA, FilePath: "ci.yml"},
 		},
 		updateResults: map[string]struct{ sha, newTag, curTag string }{
 			oldSHA: {newSHA, "v4.3.0", "v4.2.2"},
@@ -858,7 +1041,7 @@ func TestUpdate_NoChange(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "ci.yml"},
 		},
 		updateResults: map[string]struct{ sha, newTag, curTag string }{
 			sha: {sha, "v4.2.2", "v4.2.2"}, // same SHA = no update
@@ -883,7 +1066,7 @@ func TestUpdate_NoChange(t *testing.T) {
 func TestUpdate_SkipsUnpinned(t *testing.T) {
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "ci.yml"},
 		},
 	}
 
@@ -904,7 +1087,7 @@ func TestUpdate_DryRun(t *testing.T) {
 	newSHA := "aabbccdd11223344556677889900aabbccddeeff"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: oldSHA, FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: oldSHA, FilePath: "ci.yml"},
 		},
 		updateResults: map[string]struct{ sha, newTag, curTag string }{
 			oldSHA: {newSHA, "v4.3.0", "v4.2.2"},
@@ -927,7 +1110,7 @@ func TestUpdate_WithExclude(t *testing.T) {
 	sha := "11bd71901bbe5b1630ceea73d27597364c9af683"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: sha, FilePath: "ci.yml"},
 		},
 	}
 
@@ -948,7 +1131,7 @@ func TestUpdate_Suspicious(t *testing.T) {
 	newSHA := "aabbccdd11223344556677889900aabbccddeeff"
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: oldSHA, FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: oldSHA, FilePath: "ci.yml"},
 		},
 		updateResults: map[string]struct{ sha, newTag, curTag string }{
 			oldSHA: {newSHA, "v4.3.0", "v4.2.2"},
@@ -1009,8 +1192,8 @@ func TestShouldExclude(t *testing.T) {
 func TestPin_WithExclude(t *testing.T) {
 	strategy := &mockStrategy{
 		refs: []Ref{
-			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "/tmp/ci.yml"},
-			{Ecosystem: "mock", Name: "actions/setup-go", Version: "v5", FilePath: "/tmp/ci.yml"},
+			{Ecosystem: "mock", Name: "actions/checkout", Version: "v4", FilePath: "ci.yml"},
+			{Ecosystem: "mock", Name: "actions/setup-go", Version: "v5", FilePath: "ci.yml"},
 		},
 	}
 
@@ -1133,7 +1316,7 @@ jobs:
 		t.Errorf("expected at least 2 pinned (GHA + container), got stats: %+v", report.Stats)
 	}
 
-	// Read the final file — both GHA and container pins must be present.
+	// Read the final file: both GHA and container pins must be present.
 	got, err := fs.ReadFile(root.FS(), ".github/workflows/ci.yml")
 	if err != nil {
 		t.Fatal(err)
@@ -1148,5 +1331,23 @@ jobs:
 	}
 	if !strings.Contains(content, "alpine:3.19@"+digest) {
 		t.Error("container pin for alpine (docker://) missing")
+	}
+	if !slices.Equal(report.ChangedFiles, []string{".github/workflows/ci.yml"}) {
+		t.Fatalf("ChangedFiles = %v, want [.github/workflows/ci.yml]", report.ChangedFiles)
+	}
+	if report.Stats.FilesChanged != 1 {
+		t.Fatalf("FilesChanged = %d, want 1", report.Stats.FilesChanged)
+	}
+	if strings.Count(report.Patch, "diff --git ") != 1 {
+		t.Fatalf("patch should contain exactly one file diff, got:\n%s", report.Patch)
+	}
+	if !strings.Contains(report.Patch, "actions/checkout@"+actionSHA+" # v4.2.2") {
+		t.Fatalf("patch missing GitHub Actions pin:\n%s", report.Patch)
+	}
+	if !strings.Contains(report.Patch, "postgres:16@"+digest) {
+		t.Fatalf("patch missing job container pin:\n%s", report.Patch)
+	}
+	if !strings.Contains(report.Patch, "alpine:3.19@"+digest) {
+		t.Fatalf("patch missing docker action container pin:\n%s", report.Patch)
 	}
 }

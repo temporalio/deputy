@@ -77,7 +77,7 @@ can plug into the same scan flow as providers are added.
 | `--policy` | | | CEL policy file(s) to evaluate (repeatable) |
 | `--ecosystems` | `-e` | all | Limit to specific ecosystems (see [supported ecosystems](#supported-ecosystems)) |
 | `--exclude-path` | | | Directory glob to skip during the walk (repeatable; e.g. `.bin/**`). Unioned with `scan.exclude_paths` from config. A slash-less name matches at any depth; a slashed path is anchored to the scan root |
-| `--enrich` | | `false` | Enrich with EPSS scores and KEV status (requires network) |
+| `--enrich` | | `false` | Enrich with EPSS scores, KEV status, and severity ratings resolved from alias advisories (requires network) |
 | `--with-graph` | | `false` | Build dependency graph to show paths to vulnerable packages |
 | `--secrets` | | `false` | Scan for leaked secrets and credentials alongside vulnerabilities |
 | `--filter` | | | CEL expression to filter vulnerabilities (e.g., `'vulnerability.advisory.severity.level == severity.critical'`) |
@@ -144,6 +144,29 @@ $ deputy scan --format json --output scan.json
 $ deputy scan --format json | jq '.vulnerabilities[] | {id: .id, severity: .severity}'
 ```
 
+### Advisory Coverage and Provenance
+
+Scan results report what was (and was not) checked for advisories, so a clean
+result is never mistaken for complete coverage:
+
+- **`coverage`** (JSON/API/MCP): `covered` lists (ecosystem, artifact)
+  combinations at least one advisory source answered for, with the source
+  names; `uncovered` lists combinations no configured source could answer for
+  (for example container base images from Dockerfiles). Uncovered means
+  *not checked*, not safe. Text output prints a matching
+  `Not checked for advisories` note.
+- **`findings[].sources`**: which advisory source(s) reported each finding
+  (e.g. `["osv"]`). Multiple entries mean independent corroboration.
+- **`advisories[].kind`**: distinguishes `FINDING_KIND_MALWARE` (e.g. OSV
+  `MAL-` records) from ordinary vulnerabilities.
+
+```console
+$ deputy scan --format json | jq '.coverage'
+```
+
+Additional advisory sources (threat feeds, vendor databases) can be added via
+plugins; see the [plugins guide](../guides/plugins.md#advisory-source-plugins).
+
 ### Filtering
 
 ```console
@@ -202,7 +225,9 @@ $ deputy scan --filter "!vulnerability.package.locations.all(p, p.startsWith('.b
 ```
 
 To drop such paths from the scan altogether (so they never appear), use
-`--exclude-path` / `scan.exclude_paths` instead.
+`--exclude-path` / `scan.exclude_paths` instead. Local source scans also prune
+directories ignored by `.gitignore`; explicit exclude paths are for
+Deputy-specific pruning beyond normal working-tree ignores.
 
 **Severity constants:**
 - `severity.critical`
@@ -232,6 +257,7 @@ $ deputy scan --show-symbols
 The `--enrich` flag queries external APIs to add:
 - **EPSS scores**: Probability of exploitation in the next 30 days (0.0-1.0)
 - **KEV status**: Whether the CVE is in CISA's Known Exploited Vulnerabilities catalog
+- **Severity resolution**: advisories whose matched record carries no rating (common for Go vulnerability database records) get one from their alias advisories, GHSA first, then CVE. Resolution runs before consolidation, so severity counts and triage priorities reflect the resolved ratings, and the severity type records where the rating came from. Without `--enrich`, `UNKNOWN` means exactly "the matched record carries no rating".
 
 The `--show-unfixable-guidance` flag provides actionable recommendations for vulnerabilities without fixes, including:
 - Risk assessment factors
@@ -240,7 +266,7 @@ The `--show-unfixable-guidance` flag provides actionable recommendations for vul
 
 ## Supported Ecosystems
 
-Deputy supports 15 ecosystems for scanning:
+Deputy supports 17 ecosystems for scanning:
 
 | Ecosystem | Flag Value | Lockfiles / Manifests |
 |-----------|------------|----------------------|
@@ -256,12 +282,16 @@ Deputy supports 15 ecosystems for scanning:
 | CocoaPods | `cocoapods` | Podfile.lock, Package.resolved |
 | Packagist | `packagist` | composer.lock |
 | GitHub Actions | `github-actions` | .github/workflows/*.yml |
+| mise | `mise` | mise.toml (inventory only) |
+| asdf | `asdf` | .tool-versions (inventory only) |
 | Haskell | `haskell` | cabal.project.freeze, stack.yaml.lock |
 | R | `r` | renv.lock |
 | C++ | `cpp` | conan.lock |
 
 Detection is powered by [OSV-SCALIBR](https://github.com/google/osv-scalibr) with custom extensions for GitHub Actions.
-Binary analysis extracts dependencies from compiled Go and Rust executables
+Binary analysis extracts dependencies from compiled Go and Rust executables.
+
+When a project has both a manifest and the lockfile that resolves it (Cargo.toml alongside Cargo.lock, including workspace members resolved by a root lockfile), Deputy inventories the lockfile's exact resolutions and drops the manifest's version requirements, so findings always reference the versions actually built. Manifest-only projects fall back to requirement-derived entries.
 
 ### Historical Analysis
 
@@ -530,6 +560,10 @@ $ deputy scan --policy policy/severity.yaml --policy policy/licenses.yaml
 ## Output
 
 ### Text Format
+
+Vulnerability findings are displayed in a stable priority order: higher
+severity first, then direct dependencies, fixable findings, and package/ID
+tie-breakers.
 
 ```
 Scanned /path/to/repo @ HEAD (abc123d)

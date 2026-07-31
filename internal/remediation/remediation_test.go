@@ -2,6 +2,7 @@ package remediation
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
@@ -66,19 +67,31 @@ func TestCommandsFromConsolidatedMigration(t *testing.T) {
 			PrimaryID:    "GO-INDIRECT",
 			Package:      "github.com/docker/docker",
 			Version:      "v28.5.2+incompatible",
+			PURL:         "pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible",
 			IsDirect:     false,
 			ManifestRefs: []dependencyv1.ManifestRef{{Manager: "go", Path: "go.mod"}},
 			Fix:          &vulnerability.FixVerdict{Status: vulnerability.FixStatusMigration, Version: "2.0.0-beta.14", TargetModule: "github.com/moby/moby/v2"},
+		},
+		{
+			PrimaryID:    "GO-INDIRECT-CONTAINERD",
+			Package:      "github.com/containerd/containerd",
+			Version:      "v1.7.33",
+			PURL:         "pkg:golang/github.com/containerd/containerd@1.7.33",
+			IsDirect:     false,
+			ManifestRefs: []dependencyv1.ManifestRef{{Manager: "go", Path: "go.mod"}},
+			Fix:          &vulnerability.FixVerdict{Status: vulnerability.FixStatusMigration, Version: "2.1.9", TargetModule: "github.com/containerd/containerd/v2"},
 		},
 	}
 	commands, _ := CommandsFromConsolidated(cons)
 
 	// Direct migration: a concrete (but non-executable) go get on the target.
 	assertCommand(t, commands, "go get github.com/example/widget/v2@v2.0.1", false)
+	assertCommandTarget(t, commands, "go get github.com/example/widget/v2@v2.0.1", "v2.0.1")
 	// Indirect migration: advise upgrading the importer, not a local go get.
-	assertCommand(t, commands, "Upgrade the dependency that pulls this in (indirect — no in-place fix)", false)
+	assertCommand(t, commands, "Upgrade the dependency that pulls this in (indirect; no in-place fix)", false)
 
-	// An indirect migration must NOT emit a runnable go get for the target —
+	indirectMigrations := map[string]Command{}
+	// An indirect migration must NOT emit a runnable go get for the target;
 	// it would add an unused require that `go mod tidy` then drops.
 	for _, c := range commands {
 		if c.Command == "go get github.com/moby/moby/v2@v2.0.0-beta.14" {
@@ -86,6 +99,49 @@ func TestCommandsFromConsolidatedMigration(t *testing.T) {
 		}
 		if c.Command == "go mod tidy" {
 			t.Errorf("non-executable migrations should not trigger a go mod tidy follow-up")
+		}
+		if c.Command == "Upgrade the dependency that pulls this in (indirect; no in-place fix)" {
+			indirectMigrations[c.Package] = c
+		}
+	}
+	wantIndirect := map[string]struct {
+		purl          string
+		targetModule  string
+		targetVersion string
+	}{
+		"github.com/docker/docker": {
+			purl:          "pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible",
+			targetModule:  "github.com/moby/moby/v2",
+			targetVersion: "v2.0.0-beta.14",
+		},
+		"github.com/containerd/containerd": {
+			purl:          "pkg:golang/github.com/containerd/containerd@1.7.33",
+			targetModule:  "github.com/containerd/containerd/v2",
+			targetVersion: "v2.1.9",
+		},
+	}
+	if len(indirectMigrations) != len(wantIndirect) {
+		t.Fatalf("indirect migration command count = %d, want %d: %+v", len(indirectMigrations), len(wantIndirect), commands)
+	}
+	for pkgName, want := range wantIndirect {
+		got, ok := indirectMigrations[pkgName]
+		if !ok {
+			t.Fatalf("missing indirect migration command for %s: %+v", pkgName, commands)
+		}
+		if got.PURL != want.purl {
+			t.Errorf("%s purl = %q, want %q", pkgName, got.PURL, want.purl)
+		}
+		if got.TargetModule != want.targetModule {
+			t.Errorf("%s target module = %q, want %q", pkgName, got.TargetModule, want.targetModule)
+		}
+		if got.TargetVersion != want.targetVersion {
+			t.Errorf("%s target version = %q, want %q", pkgName, got.TargetVersion, want.targetVersion)
+		}
+		if !got.Migration {
+			t.Errorf("%s command should be marked as migration", pkgName)
+		}
+		if got.Executable {
+			t.Errorf("%s indirect migration command should not be executable", pkgName)
 		}
 	}
 }
@@ -107,6 +163,7 @@ func TestGoModuleVersionNormalization(t *testing.T) {
 
 	// Should normalize to v0.3.4
 	assertCommand(t, commands, "go get github.com/google/osv-scalibr@v0.3.4", true)
+	assertCommandTarget(t, commands, "go get github.com/google/osv-scalibr@v0.3.4", "v0.3.4")
 }
 
 func assertCommand(t *testing.T, commands []Command, want string, expectExecutable bool) {
@@ -120,6 +177,19 @@ func assertCommand(t *testing.T, commands []Command, want string, expectExecutab
 		}
 	}
 	t.Fatalf("command %q not found in remediation plan", want)
+}
+
+func assertCommandTarget(t *testing.T, commands []Command, wantCommand, wantTarget string) {
+	t.Helper()
+	for _, c := range commands {
+		if c.Command == wantCommand {
+			if c.TargetVersion != wantTarget {
+				t.Fatalf("command %q target version = %q, want %q", wantCommand, c.TargetVersion, wantTarget)
+			}
+			return
+		}
+	}
+	t.Fatalf("command %q not found in remediation plan", wantCommand)
 }
 
 func TestDependencyGroupFlag(t *testing.T) {
@@ -474,6 +544,44 @@ func TestCommandsFromConsolidatedSkipsInstallArtifactManifests(t *testing.T) {
 	}
 	if !sawRoot {
 		t.Error("expected a remediation command for the source-of-truth Cargo.toml")
+	}
+}
+
+func TestApplyGuidanceAdaptsIndirectMigrationHints(t *testing.T) {
+	commands := []Command{
+		{
+			Package:       "github.com/docker/docker",
+			Version:       "v28.5.2+incompatible",
+			PURL:          "pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible",
+			TargetVersion: "2.0.0-beta.14",
+			TargetModule:  "github.com/moby/moby/v2",
+			Migration:     true,
+			IsDirect:      false,
+			Executable:    false,
+			Hint:          "use dependency graph context to find the direct dependency that pulls this in",
+		},
+	}
+
+	mcpCommands := ApplyGuidance(commands, MCPGuidance())
+	if got := mcpCommands[0].Hint; !strings.Contains(got, `graph_why`) || !strings.Contains(got, commands[0].PURL) || !strings.Contains(got, "resolveTransitives true") {
+		t.Fatalf("MCP hint = %q, want graph_why, PURL, and resolveTransitives", got)
+	}
+	if strings.Contains(mcpCommands[0].Hint, "--with-graph") {
+		t.Fatalf("MCP hint leaked CLI flag: %q", mcpCommands[0].Hint)
+	}
+
+	cliCommands := ApplyGuidance(commands, CLIGuidance())
+	if got := cliCommands[0].Hint; !strings.Contains(got, "--resolve-transitives") || !strings.Contains(got, `deputy graph why`) {
+		t.Fatalf("CLI hint = %q, want CLI graph guidance with transitive resolution", got)
+	}
+
+	apiCommands := ApplyGuidance(commands, APIGuidance())
+	if got := apiCommands[0].Hint; !strings.Contains(got, "GraphService.WhyDependency") || !strings.Contains(got, "use_proxy") || !strings.Contains(got, "use_git") {
+		t.Fatalf("API hint = %q, want GraphService guidance with transitive resolution", got)
+	}
+
+	if commands[0].Hint == mcpCommands[0].Hint {
+		t.Fatal("ApplyGuidance mutated or failed to adapt the original command")
 	}
 }
 

@@ -34,10 +34,77 @@ func (f *fakeClient) GetVulnByID(ctx context.Context, id string) (*osvschema.Vul
 	return v, nil
 }
 
+type captureQueryClient struct {
+	queries []*osvdev.Query
+}
+
+func (c *captureQueryClient) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
+	c.queries = slices.Clone(queries)
+	return &osvdev.BatchedResponse{Results: make([]osvdev.MinimalResponse, len(queries))}, nil
+}
+
+func (c *captureQueryClient) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
+	return nil, fmt.Errorf("unexpected GetVulnByID(%q)", id)
+}
+
 func resetDiskCache(t *testing.T) {
 	t.Helper()
 	restore := disk.SetBaseDirForTest(t.TempDir())
 	t.Cleanup(restore)
+}
+
+func TestOSVAPIQueryable(t *testing.T) {
+	tests := []struct {
+		name string
+		in   PkgInput
+		want bool
+	}{
+		{name: "go", in: PkgInput{QueryKey: QueryKey{Ecosystem: "go"}}, want: true},
+		{name: "golang alias", in: PkgInput{QueryKey: QueryKey{Ecosystem: "golang"}}, want: true},
+		{name: "npm", in: PkgInput{QueryKey: QueryKey{Ecosystem: "npm"}}, want: true},
+		{name: "cargo", in: PkgInput{QueryKey: QueryKey{Ecosystem: "cargo"}}, want: true},
+		{name: "cargo osv name", in: PkgInput{QueryKey: QueryKey{Ecosystem: "crates.io"}}, want: true},
+		{name: "purl only golang", in: PkgInput{QueryKey: QueryKey{PURL: "pkg:golang/golang.org/x/net@v0.55.0"}}, want: true},
+		{name: "docker ecosystem", in: PkgInput{QueryKey: QueryKey{Ecosystem: "docker"}}, want: false},
+		{name: "docker purl", in: PkgInput{QueryKey: QueryKey{PURL: "pkg:docker/library/alpine@3.19"}}, want: false},
+		{name: "mise (no osv coverage)", in: PkgInput{QueryKey: QueryKey{Ecosystem: "mise"}}, want: false},
+		{name: "asdf (no osv coverage)", in: PkgInput{QueryKey: QueryKey{Ecosystem: "asdf"}}, want: false},
+		{name: "empty", in: PkgInput{}, want: false},
+		// GitHub Actions is queried via the bucket path, not this API, so the
+		// API-queryable check returns false; queryBatch partitions it earlier.
+		{name: "github-actions", in: PkgInput{QueryKey: QueryKey{Ecosystem: "github-actions"}}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := osvAPIQueryable(tt.in); got != tt.want {
+				t.Fatalf("osvAPIQueryable(%+v) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestQueryRaw_SkipsOSVUnsupportedEcosystems verifies a mixed batch does not
+// abort when it contains packages OSV cannot query (Dockerfile base images,
+// mise tools): those are dropped before the batch and the supported packages
+// are still queried. Previously a single unsupported ecosystem made OSV reject
+// the entire batch, failing the whole scan.
+func TestQueryRaw_SkipsOSVUnsupportedEcosystems(t *testing.T) {
+	resetDiskCache(t)
+	client := &captureQueryClient{}
+	pkgs := []PkgInput{
+		{QueryKey: QueryKey{Name: "github.com/foo/bar", Version: "1.2.3", Ecosystem: "go"}},
+		{QueryKey: QueryKey{Name: "alpine", Version: "3.19", Ecosystem: "docker", PURL: "pkg:docker/library/alpine@3.19"}},
+		{QueryKey: QueryKey{Name: "node", Version: "20.0.0", Ecosystem: "mise"}},
+	}
+	if _, err := QueryRaw(t.Context(), client, pkgs); err != nil {
+		t.Fatalf("QueryRaw() error = %v, want nil (unsupported ecosystems should be skipped, not fatal)", err)
+	}
+	if len(client.queries) != 1 {
+		t.Fatalf("QueryRaw() sent %d queries to OSV, want 1 (only the go package)", len(client.queries))
+	}
+	if got := client.queries[0].Package; got.Ecosystem != "Go" || got.Name != "github.com/foo/bar" {
+		t.Fatalf("queried package = %+v, want the Go package", got)
+	}
 }
 
 func Test_QueryRaw_ok(t *testing.T) {
@@ -52,6 +119,56 @@ func Test_QueryRaw_ok(t *testing.T) {
 	}
 	if vulns[0].CVE != "CVE-1" {
 		t.Fatalf("want CVE-1, got %q", vulns[0].CVE)
+	}
+}
+
+func Test_QueryRaw_usesNameEcosystemForPURLInputs(t *testing.T) {
+	const version = "v0.0.0-20200622213623-75b288015ac9"
+	tests := []struct {
+		name string
+		in   PkgInput
+	}{
+		{
+			name: "explicit identity plus purl",
+			in: PkgInput{QueryKey: QueryKey{
+				Name:      "golang.org/x/crypto",
+				Version:   version,
+				Ecosystem: "go",
+				PURL:      "pkg:golang/golang.org/x/crypto@" + version,
+			}},
+		},
+		{
+			name: "purl only",
+			in: PkgInput{QueryKey: QueryKey{
+				PURL: "pkg:golang/golang.org/x/crypto@" + version,
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetDiskCache(t)
+			client := &captureQueryClient{}
+			if _, err := QueryRaw(t.Context(), client, []PkgInput{tt.in}); err != nil {
+				t.Fatalf("QueryRaw() error = %v", err)
+			}
+			if len(client.queries) != 1 {
+				t.Fatalf("QueryRaw() sent %d queries, want 1", len(client.queries))
+			}
+			got := client.queries[0]
+			if got.Package.Name != "golang.org/x/crypto" {
+				t.Errorf("query package name = %q, want %q", got.Package.Name, "golang.org/x/crypto")
+			}
+			if got.Package.Ecosystem != "Go" {
+				t.Errorf("query package ecosystem = %q, want %q", got.Package.Ecosystem, "Go")
+			}
+			if got.Package.PURL != "" {
+				t.Errorf("query package purl = %q, want empty when name/ecosystem are available", got.Package.PURL)
+			}
+			if got.Version != version {
+				t.Errorf("query version = %q, want %q", got.Version, version)
+			}
+		})
 	}
 }
 

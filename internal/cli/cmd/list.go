@@ -10,13 +10,13 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/spf13/cobra"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
+	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
 )
@@ -116,7 +116,7 @@ FILTERING & FORMATTING:
   deputy list --format json
 
   # Only show direct dependencies
-  deputy list --only-direct
+  deputy list --direct
 
   # Filter by ecosystem
   deputy list --ecosystems go,npm
@@ -175,19 +175,7 @@ FILTERING & FORMATTING:
 			// Convert proto packages to ListItems
 			items := protoPackagesToListItems(resp.Msg.Packages)
 
-			// Sort by PURL for stable output
-			slices.SortFunc(items, func(a, b ListItem) int {
-				if c := cmp.Compare(a.PURL, b.PURL); c != 0 {
-					return c
-				}
-				if a.IsDirect != b.IsDirect {
-					if a.IsDirect {
-						return -1
-					}
-					return 1
-				}
-				return cmp.Compare(a.Name, b.Name)
-			})
+			sortListItems(items)
 
 			var w io.Writer = cmd.OutOrStdout()
 			if outPath != "" && outPath != "-" {
@@ -206,12 +194,7 @@ FILTERING & FORMATTING:
 				return writeListTSV(w, items, !noHeader, false)
 			case FormatJSON:
 				// Use protojson for consistent JSON output from proto response
-				opts := protojson.MarshalOptions{
-					Multiline:       true,
-					Indent:          "  ",
-					EmitUnpopulated: false,
-					UseProtoNames:   true,
-				}
+				opts := internalproto.CLIJSONMarshalOptions()
 				data, err := opts.Marshal(resp.Msg)
 				if err != nil {
 					return fmt.Errorf("marshal proto to JSON: %w", err)
@@ -234,6 +217,7 @@ FILTERING & FORMATTING:
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
 	cmd.Flags().BoolVar(&noHeader, "no-header", false, "Omit header row for text/tsv formats")
 	cmd.Flags().BoolVar(&onlyDirect, "only-direct", false, "Only include direct dependencies")
+	cmd.Flags().BoolVar(&onlyDirect, "direct", false, "Alias for --only-direct")
 	cmd.Flags().StringVarP(&source, "source", "s", "", "Target source type: remote, docker-daemon, tarball, oci-archive, oci-layout")
 	cmd.Flags().StringVar(&platform, "platform", "", "Platform for container images (os/arch[/variant])")
 
@@ -283,6 +267,32 @@ func protoPackagesToListItems(pkgs []*dependencyv1.Package) []ListItem {
 		})
 	}
 	return items
+}
+
+func sortListItems(items []ListItem) {
+	slices.SortFunc(items, compareListItems)
+}
+
+func compareListItems(a, b ListItem) int {
+	if c := cmp.Compare(a.PURL, b.PURL); c != 0 {
+		return c
+	}
+	if a.IsDirect != b.IsDirect {
+		if a.IsDirect {
+			return -1
+		}
+		return 1
+	}
+	if c := cmp.Compare(a.Name, b.Name); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.Version, b.Version); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.Ecosystem, b.Ecosystem); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.Sources, b.Sources)
 }
 
 // decodePURLForDisplay decodes percent-encoded characters in a PURL for

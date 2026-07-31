@@ -253,9 +253,9 @@ message GraphStats {
   // TransitiveNodes is the count of transitive dependencies.
   int32 transitive_nodes = 3;
 
-  // MaxDepth is the maximum dependency depth across all nodes.
-  // Note: Includes disconnected nodes (depth=999). Use max_connected_depth
-  // for the actual graph depth.
+  // MaxDepth is the maximum resolved dependency depth across connected nodes
+  // (0 when only roots are resolved). Disconnected nodes carry no dependency
+  // depth and are counted in disconnected_nodes instead.
   int32 max_depth = 4;
 
   // VulnerableNodes is the count of packages with vulnerabilities.
@@ -264,10 +264,8 @@ message GraphStats {
   // Ecosystems maps ecosystem names to package counts.
   map<string, int32> ecosystems = 6;
 
-  // MaxConnectedDepth is the maximum depth among connected nodes only.
-  // Excludes disconnected nodes (depth=999) which are packages discovered
-  // but not reachable from any direct dependency (e.g., GitHub Actions,
-  // container base images from Dockerfiles).
+  // MaxConnectedDepth equals max_depth. Retained for wire compatibility with
+  // releases where max_depth still included a disconnected-node sentinel.
   int32 max_connected_depth = 7;
 
   // DisconnectedNodes is the count of packages with no path from any root.
@@ -325,6 +323,14 @@ message WhyDependencyResponse {
 
   // Warnings contains non-fatal issues.
   repeated string warnings = 5;
+
+  // DependencyNode is the matched dependency node when found.
+  // Present even when no dependency path could be resolved, so clients can
+  // inspect exact PURL, directness, depth, locations, and import status.
+  Node dependency_node = 6;
+
+  // Message provides human-readable context for empty or not-found results.
+  string message = 7;
 }
 
 // DependencyPath represents a path through the dependency graph.
@@ -369,6 +375,23 @@ message NeedsDependencyResponse {
 
   // Dependents are packages that depend on this package.
   repeated Node dependents = 4;
+
+  // Found indicates whether the queried package was found in the graph.
+  // Always present (unlike WhyDependencyResponse.found, which predates
+  // explicit presence and stays a plain bool for wire compatibility).
+  optional bool found = 5;
+
+  // Direct indicates whether the queried package is a direct/root dependency.
+  optional bool direct = 6;
+
+  // DirectCount is the number of direct dependencies in dependents.
+  optional int32 direct_count = 7;
+
+  // TransitiveCount is the number of transitive dependencies in dependents.
+  optional int32 transitive_count = 8;
+
+  // Message provides human-readable context for empty or not-found results.
+  string message = 9;
 }
 
 // QueryGraphRequest filters a dependency graph.

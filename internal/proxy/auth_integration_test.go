@@ -190,7 +190,7 @@ policies:
 		t.Fatalf("newGoModuleHandler: %v", err)
 	}
 	// Disable external lookups for tests
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = nil
 	handler.lookups.vulnLookup = nil
 
@@ -392,7 +392,7 @@ policies:
 	if err != nil {
 		t.Fatalf("newGoModuleHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = nil
 	handler.lookups.vulnLookup = nil
 

@@ -31,6 +31,8 @@ type Package struct {
 	// Version is the resolved version string.
 	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
 	// Ecosystem identifies the package ecosystem (e.g., "go", "npm", "pypi").
+	// Empty when the artifact carries no recognizable package ecosystem, such
+	// as unrecognized SBOM components.
 	Ecosystem string `protobuf:"bytes,3,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
 	// Purl is the Package URL (PURL) for this dependency.
 	// See: https://github.com/package-url/purl-spec
@@ -230,11 +232,11 @@ var File_deputy_dependency_v1_dependency_proto protoreflect.FileDescriptor
 
 const file_deputy_dependency_v1_dependency_proto_rawDesc = "" +
 	"\n" +
-	"%deputy/dependency/v1/dependency.proto\x12\x14deputy.dependency.v1\x1a\x1bbuf/validate/validate.proto\x1a#deputy/container/v1/container.proto\"\xdd\x02\n" +
+	"%deputy/dependency/v1/dependency.proto\x12\x14deputy.dependency.v1\x1a\x1bbuf/validate/validate.proto\x1a#deputy/container/v1/container.proto\"\xd4\x02\n" +
 	"\aPackage\x12\x1b\n" +
 	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\x12%\n" +
-	"\tecosystem\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tecosystem\x12\x12\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1c\n" +
+	"\tecosystem\x18\x03 \x01(\tR\tecosystem\x12\x12\n" +
 	"\x04purl\x18\x04 \x01(\tR\x04purl\x12\x1a\n" +
 	"\blicenses\x18\x05 \x03(\tR\blicenses\x12\x16\n" +
 	"\x06direct\x18\x06 \x01(\bR\x06direct\x12\x1c\n" +

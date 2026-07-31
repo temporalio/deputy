@@ -14,11 +14,11 @@ import (
 	"strings"
 
 	gocmp "github.com/google/go-cmp/cmp"
+	"github.com/spf13/cobra"
 	"github.com/temporalio/deputy/internal/cli/flags"
 	deperrors "github.com/temporalio/deputy/internal/errors"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/policy"
-	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -152,15 +152,21 @@ you'll see in production. This helps you write policies with confidence
 before deploying them.
 
 ENTRYPOINT CATEGORIES:
-  scan        Vulnerability scanning (scan_vulnerability, scan_report)
-  proxy       Package proxy requests (go_artifact_request, npm_artifact_request, ...)
-  diff        Dependency diffs (diff_report, diff_vulnerability, ...)
-  container   Container images (container_diff_report, ...)
-  dockerfile  Dockerfile analysis (dockerfile_report, dockerfile_stage)
-  sbom        SBOM generation (sbom_report, sbom_component)
-  graph       Dependency graphs (graph_report, graph_node, graph_edge)
-  secrets     Secret scanning (secrets_report, secrets_finding)
-  service     API authorization (service_scan_request, ...)
+  scan            Vulnerability scanning (scan_vulnerability, scan_report)
+  proxy           Package proxy requests (go_artifact_request, npm_artifact_request, ...)
+  diff            Dependency diffs (diff_report, diff_vulnerability, ...)
+  container_diff  Container image diffs (container_diff_report, ...)
+  dockerfile      Dockerfile analysis (dockerfile_report, dockerfile_stage)
+  sbom            SBOM generation (sbom_report, sbom_component)
+  graph           Dependency graphs (graph_report, graph_node, graph_edge)
+  fix             Remediation planning (fix_plan, fix_plan_step)
+  triage          Vulnerability triage (triage_report, triage_cluster)
+  secrets         Secret scanning (secrets_report, secrets_finding)
+  server          API authorization (service_scan_request, ...)
+  sandbox         Sandboxed execution control (sandbox_execution, sandbox_command, ...)
+
+Legacy aliases "container" and "service" are accepted where Deputy filters by
+category, but generated examples use canonical category names.
 
 DETAIL LEVELS:
   minimal       Only required fields with simplest values
@@ -932,7 +938,7 @@ func writeSimulationResult(w io.Writer, format string, index int, payload map[st
 		for _, act := range actions {
 			fmt.Fprintf(w, "  %s from %s", strings.ToUpper(act.Type), act.Source)
 			if act.Reason != "" {
-				fmt.Fprintf(w, " — %s", act.Reason)
+				fmt.Fprintf(w, ": %s", act.Reason)
 			}
 			fmt.Fprintln(w)
 		}

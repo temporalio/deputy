@@ -1,6 +1,6 @@
 # Policy Framework
 
-Deputy policies capture a decision once and enforce it everywhere: scan, diff, sbom, fix, triage, and the artifact proxy. Policies are structured YAML bundles compiled to CEL and evaluated against a consistent input map, so rules stay readable, testable, and auditable.
+Deputy policies capture a decision once and enforce it everywhere: scan, diff, sbom, fix, triage, graph, secrets, server authorization, sandbox execution, and the artifact proxy. Policies are structured YAML bundles compiled to CEL and evaluated against a consistent input map, so rules stay readable, testable, and auditable.
 
 ## Policy Evaluation Flow
 
@@ -14,7 +14,7 @@ flowchart LR
     end
 
     subgraph Runtime["Runtime"]
-        Command["Command<br/>(scan, diff, proxy...)"]
+        Command["Command or service surface<br/>(scan, diff, proxy, sandbox, ...)"]
         Input["Build input map"]
         Entrypoint["Match entrypoint"]
         CEL["CEL evaluation"]

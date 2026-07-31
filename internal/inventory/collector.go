@@ -26,6 +26,7 @@ import (
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/container/image"
 	"github.com/temporalio/deputy/internal/dockerfile"
+	"github.com/temporalio/deputy/internal/gitutil"
 	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/repository/workspace"
@@ -192,6 +193,13 @@ func Collect(ctx context.Context, target string, opts Options) (*Execution, erro
 //   - refProvided: true if the caller explicitly provided ref
 //   - opts: collection options
 func CollectRepository(ctx context.Context, target, ref string, refProvided bool, opts Options) (*Execution, error) {
+	// A committed snapshot was requested: delegate to the at-ref collector so
+	// the inventory reads that commit's tree. Scanning the working tree here
+	// would silently analyze the wrong content while echoing the requested ref.
+	if refProvided && !gitutil.IsWorkingTreeRef(ref) {
+		return CollectRepositoryAtRef(ctx, target, ref, opts)
+	}
+
 	ctx, span := otel.StartSpan(ctx, "deputy.inventory.repository",
 		trace.WithAttributes(
 			attribute.String("deputy.target.path", target),
@@ -211,8 +219,15 @@ func CollectRepository(ctx context.Context, target, ref string, refProvided bool
 		effectiveRef = "HEAD~0"
 	}
 
-	// Scan packages
-	pkgs, err := ScanPackagesWorking(ctx, resolved.workspace, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	// Scan packages. For local working trees, honor .gitignore directory
+	// rules so generated artifacts and local tool caches do not pollute source
+	// inventory. Remote clones contain tracked contents only, so .gitignore is
+	// left out there.
+	pkgs, err := ScanPackagesWorking(ctx, resolved.workspace, ScanOptions{
+		Ecosystems:   opts.Ecosystems,
+		ExcludePaths: opts.ExcludePaths,
+		UseGitignore: !resolved.cloned,
+	})
 	if err != nil {
 		resolved.cleanup()
 		otel.SetSpanError(span, err)
@@ -258,7 +273,11 @@ func CollectDirectory(ctx context.Context, path string, opts Options) (*Executio
 		return nil, fmt.Errorf("failed to open directory: %w", err)
 	}
 
-	pkgs, err := ScanPackagesWorking(ctx, ws, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	pkgs, err := ScanPackagesWorking(ctx, ws, ScanOptions{
+		Ecosystems:   opts.Ecosystems,
+		ExcludePaths: opts.ExcludePaths,
+		UseGitignore: true,
+	})
 	if err != nil {
 		_ = ws.Close()
 		otel.SetSpanError(span, err)
@@ -502,15 +521,30 @@ func CollectAtCommit(ctx context.Context, repo *git.Repository, commitHash plumb
 		))
 	defer span.End()
 
-	pkgs, err := ScanPackagesAtCommitSnapshot(ctx, repo, commitHash, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	// Keep the snapshot workspace alive on the Execution: graph edge
+	// resolution reads the ref's manifests and lockfiles from it, the same
+	// way working-tree collection hands its directory workspace onward.
+	ws, err := CommitSnapshotWorkspace(repo, commitHash)
 	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+	pkgs, err := scanWorkspace(ctx, ws, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	if err != nil {
+		_ = ws.Close()
 		otel.SetSpanError(span, err)
 		return nil, err
 	}
 	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
 
-	// Try to get direct dependencies from the commit snapshot
-	direct, _ := compare.CollectGoDirectModulesFromCommit(repo, commitHash)
+	// Resolve direct dependencies from the commit snapshot across the same
+	// ecosystems as working-tree scans (Go, npm, Cargo, PyPI). Best-effort: a
+	// failure here degrades direct/transitive labels, not the inventory.
+	direct, err := compare.CollectDirectDependenciesFromCommit(repo, commitHash)
+	if err != nil {
+		slog.DebugContext(ctx, "inventory: direct dependency detection at commit failed",
+			"commit", commitHash.String(), "error", err)
+	}
 
 	result := Result{
 		Target: Target{
@@ -522,7 +556,7 @@ func CollectAtCommit(ctx context.Context, repo *git.Repository, commitHash plumb
 		Direct:      direct,
 	}
 
-	return &Execution{Result: result}, nil
+	return &Execution{Result: result, Workspace: ws, cleanup: func() { _ = ws.Close() }}, nil
 }
 
 // CollectRepositoryAtRef extracts inventory from a git repository at a specific reference.
@@ -553,24 +587,39 @@ func CollectRepositoryAtRef(ctx context.Context, target, ref string, opts Option
 		return nil, fmt.Errorf("failed to open git repository: %w", err)
 	}
 
-	// Resolve the ref to a commit hash
-	hash, err := repo.ResolveRevision(plumbing.Revision(ref))
+	// Resolve the ref to a commit hash, honoring the same revision grammar as
+	// diff (ancestry suffixes, time selectors, origin fallback).
+	hash, err := gitutil.ResolveRevisionEnhanced(repo, ref)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("failed to resolve ref %q: %w", ref, err)
 	}
 	span.SetAttributes(attribute.String("deputy.target.commit", hash.String()))
 
-	// Scan at the specific commit
-	pkgs, err := ScanPackagesAtCommitSnapshot(ctx, repo, *hash, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	// Scan at the specific commit, keeping the snapshot workspace alive on
+	// the Execution so graph edge resolution reads the ref's manifests and
+	// lockfiles instead of falling back to a disconnected basic graph.
+	ws, err := CommitSnapshotWorkspace(repo, *hash)
 	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, fmt.Errorf("failed to snapshot ref %q: %w", ref, err)
+	}
+	pkgs, err := scanWorkspace(ctx, ws, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	if err != nil {
+		_ = ws.Close()
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("failed to scan packages at ref %q: %w", ref, err)
 	}
 	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
 
-	// Get direct dependencies from the commit
-	direct, _ := compare.CollectGoDirectModulesFromCommit(repo, *hash)
+	// Resolve direct dependencies from the commit snapshot across the same
+	// ecosystems as working-tree scans (Go, npm, Cargo, PyPI). Best-effort: a
+	// failure here degrades direct/transitive labels, not the inventory.
+	direct, err := compare.CollectDirectDependenciesFromCommit(repo, *hash)
+	if err != nil {
+		slog.DebugContext(ctx, "inventory: direct dependency detection at ref failed",
+			"ref", ref, "commit", hash.String(), "error", err)
+	}
 
 	// Get origin URL
 	originURL := ""
@@ -597,7 +646,7 @@ func CollectRepositoryAtRef(ctx context.Context, target, ref string, opts Option
 		Direct:      direct,
 	}
 
-	return &Execution{Result: result}, nil
+	return &Execution{Result: result, Workspace: ws, cleanup: func() { _ = ws.Close() }}, nil
 }
 
 // CollectBinary extracts inventory from a Go or Rust binary file.

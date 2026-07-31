@@ -12,7 +12,6 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	inv "github.com/temporalio/deputy/internal/inventory"
 )
 
 func TestRefConstants(t *testing.T) {
@@ -436,6 +435,15 @@ func TestParseReferences_InvalidTargetRef(t *testing.T) {
 	}
 }
 
+// suffixMatcher is a PathMatcher matching paths by filename suffix, standing
+// in for inventory's dependency matcher to avoid an import cycle in tests.
+type suffixMatcher string
+
+// Matches reports whether the path ends with the matcher's suffix.
+func (s suffixMatcher) Matches(path string) bool {
+	return strings.HasSuffix(path, string(s))
+}
+
 func TestHasWorkingDependencyChanges(t *testing.T) {
 	dir := t.TempDir()
 	repo, err := git.PlainInit(dir, false)
@@ -460,10 +468,9 @@ func TestHasWorkingDependencyChanges(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	matcher, err := inv.GetDependencyMatcher(inv.ScanOptions{Ecosystems: []string{"go"}})
-	if err != nil {
-		t.Fatalf("GetDependencyMatcher: %v", err)
-	}
+	// A stub matcher keeps this test inside package gitutil without importing
+	// inventory (which imports gitutil); PathMatcher is the whole contract.
+	matcher := suffixMatcher("go.mod")
 
 	// Clean tree should return false
 	has, err := hasWorkingDependencyChanges(repo, matcher)
@@ -568,4 +575,37 @@ func TestGetRemoteDefaultBranch_WithOrigin(t *testing.T) {
 	branch := getRemoteDefaultBranch(repo)
 	// May be empty since we can't actually connect
 	_ = branch
+}
+
+// TestIsWorkingTreeRef pins the shared working-tree vocabulary used by scan
+// and list ref routing: these spellings mean "analyze the checked-out tree",
+// anything else names a committed snapshot.
+func TestIsWorkingTreeRef(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want bool
+	}{
+		{"", true},
+		{".", true},
+		{"HEAD", true},
+		{"head", true},
+		{"HEAD~0", true},
+		{"WORKING", true},
+		{"working", true},
+		{"WORKTREE", true},
+		{"WT", true},
+		{" HEAD ", true},
+		{"HEAD~1", false},
+		{"HEAD~40", false},
+		{"main", false},
+		{"v1.2.3", false},
+		{"abc123d", false},
+		{"origin/main", false},
+		{"HEAD@{1.week.ago}", false},
+	}
+	for _, tt := range tests {
+		if got := IsWorkingTreeRef(tt.ref); got != tt.want {
+			t.Errorf("IsWorkingTreeRef(%q) = %v, want %v", tt.ref, got, tt.want)
+		}
+	}
 }

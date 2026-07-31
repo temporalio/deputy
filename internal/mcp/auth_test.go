@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/temporalio/deputy/internal/auth/jwt"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	josejwt "github.com/picatz/jose/pkg/jwt"
+	"github.com/temporalio/deputy/internal/auth/jwt"
 )
 
 func TestAuthConfig_TypeAlias(t *testing.T) {

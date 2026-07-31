@@ -10,7 +10,7 @@ import (
 	"github.com/temporalio/deputy/internal/purlx"
 )
 
-func TestPackagesToInputsUsesMiseLockedVersion(t *testing.T) {
+func TestPackagesToProtoUsesMiseLockedVersion(t *testing.T) {
 	pkg := &extractor.Package{
 		Name:      "go",
 		Version:   "1.20",
@@ -19,19 +19,19 @@ func TestPackagesToInputsUsesMiseLockedVersion(t *testing.T) {
 		Metadata:  &mise.Metadata{LockedVersion: "1.20.1"},
 	}
 
-	inputs := packagesToInputs([]*extractor.Package{pkg}, nil)
+	inputs := packagesToProto([]*extractor.Package{pkg}, nil)
 	if len(inputs) != 2 {
 		t.Fatalf("got %d inputs, want stdlib and toolchain", len(inputs))
 	}
 	for _, in := range inputs {
-		if in.Version != "1.20.1" {
-			t.Errorf("%s version = %q, want 1.20.1", in.Name, in.Version)
+		if in.GetVersion() != "1.20.1" {
+			t.Errorf("%s version = %q, want 1.20.1", in.GetName(), in.GetVersion())
 		}
-		if !in.IsDirect {
-			t.Errorf("%s should be direct", in.Name)
+		if !in.GetDirect() {
+			t.Errorf("%s should be direct", in.GetName())
 		}
-		if len(in.ManifestRefs) != 1 || dependency.ManifestRefComponentKey(&in.ManifestRefs[0]) != "go" {
-			t.Errorf("%s manifest refs = %+v, want component key go", in.Name, in.ManifestRefs)
+		if len(in.GetManifestRefs()) != 1 || dependency.ManifestRefComponentKey(in.GetManifestRefs()[0]) != "go" {
+			t.Errorf("%s manifest refs = %+v, want component key go", in.GetName(), in.GetManifestRefs())
 		}
 	}
 }

@@ -22,6 +22,7 @@ import (
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
 	deputyerrors "github.com/temporalio/deputy/internal/errors"
+	"github.com/temporalio/deputy/internal/ignore"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/output"
 	"github.com/temporalio/deputy/internal/policy"
@@ -115,6 +116,7 @@ AI ASSISTANCE:
 	fixCmd.Flags().Bool("apply", false, "Execute runnable remediation commands in-place (local scans only)")
 	fixCmd.Flags().StringArray("policy", nil, "Path to CEL policy files or bundles to evaluate against remediation plans (repeatable)")
 	addExcludePathFlag(fixCmd)
+	fixCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	root.AddCommand(fixCmd)
 }
 
@@ -168,7 +170,7 @@ func runFixPlan(c *services.Clients, cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: --ignore-unfixed has no effect when --plan is supplied\n")
 		}
 	case strings.TrimSpace(reportPath) != "":
-		resp, err := buildFixFromReport(cmd.InOrStdin(), reportPath, ignoreUnfixed)
+		resp, err := buildFixFromReport(cmd, cmd.InOrStdin(), reportPath, ignoreUnfixed)
 		if err != nil {
 			return err
 		}
@@ -224,16 +226,15 @@ func runFixPlan(c *services.Clients, cmd *cobra.Command, args []string) error {
 		applyDir = scanResult.Target.LocalPath
 		wasCloned = scanResult.Target.Cloned
 
-		resultOut := *scanResult
+		resultOut := applyFixIgnoreRules(cmd, *scanResult, applyDir)
 		if ignoreUnfixed {
 			resultOut = scanning.FilterUnfixed(resultOut)
 		}
 		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
 		commands, stdlib := remediation.CommandsFromConsolidated(cons)
+		commands = remediation.ApplyGuidance(commands, remediation.CLIGuidance())
 		fixResp = internalproto.BuildFixResponse(
-			scanResult.Target.DisplayPath,
-			"", // ref not stored in target
-			scanResult.Target.CommitHash,
+			internalproto.InventoryTargetToProto(scanResult.Target),
 			stdlib,
 			commands,
 		)
@@ -349,7 +350,7 @@ func readFixPlanProto(r io.Reader, path string) (*fixv1.FixResponse, error) {
 }
 
 // buildFixFromReport reads a scan report and builds a fix response.
-func buildFixFromReport(r io.Reader, reportPath string, ignoreUnfixed bool) (*fixv1.FixResponse, error) {
+func buildFixFromReport(cmd *cobra.Command, r io.Reader, reportPath string, ignoreUnfixed bool) (*fixv1.FixResponse, error) {
 	data, err := readReportSource(r, reportPath)
 	if err != nil {
 		return nil, err
@@ -370,21 +371,50 @@ func buildFixFromReport(r io.Reader, reportPath string, ignoreUnfixed bool) (*fi
 		return nil, fmt.Errorf("scan result is empty")
 	}
 
-	resultOut := *scanResult
+	// An imported report was filtered by its own target's suppressions when
+	// it was produced, and the current working directory has no necessary
+	// relationship to that target: auto-discovering .deputyignore.yaml here
+	// would let an unrelated repository's rules silently drop remediation
+	// commands. Only an explicit --ignore-file applies.
+	resultOut := applyFixIgnoreRules(cmd, *scanResult, "")
 	if ignoreUnfixed {
 		resultOut = scanning.FilterUnfixed(resultOut)
 	}
 	cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
 	commands, stdlib := remediation.CommandsFromConsolidated(cons)
+	commands = remediation.ApplyGuidance(commands, remediation.CLIGuidance())
 
-	displayPath := ""
-	commitHash := ""
-	if scanResp.Target != nil {
-		displayPath = scanResp.Target.DisplayPath
-		commitHash = scanResp.Target.CommitHash
+	return internalproto.BuildFixResponse(scanResp.Target, stdlib, commands), nil
+}
+
+// applyFixIgnoreRules filters findings through the target's vulnerability
+// suppressions (--ignore-file, or auto-discovered .deputyignore.yaml and
+// friends), matching deputy scan, so the plan never recommends work the
+// repository has documented as suppressed. An empty workDir disables
+// auto-discovery, leaving only an explicit --ignore-file: imported reports
+// have no local target to discover rules from. Load failures degrade to no
+// suppressions with a warning.
+func applyFixIgnoreRules(cmd *cobra.Command, result scanning.Result, workDir string) scanning.Result {
+	ignoreFile, _ := cmd.Flags().GetString("ignore-file")
+	var rules *ignore.Rules
+	var err error
+	switch {
+	case ignoreFile != "":
+		rules, err = ignore.LoadFromPath(ignoreFile)
+	case workDir != "":
+		rules, err = ignore.LoadFromDirectory(workDir)
+	default:
+		return result
 	}
-
-	return internalproto.BuildFixResponse(displayPath, "", commitHash, stdlib, commands), nil
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: loading ignore rules: %v\n", err)
+		return result
+	}
+	filtered, ignored := scanning.FilterIgnored(result, rules)
+	if ignored > 0 {
+		fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render(fmt.Sprintf("Note: %d vulnerability finding(s) ignored by rules", ignored)))
+	}
+	return filtered
 }
 
 // renderFixText displays a human-readable summary of the remediation plan.
@@ -414,12 +444,7 @@ func renderFixText(w io.Writer, resp *fixv1.FixResponse) {
 
 // outputFixProtoJSON writes the fix response as JSON using protojson.
 func outputFixProtoJSON(w io.Writer, resp *fixv1.FixResponse) error {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal proto to JSON: %w", err)

@@ -67,9 +67,10 @@ flowchart TB
 ### Entrypoint inputs
 - Standard top-level identifiers include `request`, `pkg`, `target`, `image`, `vulnerabilities`, `vulnerability`, `jwt`, `changes`, `packages`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`, and `change`. See the [policy inputs](policy-inputs.md) for the full list and example payloads.
 - `env.command` and `env.entrypoint` indicate the invoking command/entrypoint.
+- Use canonical command names in `commands`: `proxy`, `scan`, `diff`, `sbom`, `fix`, `triage`, `secrets`, `graph`, `server`, `sandbox`. `exec` is accepted as a legacy alias for `sandbox`. Container image diff policies still use `commands: ["diff"]`; `container_diff` is the policy discovery category for the `container_diff_*` entrypoints.
 - Proxy requests always include `request.version` as a string. When no concrete version exists yet (e.g., metadata/index requests), Deputy sets it to the placeholder `"<unknown>"` and also provides:
-  - `request.has_version` (bool) — true only when a real version was present in the request path.
-  - `request.raw_version` (string) — the original version string (empty when none was present).
+  - `request.has_version` (bool): true only when a real version was present in the request path.
+  - `request.raw_version` (string): the original version string (empty when none was present).
   Use `request.has_version` to guard version-sensitive logic, e.g.:
   ```cel
   request.has_version &&
@@ -81,17 +82,21 @@ Canonical entrypoints (snake_case):
 - scan (repository/image): `scan_report`, `scan_vulnerability`
 - scan (Dockerfile): `dockerfile_report`, `dockerfile_stage`
 - diff (git refs): `diff_report`, `diff_dependency_change`, `diff_vulnerability`
-- diff (container images): `container_diff_report`, `container_diff_change`, `container_diff_vulnerability`, `container_diff_layer`, `container_diff_config`
+- container_diff (container images): `container_diff_report`, `container_diff_change`, `container_diff_vulnerability`, `container_diff_layer`, `container_diff_config`
 - sbom: `sbom_report`, `sbom_component`
 - fix: `fix_plan`, `fix_plan_step`
 - triage: `triage_report`, `triage_cluster`
+- secrets: `secrets_report`, `secrets_finding`
+- graph: `graph_report`, `graph_node`, `graph_edge`
+- server: `service_scan_request`, `service_list_request`, `service_sbom_request`, `service_diff_request`, `service_secrets_request`, `service_graph_request`
+- sandbox: `sandbox_execution`, `sandbox_command`, `sandbox_network`
 
 ### Validation
 - Empty `policies` or missing `rules` is invalid; each policy must have at least one rule.
 - Policy names must be unique within a bundle.
 - String vars are CEL expressions; non-string values are treated as literals. Rules must include `action` and `when`.
 - `mode`, if set, must be `enforce` or `advisory`.
-- Canonical ecosystem strings used by built-in entrypoints: `go`, `npm`, `pypi`, `rubygems`.
+- Canonical ecosystem strings used by built-in entrypoints: `go`, `npm`, `pypi`, `rubygems`, `oci`.
 
 ## Examples
 

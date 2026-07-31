@@ -1,6 +1,6 @@
 # Policies (CEL)
 
-Deputy policies are reusable guardrails for supply chain decisions. You write them once and apply them everywhere Deputy runs: scan, diff, sbom, fix, triage, and the artifact proxy.
+Deputy policies are reusable guardrails for supply chain decisions. You write them once and apply them everywhere Deputy runs: scan, diff, sbom, fix, triage, server authorization, sandbox execution, and the artifact proxy.
 
 Policies are authored as YAML bundles that contain CEL expressions. This gives you a single, auditable rule set that can block risky artifacts, warn on policy drift, or annotate outputs for downstream tooling.
 
@@ -20,17 +20,19 @@ flowchart LR
   Policy --> Fix[fix]
   Policy --> Triage[triage]
   Policy --> Proxy[proxy]
+  Policy --> Server[server]
+  Policy --> Sandbox[sandbox]
 
   classDef control fill:#fff3e0,stroke:#e65100
   classDef process fill:#e8f5e9,stroke:#2e7d32
 
   class Policy control
-  class Scan,Diff,SBOM,Fix,Triage,Proxy process
+  class Scan,Diff,SBOM,Fix,Triage,Proxy,Server,Sandbox process
 ```
 
 ## How policy evaluation works
 
-Each command emits one or more entrypoints (for example: `scan_report`, `diff_dependency_change`, `sbom_component`, `go_artifact_request`). The policy runtime injects `env.command` and `env.entrypoint` so a single policy can branch based on where it is being applied.
+Each command or service surface emits one or more entrypoints (for example: `scan_report`, `diff_dependency_change`, `sbom_component`, `go_artifact_request`, or `sandbox_execution`). The policy runtime injects `env.command` and `env.entrypoint` so a single policy can branch based on where it is being applied.
 
 ## Quick start
 

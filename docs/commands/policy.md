@@ -12,9 +12,9 @@ deputy policy <subcommand> [flags]
 
 Deputy uses the Common Expression Language (CEL) for security policies covering:
 
-- **Vulnerability management** — block critical/high severity
-- **License compliance** — deny AGPL, require Apache-2.0
-- **Dependency constraints** — allowlist specific packages
+- **Vulnerability management**: block critical/high severity
+- **License compliance**: deny AGPL, require Apache-2.0
+- **Dependency constraints**: allowlist specific packages
 
 The `policy` command provides a complete development workflow: lint your policies, test them against fixtures, bundle them for deployment, and even explore CEL interactively.
 
@@ -28,6 +28,7 @@ The `policy` command provides a complete development workflow: lint your policie
 | [`bundle`](#bundle) | Package policies into a single file |
 | [`inspect`](#inspect) | Show bundle metadata |
 | [`simulate`](#simulate) | Run policies against recorded inputs |
+| [`examples`](#examples) | Generate example policy inputs |
 | [`repl`](#repl) | Interactive CEL playground |
 | [`lsp`](#lsp) | Language Server Protocol for editors |
 
@@ -198,9 +199,66 @@ $ deputy policy simulate \
     --format text
 
 Input 0:
-  DENY from security.yaml — Critical vulnerability detected
+  DENY from security.yaml: Critical vulnerability detected
 Input 1:
   ALLOW from security.yaml
+```
+
+---
+
+## `examples`
+
+Generate canonical JSON inputs for policy development and testing.
+
+```
+deputy policy examples [entrypoint] [flags]
+```
+
+With no entrypoint, or with `--list`, Deputy lists all known policy entrypoints
+grouped by canonical category.
+
+### Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--list` | `false` | List available entrypoints instead of generating JSON |
+| `--level`, `-l` | `typical` | Detail level: `minimal`, `typical`, or `comprehensive` |
+| `--output`, `-o` | stdout | Write generated JSON to a file |
+
+### Canonical Categories
+
+| Category | Scope |
+| --- | --- |
+| `scan` | Vulnerability scan reports and findings |
+| `proxy` | Package proxy requests |
+| `diff` | Git dependency diffs |
+| `container_diff` | Container image diffs |
+| `dockerfile` | Dockerfile analysis |
+| `sbom` | SBOM reports and components |
+| `graph` | Dependency graph reports, nodes, and edges |
+| `fix` | Remediation plans and plan steps |
+| `triage` | Vulnerability triage reports and clusters |
+| `secrets` | Secret scan reports and findings |
+| `server` | Deputy API authorization entrypoints |
+| `sandbox` | Sandboxed execution control |
+
+Legacy category aliases `container`, `service`, and `exec` are accepted by
+policy discovery filters, but examples and documentation use the canonical
+`container_diff`, `server`, and `sandbox` names.
+
+### Examples
+
+```console
+$ deputy policy examples --list
+Available policy entrypoints:
+  scan - Vulnerability scanning policies
+    • scan_report
+    • scan_vulnerability
+```
+
+```console
+$ deputy policy examples scan_vulnerability --level minimal --output input.json
+$ deputy policy eval --policy deny-critical.yaml --input input.json
 ```
 
 ---

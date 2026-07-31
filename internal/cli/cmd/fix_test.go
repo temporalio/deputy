@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/spf13/cobra"
 	fixv1 "github.com/temporalio/deputy/gen/deputy/fix/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	internalproto "github.com/temporalio/deputy/internal/proto"
@@ -18,7 +22,12 @@ func TestBuildFixResponse(t *testing.T) {
 		{Command: "Edit Gemfile to require foo >= 2.0.0", Executable: false},
 		{Command: "go get go@1.22.3", Executable: true},
 	}
-	resp := internalproto.BuildFixResponse("github.com/example/project", "main", "abcdef0", "v1.22.3", commands)
+	resp := internalproto.BuildFixResponse(&targetv1.Target{
+		DisplayPath:  "github.com/example/project",
+		Ref:          "main",
+		EffectiveRef: "main",
+		CommitHash:   "abcdef0",
+	}, "v1.22.3", commands)
 	if resp.Target.DisplayPath != "github.com/example/project" {
 		t.Fatalf("plan target mismatch: %+v", resp.Target)
 	}
@@ -75,5 +84,45 @@ func TestReadFixPlanProtoFromReader(t *testing.T) {
 	}
 	if got.Stats.TotalCommands != int32(len(got.Commands)) {
 		t.Fatalf("expected stats to refresh, got %+v", got.Stats)
+	}
+}
+
+// TestBuildFixFromReportIgnoresUnrelatedCwdRules guards imported reports
+// against the caller's working directory: a .deputyignore.yaml in an
+// unrelated repository must not silently drop remediation commands from a
+// report produced elsewhere. Only an explicit --ignore-file applies.
+func TestBuildFixFromReportIgnoresUnrelatedCwdRules(t *testing.T) {
+	report := `{
+		"target": {"displayPath": "github.com/example/project"},
+		"findings": [{
+			"advisoryId": "CVE-2026-1111",
+			"affected": true,
+			"package": {"name": "github.com/example/widget", "version": "v1.0.0", "ecosystem": "go", "purl": "pkg:golang/github.com/example/widget@v1.0.0", "direct": true, "manifestRefs": [{"path": "go.mod", "manager": "go"}]}
+		}],
+		"advisories": {
+			"CVE-2026-1111": {
+				"id": "CVE-2026-1111",
+				"fixedVersions": ["v1.1.0"],
+				"packageFixes": [{"module": "github.com/example/widget", "ecosystem": "Go", "fixedVersions": ["v1.1.0"]}]
+			}
+		}
+	}`
+
+	dir := t.TempDir()
+	rules := "ignore:\n  - package: github.com/example/widget\n    ecosystem: go\n    reason: unrelated repo suppression\n"
+	if err := os.WriteFile(filepath.Join(dir, ".deputyignore.yaml"), []byte(rules), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("ignore-file", "", "")
+
+	resp, err := buildFixFromReport(cmd, strings.NewReader(report), "-", false)
+	if err != nil {
+		t.Fatalf("buildFixFromReport: %v", err)
+	}
+	if len(resp.Commands) == 0 {
+		t.Fatal("expected remediation commands: the cwd's ignore rules must not filter an imported report")
 	}
 }

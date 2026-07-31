@@ -27,6 +27,29 @@ func ProcessOSVVulnerability(vuln osvschema.Vulnerability, input PkgInput) Vulne
 	return flattenAdvisoryFinding(advisory, finding)
 }
 
+// VulnerabilitiesFromProto flattens proto findings (plus their advisory
+// records) back into the flat records the proxy layer consumes, the inverse of
+// VulnerabilitiesToFindings. Each finding's inline advisory is preferred,
+// falling back to the advisories map by ID, so results from any advisory
+// source (built-in or plugin) flatten identically.
+func VulnerabilitiesFromProto(findings []*vulnerabilityv1.Finding, advisories map[string]*vulnerabilityv1.Advisory) []Vulnerability {
+	out := make([]Vulnerability, 0, len(findings))
+	for _, f := range findings {
+		if f == nil {
+			continue
+		}
+		adv := f.GetAdvisory()
+		if adv == nil {
+			adv = advisories[f.GetAdvisoryId()]
+		}
+		if adv == nil {
+			adv = &vulnerabilityv1.Advisory{Id: f.GetAdvisoryId()}
+		}
+		out = append(out, flattenAdvisoryFinding(adv, vulnerability.FindingFromProto(f)))
+	}
+	return out
+}
+
 // ProcessOSVVulnerabilityDomain converts a raw OSV vulnerability into the
 // domain Advisory + Finding pair, keeping the advisory metadata separate from
 // scan-time occurrence details.

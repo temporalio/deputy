@@ -57,6 +57,7 @@ func DisplayVulnerabilitiesWithHeader(w io.Writer, result scanning.Result, headi
 	if len(cons) == 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, ui.StyleAdded.Render("✓ No vulnerabilities found"))
+		displayCoverageNote(w, result.Coverage)
 		return
 	}
 	fmt.Fprintln(w)
@@ -65,6 +66,26 @@ func DisplayVulnerabilitiesWithHeader(w io.Writer, result scanning.Result, headi
 	VulnerabilityList(w, cons, displayOpts)
 
 	VulnerabilitySummaryAndActions(w, cons, result.Stats, displayOpts)
+	displayCoverageNote(w, result.Coverage)
+}
+
+// displayCoverageNote prints a subtle note about inventory that no advisory
+// source could check (e.g. container base images), so a clean result is not
+// mistaken for "everything was checked". Silent when nothing is uncovered.
+func displayCoverageNote(w io.Writer, cov *vulnerabilityv1.ScanCoverage) {
+	if cov == nil || len(cov.GetUncovered()) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(cov.GetUncovered()))
+	for _, e := range cov.GetUncovered() {
+		label := e.GetEcosystem()
+		if label == "" {
+			label = "unknown"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", e.GetPackageCount(), label))
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.StyleDim.Render("Not checked for advisories (no source covers): "+strings.Join(parts, ", ")))
 }
 
 // fixAnnotation renders the inline fix marker for a finding, preferring the
@@ -259,7 +280,7 @@ func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidat
 		if summary.StdlibRecommendation != "" {
 			// The per-source steps below specify exactly where to apply this
 			// (go.mod via `go get go@X` and/or mise.toml via `mise use go@X`), so
-			// we don't hardcode go.mod here — a Go runtime can be declared in
+			// we don't hardcode go.mod here; a Go runtime can be declared in
 			// mise.toml with no go.mod present.
 			fmt.Fprintf(w, "  %d. %s %s\n", step, ui.StyleBold.Render("Upgrade Go toolchain to"), ui.StyleUpgraded.Render(summary.StdlibRecommendation))
 			step++

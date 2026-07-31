@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/spf13/cobra"
 	"github.com/temporalio/deputy/internal/ai"
 	_ "github.com/temporalio/deputy/internal/ai/providers/claude" // Register claude provider
 	_ "github.com/temporalio/deputy/internal/ai/providers/codex"  // Register codex provider
@@ -16,7 +17,6 @@ import (
 	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/explain"
 	ui "github.com/temporalio/deputy/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 // AddExplainCommand adds the explain command to the root command.
@@ -86,6 +86,10 @@ The agent runs in read-only mode by default (cannot modify files), providing:
 
 				vuln, err := client.GetVulnByID(ctx, id)
 				if err != nil {
+					if osv.IsNotFoundError(err) {
+						fmt.Fprintf(out, "%s %s: not found\n", ui.StyleRemoved.Render("error"), id)
+						continue
+					}
 					fmt.Fprintf(out, "%s %s: %v\n", ui.StyleRemoved.Render("error"), id, err)
 					continue
 				}
@@ -93,6 +97,7 @@ The agent runs in read-only mode by default (cannot modify files), providing:
 					fmt.Fprintf(out, "%s %s: not found\n", ui.StyleRemoved.Render("error"), id)
 					continue
 				}
+				vuln = osv.HydrateSparseVulnerabilityAliases(ctx, client, vuln)
 
 				if formatFlag == "json" {
 					if err := renderer.RenderJSON(ctx, out, vuln); err != nil {

@@ -54,7 +54,7 @@ scan:
   ecosystems:              # Limit to specific ecosystems
     - go
     - npm
-  exclude_paths:           # Directory globs to skip during the walk
+  exclude_paths:           # Additional directory globs to skip during the walk
     - .bin/**              #   vendored tool binaries
     - "**/testdata"        #   test fixtures (matches at any depth)
   ignore_unfixed: false    # Ignore vulns without fixes
@@ -163,7 +163,7 @@ ai:
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `scan.ecosystems` | []string | all | Ecosystems to scan (`go`, `npm`, `pypi`, `rubygems`) |
-| `scan.exclude_paths` | []string | (none) | Directory globs to skip during the walk (e.g. `.bin/**`). Unioned with `--exclude-path`. A slash-less name matches at any depth; a slashed path is anchored to the scan root. Honored by scan, diff, list, and graph. |
+| `scan.exclude_paths` | []string | (none) | Additional directory globs to skip during the walk (e.g. `.bin/**`). Local source scans already prune directories ignored by `.gitignore`; this setting is for Deputy-specific exclusions and is unioned with `--exclude-path`. A slash-less name matches at any depth; a slashed path is anchored to the scan root. Honored by scan, diff, list, and graph. |
 | `scan.ignore_unfixed` | bool | `false` | Filter out vulns without available fixes |
 | `scan.format` | string | `text` | Default output format |
 
@@ -171,6 +171,28 @@ ai:
 - `DEPUTY_SCAN_ECOSYSTEMS` (comma-separated)
 - `DEPUTY_SCAN_SKIP_CACHE`
 - `DEPUTY_OSV_BASE_URL` (override OSV API base URL; useful for tests or mirrors)
+- `DEPUTY_ADVISORY_SOURCES` (comma-separated advisory-source plugin programs to
+  load alongside the built-in OSV source, as PATH-resolved names or paths.
+  Explicit opt-in: Deputy never auto-executes plugins it merely finds on PATH.
+  Unioned with the `advisory_sources` config section below. See the
+  [plugins guide](../guides/plugins.md#advisory-source-plugins).)
+
+### Advisory Sources
+
+External advisory sources (threat feeds, vendor databases) aggregate with the
+built-in OSV source during scans, with union-with-provenance merging. Each entry
+sets exactly one of `program` (a pluginrpc plugin executable, run per query) or
+`url` (a persistent ConnectRPC `AdvisorySourceService`; lower latency, and the
+right binding for shared or remote feeds):
+
+```yaml
+advisory_sources:
+  - program: deputy-advisory-source-myfeed   # pluginrpc subprocess plugin
+  - url: https://feeds.corp.example          # ConnectRPC service
+```
+
+A source that fails to load is skipped with a warning rather than failing the
+scan; the scan's `coverage` block shows which sources actually answered.
 
 ### SBOM
 

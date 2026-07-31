@@ -59,7 +59,7 @@ manually). See the [mise guide](../guides/mise.md).
 commit, digest, or tool version that the reference resolves to *right now*. For
 formats with committed lockfiles, that means preserving a compatible locked
 version before consulting upstream metadata. If `uses: actions/foo@v7` currently
-resolves to the `v7.6.0` commit, that is the commit you get — pinning never
+resolves to the `v7.6.0` commit, that is the commit you get; pinning never
 substitutes a different release.
 
 This guarantee is why you sometimes see a less-specific version comment than you
@@ -78,12 +78,12 @@ uses: dtolnay/rust-toolchain@29eef33…  # stable ← pinned to the branch's com
 
 The comment always reflects the **most specific ref that genuinely points at the
 pinned commit**. Deputy will not fabricate a precise version (e.g. `# v2.9.1`)
-when that tag points at a *different* commit — doing so would misrepresent what
+when that tag points at a *different* commit; doing so would misrepresent what
 is actually pinned. The comment is also what Dependabot and Renovate read to
 propose updates, so it is kept accurate to the pinned commit.
 
 To intentionally move pins forward to the latest release in their channel, use
-[`deputy pin update`](#subcommands) — that is the command that changes versions.
+[`deputy pin update`](#subcommands); that is the command that changes versions.
 Plain `deputy pin` makes an existing reference immutable; when a lockfile has
 already recorded the exact version, that exact version is what gets written.
 
@@ -148,20 +148,33 @@ $ deputy pin update --ecosystems mise,asdf --allowed-host-bins /opt/homebrew/bin
 | `--skip-verification` | `false` | Alias for `--verification=off` |
 | `--concurrency` | `4` | Max parallel network requests |
 
+## JSON patch metadata
+
+When `--format json` is used after a non-dry-run `pin` or `pin update`, the
+report includes `changedFiles`, `stats.filesChanged`, and `patch`. These fields
+are derived only from files Deputy intentionally rewrote for successful
+`pinned` or `updated` results.
+
+Deputy captures before/after content for those files and builds the patch from
+that scoped set. It does not build the JSON patch from a repository-wide
+`git diff`, so unrelated checkout state such as case-collision churn, submodule
+gitlinks, filemode noise, or other pre-existing worktree changes is not included
+unless it is in a file Deputy actually rewrote.
+
 ## Verification modes
 
 When pinning GitHub Actions, each resolved commit SHA is checked against the GitHub API for fork/imposter provenance (signed? reachable from the default branch?). `--verification` controls how findings affect the run:
 
 | Mode | Flagged ref (likely imposter) | Exit code | Use case |
 | --- | --- | --- | --- |
-| `warn` (default) | Pinned anyway; reported as a warning | 0 | Automated pinning — a floating tag already resolves to that SHA at runtime, so freezing it is no riskier than leaving it floating |
+| `warn` (default) | Pinned anyway; reported as a warning | 0 | Automated pinning: a floating tag already resolves to that SHA at runtime, so freezing it is no riskier than leaving it floating |
 | `error` | Left unpinned and reported | non-zero | Strict CI gate that must fail on any suspicious ref |
 | `off` | Not checked | 0 | Offline or token-less runs (alias `--skip-verification`) |
 
 Notes:
 
-- A ref is flagged when its commit is unsigned **and** not reachable from the repository's default branch — common and legitimate for old major tags (`@v1`) and dist-bundled actions that tag releases off the default branch. `warn` pins these and surfaces the warning so a single such ref never aborts the whole repository's pinning.
-- **Unverifiable** refs (rate limited, network error, missing `GITHUB_TOKEN`, renamed repo) are reported as warnings and pinned — they are *never* treated as imposters, in any mode.
+- A ref is flagged when its commit is unsigned **and** not reachable from the repository's default branch, common and legitimate for old major tags (`@v1`) and dist-bundled actions that tag releases off the default branch. `warn` pins these and surfaces the warning so a single such ref never aborts the whole repository's pinning.
+- **Unverifiable** refs (rate limited, network error, missing `GITHUB_TOKEN`, renamed repo) are reported as warnings and pinned; they are *never* treated as imposters, in any mode.
 
 ## Exclude patterns
 
@@ -178,7 +191,7 @@ Because the repo identity is matched too, an org- or repo-level pattern skips mo
 | `temporalio/**` | yes | yes (recursive) |
 | `temporalio/private-actions` | no | yes (matches the repo, all subpaths) |
 | `temporalio/private-actions/**` | no | yes |
-| `actions/checkout` | — | exact full-path match |
+| `actions/checkout` | - | exact full-path match |
 
 Use `org/*` or `org/**` to skip a whole organization, e.g. to pin third-party actions while leaving your own org's actions untouched.
 

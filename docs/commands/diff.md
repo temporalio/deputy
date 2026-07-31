@@ -30,13 +30,13 @@ Deputy diff operates in two modes depending on the arguments:
 | **Git diff** | Arguments look like Git refs | `deputy diff main develop` |
 | **Container diff** | Arguments look like image refs | `deputy diff nginx:1.24 nginx:1.25` |
 
-Deputy auto-detects the mode based on whether references contain `/` with `:` (image pattern) or look like Git refs.
+Deputy auto-detects the mode based on whether references contain `/` with `:` (image pattern) or look like Git refs. The base and target must be the same kind of reference; mixed Git/container inputs such as `docker://nginx:1.24 main` are rejected instead of being guessed.
 
 ---
 
 ## Container Image Diff
 
-Compare two container images to understand what changed between versions—packages added/removed, vulnerabilities fixed/introduced, configuration changes, and layer modifications.
+Compare two container images to understand what changed between versions: packages added/removed, vulnerabilities fixed/introduced, configuration changes, and layer modifications.
 
 ### How Container Diff Works
 
@@ -379,6 +379,11 @@ flowchart TB
 `none` | `low` | `med` | `high` | `critical` | `any`
 
 The `--unchanged-threshold` flag controls when vulnerabilities in unchanged dependencies are shown:
+
+> Note: an advisory that already affected an updated package's base version
+> counts as pre-existing, not newly introduced; upgrading a package does not
+> re-flag advisories it carried before the change. If the base-version lookup
+> fails, the diff falls back to reporting every changed-package advisory.
 
 ```mermaid
 flowchart LR

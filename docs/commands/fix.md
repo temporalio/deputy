@@ -20,7 +20,7 @@ deputy fix [repo] [flags]
 | --- | --- | --- | --- |
 | `--report` | | | Path to JSON scan report (use `-` for stdin) |
 | `--plan` | | | Path to existing remediation plan JSON |
-| `--ref` | | `HEAD` | Git reference to scan |
+| `--ref` | | auto | Git reference to scan; omitted lets Deputy choose `HEAD` or the working tree |
 | `--ecosystems` | | all | Limit to specific ecosystems |
 | `--exclude-path` | | | Directory glob to skip during the walk (repeatable; e.g. `.bin/**`). Unioned with `scan.exclude_paths` from config |
 | `--ignore-unfixed` | | `false` | Skip vulns without fixes |
@@ -70,6 +70,9 @@ $ deputy fix
 
 # Scan and immediately apply fixes
 $ deputy fix --apply .
+
+# Generate a plan for a remote repository at a specific ref
+$ deputy fix github.com/hashicorp/vagrant --ref main
 ```
 
 ### Plan Management
@@ -138,26 +141,38 @@ Remediation Plan:
 
 ### JSON Format
 
+JSON output marshals the `deputy.fix.v1.FixResponse` proto with snake_case
+field names:
+
 ```json
 {
   "target": {
-    "repo": "/path/to/repo",
-    "ref": "HEAD",
-    "commit": "abc123d..."
+    "display_path": "/path/to/repo",
+    "ref": "main",
+    "effective_ref": "refs/heads/main",
+    "commit_hash": "abc123def456"
   },
-  "stdlibUpgrade": "v1.24.9",
+  "stdlib_upgrade": "1.24.9",
   "commands": [
     {
-      "ecosystem": "go",
+      "manager": "go",
       "command": "go get github.com/example/pkg@v1.2.4",
-      "workdir": ".",
-      "runnable": true
+      "path": "go.mod",
+      "follow_up": "go mod tidy",
+      "is_direct": true,
+      "executable": true,
+      "package": "github.com/example/pkg",
+      "version": "v1.2.3",
+      "purl": "pkg:golang/github.com/example/pkg@v1.2.3",
+      "target_version": "v1.2.4",
+      "vulnerabilities": ["CVE-2026-1234"]
     }
   ],
   "stats": {
-    "totalCommands": 4,
-    "runnableCommands": 4
-  }
+    "total_commands": 4,
+    "runnable_commands": 4
+  },
+  "generated_at": "2026-07-06T10:30:00Z"
 }
 ```
 

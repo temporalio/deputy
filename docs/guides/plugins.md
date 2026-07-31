@@ -533,9 +533,111 @@ deputy scan .
 DEPUTY_LOG_LEVEL=debug deputy scan . 2>&1 | grep trace
 ```
 
+## Advisory Source Plugins
+
+Beyond extractors, Deputy supports **advisory source** plugins: components that,
+given a set of packages, return the advisories (vulnerabilities and malware)
+affecting them. The built-in OSV source implements the same contract in-process;
+plugins let you add threat feeds, vendor databases, or internal allow/deny
+intelligence. Deputy aggregates all sources with union-with-provenance
+semantics: each finding records which source(s) reported it in `sources`, and
+the scan's `coverage` block shows which (ecosystem, artifact) combinations each
+source answered for. Advisory records (the shared descriptions keyed by
+advisory ID) merge first-source-wins in registration order, with the built-in
+OSV source first; a custom source cannot overwrite OSV's record for an ID OSV
+already returned, only add findings that reference it.
+
+### Quick Start (Go)
+
+```go
+package main
+
+import (
+    "context"
+
+    plugin "github.com/temporalio/deputy/sdk/plugin"
+)
+
+type mySource struct{}
+
+func (s *mySource) Info() *plugin.AdvisorySourceInfo {
+    return &plugin.AdvisorySourceInfo{
+        Name:        "my-feed",
+        DisplayName: "My Threat Feed",
+        Version:     1,
+        Capabilities: &plugin.SourceCapabilities{
+            Ecosystems:   []string{"npm", "pypi"},
+            Artifacts:    []plugin.ArtifactKind{plugin.ArtifactKindPackage},
+            FindingKinds: []plugin.FindingKind{plugin.FindingKindMalware},
+        },
+    }
+}
+
+func (s *mySource) Query(ctx context.Context, packages []*plugin.Package) ([]*plugin.Finding, map[string]*plugin.Advisory, error) {
+    // Look up packages against your feed and return findings + advisories.
+    return nil, nil, nil
+}
+
+func main() {
+    plugin.MainAdvisorySource(&mySource{})
+}
+```
+
+Declare accurate capabilities: Deputy routes only packages a source covers, and
+a source must ignore anything outside its declared coverage rather than
+erroring.
+
+### Registration (explicit opt-in)
+
+Advisory sources are trusted components. A `program:` source runs as a
+subprocess with the same operating-system privileges as Deputy itself (there is
+no sandbox), it sees every package identity in your scan, and its findings feed
+policy and remediation decisions verbatim. Review and version-pin a plugin as
+you would any dependency, and prefer the ConnectRPC binding for feeds a team
+operates centrally. Because sources can see and shape security findings, Deputy
+**never auto-executes** binaries it merely finds on PATH, and remote server
+mode excludes `program:` sources entirely (remote mode executes no code; each
+exclusion is logged). Name the sources you trust explicitly, via the
+environment:
+
+```bash
+DEPUTY_ADVISORY_SOURCES=deputy-advisory-source-myfeed deputy scan .
+```
+
+or in `.deputy.yaml`:
+
+```yaml
+advisory_sources:
+  - program: deputy-advisory-source-myfeed   # pluginrpc subprocess plugin
+  - url: https://feeds.corp.example          # ConnectRPC service
+```
+
+A source that fails to load is skipped with a warning rather than failing the
+scan; the scan's `coverage` block shows which sources actually answered.
+
+### Transport Bindings
+
+The `AdvisorySourceService` proto contract has three interchangeable bindings;
+pick per source, the aggregation is identical:
+
+| Binding | Config | Cost per query | Right for |
+|---------|--------|----------------|-----------|
+| In-process | (built-in OSV) | none | core sources |
+| pluginrpc | `program:` | subprocess exec | scans, any-language plugins, no daemon |
+| ConnectRPC | `url:` | one HTTP call | latency-sensitive callers, shared/remote feeds |
+
+To serve the ConnectRPC binding, implement `AdvisorySourceService` with the
+generated `pluginv1connect.NewAdvisorySourceServiceHandler` and run it as a
+sidecar or shared service.
+
+See [Example: Static Advisory Source](../../examples/advisory-source-plugins/static/)
+for a complete working plugin.
+
 ## Reference
 
 - [Plugin SDK (pkg.go.dev)](https://pkg.go.dev/github.com/temporalio/deputy/sdk/plugin)
 - [ExtractorService Proto](../../api/deputy/plugin/v1/extractor.proto)
+- [AdvisorySourceService Proto](../../api/deputy/plugin/v1/advisory_source.proto)
 - [pluginrpc Documentation](https://github.com/pluginrpc/pluginrpc)
 - [Example: Dotenv Extractor](../../examples/plugins/dotenv-extractor/)
+- [Example: Static Advisory Source](../../examples/advisory-source-plugins/static/)

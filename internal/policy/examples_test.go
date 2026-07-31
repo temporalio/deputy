@@ -153,6 +153,9 @@ func TestGenerateExample_EnvStructure(t *testing.T) {
 		{EntrypointGraphReport, "graph"},
 		{EntrypointSecretsReport, "secrets"},
 		{EntrypointServiceScanRequest, "server"},
+		{EntrypointSandboxExecution, "sandbox"},
+		{EntrypointFixPlan, "fix"},
+		{EntrypointTriageReport, "triage"},
 	}
 
 	for _, tt := range tests {

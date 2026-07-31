@@ -104,3 +104,24 @@ func TestBindingProfileVariables(t *testing.T) {
 		t.Error("expected 'target' to be optional, not required")
 	}
 }
+
+func TestExampleCategoriesCoverAllEntrypoints(t *testing.T) {
+	seen := make(map[Entrypoint]string)
+	for _, cat := range ExampleCategories {
+		for _, ep := range cat.Entrypoints {
+			if ep.Category() != cat.Name {
+				t.Errorf("entrypoint %q is in category %q, want %q", ep, cat.Name, ep.Category())
+			}
+			if prev, ok := seen[ep]; ok {
+				t.Errorf("entrypoint %q appears in both %q and %q", ep, prev, cat.Name)
+			}
+			seen[ep] = cat.Name
+		}
+	}
+
+	for _, ep := range AllEntrypoints {
+		if _, ok := seen[ep]; !ok {
+			t.Errorf("entrypoint %q missing from ExampleCategories", ep)
+		}
+	}
+}

@@ -17,7 +17,7 @@ Deputy is intentionally pipeline-friendly: commands compose well with each other
 | [`diff`](diff.md) | Compare dependency changes between refs | `--skip-vuln-scan`, `--licenses` |
 | [`graph`](graph.md) | Visualize dependency graph | `--format`, `--depth`, `--focus`, subcommands: `why`, `needs` |
 | [`sbom`](sbom.md) | Generate CycloneDX/SPDX SBOMs | `--format`, `--ref`, `--enrich-licenses` |
-| [`list`](list.md) | Dump PURLs for scripting | `--format`, `--only-direct`, `--source`, `--platform` |
+| [`list`](list.md) | Dump PURLs for scripting | `--format`, `--direct`, `--source`, `--platform` |
 | [`pin`](pin.md) | Pin dependencies to immutable refs | `--ecosystems`, `--exclude`, `--dry-run`, subcommands: `check`, `verify`, `update` |
 | [`exec`](exec.md) | Run a command in a sandboxed runtime | `--runtime`, `--mode`, `--network`, `--exec-allow` |
 | [`policy`](policy.md) | Lint, test, bundle, evaluate policies | subcommands: `lint`, `test`, `eval`, `bundle` |
@@ -55,7 +55,7 @@ $ deputy graph --format dot | dot -Tpng -o deps.png
 $ deputy graph why lodash
 
 # List all dependencies as PURLs
-$ deputy list --format json | jq '.items[].purl'
+$ deputy list --format json | jq '.packages[].purl'
 
 # Validate policies before use
 $ deputy policy lint policy/*.yaml
@@ -73,13 +73,13 @@ $ deputy sbom --format protobom-json | deputy scan sbom -
 $ deputy scan --format json | deputy fix --report -
 
 # List deps, filter with jq
-$ deputy list --format json | jq '.items[] | select(.isDirect) | .purl'
+$ deputy list --format json | jq '.packages[] | select(.direct) | .purl'
 ```
 
 ## Exit Codes
 
-- `0` — Success (no policy violations)
-- `1` — Policy violations, scan errors, or other failures
+- `0`: Success (no policy violations)
+- `1`: Policy violations, scan errors, or other failures
 
 Use exit codes for CI gating.
 
@@ -87,30 +87,30 @@ Use exit codes for CI gating.
 
 ### Core Workflow
 
-- [Scan](scan.md) — Vulnerability scanning
-- [Secrets](secrets.md) — Secret and credential detection
-- [Explain](explain.md) — Vulnerability explanation with agent analysis
-- [Fix](fix.md) — Remediation planning
-- [Triage](triage.md) — Prioritization
-- [Diff](diff.md) — Dependency change analysis
-- [Graph](graph.md) — Dependency graph visualization
-- [SBOM](sbom.md) — SBOM generation
-- [List](list.md) — Dependency listing
-- [Pin](pin.md) — Dependency pinning for supply chain security
-- [Exec](exec.md) — Sandboxed command execution
+- [Scan](scan.md): Vulnerability scanning
+- [Secrets](secrets.md): Secret and credential detection
+- [Explain](explain.md): Vulnerability explanation with agent analysis
+- [Fix](fix.md): Remediation planning
+- [Triage](triage.md): Prioritization
+- [Diff](diff.md): Dependency change analysis
+- [Graph](graph.md): Dependency graph visualization
+- [SBOM](sbom.md): SBOM generation
+- [List](list.md): Dependency listing
+- [Pin](pin.md): Dependency pinning for supply chain security
+- [Exec](exec.md): Sandboxed command execution
 
 ### Enforcement & Platform
 
-- [Policy](policy.md) — Policy authoring tools
-- [Proxy](proxy.md) — Package proxy
-- [Server](server.md) — API server for remote clients
+- [Policy](policy.md): Policy authoring tools
+- [Proxy](proxy.md): Package proxy
+- [Server](server.md): API server for remote clients
 
 ### Integrations
 
-- [MCP](mcp.md) — MCP server for AI assistants (Claude, Codex, Cursor)
+- [MCP](mcp.md): MCP server for AI assistants (Claude, Codex, Cursor)
 
 ### Setup & Configuration
 
-- [Init](init.md) — Project initialization
-- [Config](config.md) — Configuration management
-- [Completion](completion.md) — Shell autocompletion
+- [Init](init.md): Project initialization
+- [Config](config.md): Configuration management
+- [Completion](completion.md): Shell autocompletion

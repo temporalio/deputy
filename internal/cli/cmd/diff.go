@@ -17,13 +17,19 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
+
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/advisorysource"
+	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/compare"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
@@ -43,9 +49,6 @@ import (
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/temporalio/deputy/internal/vulnerability"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sync/errgroup"
 )
 
 // AddDiffCommand registers the diff subcommand which compares dependency
@@ -147,8 +150,11 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 				outW = f
 			}
 
-			// Check if both arguments are container image references
-			// BUT only if they don't look like Git refs in the current repo context
+			// Check if both arguments are container image references.
+			// BUT only if they don't look like Git refs in the current repo context.
+			if len(args) == 2 && isMixedContainerDiffInContext(args[0], args[1], repo) {
+				return fmt.Errorf("base and target must both be Git refs or both be container image refs")
+			}
 			if len(args) == 2 && isContainerDiffInContext(args[0], args[1], repo) {
 				// Determine if using local daemon (--source docker-daemon or deprecated --local-daemon)
 				useDaemon := useLocalDaemon || source == "docker-daemon" || source == "daemon" || source == "local"
@@ -305,7 +311,7 @@ PERFORMANCE TIPS:
 	cmd.Flags().BoolVar(&ignoreUnfixed, "ignore-unfixed", false, "Ignore vulnerabilities without fixes in diff scan output")
 	cmd.Flags().BoolVar(&showUnchanged, "show-unchanged", false, "Always show vulnerabilities in unchanged dependencies (overrides quiet behavior)")
 	cmd.Flags().StringVar(&unchangedThreshold, "unchanged-threshold", "critical", "Auto-show unchanged vulns at or above this severity: none|low|med|high|critical|any")
-	cmd.Flags().StringSliceVarP(&ecosystems, "ecosystems", "e", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
+	cmd.Flags().StringSliceVarP(&ecosystems, "ecosystems", "e", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, mise, asdf, haskell, r, cpp (default: all)")
 	addExcludePathFlag(cmd)
 	cmd.Flags().BoolVar(&debugMatcher, "debug-matcher", false, "Print which changed files were considered dependency manifests/lockfiles")
 	cmd.Flags().StringArrayVar(&policyPaths, "policy", nil, "Path to CEL policy files or bundles to evaluate against diff results (repeatable)")
@@ -619,6 +625,16 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 
 		changedVulns, unchangedVulns := splitVulnsByChange(reportVulns, changes)
 
+		// An advisory that already affected the base version of an updated
+		// package is not introduced by the change: the diff contract is
+		// vulnerability additions, removals, and fixes, and CI gates count
+		// the changed set as newly introduced. Reclassify those advisories
+		// into the pre-existing bucket.
+		if len(changedVulns) > 0 {
+			baseAffected := baseVersionAdvisories(ctx, changes, errW)
+			changedVulns, unchangedVulns = reclassifyPreexistingVulns(changedVulns, unchangedVulns, baseAffected)
+		}
+
 		_, unchangedStats := consolidateReportVulnerabilities(unchangedVulns)
 
 		// Decide whether to show unchanged set based on threshold
@@ -767,7 +783,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 	if certPool, err := x509.SystemCertPool(); err == nil {
 		if conn, err := grpc.NewClient("api.deps.dev:443", grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certPool, ""))); err == nil {
 			client = pb.NewInsightsClient(conn)
-			// closing conn when context done (fire and forget) – rely on GC otherwise
+			// closing conn when context done (fire and forget); rely on GC otherwise
 			go func() { <-ctx.Done(); _ = conn.Close() }()
 		}
 	}
@@ -1013,6 +1029,105 @@ func splitVulnsByChange(vulns []report.Vulnerability, changes []compare.Change) 
 	return changed, unchanged
 }
 
+// baseVersionAdvisories queries the advisory sources for the base versions of
+// updated packages and returns, per canonical package name, the advisory IDs
+// (including aliases) that already affected the base version. A lookup failure
+// degrades to nil with a warning: the caller then treats every changed-package
+// advisory as newly introduced, failing toward reporting rather than hiding.
+func baseVersionAdvisories(ctx context.Context, changes []compare.Change, errW io.Writer) map[string]map[string]bool {
+	basePkgs := baseQueryPackages(changes)
+	if len(basePkgs) == 0 {
+		return nil
+	}
+
+	agg, err := advisorysource.NewDefaultRegistry(ctx, osv.NewClient()).Query(ctx, basePkgs)
+	if err != nil {
+		fmt.Fprintf(errW, "Warning: base-version advisory lookup failed; reporting all changed-package advisories as new: %v\n", err)
+		return nil
+	}
+
+	affected := map[string]map[string]bool{}
+	for _, f := range agg.Findings {
+		if f == nil || !f.GetAffected() {
+			continue
+		}
+		key := compare.ParseGoPackage(&extractor.Package{Name: f.GetPackage().GetName()}).CanonicalName
+		ids := affected[key]
+		if ids == nil {
+			ids = map[string]bool{}
+			affected[key] = ids
+		}
+		ids[f.GetAdvisoryId()] = true
+		if adv := agg.Advisories[f.GetAdvisoryId()]; adv != nil {
+			for _, alias := range adv.GetAliases() {
+				ids[alias] = true
+			}
+		}
+	}
+	return affected
+}
+
+// baseQueryPackages assembles the base-version packages whose advisories can
+// pre-date a change: version changes (updated, upgraded, downgraded) with a
+// known base version, queried under the base name when the package was
+// renamed. Added packages have no base to pre-date and removed packages have
+// no changed vulnerabilities to reclassify.
+func baseQueryPackages(changes []compare.Change) []*dependencyv1.Package {
+	var basePkgs []*dependencyv1.Package
+	for _, c := range changes {
+		switch c.ChangeType {
+		case compare.Updated, compare.Upgraded, compare.Downgraded:
+		default:
+			continue
+		}
+		if c.BaseVersion == "" {
+			continue
+		}
+		name := c.OldName
+		if name == "" {
+			name = c.Name
+		}
+		basePkgs = append(basePkgs, &dependencyv1.Package{
+			Name:      name,
+			Version:   c.BaseVersion,
+			Ecosystem: c.Ecosystem,
+		})
+	}
+	return basePkgs
+}
+
+// reclassifyPreexistingVulns moves changed-package vulnerabilities whose
+// advisory already affected the package's base version (matched by ID or any
+// alias) into the pre-existing bucket, leaving the changed set to carry only
+// what the change actually introduces. A nil baseAffected map reclassifies
+// nothing.
+func reclassifyPreexistingVulns(changed, unchanged []report.Vulnerability, baseAffected map[string]map[string]bool) (newChanged, newUnchanged []report.Vulnerability) {
+	if len(baseAffected) == 0 {
+		return changed, unchanged
+	}
+	newChanged = make([]report.Vulnerability, 0, len(changed))
+	newUnchanged = unchanged
+	for _, v := range changed {
+		key := compare.ParseGoPackage(&extractor.Package{Name: v.Package}).CanonicalName
+		ids := baseAffected[key]
+		preexisting := ids[v.ID]
+		if !preexisting {
+			for _, alias := range v.Aliases {
+				if ids[alias] {
+					preexisting = true
+					break
+				}
+			}
+		}
+		if preexisting {
+			newUnchanged = append(newUnchanged, v)
+			continue
+		}
+		newChanged = append(newChanged, v)
+	}
+	return newChanged, newUnchanged
+}
+
 func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scanning.Result, []vulnerability.Consolidated) {
 	if len(vulns) == 0 {
 		// Stats must stay non-nil: callers dereference it (e.g. the diff
@@ -1115,11 +1230,12 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 	// Evaluate per-change policies
 	for _, protoChange := range protoChanges {
 		changePayload := map[string]any{
-			"repo":      diffReport.Repo,
-			"baseRef":   diffReport.BaseRef,
-			"targetRef": diffReport.TargetRef,
-			"change":    protoChange,
-			"pkg":       protoChange.Package, // Alias for consistency with scan entrypoints
+			"repo":       diffReport.Repo,
+			"base_ref":   diffReport.BaseRef,
+			"target_ref": diffReport.TargetRef,
+			"change":     protoChange,
+			"pkg":        protoChange.Package, // Alias for consistency with scan entrypoints
+			"dependency": protoChange.Package, // Alias for consistency with fix entrypoints
 		}
 		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, changePayload, "diff", policy.EntrypointDiffDependencyChange, errW); err != nil {
 			return err
@@ -1144,12 +1260,7 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 
 // outputDiffProtoJSON writes a diff response as JSON using protojson.
 func outputDiffProtoJSON(w io.Writer, resp *diffv1.DiffVulnerabilitiesResponse) error {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal proto to JSON: %w", err)

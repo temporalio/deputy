@@ -1,21 +1,20 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
-func TestIsContainerDiffInContext(t *testing.T) {
-	// Create a temporary Git repository with some tags
-	tmpDir, err := os.MkdirTemp("", "deputy-test-git-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+func newDiffTestGitRepo(t *testing.T) string {
+	t.Helper()
 
-	// Initialize a git repo with some commits and tags
+	tmpDir := t.TempDir()
 	cmds := [][]string{
 		{"git", "init"},
 		{"git", "config", "user.email", "test@example.com"},
@@ -28,12 +27,17 @@ func TestIsContainerDiffInContext(t *testing.T) {
 			t.Fatalf("command %v failed: %v\n%s", args, err, out)
 		}
 	}
+	return tmpDir
+}
+
+func TestIsContainerDiffInContext(t *testing.T) {
+	tmpDir := newDiffTestGitRepo(t)
 
 	// Create a file and commit
 	if err := os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("test"), 0644); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
-	cmds = [][]string{
+	cmds := [][]string{
 		{"git", "add", "."},
 		{"git", "commit", "-m", "Initial commit"},
 		{"git", "tag", "v1.28.1"},
@@ -67,6 +71,20 @@ func TestIsContainerDiffInContext(t *testing.T) {
 			target:  "docker://nginx:1.25",
 			repoDir: tmpDir,
 			want:    true,
+		},
+		{
+			name:    "Mixed explicit image and Git ref should not be container diff",
+			base:    "docker://nginx:1.24",
+			target:  "main",
+			repoDir: tmpDir,
+			want:    false,
+		},
+		{
+			name:    "HTTPS Git URLs are not container images in a Git repo",
+			base:    "https://github.com/owner/repo",
+			target:  "https://github.com/owner/repo-fork",
+			repoDir: tmpDir,
+			want:    false,
 		},
 		{
 			name:    "Container refs without Git repo context",
@@ -106,6 +124,79 @@ func TestIsContainerDiffInContext(t *testing.T) {
 					tt.base, tt.target, tt.repoDir, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsMixedContainerDiffInContext(t *testing.T) {
+	tmpDir := newDiffTestGitRepo(t)
+
+	tests := []struct {
+		name    string
+		base    string
+		target  string
+		repoDir string
+		want    bool
+	}{
+		{
+			name:    "explicit image and Git ref",
+			base:    "docker://nginx:1.24",
+			target:  "main",
+			repoDir: tmpDir,
+			want:    true,
+		},
+		{
+			name:    "simple target outside repo remains image-compatible",
+			base:    "nginx:1.24",
+			target:  "main",
+			repoDir: "",
+			want:    false,
+		},
+		{
+			name:    "ambiguous Docker Hub name can remain Git ref in repo",
+			base:    "nginx",
+			target:  "main",
+			repoDir: tmpDir,
+			want:    false,
+		},
+		{
+			name:    "both container images",
+			base:    "nginx:1.24",
+			target:  "nginx:1.25",
+			repoDir: tmpDir,
+			want:    false,
+		},
+		{
+			name:    "both Git refs",
+			base:    "main",
+			target:  "develop",
+			repoDir: tmpDir,
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isMixedContainerDiffInContext(tt.base, tt.target, tt.repoDir)
+			if got != tt.want {
+				t.Errorf("isMixedContainerDiffInContext(%q, %q, %q) = %v, want %v",
+					tt.base, tt.target, tt.repoDir, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiffCommandRejectsMixedContainerAndGitRefs(t *testing.T) {
+	repo := newDiffTestGitRepo(t)
+	root := &cobra.Command{Use: "deputy"}
+	AddDiffCommand(root, nil)
+	root.SetArgs([]string{"diff", "--repo", repo, "docker://nginx:1.24", "main"})
+
+	err := root.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("expected mixed ref error")
+	}
+	if !strings.Contains(err.Error(), "must both be Git refs or both be container image refs") {
+		t.Fatalf("error = %q, want mixed ref guidance", err)
 	}
 }
 

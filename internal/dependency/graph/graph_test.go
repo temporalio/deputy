@@ -78,6 +78,37 @@ func TestFromInventory(t *testing.T) {
 	t.Logf("Graph has %d nodes, %d direct", stats.TotalNodes, stats.DirectNodes)
 }
 
+func TestFromInventorySkipsRelativeGoReplacePaths(t *testing.T) {
+	pkgs := []*extractor.Package{
+		{
+			Name:      "../../..",
+			PURLType:  "golang",
+			Locations: []string{"examples/plugin/go.mod"},
+		},
+		{
+			Name:     "github.com/temporalio/deputy",
+			Version:  "0.0.0",
+			PURLType: "golang",
+		},
+	}
+
+	g := FromInventory(pkgs, nil)
+	if node := g.Node("pkg:golang/../../.."); node != nil {
+		t.Fatalf("FromInventory created node for local replacement path: %+v", node)
+	}
+	if node := g.Node("pkg:golang/github.com/temporalio/deputy@0.0.0"); node == nil {
+		t.Fatalf("FromInventory skipped valid Go module; nodes = %v", graphNodePURLs(g))
+	}
+}
+
+func graphNodePURLs(g *Graph) []string {
+	var purls []string
+	for node := range g.Nodes() {
+		purls = append(purls, node.GetPurl())
+	}
+	return purls
+}
+
 func TestRoots(t *testing.T) {
 	g := New()
 	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
@@ -639,10 +670,10 @@ func TestRenderD3(t *testing.T) {
 func TestRenderWithOptions(t *testing.T) {
 	g := New()
 	g.AddNode(&Node{
-		Purl:      "pkg:npm/a@1.0.0",
-		Name:      "a",
-		Version:   "1.0.0",
-		Direct:    true,
+		Purl:               "pkg:npm/a@1.0.0",
+		Name:               "a",
+		Version:            "1.0.0",
+		Direct:             true,
 		VulnerabilityCount: &VulnerabilityCount{Total: 1, Critical: 1},
 	})
 
@@ -705,10 +736,10 @@ func TestUpdateDepths(t *testing.T) {
 		purl  string
 		depth int32
 	}{
-		{"pkg:npm/a@1.0.0", 0},      // direct
-		{"pkg:npm/b@1.0.0", 1},      // 1 hop
-		{"pkg:npm/c@1.0.0", 2},      // 2 hops
-		{"pkg:npm/d@1.0.0", 3},      // 3 hops
+		{"pkg:npm/a@1.0.0", 0},                      // direct
+		{"pkg:npm/b@1.0.0", 1},                      // 1 hop
+		{"pkg:npm/c@1.0.0", 2},                      // 2 hops
+		{"pkg:npm/d@1.0.0", 3},                      // 3 hops
 		{"pkg:npm/orphan@1.0.0", DepthDisconnected}, // disconnected
 	}
 
@@ -821,5 +852,28 @@ func TestVulnerablePaths(t *testing.T) {
 		if len(p) == 0 || p[len(p)-1].Name != "c" {
 			t.Errorf("path should end at vulnerable node c: %v", p)
 		}
+	}
+}
+
+// TestStatsExcludesDisconnectedSentinelFromMaxDepth pins a live-spin
+// regression: disconnected nodes carry the internal DepthDisconnected
+// sentinel, which leaked into MaxDepth as 999 while the real depth was
+// omitted from wire output as a zero value.
+func TestStatsExcludesDisconnectedSentinelFromMaxDepth(t *testing.T) {
+	g := New()
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true, Depth: 0, Ecosystem: "npm"})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", Depth: 3, Ecosystem: "npm"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c", Depth: DepthDisconnected, Ecosystem: "npm"})
+
+	stats := g.Stats()
+
+	if stats.MaxDepth != 3 {
+		t.Errorf("MaxDepth = %d, want 3 (sentinel must not leak)", stats.MaxDepth)
+	}
+	if stats.MaxConnectedDepth != 3 {
+		t.Errorf("MaxConnectedDepth = %d, want 3", stats.MaxConnectedDepth)
+	}
+	if stats.DisconnectedNodes != 1 {
+		t.Errorf("DisconnectedNodes = %d, want 1", stats.DisconnectedNodes)
 	}
 }

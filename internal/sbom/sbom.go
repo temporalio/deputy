@@ -383,10 +383,17 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 
 	ghaCache := &githubActionsResolutionCache{}
 
+	// Node ids must be unique within a protobom document. The same artifact can
+	// reach this builder from two producers (a Dockerfile base image arrives
+	// from the stage-aware Dockerfile pass and again as the dockerfilex
+	// extractor's package), so every append records its id here and later
+	// producers skip ids already modeled.
+	seenNodeIDs := map[string]struct{}{app.Id: {}}
+
 	if includeDockerfileBaseImages(ecosystems) {
 		dockerfiles, _ := discoverAndParseDockerfiles(ws)
 		if len(dockerfiles) > 0 {
-			addDockerfileBaseImagesToSBOM(d, dockerfiles, app.Id)
+			addDockerfileBaseImagesToSBOM(d, dockerfiles, app.Id, seenNodeIDs)
 		}
 	}
 
@@ -411,6 +418,11 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		if purlStr != "" {
 			n.Id = spdxSafeIDFromPURL(purlStr)
 		}
+		// Skip artifacts an earlier producer already modeled (see seenNodeIDs).
+		if _, ok := seenNodeIDs[n.Id]; ok {
+			continue
+		}
+		seenNodeIDs[n.Id] = struct{}{}
 		n.Type = sbom.Node_PACKAGE
 		n.Name = deriveDisplayName(p.Name, purlStr)
 		n.Version = p.Version
@@ -821,7 +833,7 @@ var miseHashAlgorithms = map[string]sbom.HashAlgorithm{
 // addMiseLockReferences enriches a package node with the exact locked version
 // and per-platform integrity metadata from a sibling mise.lock. Each platform's
 // asset is modeled as a DOWNLOAD external reference carrying its URL and
-// checksum — a faithful, non-lossy representation, since mise installs a
+// checksum: a faithful, non-lossy representation, since mise installs a
 // distinct artifact per platform. When the lock pins exactly one platform, its
 // checksum is also set as the component-level hash for conventional consumers.
 func addMiseLockReferences(n *sbom.Node, md *mise.Metadata) {
@@ -1288,7 +1300,11 @@ func isDockerfileFilename(name string) bool {
 
 // addDockerfileBaseImagesToSBOM adds base image references from Dockerfiles as SBOM nodes.
 // Each base image becomes a component with a pkg:docker or pkg:oci PURL.
-func addDockerfileBaseImagesToSBOM(doc *sbom.Document, dockerfiles []*dockerfile.Info, appID string) {
+// addDockerfileBaseImagesToSBOM appends one node per unique Dockerfile base
+// image, wired to the root via contains edges. Every appended node id is
+// recorded in seenNodeIDs so later producers (the package loop also sees base
+// images via the dockerfilex extractor) skip artifacts already modeled here.
+func addDockerfileBaseImagesToSBOM(doc *sbom.Document, dockerfiles []*dockerfile.Info, appID string, seenNodeIDs map[string]struct{}) {
 	if doc == nil || len(dockerfiles) == 0 {
 		return
 	}
@@ -1325,6 +1341,9 @@ func addDockerfileBaseImagesToSBOM(doc *sbom.Document, dockerfiles []*dockerfile
 			}
 
 			doc.NodeList.Nodes = append(doc.NodeList.Nodes, node)
+			if seenNodeIDs != nil {
+				seenNodeIDs[node.Id] = struct{}{}
+			}
 
 			// Add edge from root to this base image
 			doc.NodeList.Edges = append(doc.NodeList.Edges, &sbom.Edge{

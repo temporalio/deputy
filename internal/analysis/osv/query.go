@@ -135,9 +135,11 @@ func QueryProto(ctx context.Context, client Client, pkgs []*dependencyv1.Package
 		return nil, map[string]*vulnerabilityv1.Advisory{}, nil
 	}
 
-	// Convert proto packages to PkgInput for the existing query infrastructure
-	inputs := make([]PkgInput, len(pkgs))
-	for i, pkg := range pkgs {
+	// Convert proto packages to PkgInput for the existing query infrastructure.
+	// Nil packages are skipped entirely; a zero-value input slot would be
+	// counted (and reported) as a package dropped for missing a version.
+	inputs := make([]PkgInput, 0, len(pkgs))
+	for _, pkg := range pkgs {
 		if pkg == nil {
 			continue
 		}
@@ -154,7 +156,7 @@ func QueryProto(ctx context.Context, client Client, pkgs []*dependencyv1.Package
 			}
 		}
 
-		inputs[i] = PkgInput{
+		inputs = append(inputs, PkgInput{
 			QueryKey: QueryKey{
 				Name:      pkg.Name,
 				Version:   pkg.Version,
@@ -167,7 +169,7 @@ func QueryProto(ctx context.Context, client Client, pkgs []*dependencyv1.Package
 				ManifestRefs: manifestRefs,
 				LayerDetails: pkg.LayerDetails,
 			},
-		}
+		})
 	}
 
 	// Query using existing infrastructure
@@ -346,12 +348,28 @@ func queryBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerab
 	}
 	var ghaPkgs []PkgInput
 	var otherPkgs []PkgInput
+	var skippedEcosystem int
 	for _, p := range pkgs {
 		if isGitHubActionsInput(p) {
 			ghaPkgs = append(ghaPkgs, p)
 			continue
 		}
+		if !osvAPIQueryable(p) {
+			// OSV's querybatch rejects the entire batch if any query names an
+			// ecosystem it does not recognize (e.g. Dockerfile base images,
+			// mise/asdf tools). Skip those rather than aborting the whole scan;
+			// OSV simply has no data for them.
+			skippedEcosystem++
+			continue
+		}
 		otherPkgs = append(otherPkgs, p)
+	}
+	if skippedEcosystem > 0 {
+		logs.Debug(ctx, "deputy.osv.skipped_unsupported_ecosystem",
+			"skipped", skippedEcosystem,
+			"queryable", len(otherPkgs)+len(ghaPkgs),
+			"total_input", len(pkgs),
+		)
 	}
 
 	var out []Vulnerability
@@ -376,6 +394,29 @@ func queryBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerab
 		return nil, nil
 	}
 	return out, nil
+}
+
+// osvAPIQueryable reports whether OSV's querybatch API can resolve this
+// package's ecosystem. OSV only recognizes a fixed set of ecosystems; Deputy
+// records that set as a non-empty OSVName in its ecosystem registry. Packages in
+// ecosystems OSV does not cover (Dockerfile base images, mise/asdf tools, and
+// anything unrecognized) must be excluded from the batch, because OSV rejects
+// the whole request if a single query names an unknown ecosystem. GitHub Actions
+// is queryable via the separate bucket path and is partitioned out before here.
+func osvAPIQueryable(p PkgInput) bool {
+	eco := strings.TrimSpace(p.Ecosystem)
+	if eco == "" && p.PURL != "" {
+		if pu, err := purlx.ParseLoose(p.PURL); err == nil {
+			eco = pu.Type
+		}
+	}
+	if ecosystem.Parse(eco).OSVQueryable() {
+		return true
+	}
+	// OS-package ecosystems (Alpine:v3.19, Debian:12, ...) live outside the
+	// package-manager ecosystem registry but are first-class in OSV.
+	_, ok := OSFamilyOSVName(eco)
+	return ok
 }
 
 // isGitHubActionsInput reports whether the given package should be queried against
@@ -404,34 +445,16 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 	meta := make([]PkgInput, 0, len(pkgs))
 	var droppedNoVersion, droppedNoIdentifier int
 	for _, p := range pkgs {
-		version := strings.TrimSpace(p.Version)
+		normalized := normalizeQueryInput(p)
+		version := strings.TrimSpace(normalized.Version)
 		if version == "" {
 			droppedNoVersion++
 			continue
 		}
-		normalized := p
-		normalized.Name = strings.TrimSpace(normalized.Name)
-		normalized.Ecosystem = strings.TrimSpace(normalized.Ecosystem)
-		normalized.PURL = strings.TrimSpace(normalized.PURL)
-		normalized.Version = version
-		if strings.EqualFold(normalized.Ecosystem, "go") {
+		if strings.EqualFold(normalized.Ecosystem, "go") || strings.EqualFold(normalized.Ecosystem, "golang") {
 			normalized.Version = normalizeGoVersion(normalized.Version)
 		}
-		pkgQuery := osvdev.Package{}
-		var queryVersion string
-		if normalized.PURL != "" {
-			pkgQuery.PURL = normalized.PURL
-			if pu, err := purl.FromString(normalized.PURL); err == nil {
-				queryVersion = pu.Version
-				pu.Version = ""
-				pkgQuery.PURL = pu.String()
-			}
-		}
-		if pkgQuery.PURL == "" {
-			pkgQuery.Name = normalized.Name
-			pkgQuery.Ecosystem = normalized.Ecosystem
-			queryVersion = normalized.Version
-		}
+		pkgQuery, queryVersion := osvQueryPackage(normalized)
 		if pkgQuery.Name == "" && pkgQuery.PURL == "" {
 			droppedNoIdentifier++
 			continue
@@ -485,7 +508,6 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 		if i >= len(queries) || i >= len(meta) {
 			break
 		}
-		i, res := i, res
 		g.Go(func() error {
 			pkgMeta := meta[i]
 			ver := queries[i].Version
@@ -595,6 +617,87 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 	return out, nil
 }
 
+func normalizeQueryInput(p PkgInput) PkgInput {
+	normalized := p
+	normalized.Name = strings.TrimSpace(normalized.Name)
+	normalized.Ecosystem = strings.TrimSpace(normalized.Ecosystem)
+	normalized.PURL = strings.TrimSpace(normalized.PURL)
+	normalized.Version = strings.TrimSpace(normalized.Version)
+
+	if normalized.PURL == "" {
+		return normalized
+	}
+	pu, err := purl.FromString(normalized.PURL)
+	if err != nil {
+		return normalized
+	}
+	normalized.PURL = pu.String()
+	if normalized.Version == "" {
+		normalized.Version = strings.TrimSpace(pu.Version)
+	}
+	if normalized.Name == "" {
+		normalized.Name = purlPackageName(pu)
+	}
+	if normalized.Ecosystem == "" {
+		normalized.Ecosystem = purlOSVEcosystem(pu)
+	}
+	return normalized
+}
+
+func osvQueryPackage(p PkgInput) (osvdev.Package, string) {
+	version := p.Version
+	if p.Name != "" && p.Ecosystem != "" {
+		return osvdev.Package{
+			Name:      p.Name,
+			Ecosystem: normalizeOSVEcosystem(p.Ecosystem),
+		}, version
+	}
+
+	pkgQuery := osvdev.Package{}
+	if p.PURL != "" {
+		pkgQuery.PURL = p.PURL
+		if pu, err := purl.FromString(p.PURL); err == nil {
+			if version == "" {
+				version = pu.Version
+			}
+			pu.Version = ""
+			pkgQuery.PURL = pu.String()
+		}
+	}
+	return pkgQuery, version
+}
+
+func normalizeOSVEcosystem(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if eco := ecosystem.Parse(name); eco != ecosystem.Unknown {
+		return eco.OSVName()
+	}
+	return name
+}
+
+func purlOSVEcosystem(pu purl.PackageURL) string {
+	if eco := ecosystem.Parse(pu.Type); eco != ecosystem.Unknown {
+		return eco.OSVName()
+	}
+	return strings.TrimSpace(pu.Type)
+}
+
+func purlPackageName(pu purl.PackageURL) string {
+	if pu.Name == "" {
+		return ""
+	}
+	if pu.Namespace == "" {
+		return pu.Name
+	}
+	if strings.EqualFold(pu.Type, "maven") {
+		return pu.Namespace + ":" + pu.Name
+	}
+	return pu.Namespace + "/" + pu.Name
+}
+
 // normalizeGoVersion ensures Go module versions use the canonical v-prefix.
 func normalizeGoVersion(v string) string {
 	return ecosystem.Go.NormalizeVersion(v)
@@ -680,24 +783,61 @@ func versionInGoSemverRange(version string, r osvschema.Range) bool {
 		return true // Can't compare, assume affected for safety
 	}
 
-	introduced := "v0.0.0"
+	var introduced string
+	introducedSet := false
+	introducedFromZero := false
 	for _, e := range r.Events {
 		if e.Introduced != "" {
-			introduced = normalizeGoVersion(e.Introduced)
+			introducedSet = true
+			introducedFromZero = strings.TrimSpace(e.Introduced) == "0"
+			if introducedFromZero {
+				introduced = ""
+			} else {
+				introduced = normalizeGoRangeVersion(e.Introduced)
+			}
 		}
 		if e.Fixed != "" {
-			fixed := normalizeGoVersion(e.Fixed)
-			if semver.Compare(cur, introduced) >= 0 && semver.Compare(cur, fixed) < 0 {
+			fixed := normalizeGoRangeVersion(e.Fixed)
+			if semver.IsValid(fixed) && goVersionAfterIntroduced(cur, introduced, introducedSet, introducedFromZero) && semver.Compare(cur, fixed) < 0 {
 				return true
 			}
-			introduced = "v0.0.0"
+			introduced = ""
+			introducedSet = false
+			introducedFromZero = false
+		}
+		if e.LastAffected != "" {
+			lastAffected := normalizeGoRangeVersion(e.LastAffected)
+			if semver.IsValid(lastAffected) && goVersionAfterIntroduced(cur, introduced, introducedSet, introducedFromZero) && semver.Compare(cur, lastAffected) <= 0 {
+				return true
+			}
+			introduced = ""
+			introducedSet = false
+			introducedFromZero = false
 		}
 	}
 	// Check if still in an open-ended "introduced" range
-	if introduced != "v0.0.0" && semver.Compare(cur, introduced) >= 0 {
+	if introducedSet && goVersionAfterIntroduced(cur, introduced, introducedSet, introducedFromZero) {
 		return true
 	}
 	return false
+}
+
+func goVersionAfterIntroduced(cur, introduced string, introducedSet, introducedFromZero bool) bool {
+	if !introducedSet || introducedFromZero {
+		return true
+	}
+	if !semver.IsValid(introduced) {
+		return true
+	}
+	return semver.Compare(cur, introduced) >= 0
+}
+
+func normalizeGoRangeVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "0" {
+		return "v0.0.0"
+	}
+	return normalizeGoVersion(v)
 }
 
 // versionInEcosystemRange checks if a version falls within an ECOSYSTEM or SEMVER range
@@ -736,8 +876,10 @@ func versionInEcosystemRange(version, ecosystem string, r osvschema.Range) bool 
 			}
 		}
 		if e.Fixed != "" {
-			fixedVersion, err := semantic.Parse(e.Fixed, semanticEco)
-			if err != nil {
+			// An unparseable fixed version skips the event, leaving the
+			// introduced range open: the conservative reading of bad
+			// advisory data (report affected rather than assume fixed).
+			if _, err := semantic.Parse(e.Fixed, semanticEco); err != nil {
 				continue
 			}
 
@@ -760,7 +902,6 @@ func versionInEcosystemRange(version, ecosystem string, r osvschema.Range) bool 
 			// Reset introduced after processing a fixed event
 			introducedSet = false
 			introducedVersion = nil
-			_ = fixedVersion // silence unused warning
 		}
 	}
 
