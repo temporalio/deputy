@@ -163,6 +163,7 @@ Supported formats: zip, jar, war, tar, tar.gz, tgz, tar.bz2, tar.xz
 | `--output`, `-o` | Write output to file |
 | `--verify` | Verify if detected secrets are still active |
 | `--no-redact` | Show actual secret values (use with caution) |
+| `--exit-zero` | Exit 0 even when secrets are found (report without failing) |
 | `--include` | Glob pattern for files to include |
 | `--exclude` | Glob pattern for files to exclude |
 
@@ -266,11 +267,16 @@ Verification is supported for:
 ### GitHub Actions
 
 ```yaml
+# Fail the job as soon as a secret is found.
 - name: Scan for secrets
-  run: deputy secrets --format sarif > secrets.sarif
+  run: deputy secrets
+
+# Or report first and gate later: --exit-zero keeps the upload step reachable.
+- name: Scan for secrets (report)
+  run: deputy secrets --format sarif --exit-zero > secrets.sarif
 
 - name: Upload SARIF
-  uses: github/codeql-action/upload-sarif@v2
+  uses: github/codeql-action/upload-sarif@v3
   with:
     sarif_file: secrets.sarif
 ```
@@ -279,14 +285,14 @@ Verification is supported for:
 
 ```yaml
 - name: Check for new secrets
-  run: |
-    deputy secrets --diff ${{ github.event.pull_request.base.sha }} ${{ github.sha }} \
-      --format json > secrets.json
-    if [ $(jq '.secretsFound' secrets.json) -gt 0 ]; then
-      echo "Secrets detected in PR!"
-      exit 1
-    fi
+  env:
+    BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    HEAD_SHA: ${{ github.sha }}
+  run: deputy secrets --diff "$BASE_SHA" "$HEAD_SHA"
 ```
+
+The command exits 1 when the diff introduces a secret, so no manual result
+parsing is needed.
 
 ### VM Image Pipeline
 
@@ -345,8 +351,33 @@ deputy secrets rootfs:///path/to/rootfs.ext4
 
 ## Exit Codes
 
-- `0` - Success (no secrets found)
-- `1` - Secrets found or scan error
+| Code | Meaning |
+| --- | --- |
+| `0` | No secrets found (or `--exit-zero` was passed) |
+| `1` | Secrets found, or the scan failed |
+
+Finding a secret is a failure condition, so `deputy secrets` can gate CI
+directly:
+
+```yaml
+- run: deputy secrets .
+```
+
+Every scan mode follows this contract: directory, file, remote Git URL,
+`--history`, base/target diff, container image, VM image, and archive.
+
+For report-only runs, `--exit-zero` keeps the exit status at 0 so a later step
+still executes, which is the usual pattern when uploading SARIF:
+
+```yaml
+- run: deputy secrets . --format sarif --exit-zero > secrets.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: secrets.sarif
+```
+
+A scan error always exits 1 regardless of `--exit-zero`: an unreadable target
+must not look like a clean result.
 
 ## See Also
 
