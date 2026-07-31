@@ -235,8 +235,10 @@ func (s *Strategy) scanActionManifest(
 			continue
 		}
 		usesStr = strings.TrimSpace(usesStr)
-		if usesStr == "" || strings.HasPrefix(usesStr, "./") || strings.HasPrefix(usesStr, "../") || strings.HasPrefix(usesStr, "docker://") {
-			continue // local or docker — skip
+		if usesStr == "" || strings.HasPrefix(usesStr, "./") || strings.HasPrefix(usesStr, "../") || strings.HasPrefix(usesStr, "$/") || strings.HasPrefix(usesStr, "docker://") {
+			// Local, self-repository ($/ resolves to the running commit, so it
+			// is already pinned by construction), or docker: nothing to pin.
+			continue
 		}
 
 		// Parse remote action reference: owner/repo[/subpath]@ref

@@ -20,6 +20,41 @@ func TestExtractor_Extract_Table(t *testing.T) {
 		want  []string
 	}{
 		{
+			name: "self-repository composite and reusable workflow",
+			files: map[string]string{
+				".github/workflows/self.yml": `
+name: self
+on: push
+jobs:
+  build:
+    steps:
+      - uses: $/tools/build
+  call:
+    uses: $/.github/workflows/reusable.yml
+`,
+				"tools/build/action.yml": `
+name: build
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+`,
+				".github/workflows/reusable.yml": `
+on: workflow_call
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+`,
+			},
+			entry: ".github/workflows/self.yml",
+			want: []string{
+				"githubactions|actions/checkout|v4",
+				"githubactions|actions/setup-go|v5",
+			},
+		},
+		{
 			name: "remote and docker uses",
 			files: map[string]string{
 				".github/workflows/ci.yml": `
@@ -249,6 +284,9 @@ func TestResolveLocalCandidates_Table(t *testing.T) {
 		{".github/workflows/a.yml", "./local-action", []string{"local-action", ".github/workflows/local-action"}},
 		{".github/workflows/a.yml", "./.github/workflows/reusable.yml", []string{".github/workflows/reusable.yml", ".github/workflows/.github/workflows/reusable.yml"}},
 		{".github/workflows/a.yml", "../nope", []string{".github/nope"}},
+		{".github/workflows/a.yml", "$/tools/build", []string{"tools/build"}},
+		{".github/workflows/a.yml", "$/.github/workflows/reusable.yml", []string{".github/workflows/reusable.yml"}},
+		{".github/workflows/a.yml", "$/../escape", nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.rel, func(t *testing.T) {

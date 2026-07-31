@@ -209,6 +209,51 @@ runs:
 	}
 }
 
+// Self-repository references ($/) resolve to the running commit, so they are
+// pinned by construction: Discover must not emit them as pinnable refs (an
+// owner of "$" would otherwise hit the GitHub API during resolution).
+func TestStrategy_DiscoverSkipsSelfRepositoryRefs(t *testing.T) {
+	fsys := testMapFS(map[string]string{
+		".github/workflows/ci.yml": `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/my-action
+      - uses: actions/checkout@v4`,
+		"my-action/action.yml": `
+name: My Action
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v3`,
+	})
+
+	s := &Strategy{}
+	refs, err := s.Discover(t.Context(), fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawCheckout, sawCache bool
+	for _, r := range refs {
+		if strings.HasPrefix(r.Name, "$") {
+			t.Errorf("self-repository reference leaked into pinnable refs: %+v", r)
+		}
+		if r.Name == "actions/checkout" {
+			sawCheckout = true
+		}
+		if r.Name == "actions/cache" {
+			sawCache = true
+		}
+	}
+	if !sawCheckout || !sawCache {
+		t.Errorf("expected remote refs alongside the skipped self reference, got: %v", refNames(refs))
+	}
+}
+
 func TestStrategy_DiscoverSubpathAction(t *testing.T) {
 	fsys := testMapFS(map[string]string{
 		".github/workflows/ci.yml": `

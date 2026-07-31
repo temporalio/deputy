@@ -87,6 +87,11 @@ To intentionally move pins forward to the latest release in their channel, use
 Plain `deputy pin` makes an existing reference immutable; when a lockfile has
 already recorded the exact version, that exact version is what gets written.
 
+Some references need no pinning and are skipped: workspace-relative paths
+(`uses: ./…`), Docker images (`uses: docker://…`), and self-repository
+references (`uses: $/…`), which GitHub resolves to the exact commit the
+workflow is already running, making them pinned by construction.
+
 ## Subcommands
 
 | Subcommand | Network | Writes | Purpose |
