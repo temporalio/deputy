@@ -61,13 +61,22 @@ outputs:
     description: 'Number of dependencies removed'
     value: ${{ steps.diff.outputs.removed-count }}
   updated-count:
-    description: 'Number of dependencies updated'
+    description: 'Number of dependencies updated (upgraded, downgraded, or otherwise changed)'
     value: ${{ steps.diff.outputs.updated-count }}
   new-vulnerabilities:
-    description: 'Number of new vulnerabilities introduced'
+    description: 'Number of vulnerabilities newly introduced by the change set'
     value: ${{ steps.diff.outputs.new-vulnerabilities }}
+  policy-denials:
+    description: 'Number of policy deny results'
+    value: ${{ steps.diff.outputs.policy-denials }}
+  policy-warnings:
+    description: 'Number of policy warn results'
+    value: ${{ steps.diff.outputs.policy-warnings }}
+  json-path:
+    description: 'Path to the full structured diff (deputy diff --format json output) for custom processing'
+    value: ${{ steps.diff.outputs.json-path }}
   summary:
-    description: 'Text summary of changes (base64 encoded to handle special characters)'
+    description: 'Markdown summary of changes (base64 encoded to handle special characters)'
     value: ${{ steps.diff.outputs.summary_base64 }}
 
 runs:
@@ -125,13 +134,16 @@ runs:
         INPUT_LICENSES: ${{ inputs.licenses }}
         INPUT_POLICY: ${{ inputs.policy }}
         BASE_REF: ${{ steps.refs.outputs.base }}
-        # Force colored output in CI for better readability in logs
-        CLICOLOR_FORCE: '1'
       run: |
         set -euo pipefail
 
-        # Build command arguments as array (safer than string concatenation)
-        ARGS=(diff "$BASE_REF" "$INPUT_TARGET")
+        DIFF_JSON="$RUNNER_TEMP/deputy-diff.json"
+        COMMENT_MD="$RUNNER_TEMP/deputy-diff.md"
+
+        # One scan produces the structured contract (deputy.diff.v1 as JSON);
+        # counts, the PR comment, and the job summary all derive from that
+        # file. Nothing below parses rendered text.
+        ARGS=(diff "$BASE_REF" "$INPUT_TARGET" --format json --output "$DIFF_JSON")
 
         if [ "$INPUT_REPO" != "." ]; then
           ARGS+=(--repo "$INPUT_REPO")
@@ -155,57 +167,57 @@ runs:
 
         echo "Running: deputy ${ARGS[*]}"
 
-        # Capture output
+        # A policy deny exits non-zero after the JSON is written, so the
+        # structured output is available either way; only a missing output
+        # file is a hard failure.
         set +e
-        OUTPUT=$(deputy "${ARGS[@]}" 2>&1)
+        deputy "${ARGS[@]}"
         EXIT_CODE=$?
         set -e
-
-        echo "$OUTPUT"
-
-        # Parse output for dependency change counts
-        # Deputy output uses: + (added), - (removed), ↑ (upgraded), ↓ (downgraded)
-        # Strip ANSI escape codes for parsing (colors may be present due to CLICOLOR_FORCE)
-        PLAIN_OUTPUT=$(echo "$OUTPUT" | sed 's/\x1b\[[0-9;]*m//g')
-
-        # Use explicit default values since grep -c returns exit 1 on no match
-        ADDED=$(echo "$PLAIN_OUTPUT" | grep -cE '^\s*\+ ' 2>/dev/null || true)
-        REMOVED=$(echo "$PLAIN_OUTPUT" | grep -cE '^\s*- ' 2>/dev/null || true)
-        # Count upgrades and downgrades (lines starting with ↑ or ↓)
-        UPDATED=$(echo "$PLAIN_OUTPUT" | grep -cE '^\s*(↑|↓) ' 2>/dev/null || true)
-
-        # Count new vulnerabilities by looking for primary vulnerability entries (lines starting with •)
-        # This avoids double-counting aliases which appear on separate "Aliases:" lines
-        # Format: "  • CVE-2025-13425 [LOW] ..." or "  • GHSA-xxxx-xxxx-xxxx [HIGH] ..."
-        NEW_VULNS=$(echo "$PLAIN_OUTPUT" | grep -cE '^\s*• (CVE-[0-9]{4}-[0-9]+|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|GO-[0-9]{4}-[0-9]+)' 2>/dev/null || true)
-        NEW_VULNS="${NEW_VULNS:-0}"
-        ADDED="${ADDED:-0}"
-        REMOVED="${REMOVED:-0}"
-        UPDATED="${UPDATED:-0}"
-
-        echo "added-count=${ADDED}" >> "$GITHUB_OUTPUT"
-        echo "removed-count=${REMOVED}" >> "$GITHUB_OUTPUT"
-        echo "updated-count=${UPDATED}" >> "$GITHUB_OUTPUT"
-        echo "new-vulnerabilities=${NEW_VULNS}" >> "$GITHUB_OUTPUT"
-
-        # Save summary for PR comment. Use the ANSI-stripped output so the comment
-        # renders as clean text (the raw output may carry color escape codes via
-        # CLICOLOR_FORCE, which show up as garbage like ^[[1;94m in markdown).
-        # Use base64 encoding to safely pass multiline output with special characters
-        # through GitHub Actions outputs (avoids heredoc parsing issues with Unicode)
-        # Note: Use tr -d '\n' for portability (GNU base64 uses -w 0, BSD uses -b 0)
-        SUMMARY_BASE64=$(printf '%s' "$PLAIN_OUTPUT" | base64 | tr -d '\n')
-        echo "summary_base64=${SUMMARY_BASE64}" >> "$GITHUB_OUTPUT"
-
-        # Also save as environment variable for the comment step
-        # Using base64 avoids issues with special characters in GITHUB_ENV
-        echo "DIFF_SUMMARY_BASE64=${SUMMARY_BASE64}" >> "$GITHUB_ENV"
-
         echo "DIFF_EXIT_CODE=$EXIT_CODE" >> "$GITHUB_ENV"
 
-        # Use numeric comparison with default value
-        if [ "${NEW_VULNS:-0}" -gt 0 ]; then
-          echo "::warning::Found $NEW_VULNS vulnerabilities in changed dependencies"
+        if [ ! -s "$DIFF_JSON" ]; then
+          echo "::error::deputy diff produced no output (exit code $EXIT_CODE)"
+          exit "$EXIT_CODE"
+        fi
+
+        # Zero-valued fields are omitted by the JSON contract, hence // 0.
+        ADDED=$(jq -r '.change_stats.added_count // 0' "$DIFF_JSON")
+        REMOVED=$(jq -r '.change_stats.removed_count // 0' "$DIFF_JSON")
+        UPDATED=$(jq -r '(.change_stats.upgraded_count // 0) + (.change_stats.downgraded_count // 0) + (.change_stats.updated_count // 0)' "$DIFF_JSON")
+        NEW_VULNS=$(jq -r '.stats.added_count // 0' "$DIFF_JSON")
+        POLICY_DENIALS=$(jq -r '[.policy_actions[]? | select(.type == "ACTION_TYPE_DENY")] | length' "$DIFF_JSON")
+        POLICY_WARNINGS=$(jq -r '[.policy_actions[]? | select(.type == "ACTION_TYPE_WARN")] | length' "$DIFF_JSON")
+
+        {
+          echo "added-count=${ADDED}"
+          echo "removed-count=${REMOVED}"
+          echo "updated-count=${UPDATED}"
+          echo "new-vulnerabilities=${NEW_VULNS}"
+          echo "policy-denials=${POLICY_DENIALS}"
+          echo "policy-warnings=${POLICY_WARNINGS}"
+          echo "json-path=${DIFF_JSON}"
+        } >> "$GITHUB_OUTPUT"
+
+        # Render the PR comment / job summary markdown from the same file.
+        deputy diff --from-json "$DIFF_JSON" --format markdown --output "$COMMENT_MD"
+        echo "DIFF_COMMENT_PATH=$COMMENT_MD" >> "$GITHUB_ENV"
+
+        # Log the report for humans reading the run output.
+        cat "$COMMENT_MD"
+
+        # Note: use tr -d '\n' for portability (GNU base64 uses -w 0, BSD uses -b 0)
+        SUMMARY_BASE64=$(base64 < "$COMMENT_MD" | tr -d '\n')
+        echo "summary_base64=${SUMMARY_BASE64}" >> "$GITHUB_OUTPUT"
+
+        # Surface policy findings as annotations, named by their rules.
+        jq -r '.policy_actions[]? | select(.type == "ACTION_TYPE_DENY")
+          | "::error::policy deny (\(.policy_name // "?")::\(.rule_name // "?")): \(.reason // .message // "denied")"' "$DIFF_JSON"
+        if [ "${POLICY_WARNINGS}" -gt 0 ]; then
+          echo "::warning::${POLICY_WARNINGS} policy warning(s); see the job summary for details"
+        fi
+        if [ "${NEW_VULNS}" -gt 0 ]; then
+          echo "::warning::Found ${NEW_VULNS} new vulnerabilities in changed dependencies"
         fi
 
     - name: Comment on PR
@@ -214,38 +226,42 @@ runs:
       with:
         github-token: ${{ inputs.github-token }}
         script: |
-          // Decode base64 summary (avoids issues with special characters)
-          const summaryBase64 = process.env.DIFF_SUMMARY_BASE64 || '';
-          let summary = 'No changes detected';
-          if (summaryBase64) {
-            try {
-              summary = Buffer.from(summaryBase64, 'base64').toString('utf-8');
-            } catch (e) {
-              console.log('Failed to decode summary:', e);
-            }
+          const fs = require('fs');
+
+          // Fixed marker for idempotent upsert: updates patch the existing
+          // comment in place instead of posting a new one per push.
+          const marker = '<!-- deputy:diff -->';
+          const footer = '\n\n<sub>Generated by [Deputy](https://github.com/temporalio/deputy)</sub>';
+
+          let report = 'No changes detected';
+          const reportPath = process.env.DIFF_COMMENT_PATH || '';
+          if (reportPath && fs.existsSync(reportPath)) {
+            report = fs.readFileSync(reportPath, 'utf-8');
           }
 
-          // Find existing comment
+          // GitHub caps comment bodies at 65536 characters; truncate
+          // deterministically and point at the job summary, which carries
+          // the full report.
+          const maxBody = 60000;
+          if (report.length > maxBody) {
+            report = report.slice(0, maxBody) +
+              '\n\n> Report truncated: see the workflow job summary for the full version.';
+          }
+
+          const body = marker + '\n' + report + footer;
+
           const { data: comments } = await github.rest.issues.listComments({
             owner: context.repo.owner,
             repo: context.repo.repo,
             issue_number: context.issue.number,
           });
 
+          // Match by marker, falling back to the heading for comments
+          // posted by older versions of this action.
           const botComment = comments.find(comment =>
             comment.user.type === 'Bot' &&
-            comment.body.includes('## Deputy Dependency Diff')
+            (comment.body.includes(marker) || comment.body.includes('## Deputy Dependency Diff'))
           );
-
-          const body = [
-            '## Deputy Dependency Diff',
-            '',
-            '```',
-            summary,
-            '```',
-            '',
-            '<sub>Generated by [Deputy](https://github.com/temporalio/deputy)</sub>',
-          ].join('\n');
 
           if (botComment) {
             await github.rest.issues.updateComment({
@@ -273,7 +289,7 @@ runs:
         EXIT_CODE="${DIFF_EXIT_CODE:-0}"
 
         if [ "$INPUT_FAIL_ON_NEW_VULNS" = "true" ]; then
-          if [ "$NEW_VULNS" -gt 0 ]; then
+          if [ "${NEW_VULNS:-0}" -gt 0 ]; then
             echo "::error::$NEW_VULNS new vulnerabilities introduced"
             exit 1
           fi
@@ -289,25 +305,9 @@ runs:
     - name: Write job summary
       if: always()
       shell: bash
-      env:
-        ADDED: ${{ steps.diff.outputs.added-count }}
-        REMOVED: ${{ steps.diff.outputs.removed-count }}
-        UPDATED: ${{ steps.diff.outputs.updated-count }}
-        NEW_VULNS: ${{ steps.diff.outputs.new-vulnerabilities }}
       run: |
-        {
-          echo "## Deputy Dependency Diff"
-          echo ""
-          echo "| Change Type | Count |"
-          echo "|-------------|-------|"
-          echo "| Added | ${ADDED:-0} |"
-          echo "| Removed | ${REMOVED:-0} |"
-          echo "| Updated | ${UPDATED:-0} |"
-          echo "| New Vulnerabilities | ${NEW_VULNS:-0} |"
-          echo ""
-          if [ "${NEW_VULNS:-0}" -gt 0 ]; then
-            echo "> :warning: New vulnerabilities were introduced"
-          elif [ "${ADDED:-0}" -eq 0 ] && [ "${REMOVED:-0}" -eq 0 ] && [ "${UPDATED:-0}" -eq 0 ]; then
-            echo "> No dependency changes detected"
-          fi
-        } >> "$GITHUB_STEP_SUMMARY"
+        if [ -n "${DIFF_COMMENT_PATH:-}" ] && [ -s "${DIFF_COMMENT_PATH:-}" ]; then
+          cat "$DIFF_COMMENT_PATH" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "Deputy diff produced no report (see the run log)." >> "$GITHUB_STEP_SUMMARY"
+        fi
