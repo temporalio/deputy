@@ -13,6 +13,7 @@ import (
 	pb "deps.dev/api/v3"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/spf13/cobra"
@@ -65,6 +66,7 @@ func AddDiffCommand(root *cobra.Command, c *services.Clients) {
 		source                                         string // source type: remote, docker-daemon
 		outputFormat                                   string
 		outPath                                        string
+		fromJSONPath                                   string
 		platform                                       string
 	)
 
@@ -144,12 +146,22 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 				outW = f
 			}
 
+			// Render-only mode: re-render a previously saved structured output
+			// without re-running analysis. CI uses this to derive both counts
+			// (jq over the JSON) and the PR comment (markdown) from one scan.
+			if fromJSONPath != "" {
+				return renderDiffFromJSON(fromJSONPath, outputFormat, outW)
+			}
+
 			// Check if both arguments are container image references.
 			// BUT only if they don't look like Git refs in the current repo context.
 			if len(args) == 2 && isMixedContainerDiffInContext(args[0], args[1], repo) {
 				return fmt.Errorf("base and target must both be Git refs or both be container image refs")
 			}
 			if len(args) == 2 && isContainerDiffInContext(args[0], args[1], repo) {
+				if strings.EqualFold(strings.TrimSpace(outputFormat), "markdown") {
+					return fmt.Errorf("--format markdown is not supported for container diffs yet (use --format json)")
+				}
 				// Determine if using local daemon (--source docker-daemon or deprecated --local-daemon)
 				useDaemon := useLocalDaemon || source == "docker-daemon" || source == "daemon" || source == "local"
 				opts := containerDiffOpts{
@@ -311,8 +323,9 @@ PERFORMANCE TIPS:
 	cmd.Flags().StringArrayVar(&policyPaths, "policy", nil, "Path to CEL policy files or bundles to evaluate against diff results (repeatable)")
 	cmd.Flags().BoolVar(&useLocalDaemon, "local-daemon", false, "Use local Docker daemon instead of pulling from remote registry (deprecated: use --source docker-daemon)")
 	cmd.Flags().StringVarP(&source, "source", "s", "", "Target source type for container images: remote, docker-daemon")
-	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "Output format: text | json")
+	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "Output format: text | json | markdown")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
+	cmd.Flags().StringVar(&fromJSONPath, "from-json", "", "Render a saved --format json output file instead of running analysis (use with --format markdown)")
 	cmd.Flags().StringVar(&platform, "platform", "", "Platform for container images (os/arch[/variant])")
 
 	root.AddCommand(cmd)
@@ -351,10 +364,14 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 
 	// Validate and normalize output format early
 	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
-	if outputFormat != "" && outputFormat != "text" && outputFormat != "json" {
-		return fmt.Errorf("unsupported --format %q (use text|json)", outputFormat)
+	if outputFormat != "" && outputFormat != "text" && outputFormat != "json" && outputFormat != "markdown" {
+		return fmt.Errorf("unsupported --format %q (use text|json|markdown)", outputFormat)
 	}
-	isJSON := outputFormat == "json"
+	// Structured formats render from the deputy.diff.v1 response instead of
+	// the interactive text report; markdown is a pure view over the same
+	// message JSON emits.
+	isJSON := outputFormat == "json" || outputFormat == "markdown"
+	structuredFormat := outputFormat
 
 	dispTarget := targetRef
 	if isWorkingPseudoRef(targetRef) {
@@ -381,7 +398,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 			if isJSON {
 				emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil, nil, 0)
 				otel.SetSpanOK(span)
-				return outputDiffProtoJSON(outW, emptyResp)
+				return outputDiffResponse(outW, emptyResp, structuredFormat)
 			}
 			fmt.Fprintln(outW, ui.StyleAdded.Render("No dependency changes detected."))
 			otel.SetSpanOK(span)
@@ -511,7 +528,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	if len(changes) == 0 {
 		if isJSON {
 			emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil, nil, 0)
-			return outputDiffProtoJSON(outW, emptyResp)
+			return outputDiffResponse(outW, emptyResp, structuredFormat)
 		}
 		fmt.Fprintln(outW, "No package changes detected.")
 		otel.SetSpanOK(span)
@@ -632,7 +649,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 				report.VulnerabilitiesToFindings(changedVulns),
 				report.VulnerabilitiesToFindings(unchangedVulns),
 				result.Advisories, policyActions, len(policyPaths))
-			if err := outputDiffProtoJSON(outW, protoResp); err != nil {
+			if err := outputDiffResponse(outW, protoResp, structuredFormat); err != nil {
 				otel.SetSpanError(span, err)
 				return err
 			}
@@ -747,7 +764,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	if isJSON {
 		protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, nil, nil, nil, nil, 0)
 		otel.SetSpanOK(span)
-		return outputDiffProtoJSON(outW, protoResp)
+		return outputDiffResponse(outW, protoResp, structuredFormat)
 	}
 
 	// Display results (no vulnerabilities scanned)
@@ -1165,6 +1182,38 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 		collect(actions, policy.EntrypointDiffVulnerability, internalproto.PolicySubjectFromFinding(finding))
 	}
 	return results, nil
+}
+
+// renderDiffFromJSON renders a previously saved `deputy diff --format json`
+// response without re-running analysis. The file must contain a
+// deputy.diff.v1.DiffVulnerabilitiesResponse in protojson form (exactly what
+// --format json emits); the requested format must be a structured one, since
+// the interactive text report is not reconstructable from the contract.
+func renderDiffFromJSON(path, format string, w io.Writer) error {
+	format = strings.ToLower(strings.TrimSpace(format))
+	if format != "json" && format != "markdown" {
+		return fmt.Errorf("--from-json requires --format json or --format markdown")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read diff JSON: %w", err)
+	}
+	resp := &diffv1.DiffVulnerabilitiesResponse{}
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(data, resp); err != nil {
+		return fmt.Errorf("parse %s (expected `deputy diff --format json` output): %w", path, err)
+	}
+	return outputDiffResponse(w, resp, format)
+}
+
+// outputDiffResponse writes a diff response in the requested structured
+// format: protojson for "json", rendered markdown for "markdown". Both are
+// views over the same deputy.diff.v1 message, so they always agree.
+func outputDiffResponse(w io.Writer, resp *diffv1.DiffVulnerabilitiesResponse, format string) error {
+	if format == "markdown" {
+		_, err := io.WriteString(w, render.DiffMarkdown(resp))
+		return err
+	}
+	return outputDiffProtoJSON(w, resp)
 }
 
 // outputDiffProtoJSON writes a diff response as JSON using protojson.

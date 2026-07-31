@@ -96,7 +96,7 @@ flowchart TB
 | `--source` | `-s` | `remote` | Target source type: `remote`, `docker-daemon` |
 | `--skip-vuln-scan` | | `false` | Skip vulnerability scanning (faster) |
 | `--policy` | | | CEL policy files (repeatable) |
-| `--format` | `-f` | `text` | Output format: `text` or `json` |
+| `--format` | `-f` | `text` | Output format: `text`, `json` (`markdown` is Git-diff only for now) |
 
 ### Using Local Docker Daemon
 
@@ -356,7 +356,8 @@ flowchart TB
 | Flag | Short | Default | Description |
 | --- | --- | --- | --- |
 | `--source` | `-s` | `remote` | Target source type: `remote`, `docker-daemon` |
-| `--format` | `-f` | `text` | Output format: `text`, `json` |
+| `--format` | `-f` | `text` | Output format: `text`, `json`, `markdown` |
+| `--from-json` | | | Render a saved `--format json` file instead of running analysis |
 
 ### Git Diff Flags
 
@@ -555,6 +556,19 @@ response carries `changes` and `change_stats` (the dependency change set) and
 evaluated `subject` (package, version, ecosystem, and advisory ID for
 vulnerability-scoped rules). CI tooling should consume these fields rather
 than parsing the rendered text.
+
+### Structured output for CI
+
+`--format json` is the machine-readable contract; `--format markdown` renders
+the same message as GitHub-flavored markdown (the Deputy diff action uses it
+for PR comments); `--from-json` re-renders a saved JSON file without
+re-running analysis, so one scan feeds both the gate and the comment:
+
+```console
+$ deputy diff main HEAD --licenses --policy policy/ci/pr-review.yaml --format json --output diff.json
+$ jq '.stats.added_count' diff.json                      # gate on new vulnerabilities
+$ deputy diff --from-json diff.json --format markdown    # render the PR comment
+```
 
 ## Output
 
