@@ -220,6 +220,17 @@ message DiffVulnerabilitiesResponse {
   // per-change and per-vulnerability results attributed to their subjects.
   // Mirrors deputy.scan.v1.ScanResponse.policy_actions.
   repeated deputy.policy.v1.Action policy_actions = 11;
+
+  // PreexistingVulnerabilities affect dependencies the change set did not
+  // touch: present in the target, but not introduced by this diff.
+  // AddedVulnerabilities carries only the newly introduced set, so gates like
+  // fail-on-new-vulnerabilities can count it directly.
+  repeated deputy.vulnerability.v1.Finding preexisting_vulnerabilities = 12;
+
+  // PolicyFilesEvaluated is how many policy bundles were evaluated. It lets
+  // renderers distinguish "no policies configured" (0, omit the section)
+  // from "policies evaluated, all passed" (>0 with no policy_actions).
+  int32 policy_files_evaluated = 13;
 }
 
 // VulnerabilityDiffStats summarizes vulnerability differences.
@@ -235,6 +246,10 @@ message VulnerabilityDiffStats {
 
   // RemovedBySeverity breaks down fixed vulnerabilities by severity.
   map<string, int32> removed_by_severity = 4;
+
+  // PreexistingCount is the number of vulnerabilities in unchanged
+  // dependencies (see DiffVulnerabilitiesResponse.preexisting_vulnerabilities).
+  int32 preexisting_count = 5;
 }
 
 // DiffContainerImagesRequest specifies container images to compare.

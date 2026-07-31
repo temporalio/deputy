@@ -9,7 +9,6 @@ import (
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/compare"
-	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // ChangeKindToProto converts internal compare.ChangeType to proto diffv1.ChangeKind.
@@ -133,41 +132,37 @@ func DiffStatsToProto(changes []compare.Change) *diffv1.DiffStats {
 
 // GitDiffReportToProto creates a DiffVulnerabilitiesResponse from git diff
 // data. This is the `deputy diff --format json` output contract: it carries
-// the dependency changes, vulnerability findings, and structured policy
-// results so consumers never parse rendered text.
+// the dependency changes, the newly-introduced and pre-existing vulnerability
+// sets, and structured policy results so consumers never parse rendered text.
+//
+// Added must contain only vulnerabilities the change set introduced (the same
+// set the rendered report counts as new); preexisting carries the rest.
 func GitDiffReportToProto(
 	repo, baseRef, targetRef string,
 	changes []compare.Change,
-	findings []vulnerability.Finding,
+	added, preexisting []*vulnerabilityv1.Finding,
 	advisories map[string]*vulnerabilityv1.Advisory,
 	policyActions []*policyv1.Action,
+	policyFilesEvaluated int,
 ) *diffv1.DiffVulnerabilitiesResponse {
-	resp := &diffv1.DiffVulnerabilitiesResponse{
+	return &diffv1.DiffVulnerabilitiesResponse{
 		BaseTarget: &targetv1.Target{
 			DisplayPath: baseRef,
 		},
 		TargetTarget: &targetv1.Target{
 			DisplayPath: targetRef,
 		},
-		GeneratedAt:   timestamppb.Now(),
-		Advisories:    advisories,
-		Changes:       PackageChangesToProto(changes),
-		ChangeStats:   DiffStatsToProto(changes),
-		PolicyActions: policyActions,
+		GeneratedAt:                timestamppb.Now(),
+		Advisories:                 advisories,
+		Changes:                    PackageChangesToProto(changes),
+		ChangeStats:                DiffStatsToProto(changes),
+		AddedVulnerabilities:       added,
+		PreexistingVulnerabilities: preexisting,
+		Stats: &diffv1.VulnerabilityDiffStats{
+			AddedCount:       int32(len(added)),
+			PreexistingCount: int32(len(preexisting)),
+		},
+		PolicyActions:        policyActions,
+		PolicyFilesEvaluated: int32(policyFilesEvaluated),
 	}
-
-	// All findings from the diff are considered "added" since we're scanning the target
-	// The actual comparison logic is handled elsewhere
-	protoFindings := make([]*vulnerabilityv1.Finding, 0, len(findings))
-	for _, f := range findings {
-		protoFindings = append(protoFindings, FindingToProto(f, advisories[f.AdvisoryID]))
-	}
-	resp.AddedVulnerabilities = protoFindings
-
-	// Calculate stats
-	resp.Stats = &diffv1.VulnerabilityDiffStats{
-		AddedCount: int32(len(findings)),
-	}
-
-	return resp
 }

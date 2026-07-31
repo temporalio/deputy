@@ -379,7 +379,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 
 		if matcher != nil && !matcher.AnyMatch(changedFiles) {
 			if isJSON {
-				emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil)
+				emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil, nil, 0)
 				otel.SetSpanOK(span)
 				return outputDiffProtoJSON(outW, emptyResp)
 			}
@@ -510,7 +510,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	})
 	if len(changes) == 0 {
 		if isJSON {
-			emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil)
+			emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil, nil, 0)
 			return outputDiffProtoJSON(outW, emptyResp)
 		}
 		fmt.Fprintln(outW, "No package changes detected.")
@@ -604,6 +604,15 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 
 		reportVulns := report.FlattenScanningResult(result)
 
+		// Partition findings into newly-introduced and pre-existing before any
+		// output is produced, so the rendered report, JSON contract, and CI
+		// gates all agree on what this change actually introduced.
+		changedVulns, unchangedVulns := splitVulnsByChange(reportVulns, changes)
+		if len(changedVulns) > 0 {
+			baseAffected := baseVersionAdvisories(ctx, changes, errW)
+			changedVulns, unchangedVulns = reclassifyPreexistingVulns(changedVulns, unchangedVulns, baseAffected)
+		}
+
 		policyReport := DiffPolicyReport{
 			Repo:            repoPath,
 			BaseRef:         baseRef,
@@ -619,7 +628,10 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 
 		// JSON output mode
 		if isJSON {
-			protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, result.Findings, result.Advisories, policyActions)
+			protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes,
+				report.VulnerabilitiesToFindings(changedVulns),
+				report.VulnerabilitiesToFindings(unchangedVulns),
+				result.Advisories, policyActions, len(policyPaths))
 			if err := outputDiffProtoJSON(outW, protoResp); err != nil {
 				otel.SetSpanError(span, err)
 				return err
@@ -632,18 +644,6 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 			}
 			otel.SetSpanOK(span)
 			return nil
-		}
-
-		changedVulns, unchangedVulns := splitVulnsByChange(reportVulns, changes)
-
-		// An advisory that already affected the base version of an updated
-		// package is not introduced by the change: the diff contract is
-		// vulnerability additions, removals, and fixes, and CI gates count
-		// the changed set as newly introduced. Reclassify those advisories
-		// into the pre-existing bucket.
-		if len(changedVulns) > 0 {
-			baseAffected := baseVersionAdvisories(ctx, changes, errW)
-			changedVulns, unchangedVulns = reclassifyPreexistingVulns(changedVulns, unchangedVulns, baseAffected)
 		}
 
 		_, unchangedStats := consolidateReportVulnerabilities(unchangedVulns)
@@ -745,7 +745,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 
 	// No vulnerability scanning - output changes only
 	if isJSON {
-		protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, nil, nil, nil)
+		protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, nil, nil, nil, nil, 0)
 		otel.SetSpanOK(span)
 		return outputDiffProtoJSON(outW, protoResp)
 	}
