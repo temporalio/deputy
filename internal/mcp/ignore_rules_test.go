@@ -195,4 +195,30 @@ func TestContainerToolsHonorIgnorePath(t *testing.T) {
 			t.Fatalf("vulnerabilities = %d, want 0 after suppression", len(result.Vulnerabilities))
 		}
 	})
+
+	// Entering through the tool rather than diffContainerImages: diffRefsTool
+	// rebuilds the request into a fresh literal before routing, so a field it
+	// forgets to copy is silently dropped and every direct-call test still
+	// passes.
+	t.Run("diff_refs tool entrypoint preserves ignorePath through normalization", func(t *testing.T) {
+		mockScan := &mockScanHandler{scanResponses: []*scanv1.ScanResponse{
+			migrationOnlyScanResponse(),
+			migrationOnlyScanResponse(),
+		}}
+		s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
+		result, err := callProtoTool(t, ctx, s.diffRefs, &mcpv1.DiffRefsRequest{
+			BaseRef:    "example/app:v1",
+			TargetRef:  "example/app:v2",
+			IgnorePath: dir,
+		}, &mcpv1.DiffRefsResult{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := result.GetIgnoredCount(); got != 1 {
+			t.Fatalf("ignoredCount = %d, want 1 (ignorePath dropped during normalization?)", got)
+		}
+		if len(result.Vulnerabilities) != 0 {
+			t.Fatalf("vulnerabilities = %d, want 0 after suppression", len(result.Vulnerabilities))
+		}
+	})
 }

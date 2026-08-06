@@ -2390,6 +2390,14 @@ func (s *Server) scanContainerTool(ctx context.Context, args *mcpv1.ScanContaine
 
 	span.SetAttributes(otel.AttrMCPImage.String(imageRef))
 
+	// Resolve suppressions before scanning: an unusable ignorePath is an
+	// argument error, and pulling the image first would charge the caller a
+	// full registry fetch for a typo and bury the cause behind a scan failure.
+	rules, err := ignoreRulesForSource(ctx, args.GetIgnorePath())
+	if err != nil {
+		return nil, err
+	}
+
 	// Build proto request for container image scan
 	scanReq := connect.NewRequest(&scanv1.ScanRequest{
 		Target: imageRef,
@@ -2412,10 +2420,6 @@ func (s *Server) scanContainerTool(ctx context.Context, args *mcpv1.ScanContaine
 
 	scanResult := resp.Msg
 	internalScanResult := internalproto.ScanningResultFromProto(scanResult)
-	rules, err := ignoreRulesForSource(ctx, args.GetIgnorePath())
-	if err != nil {
-		return nil, err
-	}
 	filtered, ignoredCount := scanning.FilterIgnored(*internalScanResult, rules)
 	consolidated := vulnerability.ConsolidateAll(filtered.Findings, filtered.Advisories)
 	elapsed := time.Since(startTime)
@@ -2469,6 +2473,7 @@ func (s *Server) diffRefsTool(ctx context.Context, args *mcpv1.DiffRefsRequest) 
 		Platform:     strings.TrimSpace(args.GetPlatform()),
 		Ecosystems:   args.GetEcosystems(),
 		ExcludePaths: args.GetExcludePaths(),
+		IgnorePath:   strings.TrimSpace(args.GetIgnorePath()),
 	}
 
 	span.SetAttributes(
@@ -2520,6 +2525,14 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 	baseRef := strings.TrimSpace(args.GetBaseRef())
 	targetRef := strings.TrimSpace(args.GetTargetRef())
 	platform := strings.TrimSpace(args.GetPlatform())
+
+	// Resolve suppressions before either scan: an unusable ignorePath is an
+	// argument error, and pulling two images first would charge the caller
+	// twice for a typo and bury the cause behind a scan failure.
+	rules, err := ignoreRulesForSource(ctx, args.GetIgnorePath())
+	if err != nil {
+		return nil, err
+	}
 
 	// Scan base image
 	baseReq := connect.NewRequest(&scanv1.ScanRequest{
@@ -2626,11 +2639,8 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 	}
 
 	// Suppressions apply to both sides of the delta so a suppressed finding
-	// cannot resurface as an added or fixed change.
-	rules, err := ignoreRulesForSource(ctx, args.GetIgnorePath())
-	if err != nil {
-		return nil, err
-	}
+	// cannot resurface as an added or fixed change. Resolved above, before
+	// either image was pulled.
 	var ignoredCount int
 	result.VulnerabilitiesBySeverity, result.Vulnerabilities, ignoredCount = diffTargetVulnerabilities(targetScan, rules)
 	result.IgnoredCount = int32(ignoredCount)
