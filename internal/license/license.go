@@ -11,6 +11,7 @@ import (
 	"io"
 	nethttp "net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -447,7 +448,13 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 		}
 		var ids []string
 		if strings.HasPrefix(modulePath, "github.com/") {
-			if parts := strings.Split(modulePath, "/"); len(parts) >= 3 {
+			// Strip the semantic-import major suffix before deriving the
+			// repository subdirectory: for github.com/owner/repo/sub/v2 the
+			// release tag is sub/v2.3.0, not sub/v2/v2.3.0. Leaving the
+			// suffix in would probe a tag that cannot exist and then fall
+			// back to the unrelated root tag of a different module.
+			pathNoMajor, _, _ := module.SplitPathVersion(modulePath)
+			if parts := strings.Split(pathNoMajor, "/"); len(parts) >= 3 {
 				// A module below the repo root (github.com/owner/repo/sub)
 				// follows Go's submodule conventions: tags carry the subpath
 				// prefix and the module's license is the closest one up its
@@ -488,6 +495,52 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 	return nil
 }
 
+// moduleLicenseScan resolves the license for a module rooted at subpath the
+// way Go does: the closest license file walking up from the module directory
+// to the repository root. Sibling directories are never consulted, so a
+// submodule in a monorepo cannot inherit an unrelated module's license.
+//
+// An empty subpath means the repository root module.
+func moduleLicenseScan(ws workspace.FS, subpath string) []string {
+	if ws == nil {
+		return nil
+	}
+	dir := path.Clean(strings.TrimSpace(subpath))
+	if dir == "" || dir == "/" {
+		dir = "."
+	}
+	for {
+		var ids []string
+		for _, name := range defaultLicenseFilenames {
+			rel := name
+			if dir != "." {
+				rel = path.Join(dir, name)
+			}
+			data, err := ws.ReadFile(rel)
+			if err != nil {
+				continue
+			}
+			for _, id := range DetectLicenseIDs(data) {
+				if id != "" && !slices.Contains(ids, id) {
+					ids = append(ids, id)
+				}
+			}
+		}
+		if len(ids) > 0 {
+			slices.Sort(ids)
+			return ids
+		}
+		if dir == "." {
+			return nil
+		}
+		parent := path.Dir(dir)
+		if parent == dir {
+			return nil
+		}
+		dir = parent
+	}
+}
+
 // scanGitHubRepoLicensesByClone clones a GitHub repository just far enough to
 // run local license detection. Versioned lookups only try tag refs so an
 // explicit tag miss cannot silently become a default-branch license result.
@@ -502,7 +555,7 @@ func scanGitHubRepoLicensesByClone(ctx context.Context, repoURL, subpath, versio
 	if version == "" {
 		if src, err := repository.CloneInMemory(ctx, opts); err == nil {
 			defer src.Close()
-			return LocalRepoLicenseScan(src.Workspace())
+			return moduleLicenseScan(src.Workspace(), subpath)
 		}
 		return nil
 	}
@@ -510,7 +563,7 @@ func scanGitHubRepoLicensesByClone(ctx context.Context, repoURL, subpath, versio
 		opts.ReferenceName = ref
 		if src, err := repository.CloneInMemory(ctx, opts); err == nil {
 			defer src.Close()
-			return LocalRepoLicenseScan(src.Workspace())
+			return moduleLicenseScan(src.Workspace(), subpath)
 		}
 	}
 	return nil

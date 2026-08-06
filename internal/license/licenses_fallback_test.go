@@ -16,6 +16,8 @@ import (
 	"testing"
 
 	pb "deps.dev/api/v3"
+	"github.com/temporalio/deputy/internal/repository/workspace"
+	"golang.org/x/mod/module"
 )
 
 type countingDepsClientEcosystem struct {
@@ -908,5 +910,117 @@ func swapGitHubHTTPClient(server *httptest.Server) func() {
 		setGitHubHTTPClientForTest(origClient)
 		githubAPIBase = origBase
 		githubRawBase = origRawBase
+	}
+}
+
+// TestSubmoduleTagPrefixExcludesMajorSuffix pins Go's tag convention for
+// versioned submodules: the semantic-import suffix is part of the module
+// path but not of the tag prefix, so github.com/owner/repo/sub/v2 releases
+// as sub/v2.3.0. Deriving the subpath from the raw module path would probe
+// sub/v2/v2.3.0, which cannot exist, and then fall back to the root tag of a
+// different module.
+func TestSubmoduleTagPrefixExcludesMajorSuffix(t *testing.T) {
+	tests := []struct {
+		modulePath  string
+		wantSubpath string
+	}{
+		{"github.com/owner/repo/sub/v2", "sub"},
+		{"github.com/owner/repo/sub", "sub"},
+		{"github.com/owner/repo/v2", ""},
+		{"github.com/owner/repo", ""},
+		{"github.com/owner/repo/a/b/v3", "a/b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.modulePath, func(t *testing.T) {
+			pathNoMajor, _, _ := module.SplitPathVersion(tt.modulePath)
+			parts := strings.Split(pathNoMajor, "/")
+			var got string
+			if len(parts) >= 3 {
+				got = strings.Join(parts[3:], "/")
+			}
+			if got != tt.wantSubpath {
+				t.Errorf("subpath = %q, want %q", got, tt.wantSubpath)
+			}
+		})
+	}
+}
+
+// License bodies long enough for the detector to classify confidently.
+const mitLicenseText = `MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`
+
+const apacheLicenseText = `Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+"License" shall mean the terms and conditions for use, reproduction, and
+distribution as defined by Sections 1 through 9 of this document.
+
+"Licensor" shall mean the copyright owner or entity authorized by the
+copyright owner that is granting the License.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this file except in compliance with the License.`
+
+// TestModuleLicenseScan_DoesNotInheritSiblingLicenses pins the clone-fallback
+// scope. Go resolves a module's license as the closest one up its directory
+// tree, so a submodule with its own license uses that, one without inherits
+// the repository root, and neither may ever pick up a sibling module's.
+func TestModuleLicenseScan_DoesNotInheritSiblingLicenses(t *testing.T) {
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+
+	write := func(p, body string) {
+		t.Helper()
+		if err := ws.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+	}
+	write("LICENSE", mitLicenseText)
+	write("sibling/LICENSE", apacheLicenseText)
+	write("withown/LICENSE", apacheLicenseText)
+	write("noown/keep.txt", "x")
+
+	tests := []struct {
+		name    string
+		subpath string
+		want    string
+	}{
+		{name: "module with its own license uses it", subpath: "withown", want: "Apache-2.0"},
+		{name: "module without one inherits the root", subpath: "noown", want: "MIT"},
+		{name: "root module uses the root license", subpath: "", want: "MIT"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := moduleLicenseScan(ws, tt.subpath)
+			if !slices.Contains(got, tt.want) {
+				t.Fatalf("licenses = %v, want to contain %s", got, tt.want)
+			}
+			// A sibling module's license must never leak in.
+			if tt.want != "Apache-2.0" && slices.Contains(got, "Apache-2.0") {
+				t.Fatalf("licenses = %v, leaked a sibling module's license", got)
+			}
+		})
 	}
 }
