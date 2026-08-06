@@ -204,9 +204,10 @@ message ScanContainerRequest {
   // from alias advisories for records that carry none (moving counts out of
   // the unknown bucket), plus threat intel where available. Slower.
   bool enrich = 3;
-  // Optional source of vulnerability suppressions. A directory discovers its
-  // .deputyignore.yaml (and friends) the way directory tools do; a file loads
-  // directly. Absent, suppressions load from the server's working directory.
+  // Optional source of vulnerability suppressions. Point this at a directory
+  // to use that directory's .deputyignore.yaml, the same way directory-based
+  // tools find it, or at a file to load that file directly. When omitted,
+  // suppressions come from the server's working directory.
   string ignore_path = 4;
 }
 
@@ -942,10 +943,10 @@ message DiffRefsRequest {
   // **/testdata.
   repeated string exclude_paths = 6 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // Optional source of vulnerability suppressions for container image diffs.
-  // A directory discovers its .deputyignore.yaml (and friends) the way
-  // directory tools do; a file loads directly. Absent, suppressions load from
-  // the server's working directory. Git ref diffs ignore this and use the
-  // repository path.
+  // Point this at a directory to use that directory's .deputyignore.yaml, the
+  // same way directory-based tools find it, or at a file to load that file
+  // directly. When omitted, suppressions come from the server's working
+  // directory. Git ref diffs ignore this field and use the repository path.
   string ignore_path = 7;
 }
 

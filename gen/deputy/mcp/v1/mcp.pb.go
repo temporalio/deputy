@@ -741,9 +741,10 @@ type ScanContainerRequest struct {
 	// from alias advisories for records that carry none (moving counts out of
 	// the unknown bucket), plus threat intel where available. Slower.
 	Enrich bool `protobuf:"varint,3,opt,name=enrich,proto3" json:"enrich,omitempty"`
-	// Optional source of vulnerability suppressions. A directory discovers its
-	// .deputyignore.yaml (and friends) the way directory tools do; a file loads
-	// directly. Absent, suppressions load from the server's working directory.
+	// Optional source of vulnerability suppressions. Point this at a directory
+	// to use that directory's .deputyignore.yaml, the same way directory-based
+	// tools find it, or at a file to load that file directly. When omitted,
+	// suppressions come from the server's working directory.
 	IgnorePath    string `protobuf:"bytes,4,opt,name=ignore_path,json=ignorePath,proto3" json:"ignore_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4135,10 +4136,10 @@ type DiffRefsRequest struct {
 	// **/testdata.
 	ExcludePaths []string `protobuf:"bytes,6,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
 	// Optional source of vulnerability suppressions for container image diffs.
-	// A directory discovers its .deputyignore.yaml (and friends) the way
-	// directory tools do; a file loads directly. Absent, suppressions load from
-	// the server's working directory. Git ref diffs ignore this and use the
-	// repository path.
+	// Point this at a directory to use that directory's .deputyignore.yaml, the
+	// same way directory-based tools find it, or at a file to load that file
+	// directly. When omitted, suppressions come from the server's working
+	// directory. Git ref diffs ignore this field and use the repository path.
 	IgnorePath    string `protobuf:"bytes,7,opt,name=ignore_path,json=ignorePath,proto3" json:"ignore_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
