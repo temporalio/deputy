@@ -14,7 +14,6 @@ import (
 	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/license"
-	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
 // licensePkgKey identifies a package version for license lookup dedup.
@@ -35,14 +34,15 @@ func licenseEcosystem(raw string) string {
 }
 
 // enrichChangeLicenses resolves license information for each non-removed
-// change from the configured sources (deps.dev, local scan artifacts, or
-// both) and returns the changes with Licenses populated.
+// change from the configured package metadata sources (deps.dev, registry
+// lookups, or both) and returns the changes with Licenses populated.
 //
 // It runs before policy evaluation and output conversion, not at render
 // time, so policies (e.g. a license allowlist over pkg.licenses), structured
 // output, and the rendered report all see the same license data. Lookup
-// failures degrade to an empty license list for that package.
-func enrichChangeLicenses(ctx context.Context, ws workspace.FS, changes []compare.Change, licenseSource string) []compare.Change {
+// failures degrade to an empty license list for that package, which policy
+// reads as "no license declared" rather than as a license.
+func enrichChangeLicenses(ctx context.Context, changes []compare.Change, licenseSource string) []compare.Change {
 	if len(changes) == 0 {
 		return changes
 	}
@@ -81,12 +81,12 @@ func enrichChangeLicenses(ctx context.Context, ws workspace.FS, changes []compar
 		}
 	}
 
-	// Local artifacts and registry lookups for the scan source.
-	var localScan []string
+	// Registry lookups for the scan source. Repository-local license files
+	// are deliberately not consulted here: they describe the analyzed
+	// project, not its dependencies (the SBOM path attaches them to the
+	// document root instead).
 	remoteLicenses := map[licensePkgKey][]string{}
 	if useScan {
-		localScan = license.LocalRepoLicenseScan(ws)
-
 		var mu sync.Mutex
 		g := new(errgroup.Group)
 		g.SetLimit(max(licenseScanConcurrency(len(targets)), 1))
@@ -112,9 +112,14 @@ func enrichChangeLicenses(ctx context.Context, ws workspace.FS, changes []compar
 		pk := licensePkgKey{ecosystem: licenseEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
 		licenses := depsDevLicenses[pk]
 		if useScan {
-			if len(localScan) > 0 {
-				licenses = license.MergeLicenseSources(licenses, localScan)
-			}
+			// Only package-specific lookups may populate a dependency's
+			// licenses. Licenses discovered in the analyzed repository
+			// describe that repository, not the things it depends on, and
+			// attaching them here would make every dependency inherit the
+			// scanned project's license. That is wrong on its own and, since
+			// these values now feed policy evaluation, would let an
+			// unknown-license rule pass for a dependency that declares
+			// nothing.
 			if rl := remoteLicenses[pk]; len(rl) > 0 {
 				licenses = license.MergeLicenseSources(licenses, rl)
 			}

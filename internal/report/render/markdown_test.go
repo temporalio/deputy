@@ -95,7 +95,7 @@ func TestDiffMarkdown(t *testing.T) {
 		"[GHSA-aaaa-bbbb-cccc](https://osv.dev/vulnerability/GHSA-aaaa-bbbb-cccc)",
 		"HIGH",
 		"1.0.1",
-		"<details><summary>1 pre-existing vulnerability in unchanged dependencies</summary>",
+		"<details><summary>1 pre-existing vulnerability not introduced by this change</summary>",
 		"### Policy evaluation",
 		"⚠️ WARN **pr-license-check** (`policy/ci/pr-review.yaml`): No license information detected — 2 packages",
 	} {

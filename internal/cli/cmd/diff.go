@@ -542,7 +542,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	// the rendered report, policy evaluation (pkg.licenses), and structured
 	// output must all see the same licenses.
 	if enrichLicenses {
-		changes = enrichChangeLicenses(ctx, repoSrc.Workspace(), changes, licenseSource)
+		changes = enrichChangeLicenses(ctx, changes, licenseSource)
 	}
 
 	// Skip text rendering in JSON mode
@@ -721,8 +721,13 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 			fmt.Fprintln(outW, ui.StyleDowngraded.Render("∴ ")+ui.StyleHeader.Render("Vulnerabilities"))
 			render.VulnerabilityList(outW, changedCons, render.VulnerabilityDisplayOptions{})
 			if showUnchangedEff && len(unchangedVulns) > 0 {
-				// Visual separator for unchanged dependencies, include reason if any
-				title := "Unchanged dependencies"
+				// Separator for the pre-existing set, with the reason it is
+				// shown. Not "unchanged dependencies": an upgraded package
+				// whose advisory already affected its base version is
+				// reclassified into this bucket, so it can name dependencies
+				// listed in the changes above. What unites them is that this
+				// diff did not introduce them.
+				title := "Not introduced by this change"
 				if reason != "" {
 					title += " (" + reason + ")"
 				}
