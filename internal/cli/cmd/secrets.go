@@ -221,15 +221,19 @@ CI/CD WORKFLOWS:
   # Check for new secrets in PR (exit non-zero if found)
   deputy secrets --diff $BASE_SHA $HEAD_SHA --format json
 
-  # Scan full history in initial audit
-  deputy secrets --history --include-removed --format json > secrets-audit.json
+  # Scan full history in initial audit (report only, do not fail the step)
+  deputy secrets --history --include-removed --format json --exit-zero > secrets-audit.json
 
 GITHUB ACTIONS INTEGRATION:
-  # Upload SARIF to GitHub Code Scanning
+  # Fail the job as soon as a secret is found
   - name: Scan for secrets
-    run: deputy secrets --format sarif > secrets.sarif
+    run: deputy secrets
+
+  # Or report first and gate later: --exit-zero keeps the upload reachable
+  - name: Scan for secrets (report)
+    run: deputy secrets --format sarif --exit-zero > secrets.sarif
   - name: Upload SARIF
-    uses: github/codeql-action/upload-sarif@v2
+    uses: github/codeql-action/upload-sarif@v3
     with:
       sarif_file: secrets.sarif
 
