@@ -489,3 +489,48 @@ func testResolver(refs []refEntry) *Resolver {
 	}
 	return r
 }
+
+// TestStrategy_DiscoverAttributesNestedRefToDeclaringFile pins where a
+// recursively discovered ref is reported. A workflow referencing a composite
+// action pulls in that action's own uses statements, and each must name the
+// file it appears in. Attributing them to the workflow makes pin rewrite the
+// wrong file, and when the action sits under a skipped directory it is the
+// only result, so pin would report success while leaving the ref unpinned.
+func TestStrategy_DiscoverAttributesNestedRefToDeclaringFile(t *testing.T) {
+	fsys := testMapFS(map[string]string{
+		".github/workflows/ci.yml": `
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/tools/build`,
+		"tools/build/action.yml": `
+name: build
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5`,
+	})
+
+	s := &Strategy{}
+	refs, err := s.Discover(t.Context(), fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var found bool
+	for _, r := range refs {
+		if r.Name != "actions/setup-go" {
+			continue
+		}
+		found = true
+		if r.FilePath != "tools/build/action.yml" {
+			t.Errorf("FilePath = %q, want tools/build/action.yml (the file the uses appears in)", r.FilePath)
+		}
+	}
+	if !found {
+		t.Fatalf("actions/setup-go not discovered through the composite action; refs: %v", refNames(refs))
+	}
+}

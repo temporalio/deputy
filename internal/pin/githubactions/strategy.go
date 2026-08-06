@@ -405,6 +405,12 @@ func (s *Strategy) Rewrite(root *os.Root, relPath string, updates []pin.Update) 
 
 // packageToRef converts an extractor.Package from the actionsx extractor to
 // a pin.Ref. Returns nil for non-GitHub-Actions packages (docker, local).
+// packageToRef converts an extracted package into a pin ref. relPath is the
+// file the extraction started from and is only a fallback: recursion into
+// composite actions and reusable workflows records the declaring file in
+// pkg.Locations, and a ref must name the file it actually appears in or pin
+// will rewrite the wrong one (or, when the declaring file sits under a
+// skipped directory, silently rewrite nothing at all).
 func packageToRef(pkg *extractor.Package, relPath string) *pin.Ref {
 	if !purlx.IsGitHubActionsType(pkg.PURLType) {
 		return nil // docker or other type
@@ -420,12 +426,17 @@ func packageToRef(pkg *extractor.Package, relPath string) *pin.Ref {
 		subpath = md.Subpath
 	}
 
+	filePath := relPath
+	if len(pkg.Locations) > 0 && strings.TrimSpace(pkg.Locations[0]) != "" {
+		filePath = pkg.Locations[0]
+	}
+
 	return &pin.Ref{
 		Ecosystem: Ecosystem,
 		Name:      owner + "/" + repo,
 		Subpath:   subpath,
 		Version:   pkg.Version,
-		FilePath:  relPath,
+		FilePath:  filePath,
 		Raw:       rawFromMetadata(pkg),
 	}
 }
@@ -437,4 +448,3 @@ func rawFromMetadata(pkg *extractor.Package) string {
 	}
 	return ""
 }
-
