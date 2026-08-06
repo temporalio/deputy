@@ -16,12 +16,12 @@ func TestSecretsExit(t *testing.T) {
 	scanErr := errors.New("scanning target: boom")
 
 	tests := []struct {
-		name     string
-		found    int
-		err      error
-		exitZero bool
-		wantCode int
-		wantErr  error // non-nil means the exact error must pass through
+		name           string
+		found          int
+		err            error
+		alwaysExitZero bool
+		wantCode       int
+		wantErr        error // non-nil means the exact error must pass through
 		// wantSilent asserts the CLI suppresses printing, because the
 		// findings were already rendered to the user.
 		wantSilent bool
@@ -44,10 +44,10 @@ func TestSecretsExit(t *testing.T) {
 			wantSilent: true,
 		},
 		{
-			name:     "exit-zero suppresses the findings exit",
-			found:    7,
-			exitZero: true,
-			wantCode: 0,
+			name:           "always-exit-zero suppresses the findings exit",
+			found:          7,
+			alwaysExitZero: true,
+			wantCode:       0,
 		},
 		{
 			name:     "scan error propagates unchanged",
@@ -67,18 +67,18 @@ func TestSecretsExit(t *testing.T) {
 			wantErr:  scanErr,
 		},
 		{
-			name:     "scan error is not suppressed by exit-zero",
-			found:    0,
-			err:      scanErr,
-			exitZero: true,
-			wantCode: 1,
-			wantErr:  scanErr,
+			name:           "scan error is not suppressed by always-exit-zero",
+			found:          0,
+			err:            scanErr,
+			alwaysExitZero: true,
+			wantCode:       1,
+			wantErr:        scanErr,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := secretsExit(tt.found, tt.err, tt.exitZero)
+			got := secretsExit(tt.found, tt.err, tt.alwaysExitZero)
 
 			if code := deputyerrors.ExitCode(got); code != tt.wantCode {
 				t.Errorf("ExitCode = %d, want %d (err %v)", code, tt.wantCode, got)

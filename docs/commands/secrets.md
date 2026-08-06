@@ -163,7 +163,7 @@ Supported formats: zip, jar, war, tar, tar.gz, tgz, tar.bz2, tar.xz
 | `--output`, `-o` | Write output to file |
 | `--verify` | Verify if detected secrets are still active |
 | `--no-redact` | Show actual secret values (use with caution) |
-| `--exit-zero` | Exit 0 even when secrets are found (report without failing) |
+| `--always-exit-zero` | Exit 0 even when secrets are found (report without failing) |
 | `--include` | Glob pattern for files to include |
 | `--exclude` | Glob pattern for files to exclude |
 
@@ -271,9 +271,9 @@ Verification is supported for:
 - name: Scan for secrets
   run: deputy secrets
 
-# Or report first and gate later: --exit-zero keeps the upload step reachable.
+# Or report first and gate later: --always-exit-zero keeps the upload step reachable.
 - name: Scan for secrets (report)
-  run: deputy secrets --format sarif --exit-zero > secrets.sarif
+  run: deputy secrets --format sarif --always-exit-zero > secrets.sarif
 
 - name: Upload SARIF
   uses: github/codeql-action/upload-sarif@v3
@@ -353,7 +353,7 @@ deputy secrets rootfs:///path/to/rootfs.ext4
 
 | Code | Meaning |
 | --- | --- |
-| `0` | No secrets found (or `--exit-zero` was passed) |
+| `0` | No secrets found (or `--always-exit-zero` was passed) |
 | `1` | Secrets found, or the scan failed |
 
 Finding a secret is a failure condition, so `deputy secrets` can gate CI
@@ -366,17 +366,17 @@ directly:
 Every scan mode follows this contract: directory, file, remote Git URL,
 `--history`, base/target diff, container image, VM image, and archive.
 
-For report-only runs, `--exit-zero` keeps the exit status at 0 so a later step
+For report-only runs, `--always-exit-zero` keeps the exit status at 0 so a later step
 still executes, which is the usual pattern when uploading SARIF:
 
 ```yaml
-- run: deputy secrets . --format sarif --exit-zero > secrets.sarif
+- run: deputy secrets . --format sarif --always-exit-zero > secrets.sarif
 - uses: github/codeql-action/upload-sarif@v3
   with:
     sarif_file: secrets.sarif
 ```
 
-A scan error always exits 1 regardless of `--exit-zero`: an unreadable target
+A scan error always exits 1 regardless of `--always-exit-zero`: an unreadable target
 must not look like a clean result.
 
 ## See Also

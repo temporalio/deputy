@@ -55,7 +55,7 @@ func AddSecretsCommand(root *cobra.Command, c *services.Clients) {
 		excludeGlob    string
 		noRedact       bool
 		verifyFlag     bool
-		exitZero       bool
+		alwaysExitZero bool
 		historyFlag    bool
 		maxCommits     int
 		sinceFlag      string
@@ -222,16 +222,16 @@ CI/CD WORKFLOWS:
   deputy secrets --diff $BASE_SHA $HEAD_SHA --format json
 
   # Scan full history in initial audit (report only, do not fail the step)
-  deputy secrets --history --include-removed --format json --exit-zero > secrets-audit.json
+  deputy secrets --history --include-removed --format json --always-exit-zero > secrets-audit.json
 
 GITHUB ACTIONS INTEGRATION:
   # Fail the job as soon as a secret is found
   - name: Scan for secrets
     run: deputy secrets
 
-  # Or report first and gate later: --exit-zero keeps the upload reachable
+  # Or report first and gate later: --always-exit-zero keeps the upload reachable
   - name: Scan for secrets (report)
-    run: deputy secrets --format sarif --exit-zero > secrets.sarif
+    run: deputy secrets --format sarif --always-exit-zero > secrets.sarif
   - name: Upload SARIF
     uses: github/codeql-action/upload-sarif@v3
     with:
@@ -303,7 +303,7 @@ FILTERING:
 					targetRef = args[2]
 				}
 				found, err := runDiffSecretsScan(ctx, out, errW, target, baseRef, targetRef, formatFlag, noRedact, pathFilter)
-				return secretsExit(found, err, exitZero)
+				return secretsExit(found, err, alwaysExitZero)
 			}
 
 			// Default to current directory for non-diff modes
@@ -326,19 +326,19 @@ FILTERING:
 					includeRemoved: includeRemoved,
 				}
 				found, err := runHistoricalSecretsScan(ctx, out, errW, historyOpts)
-				return secretsExit(found, err, exitZero)
+				return secretsExit(found, err, alwaysExitZero)
 			}
 
 			// Check if target is a VM/rootfs image
 			if isVMImageTarget(target) {
 				found, err := runVMImageSecretsScan(ctx, out, errW, target, formatFlag, noRedact, includeGlob, excludeGlob)
-				return secretsExit(found, err, exitZero)
+				return secretsExit(found, err, alwaysExitZero)
 			}
 
 			// Check if target is a container image reference
 			if isImageTargetScheme(target) || looksLikeContainerReference(target) {
 				found, err := runContainerSecretsScan(ctx, out, errW, target, formatFlag, noRedact, deepScan)
-				return secretsExit(found, err, exitZero)
+				return secretsExit(found, err, alwaysExitZero)
 			}
 
 			// Check if target is a remote Git URL (e.g., github.com/owner/repo)
@@ -405,7 +405,7 @@ FILTERING:
 					default:
 						renderErr = renderSecretsTextWithVerification(out, result, noRedact, nil)
 					}
-					return secretsExit(len(findings), renderErr, exitZero)
+					return secretsExit(len(findings), renderErr, alwaysExitZero)
 				}
 				return fmt.Errorf("accessing target: %w", err)
 			}
@@ -415,7 +415,7 @@ FILTERING:
 				format, _ := secrets.DetectArchiveFormat(target)
 				if format != secrets.FormatUnknown {
 					found, err := runArchiveSecretsScan(ctx, out, errW, target, format, formatFlag, noRedact, deepScan)
-					return secretsExit(found, err, exitZero)
+					return secretsExit(found, err, alwaysExitZero)
 				}
 			}
 
@@ -503,7 +503,7 @@ FILTERING:
 			default:
 				renderErr = renderSecretsTextWithVerification(out, result, noRedact, verificationResults)
 			}
-			return secretsExit(len(findings), renderErr, exitZero)
+			return secretsExit(len(findings), renderErr, alwaysExitZero)
 		},
 	}
 
@@ -512,7 +512,7 @@ FILTERING:
 	secretsCmd.Flags().StringVar(&excludeGlob, "exclude", "", "Comma-separated globs to exclude (e.g., 'vendor/**,node_modules/**')")
 	secretsCmd.Flags().BoolVar(&noRedact, "no-redact", false, "Show actual secret values (use with caution)")
 	secretsCmd.Flags().BoolVar(&verifyFlag, "verify", false, "Verify if detected secrets are still active")
-	secretsCmd.Flags().BoolVar(&exitZero, "exit-zero", false, "Exit 0 even when secrets are found (report without failing)")
+	secretsCmd.Flags().BoolVar(&alwaysExitZero, "always-exit-zero", false, "Exit 0 even when secrets are found (report without failing)")
 
 	// History scanning flags
 	secretsCmd.Flags().BoolVar(&historyFlag, "history", false, "Scan git history for secrets")
@@ -759,16 +759,16 @@ func isBinaryContent(content []byte) bool {
 
 // secretsExit maps a completed secrets scan onto the command's exit status.
 // Finding a secret is a failure condition: the documented contract is exit 1
-// so CI gates catch leaked credentials, and --exit-zero opts out for
+// so CI gates catch leaked credentials, and --always-exit-zero opts out for
 // report-only runs (for example generating SARIF for later upload).
 //
 // Scan errors take precedence and are returned unchanged. A findings exit
 // carries no message because the findings themselves were already rendered.
-func secretsExit(found int, err error, exitZero bool) error {
+func secretsExit(found int, err error, alwaysExitZero bool) error {
 	if err != nil {
 		return err
 	}
-	if found > 0 && !exitZero {
+	if found > 0 && !alwaysExitZero {
 		return deputyerrors.Silent(deputyerrors.WithExitCode(nil, 1))
 	}
 	return nil
