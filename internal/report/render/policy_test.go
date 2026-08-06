@@ -375,3 +375,38 @@ func TestPolicyActionsSection(t *testing.T) {
 		}
 	})
 }
+
+// TestPolicyActionsSection_RendersMessageBesideReason pins that a rule
+// supplying both fields keeps its extra context in text output. Reason is the
+// headline and message adds detail; showing only the reason would drop
+// information that the JSON contract still carries.
+func TestPolicyActionsSection_RendersMessageBesideReason(t *testing.T) {
+	act := &policyv1.Action{
+		Type:       policyv1.ActionType_ACTION_TYPE_WARN,
+		PolicyName: "p.yaml",
+		RuleName:   "r",
+		Reason:     "License not on the allowlist",
+		Message:    "Found GPL-3.0 via a transitive dependency",
+	}
+
+	var buf bytes.Buffer
+	PolicyActionsSection(&buf, 1, []*policyv1.Action{act})
+	out := buf.String()
+
+	for _, want := range []string{"License not on the allowlist", "Found GPL-3.0 via a transitive dependency"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\n---\n%s", want, out)
+		}
+	}
+
+	// A message identical to the reason must not print twice.
+	dup := &policyv1.Action{
+		Type: policyv1.ActionType_ACTION_TYPE_WARN, PolicyName: "p.yaml", RuleName: "r",
+		Reason: "same text", Message: "same text",
+	}
+	buf.Reset()
+	PolicyActionsSection(&buf, 1, []*policyv1.Action{dup})
+	if got := strings.Count(buf.String(), "same text"); got != 1 {
+		t.Errorf("duplicate message rendered %d times, want 1\n---\n%s", got, buf.String())
+	}
+}

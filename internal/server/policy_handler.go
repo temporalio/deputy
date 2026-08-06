@@ -10,6 +10,7 @@ import (
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	"github.com/temporalio/deputy/gen/deputy/policy/v1/policyv1connect"
 	"github.com/temporalio/deputy/internal/policy"
+	internalproto "github.com/temporalio/deputy/internal/proto"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -76,16 +77,12 @@ func (h *PolicyHandler) Evaluate(
 		})
 	}
 
-	// Convert actions to proto
+	// Convert actions to proto through the shared converter so this surface
+	// cannot drift from the CLI and MCP ones: it splits the engine's combined
+	// "path::rule" source and carries message and code.
 	protoActions := make([]*policyv1.Action, 0, len(actions))
 	for _, a := range actions {
-		protoActions = append(protoActions, &policyv1.Action{
-			Type:        actionTypeToProto(a.Type),
-			PolicyName:  a.Source,
-			Reason:      a.Reason,
-			Remediation: a.Remediation,
-			Entrypoint:  entrypoint,
-		})
+		protoActions = append(protoActions, internalproto.PolicyActionToProto(a, entrypoint, nil))
 	}
 
 	// Determine overall outcome
@@ -280,19 +277,6 @@ func commandFromEnv(env *policyv1.Environment) string {
 }
 
 // Helper functions
-
-func actionTypeToProto(action string) policyv1.ActionType {
-	switch action {
-	case "allow":
-		return policyv1.ActionType_ACTION_TYPE_ALLOW
-	case "deny":
-		return policyv1.ActionType_ACTION_TYPE_DENY
-	case "warn":
-		return policyv1.ActionType_ACTION_TYPE_WARN
-	default:
-		return policyv1.ActionType_ACTION_TYPE_UNSPECIFIED
-	}
-}
 
 // policyMeta holds extracted metadata from a policy source.
 type policyMeta struct {

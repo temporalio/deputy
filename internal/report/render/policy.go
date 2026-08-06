@@ -237,6 +237,7 @@ type policyActionGroup struct {
 	policyName  string
 	ruleName    string
 	reason      string
+	message     string
 	remediation string
 	subjects    []*policyv1.Subject
 	// count is the number of underlying actions, which can exceed
@@ -255,8 +256,15 @@ func groupPolicyActions(actions []*policyv1.Action) []*policyActionGroup {
 		if t != policyv1.ActionType_ACTION_TYPE_DENY && t != policyv1.ActionType_ACTION_TYPE_WARN {
 			continue
 		}
+		// A rule may supply both: reason is the headline, message is extra
+		// context. Falling back to message only when reason is absent would
+		// drop that context from text output while JSON still carries it.
 		reason := firstNonEmpty(act.GetReason(), act.GetMessage())
-		key := strings.Join([]string{t.String(), act.GetPolicyName(), act.GetRuleName(), reason}, "\x00")
+		message := strings.TrimSpace(act.GetMessage())
+		if message == reason {
+			message = ""
+		}
+		key := strings.Join([]string{t.String(), act.GetPolicyName(), act.GetRuleName(), reason, message}, "\x00")
 		g, ok := byKey[key]
 		if !ok {
 			g = &policyActionGroup{
@@ -264,6 +272,7 @@ func groupPolicyActions(actions []*policyv1.Action) []*policyActionGroup {
 				policyName:  act.GetPolicyName(),
 				ruleName:    act.GetRuleName(),
 				reason:      reason,
+				message:     message,
 				remediation: act.GetRemediation(),
 			}
 			byKey[key] = g
@@ -313,6 +322,9 @@ func renderPolicyActionGroup(w io.Writer, g *policyActionGroup) {
 
 	if g.reason != "" {
 		fmt.Fprintln(w, "    "+ui.StyleSymbol.Render(g.reason))
+	}
+	if g.message != "" {
+		fmt.Fprintln(w, "    "+ui.StyleMeta.Render(g.message))
 	}
 
 	shown := min(len(g.subjects), maxPolicySubjectsShown)
