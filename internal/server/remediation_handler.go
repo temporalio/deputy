@@ -280,6 +280,14 @@ func (h *RemediationHandler) ExecutePlan(
 		return err
 	}
 	dryRun := opts.GetDryRun()
+	// StopOnError promises "halts execution if any step fails"
+	// (deputy.remediation.v1.ExecutionOptions); when unset, execution
+	// continues past failed steps and reports them through per-step FAILED
+	// events and the terminal phase.
+	stopOnError := opts.GetStopOnError()
+	// VerboseOutput promises "includes full command output instead of
+	// summaries"; when unset, completion events carry a one-line summary.
+	verbose := opts.GetVerboseOutput()
 	skipSteps := make(map[string]struct{}, len(opts.GetSkipStepIds()))
 	for _, id := range opts.GetSkipStepIds() {
 		skipSteps[id] = struct{}{}
@@ -333,6 +341,12 @@ func (h *RemediationHandler) ExecutePlan(
 
 	steps := plan.GetSteps()
 	if len(steps) == 0 {
+		// The zero-step branch must not bypass the timeout: an expired
+		// context cannot be reported as a completed plan.
+		if err := ctx.Err(); err != nil {
+			return connect.NewError(stepFailureCode(ctx, err),
+				fmt.Errorf("plan execution stopped before completion: %w", err))
+		}
 		// No steps to execute
 		if err := stream.Send(&remediationv1.ExecutionEvent{
 			Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_COMPLETED,
@@ -354,6 +368,7 @@ func (h *RemediationHandler) ExecutePlan(
 	}
 	executed := 0
 	skipped := 0
+	failed := 0
 	wouldExecute := 0
 	for i, step := range steps {
 		// executeStep is the only branch that observes the context on its
@@ -420,7 +435,10 @@ func (h *RemediationHandler) ExecutePlan(
 		output, execErr := runStep(ctx, absWorkDir, step)
 
 		if execErr != nil {
-			// Send failure event with output in message
+			failed++
+			// Failure events carry command output regardless of the
+			// verbosity setting: diagnostics for a failed step must not
+			// depend on a summarization flag.
 			failMsg := fmt.Sprintf("Step failed: %v", execErr)
 			if output != "" {
 				failMsg = fmt.Sprintf("Step failed: %v\n%s", execErr, output)
@@ -429,20 +447,25 @@ func (h *RemediationHandler) ExecutePlan(
 				Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
 				StepId:    stepID,
 				Message:   failMsg,
-				Progress:  executionProgress(i, len(steps)),
+				Progress:  executionProgress(i+1, len(steps)),
 				Timestamp: timestamppb.Now(),
 			}); err != nil {
 				return err
 			}
-			// Return the error to stop execution
-			return connect.NewError(stepFailureCode(ctx, execErr), fmt.Errorf("step %s failed: %w", stepID, execErr))
+			if stopOnError {
+				// Halt as the option promises; the terminal error carries
+				// the cause-appropriate code.
+				return connect.NewError(stepFailureCode(ctx, execErr), fmt.Errorf("step %s failed: %w", stepID, execErr))
+			}
+			continue
 		}
 		executed++
 
-		// Send step completed event
-		completeMsg := fmt.Sprintf("Completed step %d/%d", i+1, len(steps))
-		if output != "" {
-			completeMsg = fmt.Sprintf("Completed step %d/%d\n%s", i+1, len(steps), output)
+		// Send step completed event: a one-line summary by default, with the
+		// full command output only when verbose_output is set.
+		completeMsg := fmt.Sprintf("Completed step %d/%d: %s", i+1, len(steps), stepLabel(step))
+		if verbose && output != "" {
+			completeMsg = fmt.Sprintf("%s\n%s", completeMsg, output)
 		}
 		if err := stream.Send(&remediationv1.ExecutionEvent{
 			Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
@@ -460,6 +483,33 @@ func (h *RemediationHandler) ExecutePlan(
 	if err := ctx.Err(); err != nil {
 		return connect.NewError(stepFailureCode(ctx, err),
 			fmt.Errorf("plan execution stopped before completion: %w", err))
+	}
+
+	// A run that continued past failures (stop_on_error unset) ends with a
+	// terminal FAILED phase carrying the honest counts: the plan ran to the
+	// end as requested but did not fully succeed. The stream itself returns
+	// nil because the RPC did exactly what was asked; per-step FAILED events
+	// already carried the diagnostics.
+	if failed > 0 {
+		partialMsg := fmt.Sprintf("Executed %d steps: %d succeeded, %d failed", executed+failed, executed, failed)
+		if skipped > 0 {
+			partialMsg = fmt.Sprintf("%s (%d skipped)", partialMsg, skipped)
+		}
+		if err := stream.Send(&remediationv1.ExecutionEvent{
+			Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
+			Message:   partialMsg,
+			Progress:  100,
+			Timestamp: timestamppb.Now(),
+		}); err != nil {
+			return err
+		}
+		logs.Info(ctx, "remediation plan executed with failures",
+			"plan_id", plan.GetId(),
+			"steps_executed", executed,
+			"steps_failed", failed,
+			"steps_skipped", skipped,
+		)
+		return nil
 	}
 
 	// Send completion event
@@ -529,6 +579,15 @@ func rejectUnsupportedApprovalMode(mode remediationv1.ApprovalMode) error {
 			remediationv1.ApprovalMode_APPROVAL_MODE_AUTO_APPROVE,
 		))
 	}
+}
+
+// stepLabel identifies a step in human-readable event messages, preferring
+// the concrete command over the title so summaries still say what ran.
+func stepLabel(step *remediationv1.Step) string {
+	if cmd := step.GetCommand(); cmd != "" {
+		return cmd
+	}
+	return step.GetTitle()
 }
 
 // dryRunStepMessage describes what a step would do without executing it, so a

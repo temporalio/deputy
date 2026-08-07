@@ -97,15 +97,21 @@ type stepRecorder struct {
 	mu          sync.Mutex
 	stepIDs     []string
 	hadDeadline bool
+	failSteps   []string // step IDs whose execution is reported as failed
 }
 
 // run records the step and whether the execution context carried a deadline,
-// standing in for real command execution.
+// standing in for real command execution. Steps listed in failSteps fail
+// with output, mimicking a command that produced diagnostics and exited
+// nonzero.
 func (r *stepRecorder) run(ctx context.Context, _ string, step *remediationv1.Step) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_, r.hadDeadline = ctx.Deadline()
 	r.stepIDs = append(r.stepIDs, step.GetId())
+	if slices.Contains(r.failSteps, step.GetId()) {
+		return "failure output", errors.New("simulated step failure")
+	}
 	return "recorded output", nil
 }
 
@@ -166,12 +172,15 @@ func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.
 // instead of silently auto-executing, and skip_step_ids is honored.
 func TestExecutePlanExecutionOptions(t *testing.T) {
 	tests := []struct {
-		name         string
-		options      *remediationv1.ExecutionOptions
-		extraSteps   []*remediationv1.Step
-		wantCode     connect.Code // zero means the stream must succeed
-		wantExecuted []string
-		wantMessages []string // substrings that must appear across event messages
+		name           string
+		options        *remediationv1.ExecutionOptions
+		extraSteps     []*remediationv1.Step
+		failSteps      []string     // step IDs the recorder reports as failed
+		wantCode       connect.Code // zero means the stream must succeed
+		wantExecuted   []string
+		wantMessages   []string                     // substrings that must appear across event messages
+		wantMissing    []string                     // substrings that must NOT appear in any event message
+		wantFinalPhase remediationv1.ExecutionPhase // zero means COMPLETED
 	}{
 		{
 			name:         "nil options executes every step",
@@ -254,28 +263,58 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 				"Dry run complete: 2 steps would execute, nothing was changed",
 			},
 		},
+		{
+			name:         "stop_on_error true halts at the first failure",
+			options:      &remediationv1.ExecutionOptions{StopOnError: true},
+			failSteps:    []string{"step-1"},
+			wantCode:     connect.CodeInternal,
+			wantExecuted: []string{"step-1"},
+		},
+		{
+			name:         "failure without stop_on_error continues and reports honestly",
+			options:      nil,
+			failSteps:    []string{"step-1"},
+			wantExecuted: []string{"step-1", "step-2"},
+			wantMessages: []string{
+				"Step failed: simulated step failure",
+				"failure output",
+				"Executed 2 steps: 1 succeeded, 1 failed",
+			},
+			wantFinalPhase: remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
+		},
+		{
+			name:         "non-verbose completion summarizes without command output",
+			options:      nil,
+			wantExecuted: []string{"step-1", "step-2"},
+			wantMessages: []string{
+				"Completed step 1/2: go get example.com/widget@v1.5.0",
+			},
+			wantMissing: []string{"recorded output"},
+		},
+		{
+			name:         "verbose completion includes command output",
+			options:      &remediationv1.ExecutionOptions{VerboseOutput: true},
+			wantExecuted: []string{"step-1", "step-2"},
+			wantMessages: []string{"recorded output"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := &stepRecorder{}
+			rec := &stepRecorder{failSteps: tt.failSteps}
 			events, err := executePlanForTest(t, rec, tt.options, tt.extraSteps...)
 
+			if got := rec.executedSteps(); !slices.Equal(got, tt.wantExecuted) {
+				t.Fatalf("executed steps = %v, want %v", got, tt.wantExecuted)
+			}
 			if tt.wantCode != 0 {
 				if connect.CodeOf(err) != tt.wantCode {
 					t.Fatalf("ExecutePlan error = %v, want code %v", err, tt.wantCode)
-				}
-				if got := rec.executedSteps(); len(got) != 0 {
-					t.Fatalf("rejected request still executed steps %v", got)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("ExecutePlan failed: %v", err)
-			}
-
-			if got := rec.executedSteps(); !slices.Equal(got, tt.wantExecuted) {
-				t.Fatalf("executed steps = %v, want %v", got, tt.wantExecuted)
 			}
 
 			var messages []string
@@ -288,9 +327,18 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 					t.Errorf("event messages missing %q:\n%s", want, all)
 				}
 			}
+			for _, missing := range tt.wantMissing {
+				if strings.Contains(all, missing) {
+					t.Errorf("event messages must not contain %q:\n%s", missing, all)
+				}
+			}
+			wantFinal := tt.wantFinalPhase
+			if wantFinal == remediationv1.ExecutionPhase_EXECUTION_PHASE_UNSPECIFIED {
+				wantFinal = remediationv1.ExecutionPhase_EXECUTION_PHASE_COMPLETED
+			}
 			last := events[len(events)-1]
-			if last.GetPhase() != remediationv1.ExecutionPhase_EXECUTION_PHASE_COMPLETED {
-				t.Errorf("final phase = %v, want COMPLETED", last.GetPhase())
+			if last.GetPhase() != wantFinal {
+				t.Errorf("final phase = %v, want %v", last.GetPhase(), wantFinal)
 			}
 		})
 	}
@@ -368,6 +416,28 @@ func TestExecutePlanExpiredTimeoutCode(t *testing.T) {
 	}
 	stream, err := client.ExecutePlan(t.Context(), connect.NewRequest(&remediationv1.ExecutePlanRequest{
 		Source:     &remediationv1.ExecutePlanRequest_Plan{Plan: plan},
+		TargetPath: t.TempDir(),
+		Options:    &remediationv1.ExecutionOptions{Timeout: durationpb.New(time.Nanosecond)},
+	}))
+	if err == nil {
+		for stream.Receive() {
+		}
+		err = stream.Err()
+	}
+	if got := connect.CodeOf(err); got != connect.CodeDeadlineExceeded {
+		t.Fatalf("ExecutePlan error = %v (code %v), want CodeDeadlineExceeded", err, got)
+	}
+}
+
+// TestExecutePlanEmptyPlanExpiredTimeout pins that the zero-step branch is
+// not a timeout bypass: a plan with no steps must not report COMPLETED under
+// an already-expired execution timeout.
+func TestExecutePlanEmptyPlanExpiredTimeout(t *testing.T) {
+	handler := NewRemediationHandler(WithRemediationLocalMode())
+	client := newRemediationTestClient(t, handler)
+
+	stream, err := client.ExecutePlan(t.Context(), connect.NewRequest(&remediationv1.ExecutePlanRequest{
+		Source:     &remediationv1.ExecutePlanRequest_Plan{Plan: &remediationv1.Plan{Id: "plan-empty"}},
 		TargetPath: t.TempDir(),
 		Options:    &remediationv1.ExecutionOptions{Timeout: durationpb.New(time.Nanosecond)},
 	}))
