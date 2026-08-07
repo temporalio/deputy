@@ -668,9 +668,10 @@ func (h *RemediationHandler) ExecuteWithAgent(
 			return connect.NewError(connect.CodeInternal, err)
 		}
 
-		remEvent := convertAgentEventToRemediationEvent(event, sessionID)
-		if err := stream.Send(remEvent); err != nil {
-			return err
+		for _, remEvent := range convertAgentEventToRemediationEvents(event, sessionID) {
+			if err := stream.Send(remEvent); err != nil {
+				return err
+			}
 		}
 
 		// Handle approval required events
@@ -768,9 +769,10 @@ func (h *RemediationHandler) ResumeAgent(
 			return connect.NewError(connect.CodeInternal, err)
 		}
 
-		remEvent := convertAgentEventToRemediationEvent(event, sessionID)
-		if err := stream.Send(remEvent); err != nil {
-			return err
+		for _, remEvent := range convertAgentEventToRemediationEvents(event, sessionID) {
+			if err := stream.Send(remEvent); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -986,8 +988,13 @@ func buildAgentPrompt(req *remediationv1.ExecuteWithAgentRequest) string {
 	return sb.String()
 }
 
-// convertAgentEventToRemediationEvent converts an agentv1.ExecuteEvent to remediationv1.AgentEvent.
-func convertAgentEventToRemediationEvent(event *agentv1.ExecuteEvent, sessionID string) *remediationv1.AgentEvent {
+// convertAgentEventToRemediationEvents converts an agentv1.ExecuteEvent into
+// the remediationv1.AgentEvents to stream, in send order. Most upstream
+// events map one-to-one, but a remediation event carries a single details
+// payload, so a Done event that also reports token usage expands into two
+// events: the tokens event first, then the terminal summary, keeping the
+// summary the last detail a client sees for the session.
+func convertAgentEventToRemediationEvents(event *agentv1.ExecuteEvent, sessionID string) []*remediationv1.AgentEvent {
 	remEvent := &remediationv1.AgentEvent{
 		SessionId: sessionID,
 		Timestamp: timestamppb.Now(),
@@ -1062,14 +1069,23 @@ func convertAgentEventToRemediationEvent(event *agentv1.ExecuteEvent, sessionID 
 				Success:   d.Done.GetReason() == agentv1.DoneReason_DONE_REASON_SUCCESS,
 			},
 		}
+		// Token usage is additional detail on the same Done event; emit it as
+		// its own event ahead of the summary rather than replacing the
+		// summary, which is the terminal signal clients rely on.
 		if usage := d.Done.GetUsage(); usage != nil {
-			remEvent.Details = &remediationv1.AgentEvent_Tokens{
-				Tokens: &remediationv1.AgentTokensEvent{
-					PromptTokens:     usage.GetPromptTokens(),
-					CompletionTokens: usage.GetCompletionTokens(),
-					TotalTokens:      usage.GetTotalTokens(),
+			tokensEvent := &remediationv1.AgentEvent{
+				SessionId: sessionID,
+				Timestamp: remEvent.GetTimestamp(),
+				Phase:     remEvent.GetPhase(),
+				Details: &remediationv1.AgentEvent_Tokens{
+					Tokens: &remediationv1.AgentTokensEvent{
+						PromptTokens:     usage.GetPromptTokens(),
+						CompletionTokens: usage.GetCompletionTokens(),
+						TotalTokens:      usage.GetTotalTokens(),
+					},
 				},
 			}
+			return []*remediationv1.AgentEvent{tokensEvent, remEvent}
 		}
 	case *agentv1.ExecuteEvent_Status:
 		remEvent.Details = &remediationv1.AgentEvent_Status{
@@ -1094,5 +1110,5 @@ func convertAgentEventToRemediationEvent(event *agentv1.ExecuteEvent, sessionID 
 		}
 	}
 
-	return remEvent
+	return []*remediationv1.AgentEvent{remEvent}
 }

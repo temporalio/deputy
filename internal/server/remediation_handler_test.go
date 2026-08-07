@@ -13,6 +13,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	agentv1 "github.com/temporalio/deputy/gen/deputy/agent/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	remediationv1 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
 	"github.com/temporalio/deputy/gen/deputy/remediation/v1/remediationv1connect"
@@ -310,5 +311,57 @@ func TestExecutePlanTimeout(t *testing.T) {
 				t.Fatalf("step context deadline = %v, want %v", rec.hadDeadline, tt.wantDeadline)
 			}
 		})
+	}
+}
+
+// TestConvertAgentDoneEvent pins the Done event conversion: token usage must
+// not overwrite the terminal summary; both are emitted, tokens first.
+func TestConvertAgentDoneEvent(t *testing.T) {
+	doneWithUsage := &agentv1.ExecuteEvent{
+		Phase: agentv1.ExecutionPhase_EXECUTION_PHASE_COMPLETED,
+		Details: &agentv1.ExecuteEvent_Done{
+			Done: &agentv1.DoneEvent{
+				SessionId: "agent-sess",
+				Reason:    agentv1.DoneReason_DONE_REASON_SUCCESS,
+				Usage: &agentv1.TokenUsage{
+					PromptTokens:     100,
+					CompletionTokens: 25,
+					TotalTokens:      125,
+				},
+			},
+		},
+	}
+
+	events := convertAgentEventToRemediationEvents(doneWithUsage, "sess-1")
+	if len(events) != 2 {
+		t.Fatalf("converted events = %d, want 2 (tokens then summary)", len(events))
+	}
+	tokens := events[0].GetTokens()
+	if tokens == nil {
+		t.Fatalf("first event details = %T, want tokens", events[0].GetDetails())
+	}
+	if tokens.GetTotalTokens() != 125 || tokens.GetPromptTokens() != 100 || tokens.GetCompletionTokens() != 25 {
+		t.Errorf("tokens event = %+v, want 100/25/125", tokens)
+	}
+	summary := events[1].GetSummary()
+	if summary == nil {
+		t.Fatalf("second event details = %T, want summary", events[1].GetDetails())
+	}
+	if !summary.GetSuccess() || summary.GetSessionId() != "agent-sess" {
+		t.Errorf("summary event = %+v, want success for agent-sess", summary)
+	}
+
+	doneWithoutUsage := &agentv1.ExecuteEvent{
+		Phase: agentv1.ExecutionPhase_EXECUTION_PHASE_COMPLETED,
+		Details: &agentv1.ExecuteEvent_Done{
+			Done: &agentv1.DoneEvent{Reason: agentv1.DoneReason_DONE_REASON_SUCCESS},
+		},
+	}
+	events = convertAgentEventToRemediationEvents(doneWithoutUsage, "sess-1")
+	if len(events) != 1 {
+		t.Fatalf("converted events = %d, want 1", len(events))
+	}
+	if events[0].GetSummary() == nil {
+		t.Fatalf("event details = %T, want summary", events[0].GetDetails())
 	}
 }
