@@ -80,23 +80,6 @@ func (c ChangeType) Kind() diffv1.ChangeKind {
 	}
 }
 
-// newPackageChange builds a dependency change record. Package.Version carries
-// the target version (empty for removals), matching what consumers act on.
-func newPackageChange(kind ChangeType, name, oldName, baseVersion, targetVersion, ecosystem string, direct bool) *diffv1.PackageChange {
-	return &diffv1.PackageChange{
-		Package: &dependencyv1.Package{
-			Name:      name,
-			Version:   targetVersion,
-			Ecosystem: ecosystem,
-		},
-		ChangeKind:    kind.Kind(),
-		BaseVersion:   baseVersion,
-		TargetVersion: targetVersion,
-		OldName:       oldName,
-		IsDirect:      direct,
-	}
-}
-
 // GoPackageInfo represents a parsed interpretation of an import path possibly
 // containing a semantic major version suffix (e.g. /v2) or a historical vanity
 // host (gopkg.in). CanonicalName removes redundant major version path segments
@@ -735,29 +718,53 @@ func ComparePackagesWithOptions(oldPkgs, newPkgs []*extractor.Package, opts Comp
 		goDirect = GetDirectDependencies(opts.Workspace)
 	}
 	pkgDirect := opts.PkgDirect
+	// Package.Version carries the target version (empty for removals), which is
+	// the version consumers act on.
 	var changes []*diffv1.PackageChange
 	for key, oldMeta := range oldMap {
 		newMeta, ok := newMap[key]
 		if !ok {
-			changes = append(changes, newPackageChange(Removed,
-				oldMeta.pkg.Name, "", oldMeta.pkg.Version, "",
-				oldMeta.ecosystemName(), isDirectForSummary(oldMeta, goDirect, pkgDirect)))
+			changes = append(changes, &diffv1.PackageChange{
+				Package: &dependencyv1.Package{
+					Name:      oldMeta.pkg.Name,
+					Ecosystem: oldMeta.ecosystemName(),
+				},
+				ChangeKind:  Removed.Kind(),
+				BaseVersion: oldMeta.pkg.Version,
+				IsDirect:    isDirectForSummary(oldMeta, goDirect, pkgDirect),
+			})
 			continue
 		}
 		if oldMeta.pkg.Version != newMeta.pkg.Version || oldMeta.pkg.Name != newMeta.pkg.Name {
 			ct := selectChangeType(newMeta.ecosystemName(), oldMeta.pkg.Version, newMeta.pkg.Version)
-			changes = append(changes, newPackageChange(ct,
-				newMeta.pkg.Name, oldMeta.pkg.Name, oldMeta.pkg.Version, newMeta.pkg.Version,
-				newMeta.ecosystemName(), isDirectForSummary(newMeta, goDirect, pkgDirect)))
+			changes = append(changes, &diffv1.PackageChange{
+				Package: &dependencyv1.Package{
+					Name:      newMeta.pkg.Name,
+					Version:   newMeta.pkg.Version,
+					Ecosystem: newMeta.ecosystemName(),
+				},
+				ChangeKind:    ct.Kind(),
+				BaseVersion:   oldMeta.pkg.Version,
+				TargetVersion: newMeta.pkg.Version,
+				OldName:       oldMeta.pkg.Name,
+				IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
+			})
 		}
 	}
 	for key, newMeta := range newMap {
 		if _, ok := oldMap[key]; ok {
 			continue
 		}
-		changes = append(changes, newPackageChange(Added,
-			newMeta.pkg.Name, "", "", newMeta.pkg.Version,
-			newMeta.ecosystemName(), isDirectForSummary(newMeta, goDirect, pkgDirect)))
+		changes = append(changes, &diffv1.PackageChange{
+			Package: &dependencyv1.Package{
+				Name:      newMeta.pkg.Name,
+				Version:   newMeta.pkg.Version,
+				Ecosystem: newMeta.ecosystemName(),
+			},
+			ChangeKind:    Added.Kind(),
+			TargetVersion: newMeta.pkg.Version,
+			IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
+		})
 	}
 
 	// Sort changes for consistent output: by change type priority, then name
