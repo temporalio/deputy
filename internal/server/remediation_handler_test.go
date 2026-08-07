@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -517,23 +518,41 @@ func (f *fakeAgentHandler) GetInfo(context.Context, *connect.Request[agentv1.Get
 	}), nil
 }
 
-// TestListAgentsCapabilities pins the capability mapping: agentic agents
-// advertise code execution, file modification, and approval workflows, and
-// non-agentic agents advertise none of them.
+// fakeExecutorAgentHandler is a fakeAgentHandler that also implements the
+// in-process agent.Executor interface ExecuteWithAgent requires, standing in
+// for builtin agents like claude and codex.
+type fakeExecutorAgentHandler struct {
+	fakeAgentHandler
+}
+
+// ExecuteIter satisfies agent.Executor with an empty event stream.
+func (f *fakeExecutorAgentHandler) ExecuteIter(context.Context, *agentv1.ExecuteRequest) iter.Seq2[*agentv1.ExecuteEvent, error] {
+	return func(func(*agentv1.ExecuteEvent, error) bool) {}
+}
+
+// ResumeIter satisfies agent.Executor with an empty event stream.
+func (f *fakeExecutorAgentHandler) ResumeIter(context.Context, *agentv1.ResumeRequest) iter.Seq2[*agentv1.ExecuteEvent, error] {
+	return func(func(*agentv1.ExecuteEvent, error) bool) {}
+}
+
+// TestListAgentsCapabilities pins the capability mapping: only agentic agents
+// that support in-process execution (what ExecuteWithAgent actually requires)
+// advertise code execution, file modification, and approval workflows.
 func TestListAgentsCapabilities(t *testing.T) {
+	agenticCaps := &agentv1.AgentCapabilities{
+		Streaming:         true,
+		ToolUse:           true,
+		Agentic:           true,
+		SessionResumption: true,
+	}
 	tests := []struct {
-		name string
-		caps *agentv1.AgentCapabilities
-		want *remediationv1.AgentCapabilities
+		name    string
+		handler agentv1connect.AgentPluginHandler
+		want    *remediationv1.AgentCapabilities
 	}{
 		{
-			name: "agentic agent advertises execution capabilities",
-			caps: &agentv1.AgentCapabilities{
-				Streaming:         true,
-				ToolUse:           true,
-				Agentic:           true,
-				SessionResumption: true,
-			},
+			name:    "agentic in-process executor advertises execution capabilities",
+			handler: &fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: agenticCaps}},
 			want: &remediationv1.AgentCapabilities{
 				Streaming:         true,
 				ToolUse:           true,
@@ -545,16 +564,26 @@ func TestListAgentsCapabilities(t *testing.T) {
 			},
 		},
 		{
-			name: "non-agentic agent advertises no execution capabilities",
-			caps: &agentv1.AgentCapabilities{Streaming: true},
-			want: &remediationv1.AgentCapabilities{Streaming: true},
+			name:    "agentic non-executor advertises no execution capabilities",
+			handler: &fakeAgentHandler{name: "fake", caps: agenticCaps},
+			want: &remediationv1.AgentCapabilities{
+				Streaming:         true,
+				ToolUse:           true,
+				Agentic:           true,
+				SessionResumption: true,
+			},
+		},
+		{
+			name:    "non-agentic executor advertises no execution capabilities",
+			handler: &fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: &agentv1.AgentCapabilities{Streaming: true}}},
+			want:    &remediationv1.AgentCapabilities{Streaming: true},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			registry := agent.NewRegistry()
-			if err := registry.RegisterBuiltin("fake", &fakeAgentHandler{name: "fake", caps: tt.caps}); err != nil {
+			if err := registry.RegisterBuiltin("fake", tt.handler); err != nil {
 				t.Fatalf("RegisterBuiltin failed: %v", err)
 			}
 			handler := NewRemediationHandler(WithRemediationRegistry(registry))

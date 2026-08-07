@@ -825,7 +825,7 @@ func (h *RemediationHandler) ListAgents(
 			Name:         info.GetName(),
 			DisplayName:  info.GetDisplayName(),
 			Description:  info.GetDescription(),
-			Capabilities: remediationAgentCapabilities(caps),
+			Capabilities: remediationAgentCapabilities(caps, agent.AsExecutor(entry.Handler) != nil),
 			IsAvailable:  true,
 		})
 	}
@@ -839,18 +839,24 @@ func (h *RemediationHandler) ListAgents(
 // the remediation API's capability fields so ListAgents advertises what an
 // agent can actually do. The plugin contract does not model code execution,
 // file modification, or approval workflows as separate flags: its agentic
-// flag means autonomous code execution (which modifies files), and the
-// handler supplies the approval round-trip (ApproveStep) for every agentic
-// in-process execution, so all three derive from agentic.
-func remediationAgentCapabilities(caps *agentv1.AgentCapabilities) *remediationv1.AgentCapabilities {
+// flag means autonomous code execution (which modifies files). All three
+// therefore require both the agentic flag and in-process execution support
+// (inProcessExecutor), because ExecuteWithAgent refuses handlers without an
+// agent.Executor implementation: an agentic handler that cannot run
+// in-process must not advertise execution it cannot deliver. Approval
+// workflows share the same gate because they are structural for in-process
+// execution: the handler runs the ApproveStep round-trip for every such
+// session, and Approve is part of the plugin service contract.
+func remediationAgentCapabilities(caps *agentv1.AgentCapabilities, inProcessExecutor bool) *remediationv1.AgentCapabilities {
+	executes := caps.GetAgentic() && inProcessExecutor
 	return &remediationv1.AgentCapabilities{
 		Streaming:         caps.GetStreaming(),
 		ToolUse:           caps.GetToolUse(),
 		Agentic:           caps.GetAgentic(),
 		SessionResumption: caps.GetSessionResumption(),
-		CodeExecution:     caps.GetAgentic(),
-		FileModification:  caps.GetAgentic(),
-		ApprovalWorkflows: caps.GetAgentic(),
+		CodeExecution:     executes,
+		FileModification:  executes,
+		ApprovalWorkflows: executes,
 	}
 }
 
