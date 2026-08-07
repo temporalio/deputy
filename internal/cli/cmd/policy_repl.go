@@ -81,7 +81,10 @@ func runPolicyREPL(ctx context.Context, in io.Reader, out io.Writer) error {
 	legacyOutput := ui.NewREPLOutput(out)
 
 	request := map[string]string{}
-	entrypoint := "proxy"
+	// Default to a real proxy entrypoint: "proxy" is a command, not an
+	// entrypoint, and would fail the same IsValid gate :entrypoint enforces.
+	// The initial payload is request-shaped, so a proxy entrypoint matches.
+	entrypoint := string(policy.EntrypointNpmArtifactRequest)
 
 	for {
 		// Build prompt string: "proxy ›" - simple and clean

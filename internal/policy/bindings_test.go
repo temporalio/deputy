@@ -132,9 +132,16 @@ func TestExampleCategoriesCoverAllEntrypoints(t *testing.T) {
 //
 // These are real defects, tracked in #129, not exemptions. The list exists so
 // the gap is enforced at its current size instead of growing quietly. Every
-// entry is a promise the docs make and the engine cannot keep: all three
-// sandbox entrypoints are unusable because every variable they declare is on
-// this list, and `licenses` is advertised at four proxy entrypoints.
+// entry is a promise the docs make and the engine cannot keep: sandbox_network
+// is entirely unusable, sandbox_command still lacks an evaluation site, and
+// `licenses` is advertised at four proxy entrypoints nothing binds.
+//
+// A subtlety this list cannot see: declarations are global to every CEL env,
+// not per entrypoint. sandbox_command's profile lists `command`, which now
+// passes these tests only because sandbox_execution's caller declares the
+// name; nothing binds it at sandbox_command, so a policy scoped there still
+// fails at eval time. Per-entrypoint environments (#127) are the real fix;
+// until then, treat "declared" as necessary but not sufficient.
 //
 // TestBindingProfilesDeclareRealVariables fails both when a new name appears
 // here and when a listed name starts working, so fixing one requires deleting
