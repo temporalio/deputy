@@ -20,6 +20,7 @@ import (
 	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 // SchemaRegistry provides proto schema introspection for CEL hints.
@@ -61,10 +62,10 @@ type FieldSchema struct {
 
 // EnumSchema describes a proto enum type.
 type EnumSchema struct {
-	Name        string       // Enum type name
-	Description string       // Human-readable description
-	Values      []EnumValue  // Enum values
-	CELPrefix   string       // How to access in CEL (e.g., "severity.")
+	Name        string      // Enum type name
+	Description string      // Human-readable description
+	Values      []EnumValue // Enum values
+	CELPrefix   string      // How to access in CEL (e.g., "severity.")
 }
 
 // EnumValue describes a single enum value.
@@ -172,20 +173,36 @@ func (r *SchemaRegistry) registerContainerSchemas() {
 		"Container image metadata")
 }
 
+// severityDescriptions documents the severity constant members offered in
+// completions. Keys are the runtime constant names from policy.SeverityConstants().
+var severityDescriptions = map[string]string{
+	"critical":    "Critical severity (CVSS 9.0-10.0)",
+	"high":        "High severity (CVSS 7.0-8.9)",
+	"medium":      "Medium severity (CVSS 4.0-6.9)",
+	"low":         "Low severity (CVSS 0.1-3.9)",
+	"unspecified": "Unknown severity",
+}
+
 // registerEnums adds enum schemas.
 func (r *SchemaRegistry) registerEnums() {
-	// SeverityLevel
+	// SeverityLevel: member names derive from the runtime constants map so the
+	// REPL completes exactly the identifiers that evaluate (severity.critical,
+	// not severity.CRITICAL).
+	consts := policy.SeverityConstants()
+	values := make([]EnumValue, 0, len(consts))
+	for _, name := range policy.SeverityConstantNames() {
+		level, _ := consts[name].(vulnerabilityv1.SeverityLevel)
+		values = append(values, EnumValue{
+			Name:        name,
+			Number:      int32(level),
+			Description: severityDescriptions[name],
+		})
+	}
 	r.enums["severity"] = &EnumSchema{
 		Name:        "SeverityLevel",
 		Description: "Vulnerability severity levels",
 		CELPrefix:   "severity.",
-		Values: []EnumValue{
-			{Name: "CRITICAL", Number: 4, Description: "Critical severity (CVSS 9.0-10.0)"},
-			{Name: "HIGH", Number: 3, Description: "High severity (CVSS 7.0-8.9)"},
-			{Name: "MEDIUM", Number: 2, Description: "Medium severity (CVSS 4.0-6.9)"},
-			{Name: "LOW", Number: 1, Description: "Low severity (CVSS 0.1-3.9)"},
-			{Name: "UNSPECIFIED", Number: 0, Description: "Unknown severity"},
-		},
+		Values:      values,
 	}
 
 	// Scope
@@ -322,10 +339,6 @@ func (r *SchemaRegistry) registerFunctions() {
 		{Name: "isHighOrAbove", Signature: "isHighOrAbove(vulnerability) bool",
 			Description: "Check if severity is HIGH or CRITICAL", Parameters: []string{"vulnerability"},
 			ReturnType: "bool", Category: "severity"},
-		{Name: "vulnerabilitySeverity", Signature: "vulnerabilitySeverity(vulnerability) string",
-			Description: "Get severity level string", Parameters: []string{"vulnerability"},
-			ReturnType: "string", Category: "severity"},
-
 		// Graph functions
 		{Name: "isDirectDep", Signature: "isDirectDep(node) bool",
 			Description: "Check if node is direct dependency", Parameters: []string{"node"},

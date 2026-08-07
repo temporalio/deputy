@@ -1,7 +1,10 @@
 package repl
 
 import (
+	"slices"
 	"testing"
+
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 func TestNewSchemaRegistry(t *testing.T) {
@@ -63,19 +66,29 @@ func TestSchemaRegistry_Enums(t *testing.T) {
 		t.Errorf("expected 5 severity values, got %d", len(severity.Values))
 	}
 
-	// Check CRITICAL value
+	// Check critical value (constant members are lowercase at runtime)
 	hasCritical := false
 	for _, v := range severity.Values {
-		if v.Name == "CRITICAL" {
+		if v.Name == "critical" {
 			hasCritical = true
 			if v.Number != 4 {
-				t.Errorf("expected CRITICAL number 4, got %d", v.Number)
+				t.Errorf("expected critical number 4, got %d", v.Number)
 			}
 			break
 		}
 	}
 	if !hasCritical {
-		t.Error("expected CRITICAL in severity enum")
+		t.Error("expected critical in severity enum")
+	}
+
+	// The offered member names must match the runtime constants map exactly,
+	// otherwise completions teach identifiers that fail to evaluate.
+	var names []string
+	for _, v := range severity.Values {
+		names = append(names, v.Name)
+	}
+	if want := policy.SeverityConstantNames(); !slices.Equal(names, want) {
+		t.Errorf("severity enum members = %v, want runtime constants %v", names, want)
 	}
 
 	// Should have scope enum
@@ -231,5 +244,23 @@ func TestToCamelCase(t *testing.T) {
 				t.Errorf("toCamelCase(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
+	}
+}
+
+// TestSchemaFunctions_SeverityHelpersAreRegistered pins the severity helper
+// functions offered in completions to the runtime helper catalog, so the REPL
+// cannot offer functions (e.g. a former vulnerabilitySeverity entry) that are
+// not registered in any CEL environment.
+func TestSchemaFunctions_SeverityHelpersAreRegistered(t *testing.T) {
+	registered := make(map[string]bool)
+	for _, fn := range policy.HelperCatalog() {
+		registered[fn.Name] = true
+	}
+
+	r := NewSchemaRegistry()
+	for _, fn := range r.GetFunctionsByCategory("severity") {
+		if !registered[fn.Name] {
+			t.Errorf("schema offers severity function %q, which is not in the runtime helper catalog", fn.Name)
+		}
 	}
 }

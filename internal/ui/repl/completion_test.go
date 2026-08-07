@@ -163,19 +163,19 @@ func TestCompletionEngine_EnumAccess(t *testing.T) {
 		t.Fatal("expected enum completions for 'severity.'")
 	}
 
-	// Should include CRITICAL
+	// Should include critical (constant members are lowercase at runtime)
 	found := false
 	for _, c := range completions {
-		if c.Text == "CRITICAL" {
+		if c.Text == "critical" {
 			found = true
 			if c.Kind != CompletionEnum {
-				t.Errorf("expected CompletionEnum for CRITICAL, got %v", c.Kind)
+				t.Errorf("expected CompletionEnum for critical, got %v", c.Kind)
 			}
 			break
 		}
 	}
 	if !found {
-		t.Error("expected 'CRITICAL' in severity enum completions")
+		t.Error("expected 'critical' in severity enum completions")
 	}
 }
 
@@ -183,14 +183,14 @@ func TestCompletionEngine_PartialEnum(t *testing.T) {
 	schema := NewSchemaRegistry()
 	engine := NewCompletionEngine(schema)
 
-	// "severity.HI" should filter to HIGH
-	completions := engine.Complete("severity.HI", 11)
+	// "severity.hi" should filter to high
+	completions := engine.Complete("severity.hi", 11)
 
 	if len(completions) != 1 {
-		t.Errorf("expected 1 completion for 'severity.HI', got %d", len(completions))
+		t.Errorf("expected 1 completion for 'severity.hi', got %d", len(completions))
 	}
-	if len(completions) > 0 && completions[0].Text != "HIGH" {
-		t.Errorf("expected 'HIGH', got %q", completions[0].Text)
+	if len(completions) > 0 && completions[0].Text != "high" {
+		t.Errorf("expected 'high', got %q", completions[0].Text)
 	}
 }
 
@@ -266,9 +266,9 @@ func TestCompletionEngine_GetHint_EnumDescription(t *testing.T) {
 	engine := NewCompletionEngine(schema)
 
 	// Hint for enum value should show description
-	hint := engine.GetHint("severity.CRIT", 14)
+	hint := engine.GetHint("severity.crit", 14)
 	if hint == nil {
-		t.Fatal("expected hint for 'severity.CRIT'")
+		t.Fatal("expected hint for 'severity.crit'")
 	}
 	if hint.Text == "" {
 		t.Error("expected hint with description")

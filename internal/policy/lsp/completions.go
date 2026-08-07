@@ -224,7 +224,9 @@ func celFieldCompletions(base string) []string {
 	case "request.client":
 		return []string{"ip", "userAgent", "principal"}
 	case "severity":
-		return []string{"CRITICAL", "HIGH", "MEDIUM", "LOW", "UNSPECIFIED"}
+		// Derived from the runtime constants map so completions offer exactly
+		// the members that evaluate (severity.critical, not severity.CRITICAL).
+		return policy.SeverityConstantNames()
 	case "scope":
 		return []string{"RUNTIME", "DEV", "TEST", "BUILD", "OPTIONAL", "UNSPECIFIED"}
 	case "repo":
