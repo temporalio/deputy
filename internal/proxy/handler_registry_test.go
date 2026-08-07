@@ -244,3 +244,34 @@ func TestGenericHandler_ServeHTTP(t *testing.T) {
 		}
 	})
 }
+
+// TestEcosystemRegistryEntrypointsAreCanonical pins the call-site invariant of
+// genericHandler.ServeHTTP: every ecosystem registered for proxying must have
+// proxy capability and must synthesize a canonical policy entrypoint,
+// otherwise proxy policies written for it would never match. It also checks
+// the registry covers every proxy-capable ecosystem so download-time policy
+// enforcement cannot silently lose an ecosystem.
+func TestEcosystemRegistryEntrypointsAreCanonical(t *testing.T) {
+	// Sanity floor: 4 proxied ecosystems today (go, npm, pypi, rubygems).
+	if len(ecosystemRegistry) < 4 {
+		t.Fatalf("ecosystemRegistry has %d ecosystems, want at least 4", len(ecosystemRegistry))
+	}
+
+	for eco, config := range ecosystemRegistry {
+		if config.Ecosystem != eco {
+			t.Errorf("ecosystemRegistry[%s].Ecosystem = %s, want key and value to match", eco, config.Ecosystem)
+		}
+		if !eco.Capabilities().Proxy {
+			t.Errorf("ecosystemRegistry contains %s, which does not declare proxy capability", eco)
+		}
+		if ep := eco.ProxyEntrypoint(); !ep.IsValid() {
+			t.Errorf("proxied ecosystem %s synthesizes entrypoint %q, which is not a canonical policy entrypoint", eco, ep)
+		}
+	}
+
+	for _, eco := range ecosystem.WithProxy() {
+		if _, ok := ecosystemRegistry[eco]; !ok {
+			t.Errorf("proxy-capable ecosystem %s is missing from ecosystemRegistry", eco)
+		}
+	}
+}
