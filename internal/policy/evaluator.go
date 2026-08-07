@@ -78,6 +78,15 @@ var (
 		"ancestors",   // Ancestor nodes for current node
 		"descendants", // Descendant nodes for current node
 		// Constants for policy authoring
+		// Sandbox execution variables, bound by Manager.evaluateExecutionPolicy.
+		// Only the sandbox_execution entrypoint has an evaluation site today, so
+		// only what it actually binds is declared here; see bindings_test.go for
+		// the rest of the sandbox surface, which has no caller to bind it.
+		"command",
+		"workspace_dir",
+		"requested_config",
+		"context",
+
 		"severity", // Severity constants: severity.critical, severity.high, etc.
 		"scope",    // Dependency scope constants: scope.RUNTIME, scope.DEV, etc.
 	}

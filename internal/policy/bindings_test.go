@@ -139,17 +139,17 @@ func TestExampleCategoriesCoverAllEntrypoints(t *testing.T) {
 // TestBindingProfilesDeclareRealVariables fails both when a new name appears
 // here and when a listed name starts working, so fixing one requires deleting
 // its line and the list cannot rot.
+// Every survivor here has no code that binds it, so declaring it would trade
+// "undeclared reference" at compile time for "no such attribute" at eval time,
+// which is a worse trade: the policy would look valid and fail during a scan.
+// Each needs an evaluation site before it can be declared.
 var undeclaredBindingVars = map[string]string{
-	"command":          "#129 sandbox_command, sandbox_execution",
-	"context":          "#129 sandbox_network, sandbox_command, sandbox_execution",
-	"host":             "#129 sandbox_network",
-	"licenses":         "#129 the four *_artifact_request entrypoints",
-	"port":             "#129 sandbox_network",
-	"protocol":         "#129 sandbox_network",
-	"requested_config": "#129 sandbox_execution",
-	"sandbox_config":   "#129 sandbox_network, sandbox_command",
-	"source":           "#129 sandbox_execution",
-	"workspace_dir":    "#129 sandbox_execution",
+	"host":           "#129 sandbox_network has no evaluation site",
+	"licenses":       "#129 no *_artifact_request caller binds it",
+	"port":           "#129 sandbox_network has no evaluation site",
+	"protocol":       "#129 sandbox_network has no evaluation site",
+	"sandbox_config": "#129 sandbox_network and sandbox_command have no evaluation site",
+	"source":         "#129 sandbox_execution binds no source",
 }
 
 // TestBindingProfilesDeclareRealVariables pins the contract that
