@@ -1405,6 +1405,7 @@ func lookupGoProxyLicense(ctx context.Context, modulePath, version string) []str
 	if err != nil {
 		return nil
 	}
+	req.Header.Set("User-Agent", "deputy-license-scan")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil
@@ -1507,6 +1508,7 @@ func lookupPackagistP2(ctx context.Context, name, version string) []string {
 	if err != nil {
 		return nil
 	}
+	req.Header.Set("User-Agent", "deputy-license-scan")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil
@@ -1568,6 +1570,7 @@ func lookupPackagistLegacy(ctx context.Context, name, version string) []string {
 	if err != nil {
 		return nil
 	}
+	req.Header.Set("User-Agent", "deputy-license-scan")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil
