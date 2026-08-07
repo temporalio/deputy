@@ -46,14 +46,14 @@ var defaultLicenseFilenames = []string{
 // Package registry base URLs for license lookups.
 // These are variables (not constants) to allow test overrides via WithLicenseEndpoints.
 var (
-	goProxyBase   = "https://proxy.golang.org"   // Go module proxy
-	cratesBase    = "https://crates.io"          // Rust crates registry
-	packagistBase = "https://repo.packagist.org" // PHP Composer registry
-	pubBase       = "https://pub.dev"            // Dart/Flutter packages
-	cocoapodsBase = "https://cocoapods.org"      // iOS/macOS CocoaPods
-	hexpmBase     = "https://hex.pm"             // Erlang/Elixir Hex.pm
-	pypiBase      = "https://pypi.org"           // Python Package Index
-	githubAPIBase = "https://api.github.com"     // GitHub REST API
+	goProxyBase   = "https://proxy.golang.org"    // Go module proxy
+	cratesBase    = "https://crates.io"           // Rust crates registry
+	packagistBase = "https://repo.packagist.org"  // PHP Composer registry
+	pubBase       = "https://pub.dev"             // Dart/Flutter packages
+	cocoapodsBase = "https://trunk.cocoapods.org" // CocoaPods trunk API
+	hexpmBase     = "https://hex.pm"              // Erlang/Elixir Hex.pm
+	pypiBase      = "https://pypi.org"            // Python Package Index
+	githubAPIBase = "https://api.github.com"      // GitHub REST API
 	githubRawBase = "https://raw.githubusercontent.com"
 )
 
@@ -937,7 +937,7 @@ func LookupCocoaPodsLicense(ctx context.Context, name, version string) []string 
 		return nil
 	}
 	// First, get the data URL from the version endpoint
-	url := fmt.Sprintf("https://trunk.cocoapods.org/api/v1/pods/%s/versions/%s", name, version)
+	url := fmt.Sprintf("%s/api/v1/pods/%s/versions/%s", cocoapodsBase, name, version)
 	var payload struct {
 		DataURL string `json:"data_url"`
 	}
