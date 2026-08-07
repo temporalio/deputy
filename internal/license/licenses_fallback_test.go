@@ -43,6 +43,27 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.`
 
+// testISCLicenseText is a sentinel license fixture. The live packages these
+// hermetic registry tests borrow names from are not ISC licensed, so an ISC
+// result proves the lookup consulted the mock host rather than silently
+// falling through to the real registry after a base-URL routing regression.
+const testISCLicenseText = `ISC License
+
+Copyright (c) 2004-2010 by Internet Systems Consortium, Inc. ("ISC")
+Copyright (c) 1995-2003 by Internet Software Consortium
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
+OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.`
+
 func (c *countingDepsClientEcosystem) GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error) {
 	c.calls++
 	c.sys = req.GetVersionKey().GetSystem()
@@ -115,8 +136,10 @@ SOFTWARE.`
 func TestLookupLicensesBestEffort_Crates(t *testing.T) {
 	resetLicenseTestState(t)
 	var requested string
+	var gotUserAgent string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requested = r.URL.Path
+		gotUserAgent = r.Header.Get("User-Agent")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"version": map[string]any{"license": "MIT"},
 		})
@@ -134,6 +157,9 @@ func TestLookupLicensesBestEffort_Crates(t *testing.T) {
 	}
 	if !strings.Contains(requested, "/api/v1/crates/serde/") {
 		t.Fatalf("unexpected crates path %s", requested)
+	}
+	if gotUserAgent != licenseUserAgent {
+		t.Fatalf("expected User-Agent %q on crates lookup, got %q", licenseUserAgent, gotUserAgent)
 	}
 }
 
@@ -198,25 +224,6 @@ func TestLookupLicensesBestEffort_Packagist(t *testing.T) {
 
 func TestLookupLicensesBestEffort_Pub(t *testing.T) {
 	resetLicenseTestState(t)
-	mitText := `MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.`
 	var base string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/api/packages/riverpod/versions/1.0.0") {
@@ -224,10 +231,12 @@ SOFTWARE.`
 			return
 		}
 		if strings.Contains(r.URL.Path, "/pkg.tar.gz") {
+			// ISC is a sentinel: live riverpod ships an MIT license, so a
+			// revert of the pubBase routing cannot produce this value.
 			zw := gzip.NewWriter(w)
 			tw := tar.NewWriter(zw)
-			_ = tw.WriteHeader(&tar.Header{Name: "LICENSE", Size: int64(len(mitText))})
-			_, _ = tw.Write([]byte(mitText))
+			_ = tw.WriteHeader(&tar.Header{Name: "LICENSE", Size: int64(len(testISCLicenseText))})
+			_, _ = tw.Write([]byte(testISCLicenseText))
 			_ = tw.Close()
 			_ = zw.Close()
 			return
@@ -242,7 +251,7 @@ SOFTWARE.`
 	defer restoreBases()
 
 	got := LookupLicensesBestEffort(t.Context(), "dart", "riverpod", "1.0.0")
-	if want := []string{"MIT"}; !slices.Equal(got, want) {
+	if want := []string{"ISC"}; !slices.Equal(got, want) {
 		t.Fatalf("expected pub license, got %v", got)
 	}
 }
@@ -250,13 +259,20 @@ SOFTWARE.`
 func TestLookupLicensesBestEffort_CocoaPods(t *testing.T) {
 	resetLicenseTestState(t)
 	var base string
+	var mu sync.Mutex
+	var hits int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
 		if strings.Contains(r.URL.Path, "/api/v1/pods/Alamofire/versions/5.9.1") {
 			_, _ = w.Write([]byte(fmt.Sprintf(`{"data_url":"%s/Specs/Alamofire.json"}`, base)))
 			return
 		}
 		if strings.Contains(r.URL.Path, "/Specs/Alamofire.json") {
-			_, _ = w.Write([]byte(`{"license":{"type":"MIT"}}`))
+			// ISC is a sentinel: live Alamofire is MIT, so a revert of the
+			// cocoapodsBase routing cannot produce this value from the network.
+			_, _ = w.Write([]byte(`{"license":{"type":"ISC"}}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -269,8 +285,13 @@ func TestLookupLicensesBestEffort_CocoaPods(t *testing.T) {
 	defer restoreBases()
 
 	got := LookupLicensesBestEffort(t.Context(), "cocoapods", "Alamofire", "5.9.1")
-	if want := []string{"MIT"}; !slices.Equal(got, want) {
+	if want := []string{"ISC"}; !slices.Equal(got, want) {
 		t.Fatalf("expected cocoapods license, got %v", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits == 0 {
+		t.Fatal("expected cocoapods lookup to hit the mock registry host")
 	}
 }
 
@@ -278,7 +299,9 @@ func TestLookupLicensesBestEffort_Hex(t *testing.T) {
 	resetLicenseTestState(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/api/packages/plug") && !strings.Contains(r.URL.Path, "releases") {
-			_, _ = w.Write([]byte(`{"meta":{"licenses":["Apache-2.0"]}}`))
+			// ISC is a sentinel: live plug is Apache-2.0, so a revert of the
+			// hexpmBase routing cannot produce this value from the network.
+			_, _ = w.Write([]byte(`{"meta":{"licenses":["ISC"]}}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -290,7 +313,7 @@ func TestLookupLicensesBestEffort_Hex(t *testing.T) {
 	defer restoreBases()
 
 	got := LookupLicensesBestEffort(t.Context(), "hex", "plug", "1.12.0")
-	if want := []string{"Apache-2.0"}; !slices.Equal(got, want) {
+	if want := []string{"ISC"}; !slices.Equal(got, want) {
 		t.Fatalf("expected hex license, got %v", got)
 	}
 }
@@ -354,11 +377,13 @@ func TestLookupLicensesBestEffort_GitHubWithoutVersion(t *testing.T) {
 	// GitHub Actions can be looked up without a version via the GitHub License API
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/repos/actions/checkout/license") {
+			// ISC is a sentinel: live actions/checkout is MIT, so a revert of
+			// the githubAPIBase routing cannot produce this value.
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"license": map[string]any{
-					"key":     "mit",
-					"spdx_id": "MIT",
-					"name":    "MIT License",
+					"key":     "isc",
+					"spdx_id": "ISC",
+					"name":    "ISC License",
 				},
 			})
 			return
@@ -372,7 +397,7 @@ func TestLookupLicensesBestEffort_GitHubWithoutVersion(t *testing.T) {
 
 	// GitHub Actions without version should still work
 	got := LookupLicensesBestEffort(t.Context(), "github", "actions/checkout", "")
-	if want := []string{"MIT"}; !slices.Equal(got, want) {
+	if want := []string{"ISC"}; !slices.Equal(got, want) {
 		t.Fatalf("expected GitHub Actions license %v without version, got %v", want, got)
 	}
 }
@@ -654,7 +679,10 @@ func TestLookupLicensesBestEffort_PyPI(t *testing.T) {
 					"license": "", // empty license field
 					"classifiers": []string{
 						"Development Status :: 5 - Production/Stable",
-						"License :: OSI Approved :: BSD License",
+						// ISC is a sentinel: live numpy carries the BSD
+						// classifier, so a revert of the pypiBase routing
+						// cannot produce this value from the network.
+						"License :: OSI Approved :: ISC License (ISCL)",
 						"Programming Language :: Python :: 3",
 					},
 				},
@@ -670,7 +698,7 @@ func TestLookupLicensesBestEffort_PyPI(t *testing.T) {
 		defer func() { pypiBase = oldPyPIBase }()
 
 		got := LookupLicensesBestEffort(t.Context(), "pypi", "numpy", "1.26.0")
-		if want := []string{"BSD-3-Clause"}; !slices.Equal(got, want) {
+		if want := []string{"ISC"}; !slices.Equal(got, want) {
 			t.Fatalf("expected PyPI classifier license %v, got %v", want, got)
 		}
 	})
