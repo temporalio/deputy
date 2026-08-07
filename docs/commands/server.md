@@ -74,10 +74,19 @@ Once the server is running, clients can connect:
 # CLI with --server flag
 $ deputy --server http://localhost:8090 scan github.com/owner/repo
 
-# Or set environment variable
+# Authenticated call against a server with --auth-mode required
+$ deputy --server https://deputy.example.com:8090 --auth-token "$TOKEN" scan github.com/owner/repo
+
+# Or set environment variables
 $ export DEPUTY_SERVER=http://localhost:8090
+$ export DEPUTY_AUTH_TOKEN="$TOKEN"
 $ deputy scan github.com/owner/repo
 ```
+
+Connection settings resolve with flag-first precedence: `--server` beats
+`DEPUTY_SERVER` and `--auth-token` beats `DEPUTY_AUTH_TOKEN` when both are set.
+If neither the flag nor the environment variable is set, Deputy runs in-process
+(local mode).
 
 ### SDK Usage
 
