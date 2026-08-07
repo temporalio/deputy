@@ -809,22 +809,36 @@ func (h *RemediationHandler) ListAgents(
 		caps := info.GetCapabilities()
 
 		agents = append(agents, &remediationv1.AgentInfo{
-			Name:        info.GetName(),
-			DisplayName: info.GetDisplayName(),
-			Description: info.GetDescription(),
-			Capabilities: &remediationv1.AgentCapabilities{
-				Streaming:         caps.GetStreaming(),
-				ToolUse:           caps.GetToolUse(),
-				Agentic:           caps.GetAgentic(),
-				SessionResumption: caps.GetSessionResumption(),
-			},
-			IsAvailable: true,
+			Name:         info.GetName(),
+			DisplayName:  info.GetDisplayName(),
+			Description:  info.GetDescription(),
+			Capabilities: remediationAgentCapabilities(caps),
+			IsAvailable:  true,
 		})
 	}
 
 	return connect.NewResponse(&remediationv1.ListAgentsResponse{
 		Agents: agents,
 	}), nil
+}
+
+// remediationAgentCapabilities maps the agent plugin capability contract onto
+// the remediation API's capability fields so ListAgents advertises what an
+// agent can actually do. The plugin contract does not model code execution,
+// file modification, or approval workflows as separate flags: its agentic
+// flag means autonomous code execution (which modifies files), and the
+// handler supplies the approval round-trip (ApproveStep) for every agentic
+// in-process execution, so all three derive from agentic.
+func remediationAgentCapabilities(caps *agentv1.AgentCapabilities) *remediationv1.AgentCapabilities {
+	return &remediationv1.AgentCapabilities{
+		Streaming:         caps.GetStreaming(),
+		ToolUse:           caps.GetToolUse(),
+		Agentic:           caps.GetAgentic(),
+		SessionResumption: caps.GetSessionResumption(),
+		CodeExecution:     caps.GetAgentic(),
+		FileModification:  caps.GetAgentic(),
+		ApprovalWorkflows: caps.GetAgentic(),
+	}
 }
 
 // ApproveStep approves or denies a pending remediation step.
@@ -864,8 +878,11 @@ func (h *RemediationHandler) ApproveStep(
 
 	select {
 	case session.approvals <- approval:
+		// CanProceed reports whether the step may continue: a delivered
+		// denial is still accepted, but the denied step must not proceed.
 		return connect.NewResponse(&remediationv1.ApproveStepResponse{
-			Accepted: true,
+			Accepted:   true,
+			CanProceed: req.Msg.GetApproved(),
 		}), nil
 	case <-ctx.Done():
 		return nil, ctx.Err()

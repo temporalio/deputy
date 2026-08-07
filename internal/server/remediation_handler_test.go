@@ -14,11 +14,13 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	agentv1 "github.com/temporalio/deputy/gen/deputy/agent/v1"
+	"github.com/temporalio/deputy/gen/deputy/agent/v1/agentv1connect"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	remediationv1 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
 	"github.com/temporalio/deputy/gen/deputy/remediation/v1/remediationv1connect"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/agent"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
@@ -363,5 +365,139 @@ func TestConvertAgentDoneEvent(t *testing.T) {
 	}
 	if events[0].GetSummary() == nil {
 		t.Fatalf("event details = %T, want summary", events[0].GetDetails())
+	}
+}
+
+// TestApproveStepCanProceed pins the ApproveStepResponse contract: a
+// delivered approval reports can_proceed matching the decision, and a
+// session with no pending approval is refused without claiming progress.
+func TestApproveStepCanProceed(t *testing.T) {
+	tests := []struct {
+		name           string
+		approved       bool
+		fillChannel    bool
+		wantAccepted   bool
+		wantCanProceed bool
+	}{
+		{name: "accepted approval can proceed", approved: true, wantAccepted: true, wantCanProceed: true},
+		{name: "accepted denial cannot proceed", approved: false, wantAccepted: true, wantCanProceed: false},
+		{name: "no pending approval is refused", approved: true, fillChannel: true, wantAccepted: false, wantCanProceed: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewRemediationHandler()
+			session := &agentSession{approvals: make(chan *agentv1.ApproveRequest, 1)}
+			handler.sessions["sess-1"] = session
+			if tt.fillChannel {
+				session.approvals <- &agentv1.ApproveRequest{}
+			}
+
+			resp, err := handler.ApproveStep(t.Context(), connect.NewRequest(&remediationv1.ApproveStepRequest{
+				SessionId: "sess-1",
+				StepId:    "step-1",
+				Approved:  tt.approved,
+			}))
+			if err != nil {
+				t.Fatalf("ApproveStep failed: %v", err)
+			}
+			if got := resp.Msg.GetAccepted(); got != tt.wantAccepted {
+				t.Errorf("accepted = %v, want %v", got, tt.wantAccepted)
+			}
+			if got := resp.Msg.GetCanProceed(); got != tt.wantCanProceed {
+				t.Errorf("can_proceed = %v, want %v", got, tt.wantCanProceed)
+			}
+		})
+	}
+}
+
+// fakeAgentHandler is a minimal agent plugin reporting fixed capabilities so
+// ListAgents mapping can be asserted without real agent binaries.
+type fakeAgentHandler struct {
+	agentv1connect.UnimplementedAgentPluginHandler
+	name string
+	caps *agentv1.AgentCapabilities
+}
+
+// GetInfo reports the fake agent's identity and configured capabilities.
+func (f *fakeAgentHandler) GetInfo(context.Context, *connect.Request[agentv1.GetInfoRequest]) (*connect.Response[agentv1.GetInfoResponse], error) {
+	return connect.NewResponse(&agentv1.GetInfoResponse{
+		Name:         f.name,
+		DisplayName:  f.name,
+		Description:  "fake agent",
+		Capabilities: f.caps,
+	}), nil
+}
+
+// TestListAgentsCapabilities pins the capability mapping: agentic agents
+// advertise code execution, file modification, and approval workflows, and
+// non-agentic agents advertise none of them.
+func TestListAgentsCapabilities(t *testing.T) {
+	tests := []struct {
+		name string
+		caps *agentv1.AgentCapabilities
+		want *remediationv1.AgentCapabilities
+	}{
+		{
+			name: "agentic agent advertises execution capabilities",
+			caps: &agentv1.AgentCapabilities{
+				Streaming:         true,
+				ToolUse:           true,
+				Agentic:           true,
+				SessionResumption: true,
+			},
+			want: &remediationv1.AgentCapabilities{
+				Streaming:         true,
+				ToolUse:           true,
+				Agentic:           true,
+				SessionResumption: true,
+				CodeExecution:     true,
+				FileModification:  true,
+				ApprovalWorkflows: true,
+			},
+		},
+		{
+			name: "non-agentic agent advertises no execution capabilities",
+			caps: &agentv1.AgentCapabilities{Streaming: true},
+			want: &remediationv1.AgentCapabilities{Streaming: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := agent.NewRegistry()
+			if err := registry.RegisterBuiltin("fake", &fakeAgentHandler{name: "fake", caps: tt.caps}); err != nil {
+				t.Fatalf("RegisterBuiltin failed: %v", err)
+			}
+			handler := NewRemediationHandler(WithRemediationRegistry(registry))
+
+			resp, err := handler.ListAgents(t.Context(), connect.NewRequest(&remediationv1.ListAgentsRequest{}))
+			if err != nil {
+				t.Fatalf("ListAgents failed: %v", err)
+			}
+			agents := resp.Msg.GetAgents()
+			if len(agents) != 1 {
+				t.Fatalf("agents = %d, want 1", len(agents))
+			}
+			got := agents[0].GetCapabilities()
+			checks := []struct {
+				field string
+				got   bool
+				want  bool
+			}{
+				{"streaming", got.GetStreaming(), tt.want.GetStreaming()},
+				{"tool_use", got.GetToolUse(), tt.want.GetToolUse()},
+				{"agentic", got.GetAgentic(), tt.want.GetAgentic()},
+				{"session_resumption", got.GetSessionResumption(), tt.want.GetSessionResumption()},
+				{"code_execution", got.GetCodeExecution(), tt.want.GetCodeExecution()},
+				{"file_modification", got.GetFileModification(), tt.want.GetFileModification()},
+				{"approval_workflows", got.GetApprovalWorkflows(), tt.want.GetApprovalWorkflows()},
+			}
+			for _, c := range checks {
+				if c.got != c.want {
+					t.Errorf("%s = %v, want %v", c.field, c.got, c.want)
+				}
+			}
+		})
 	}
 }
