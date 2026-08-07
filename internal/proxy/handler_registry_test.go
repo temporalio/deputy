@@ -134,6 +134,12 @@ func TestHandlerFactory_Register(t *testing.T) {
 	if !found {
 		t.Error("registered ecosystem not found in supported list")
 	}
+
+	// Registration must extend this factory only, never the package-level
+	// default registry shared by every other factory.
+	if _, ok := ecosystemRegistry[ecosystem.Cargo]; ok {
+		t.Error("Register mutated the package-level default registry; factories must own their registry copy")
+	}
 }
 
 func TestNewHandlerFromString(t *testing.T) {
