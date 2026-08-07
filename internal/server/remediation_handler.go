@@ -51,6 +51,11 @@ type RemediationHandler struct {
 	// sessions tracks active agent sessions for approval and cancellation
 	sessions   map[string]*agentSession
 	sessionsMu sync.RWMutex
+
+	// execStep runs a single remediation step. It defaults to executeStep and
+	// exists as a seam so tests can observe or suppress command execution
+	// without spawning real processes.
+	execStep func(ctx context.Context, workDir string, step *remediationv1.Step) (string, error)
 }
 
 // agentSession tracks an active agent execution for approval handling.
@@ -87,6 +92,7 @@ func NewRemediationHandler(opts ...RemediationHandlerOption) *RemediationHandler
 	h := &RemediationHandler{
 		registry: agent.DefaultRegistry,
 		sessions: make(map[string]*agentSession),
+		execStep: executeStep,
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -265,6 +271,24 @@ func (h *RemediationHandler) ExecutePlan(
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("plan is required"))
 	}
 
+	// Fail closed on execution options the handler cannot honor: silently
+	// ignoring a requested safety control and executing anyway is worse than
+	// refusing outright.
+	opts := req.Msg.GetOptions()
+	if err := rejectUnsupportedApprovalMode(opts.GetApprovalMode()); err != nil {
+		return err
+	}
+	dryRun := opts.GetDryRun()
+	skipSteps := make(map[string]struct{}, len(opts.GetSkipStepIds()))
+	for _, id := range opts.GetSkipStepIds() {
+		skipSteps[id] = struct{}{}
+	}
+	if timeout := opts.GetTimeout().AsDuration(); timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
 	targetPath := req.Msg.GetTargetPath()
 	if targetPath == "" {
 		targetPath = "."
@@ -280,6 +304,7 @@ func (h *RemediationHandler) ExecutePlan(
 		"plan_id", plan.GetId(),
 		"steps", len(plan.GetSteps()),
 		"work_dir", absWorkDir,
+		"dry_run", dryRun,
 	)
 
 	// Send preparing phase
@@ -297,6 +322,7 @@ func (h *RemediationHandler) ExecutePlan(
 		if err := stream.Send(&remediationv1.ExecutionEvent{
 			Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_COMPLETED,
 			Message:   "No steps to execute",
+			Progress:  100,
 			Timestamp: timestamppb.Now(),
 		}); err != nil {
 			return err
@@ -305,10 +331,49 @@ func (h *RemediationHandler) ExecutePlan(
 	}
 
 	// Execute each step
+	runStep := h.execStep
+	if runStep == nil {
+		// Zero-value handlers (constructed without NewRemediationHandler)
+		// still execute real steps rather than panicking.
+		runStep = executeStep
+	}
+	executed := 0
+	skipped := 0
 	for i, step := range steps {
 		stepID := step.GetId()
 		if stepID == "" {
 			stepID = fmt.Sprintf("step-%d", i+1)
+		}
+
+		// Honor the skip list before anything about the step runs.
+		if _, skip := skipSteps[stepID]; skip {
+			skipped++
+			if err := stream.Send(&remediationv1.ExecutionEvent{
+				Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
+				StepId:    stepID,
+				Message:   fmt.Sprintf("Skipped step %d/%d (requested via skip_step_ids): %s", i+1, len(steps), step.GetTitle()),
+				Progress:  executionProgress(i+1, len(steps)),
+				Timestamp: timestamppb.Now(),
+			}); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// Dry run: describe what would run without ever reaching command
+		// execution. This branch must stay ahead of the execStep call so the
+		// simulation can never execute anything.
+		if dryRun {
+			if err := stream.Send(&remediationv1.ExecutionEvent{
+				Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
+				StepId:    stepID,
+				Message:   dryRunStepMessage(i+1, len(steps), step),
+				Progress:  executionProgress(i+1, len(steps)),
+				Timestamp: timestamppb.Now(),
+			}); err != nil {
+				return err
+			}
+			continue
 		}
 
 		// Send step starting event
@@ -316,13 +381,14 @@ func (h *RemediationHandler) ExecutePlan(
 			Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
 			StepId:    stepID,
 			Message:   fmt.Sprintf("Executing step %d/%d: %s", i+1, len(steps), step.GetTitle()),
+			Progress:  executionProgress(i, len(steps)),
 			Timestamp: timestamppb.Now(),
 		}); err != nil {
 			return err
 		}
 
 		// Execute the step
-		output, execErr := executeStep(ctx, absWorkDir, step)
+		output, execErr := runStep(ctx, absWorkDir, step)
 
 		if execErr != nil {
 			// Send failure event with output in message
@@ -334,6 +400,7 @@ func (h *RemediationHandler) ExecutePlan(
 				Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
 				StepId:    stepID,
 				Message:   failMsg,
+				Progress:  executionProgress(i, len(steps)),
 				Timestamp: timestamppb.Now(),
 			}); err != nil {
 				return err
@@ -341,6 +408,7 @@ func (h *RemediationHandler) ExecutePlan(
 			// Return the error to stop execution
 			return connect.NewError(connect.CodeInternal, fmt.Errorf("step %s failed: %w", stepID, execErr))
 		}
+		executed++
 
 		// Send step completed event
 		completeMsg := fmt.Sprintf("Completed step %d/%d", i+1, len(steps))
@@ -351,6 +419,7 @@ func (h *RemediationHandler) ExecutePlan(
 			Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
 			StepId:    stepID,
 			Message:   completeMsg,
+			Progress:  executionProgress(i+1, len(steps)),
 			Timestamp: timestamppb.Now(),
 		}); err != nil {
 			return err
@@ -358,9 +427,17 @@ func (h *RemediationHandler) ExecutePlan(
 	}
 
 	// Send completion event
+	completionMsg := fmt.Sprintf("Successfully executed %d steps", executed)
+	if dryRun {
+		completionMsg = fmt.Sprintf("Dry run complete: %d steps would execute, nothing was changed", len(steps)-skipped)
+	}
+	if skipped > 0 {
+		completionMsg = fmt.Sprintf("%s (%d skipped)", completionMsg, skipped)
+	}
 	if err := stream.Send(&remediationv1.ExecutionEvent{
 		Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_COMPLETED,
-		Message:   fmt.Sprintf("Successfully executed %d steps", len(steps)),
+		Message:   completionMsg,
+		Progress:  100,
 		Timestamp: timestamppb.Now(),
 	}); err != nil {
 		return err
@@ -368,10 +445,56 @@ func (h *RemediationHandler) ExecutePlan(
 
 	logs.Info(ctx, "remediation plan executed successfully",
 		"plan_id", plan.GetId(),
-		"steps_executed", len(steps),
+		"steps_executed", executed,
+		"steps_skipped", skipped,
+		"dry_run", dryRun,
 	)
 
 	return nil
+}
+
+// rejectUnsupportedApprovalMode fails closed on approval modes ExecutePlan
+// cannot honor. The handler has no interactive approval loop for plan
+// execution (that exists only for ExecuteWithAgent), so accepting
+// INTERACTIVE, ALL_STEPS, or SKIP_HIGH_RISK and then executing every step
+// unconditionally would silently discard a requested safety control. Only
+// UNSPECIFIED and AUTO_APPROVE match what the handler actually does.
+func rejectUnsupportedApprovalMode(mode remediationv1.ApprovalMode) error {
+	switch mode {
+	case remediationv1.ApprovalMode_APPROVAL_MODE_UNSPECIFIED,
+		remediationv1.ApprovalMode_APPROVAL_MODE_AUTO_APPROVE:
+		return nil
+	default:
+		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf(
+			"approval mode %s is not supported by ExecutePlan; supported modes: %s, %s",
+			mode,
+			remediationv1.ApprovalMode_APPROVAL_MODE_UNSPECIFIED,
+			remediationv1.ApprovalMode_APPROVAL_MODE_AUTO_APPROVE,
+		))
+	}
+}
+
+// dryRunStepMessage describes what a step would do without executing it, so a
+// dry-run stream carries the same information a real run's command execution
+// would surface.
+func dryRunStepMessage(position, total int, step *remediationv1.Step) string {
+	switch {
+	case step.GetCommand() == "":
+		return fmt.Sprintf("[dry run] Step %d/%d has no command: %s", position, total, step.GetTitle())
+	case !step.GetExecutable():
+		return fmt.Sprintf("[dry run] Step %d/%d is manual: %s", position, total, step.GetCommand())
+	default:
+		return fmt.Sprintf("[dry run] Step %d/%d would execute: %s", position, total, step.GetCommand())
+	}
+}
+
+// executionProgress converts a completed-step count into the 0-100 completion
+// percentage the ExecutionEvent contract declares for its progress field.
+func executionProgress(done, total int) int32 {
+	if total <= 0 {
+		return 0
+	}
+	return int32(done * 100 / total)
 }
 
 // resolveWorkDir resolves and validates the working directory.
