@@ -195,8 +195,7 @@ Deputy can operate in two modes:
 • Remote: Connect to a remote Deputy server via HTTP/2
 
 Remote mode is selected with the --server flag or the DEPUTY_SERVER environment
-variable; the flag takes precedence when both are set. The --daemon flag is
-reserved for future daemon support and currently has no effect.
+variable; the flag takes precedence when both are set.
 
 DEFAULT EXECUTION:
 Running 'deputy' without arguments defaults to 'deputy diff' if inside a Git repository.`,
@@ -257,6 +256,10 @@ CONNECTION MODES:
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", logFormat, "Logging format (text, json). Override with DEPUTY_LOG_FORMAT")
 	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "", "Connect to remote Deputy server (e.g., https://deputy.example.com:8090). Takes precedence over DEPUTY_SERVER; --server= (empty) forces in-process mode")
 	rootCmd.PersistentFlags().StringVar(&daemonSocket, "daemon", "", "Reserved for future daemon support; currently has no effect")
+	// Hidden while reserved: the flag stays parseable so scripts written against
+	// it keep working when daemon mode lands, without adding help-text noise for
+	// a mode that does not exist yet.
+	_ = rootCmd.PersistentFlags().MarkHidden("daemon")
 	rootCmd.PersistentFlags().StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with remote server. Takes precedence over DEPUTY_AUTH_TOKEN; --auth-token= (empty) sends no token")
 	rootCmd.PersistentFlags().StringVar(&noCache, "no-cache", "", "Bypass cache and fetch fresh data. Use 'true' for all caches, or comma-separated source names (e.g., 'osv,kev')")
 
