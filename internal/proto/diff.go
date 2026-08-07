@@ -132,15 +132,19 @@ func DiffStatsToProto(changes []compare.Change) *diffv1.DiffStats {
 
 // GitDiffReportToProto creates a DiffVulnerabilitiesResponse from git diff
 // data. This is the `deputy diff --format json` output contract: it carries
-// the dependency changes, the newly-introduced and pre-existing vulnerability
-// sets, and structured policy results so consumers never parse rendered text.
+// the dependency changes, the introduced and unchanged vulnerability sets,
+// and structured policy results so consumers never parse rendered text.
 //
 // Added must contain only vulnerabilities the change set introduced (the same
-// set the rendered report counts as new); preexisting carries the rest.
+// set the rendered report counts as new); unchanged carries the rest.
+//
+// RemovedVulnerabilities is left unset here: the CLI partitions target-side
+// findings and never enumerates base-only ones, so it cannot fill the set the
+// server handler does. See #135.
 func GitDiffReportToProto(
 	repo, baseRef, targetRef string,
 	changes []compare.Change,
-	added, preexisting []*vulnerabilityv1.Finding,
+	added, unchanged []*vulnerabilityv1.Finding,
 	advisories map[string]*vulnerabilityv1.Advisory,
 	policyActions []*policyv1.Action,
 	policyFilesEvaluated int,
@@ -152,15 +156,15 @@ func GitDiffReportToProto(
 		TargetTarget: &targetv1.Target{
 			DisplayPath: targetRef,
 		},
-		GeneratedAt:                timestamppb.Now(),
-		Advisories:                 advisories,
-		Changes:                    PackageChangesToProto(changes),
-		ChangeStats:                DiffStatsToProto(changes),
-		AddedVulnerabilities:       added,
-		PreexistingVulnerabilities: preexisting,
+		GeneratedAt:              timestamppb.Now(),
+		Advisories:               advisories,
+		Changes:                  PackageChangesToProto(changes),
+		ChangeStats:              DiffStatsToProto(changes),
+		AddedVulnerabilities:     added,
+		UnchangedVulnerabilities: unchanged,
 		Stats: &diffv1.VulnerabilityDiffStats{
-			AddedCount:       int32(len(added)),
-			PreexistingCount: int32(len(preexisting)),
+			AddedCount:     int32(len(added)),
+			UnchangedCount: int32(len(unchanged)),
 		},
 		PolicyActions:        policyActions,
 		PolicyFilesEvaluated: int32(policyFilesEvaluated),

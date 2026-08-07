@@ -165,21 +165,21 @@ func markdownChangeRow(c *diffv1.PackageChange) string {
 // table and the collapsed pre-existing set.
 func writeMarkdownVulnerabilities(b *strings.Builder, resp *diffv1.DiffVulnerabilitiesResponse) {
 	added := resp.GetAddedVulnerabilities()
-	preexisting := resp.GetPreexistingVulnerabilities()
+	unchanged := resp.GetUnchangedVulnerabilities()
 
 	if len(added) > 0 {
 		fmt.Fprintf(b, "\n### ❗ Newly introduced vulnerabilities (%d)\n\n", len(added))
 		writeMarkdownFindingTable(b, added, resp.GetAdvisories())
 	}
 
-	if len(preexisting) > 0 {
+	if len(unchanged) > 0 {
 		// Not "unchanged dependencies": an upgraded package whose advisory
 		// already affected its base version is reclassified into this bucket,
 		// so the set includes dependencies listed in the changes table above.
 		// What unites them is that this diff did not introduce them.
 		fmt.Fprintf(b, "\n<details><summary>%d pre-existing vulnerabilit%s not introduced by this change</summary>\n\n",
-			len(preexisting), pluralYMD(len(preexisting)))
-		writeMarkdownFindingTable(b, preexisting, resp.GetAdvisories())
+			len(unchanged), pluralYMD(len(unchanged)))
+		writeMarkdownFindingTable(b, unchanged, resp.GetAdvisories())
 		b.WriteString("\n</details>\n")
 	}
 }

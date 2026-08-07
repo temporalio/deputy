@@ -370,14 +370,13 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	// Structured formats render from the deputy.diff.v1 response instead of
 	// the interactive text report; markdown is a pure view over the same
 	// message JSON emits.
-	isJSON := outputFormat == "json" || outputFormat == "markdown"
-	structuredFormat := outputFormat
+	structured := outputFormat == "json" || outputFormat == "markdown"
 
 	dispTarget := targetRef
 	if isWorkingPseudoRef(targetRef) {
 		dispTarget = "WORKING"
 	}
-	if !isJSON {
+	if !structured {
 		doc := render.DiffHeaderDoc(baseRef, dispTarget)
 		_ = doc.Render(outW, output.UIStyles())
 	}
@@ -390,15 +389,15 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 			return fmt.Errorf("error checking files changed: %w", err)
 		}
 
-		if debugMatcher && !isJSON {
+		if debugMatcher && !structured {
 			renderMatcherDebug(outW, changedFiles, matcher)
 		}
 
 		if matcher != nil && !matcher.AnyMatch(changedFiles) {
-			if isJSON {
+			if structured {
 				emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil, nil, 0)
 				otel.SetSpanOK(span)
-				return outputDiffResponse(outW, emptyResp, structuredFormat)
+				return outputDiffResponse(outW, emptyResp, outputFormat)
 			}
 			fmt.Fprintln(outW, ui.StyleAdded.Render("No dependency changes detected."))
 			otel.SetSpanOK(span)
@@ -526,9 +525,9 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 		ExcludeMainModules: excludeMainModules,
 	})
 	if len(changes) == 0 {
-		if isJSON {
+		if structured {
 			emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil, nil, 0)
-			return outputDiffResponse(outW, emptyResp, structuredFormat)
+			return outputDiffResponse(outW, emptyResp, outputFormat)
 		}
 		fmt.Fprintln(outW, "No package changes detected.")
 		otel.SetSpanOK(span)
@@ -546,7 +545,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	}
 
 	// Skip text rendering in JSON mode
-	if !isJSON {
+	if !structured {
 		displayDetailedDependencyChanges(changes, outW)
 	}
 
@@ -554,7 +553,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	if enableVulnScan {
 		// Show progress indicator for interactive mode
 		var progress *ui.Progress
-		if ui.IsTTY(errW) && !isJSON {
+		if ui.IsTTY(errW) && !structured {
 			fmt.Fprintln(errW) // Visual spacing (cleared with spinner)
 			progress = ui.NewProgress(errW, "Scanning for vulnerabilities")
 			progress.Start(ctx)
@@ -627,7 +626,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 		changedVulns, unchangedVulns := splitVulnsByChange(reportVulns, changes)
 		if len(changedVulns) > 0 {
 			baseAffected := baseVersionAdvisories(ctx, changes, errW)
-			changedVulns, unchangedVulns = reclassifyPreexistingVulns(changedVulns, unchangedVulns, baseAffected)
+			changedVulns, unchangedVulns = reclassifyUnchangedVulns(changedVulns, unchangedVulns, baseAffected)
 		}
 
 		policyReport := DiffPolicyReport{
@@ -644,12 +643,12 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 		}
 
 		// JSON output mode
-		if isJSON {
+		if structured {
 			protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes,
 				report.VulnerabilitiesToFindings(changedVulns),
 				report.VulnerabilitiesToFindings(unchangedVulns),
 				result.Advisories, policyActions, len(policyPaths))
-			if err := outputDiffResponse(outW, protoResp, structuredFormat); err != nil {
+			if err := outputDiffResponse(outW, protoResp, outputFormat); err != nil {
 				otel.SetSpanError(span, err)
 				return err
 			}
@@ -766,10 +765,10 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	}
 
 	// No vulnerability scanning - output changes only
-	if isJSON {
+	if structured {
 		protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, nil, nil, nil, nil, 0)
 		otel.SetSpanOK(span)
-		return outputDiffResponse(outW, protoResp, structuredFormat)
+		return outputDiffResponse(outW, protoResp, outputFormat)
 	}
 
 	// Display results (no vulnerabilities scanned)
@@ -1007,12 +1006,12 @@ func baseQueryPackages(changes []compare.Change) []*dependencyv1.Package {
 	return basePkgs
 }
 
-// reclassifyPreexistingVulns moves changed-package vulnerabilities whose
+// reclassifyUnchangedVulns moves changed-package vulnerabilities whose
 // advisory already affected the package's base version (matched by ID or any
 // alias) into the pre-existing bucket, leaving the changed set to carry only
 // what the change actually introduces. A nil baseAffected map reclassifies
 // nothing.
-func reclassifyPreexistingVulns(changed, unchanged []report.Vulnerability, baseAffected map[string]map[string]bool) (newChanged, newUnchanged []report.Vulnerability) {
+func reclassifyUnchangedVulns(changed, unchanged []report.Vulnerability, baseAffected map[string]map[string]bool) (newChanged, newUnchanged []report.Vulnerability) {
 	if len(baseAffected) == 0 {
 		return changed, unchanged
 	}

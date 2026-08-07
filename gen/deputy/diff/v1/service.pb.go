@@ -750,11 +750,13 @@ type DiffVulnerabilitiesResponse struct {
 	// per-change and per-vulnerability results attributed to their subjects.
 	// Mirrors deputy.scan.v1.ScanResponse.policy_actions.
 	PolicyActions []*v14.Action `protobuf:"bytes,11,rep,name=policy_actions,json=policyActions,proto3" json:"policy_actions,omitempty"`
-	// PreexistingVulnerabilities affect dependencies the change set did not
-	// touch: present in the target, but not introduced by this diff.
+	// UnchangedVulnerabilities are present in the target but not introduced by
+	// this diff, completing the added/removed/unchanged split. A finding stays
+	// here when it survives a version bump, so "unchanged" describes the
+	// finding's status across the diff, not the dependency's version.
 	// AddedVulnerabilities carries only the newly introduced set, so gates like
 	// fail-on-new-vulnerabilities can count it directly.
-	PreexistingVulnerabilities []*v13.Finding `protobuf:"bytes,12,rep,name=preexisting_vulnerabilities,json=preexistingVulnerabilities,proto3" json:"preexisting_vulnerabilities,omitempty"`
+	UnchangedVulnerabilities []*v13.Finding `protobuf:"bytes,12,rep,name=unchanged_vulnerabilities,json=unchangedVulnerabilities,proto3" json:"unchanged_vulnerabilities,omitempty"`
 	// PolicyFilesEvaluated is how many policy bundles were evaluated. It lets
 	// renderers distinguish "no policies configured" (0, omit the section)
 	// from "policies evaluated, all passed" (>0 with no policy_actions).
@@ -870,9 +872,9 @@ func (x *DiffVulnerabilitiesResponse) GetPolicyActions() []*v14.Action {
 	return nil
 }
 
-func (x *DiffVulnerabilitiesResponse) GetPreexistingVulnerabilities() []*v13.Finding {
+func (x *DiffVulnerabilitiesResponse) GetUnchangedVulnerabilities() []*v13.Finding {
 	if x != nil {
-		return x.PreexistingVulnerabilities
+		return x.UnchangedVulnerabilities
 	}
 	return nil
 }
@@ -895,11 +897,12 @@ type VulnerabilityDiffStats struct {
 	AddedBySeverity map[string]int32 `protobuf:"bytes,3,rep,name=added_by_severity,json=addedBySeverity,proto3" json:"added_by_severity,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// RemovedBySeverity breaks down fixed vulnerabilities by severity.
 	RemovedBySeverity map[string]int32 `protobuf:"bytes,4,rep,name=removed_by_severity,json=removedBySeverity,proto3" json:"removed_by_severity,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	// PreexistingCount is the number of vulnerabilities in unchanged
-	// dependencies (see DiffVulnerabilitiesResponse.preexisting_vulnerabilities).
-	PreexistingCount int32 `protobuf:"varint,5,opt,name=preexisting_count,json=preexistingCount,proto3" json:"preexisting_count,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// UnchangedCount is the number of vulnerabilities the diff neither
+	// introduced nor resolved (see
+	// DiffVulnerabilitiesResponse.unchanged_vulnerabilities).
+	UnchangedCount int32 `protobuf:"varint,5,opt,name=unchanged_count,json=unchangedCount,proto3" json:"unchanged_count,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *VulnerabilityDiffStats) Reset() {
@@ -960,9 +963,9 @@ func (x *VulnerabilityDiffStats) GetRemovedBySeverity() map[string]int32 {
 	return nil
 }
 
-func (x *VulnerabilityDiffStats) GetPreexistingCount() int32 {
+func (x *VulnerabilityDiffStats) GetUnchangedCount() int32 {
 	if x != nil {
-		return x.PreexistingCount
+		return x.UnchangedCount
 	}
 	return 0
 }
@@ -2404,7 +2407,7 @@ const file_deputy_diff_v1_service_proto_rawDesc = "" +
 	"baseTarget\x12#\n" +
 	"\rtarget_target\x18\x02 \x01(\tR\ftargetTarget\x12>\n" +
 	"\fdiff_options\x18\x03 \x01(\v2\x1b.deputy.diff.v1.DiffOptionsR\vdiffOptions\x12>\n" +
-	"\fscan_options\x18\x04 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\vscanOptions\"\xf2\a\n" +
+	"\fscan_options\x18\x04 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\vscanOptions\"\xee\a\n" +
 	"\x1bDiffVulnerabilitiesResponse\x129\n" +
 	"\vbase_target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\n" +
 	"baseTarget\x12=\n" +
@@ -2420,19 +2423,19 @@ const file_deputy_diff_v1_service_proto_rawDesc = "" +
 	"\achanges\x18\t \x03(\v2\x1d.deputy.diff.v1.PackageChangeR\achanges\x12<\n" +
 	"\fchange_stats\x18\n" +
 	" \x01(\v2\x19.deputy.diff.v1.DiffStatsR\vchangeStats\x12?\n" +
-	"\x0epolicy_actions\x18\v \x03(\v2\x18.deputy.policy.v1.ActionR\rpolicyActions\x12a\n" +
-	"\x1bpreexisting_vulnerabilities\x18\f \x03(\v2 .deputy.vulnerability.v1.FindingR\x1apreexistingVulnerabilities\x124\n" +
+	"\x0epolicy_actions\x18\v \x03(\v2\x18.deputy.policy.v1.ActionR\rpolicyActions\x12]\n" +
+	"\x19unchanged_vulnerabilities\x18\f \x03(\v2 .deputy.vulnerability.v1.FindingR\x18unchangedVulnerabilities\x124\n" +
 	"\x16policy_files_evaluated\x18\r \x01(\x05R\x14policyFilesEvaluated\x1a`\n" +
 	"\x0fAdvisoriesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
-	"\x05value\x18\x02 \x01(\v2!.deputy.vulnerability.v1.AdvisoryR\x05value:\x028\x01\"\xed\x03\n" +
+	"\x05value\x18\x02 \x01(\v2!.deputy.vulnerability.v1.AdvisoryR\x05value:\x028\x01\"\xe9\x03\n" +
 	"\x16VulnerabilityDiffStats\x12\x1f\n" +
 	"\vadded_count\x18\x01 \x01(\x05R\n" +
 	"addedCount\x12#\n" +
 	"\rremoved_count\x18\x02 \x01(\x05R\fremovedCount\x12g\n" +
 	"\x11added_by_severity\x18\x03 \x03(\v2;.deputy.diff.v1.VulnerabilityDiffStats.AddedBySeverityEntryR\x0faddedBySeverity\x12m\n" +
-	"\x13removed_by_severity\x18\x04 \x03(\v2=.deputy.diff.v1.VulnerabilityDiffStats.RemovedBySeverityEntryR\x11removedBySeverity\x12+\n" +
-	"\x11preexisting_count\x18\x05 \x01(\x05R\x10preexistingCount\x1aB\n" +
+	"\x13removed_by_severity\x18\x04 \x03(\v2=.deputy.diff.v1.VulnerabilityDiffStats.RemovedBySeverityEntryR\x11removedBySeverity\x12'\n" +
+	"\x0funchanged_count\x18\x05 \x01(\x05R\x0eunchangedCount\x1aB\n" +
 	"\x14AddedBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\x1aD\n" +
@@ -2683,7 +2686,7 @@ var file_deputy_diff_v1_service_proto_depIdxs = []int32{
 	6,  // 19: deputy.diff.v1.DiffVulnerabilitiesResponse.changes:type_name -> deputy.diff.v1.PackageChange
 	7,  // 20: deputy.diff.v1.DiffVulnerabilitiesResponse.change_stats:type_name -> deputy.diff.v1.DiffStats
 	34, // 21: deputy.diff.v1.DiffVulnerabilitiesResponse.policy_actions:type_name -> deputy.policy.v1.Action
-	33, // 22: deputy.diff.v1.DiffVulnerabilitiesResponse.preexisting_vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	33, // 22: deputy.diff.v1.DiffVulnerabilitiesResponse.unchanged_vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
 	25, // 23: deputy.diff.v1.VulnerabilityDiffStats.added_by_severity:type_name -> deputy.diff.v1.VulnerabilityDiffStats.AddedBySeverityEntry
 	26, // 24: deputy.diff.v1.VulnerabilityDiffStats.removed_by_severity:type_name -> deputy.diff.v1.VulnerabilityDiffStats.RemovedBySeverityEntry
 	12, // 25: deputy.diff.v1.DiffContainerImagesRequest.options:type_name -> deputy.diff.v1.ContainerDiffOptions

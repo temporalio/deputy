@@ -221,11 +221,13 @@ message DiffVulnerabilitiesResponse {
   // Mirrors deputy.scan.v1.ScanResponse.policy_actions.
   repeated deputy.policy.v1.Action policy_actions = 11;
 
-  // PreexistingVulnerabilities affect dependencies the change set did not
-  // touch: present in the target, but not introduced by this diff.
+  // UnchangedVulnerabilities are present in the target but not introduced by
+  // this diff, completing the added/removed/unchanged split. A finding stays
+  // here when it survives a version bump, so "unchanged" describes the
+  // finding's status across the diff, not the dependency's version.
   // AddedVulnerabilities carries only the newly introduced set, so gates like
   // fail-on-new-vulnerabilities can count it directly.
-  repeated deputy.vulnerability.v1.Finding preexisting_vulnerabilities = 12;
+  repeated deputy.vulnerability.v1.Finding unchanged_vulnerabilities = 12;
 
   // PolicyFilesEvaluated is how many policy bundles were evaluated. It lets
   // renderers distinguish "no policies configured" (0, omit the section)
@@ -247,9 +249,10 @@ message VulnerabilityDiffStats {
   // RemovedBySeverity breaks down fixed vulnerabilities by severity.
   map<string, int32> removed_by_severity = 4;
 
-  // PreexistingCount is the number of vulnerabilities in unchanged
-  // dependencies (see DiffVulnerabilitiesResponse.preexisting_vulnerabilities).
-  int32 preexisting_count = 5;
+  // UnchangedCount is the number of vulnerabilities the diff neither
+  // introduced nor resolved (see
+  // DiffVulnerabilitiesResponse.unchanged_vulnerabilities).
+  int32 unchanged_count = 5;
 }
 
 // DiffContainerImagesRequest specifies container images to compare.

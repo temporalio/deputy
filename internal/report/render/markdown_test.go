@@ -54,11 +54,11 @@ func diffMarkdownFixture() *diffv1.DiffVulnerabilitiesResponse {
 				FixedVersions: []string{"1.0.1"},
 			},
 		}},
-		PreexistingVulnerabilities: []*vulnerabilityv1.Finding{{
+		UnchangedVulnerabilities: []*vulnerabilityv1.Finding{{
 			AdvisoryId: "CVE-2026-0001",
 			Package:    &dependencyv1.Package{Name: "example.com/old", Version: "3.0.0"},
 		}},
-		Stats: &diffv1.VulnerabilityDiffStats{AddedCount: 1, PreexistingCount: 1},
+		Stats: &diffv1.VulnerabilityDiffStats{AddedCount: 1, UnchangedCount: 1},
 		PolicyActions: []*policyv1.Action{
 			{
 				Type:       policyv1.ActionType_ACTION_TYPE_WARN,
