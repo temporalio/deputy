@@ -403,14 +403,21 @@ func (s *Strategy) Rewrite(root *os.Root, relPath string, updates []pin.Update) 
 	return RewriteWorkflow(root, relPath, updates)
 }
 
-// packageToRef converts an extractor.Package from the actionsx extractor to
+// packageToRef converts an extractor.Package from the actionsx extractor into
 // a pin.Ref. Returns nil for non-GitHub-Actions packages (docker, local).
-// packageToRef converts an extracted package into a pin ref. relPath is the
-// file the extraction started from and is only a fallback: recursion into
-// composite actions and reusable workflows records the declaring file in
-// pkg.Locations, and a ref must name the file it actually appears in or pin
-// will rewrite the wrong one (or, when the declaring file sits under a
-// skipped directory, silently rewrite nothing at all).
+//
+// relPath is the file the extraction pass started from and is only a fallback.
+// The extractor recurses into local composite actions and reusable workflows
+// and records each declaring file in pkg.Locations, so a ref must be named
+// from Locations: pin groups rewrites by FilePath, and naming the entry file
+// for an action declared elsewhere rewrites a file that does not contain the
+// ref, which silently pins nothing while still counting as pinned.
+//
+// Locations is a list because the extractor dedupes packages by
+// type+name+subpath+version and merges their locations, so [0] is the first
+// declaring file in traversal order. When an action is declared in more than
+// one file reached by a single pass, the remaining locations are dropped here;
+// see #134.
 func packageToRef(pkg *extractor.Package, relPath string) *pin.Ref {
 	if !purlx.IsGitHubActionsType(pkg.PURLType) {
 		return nil // docker or other type
