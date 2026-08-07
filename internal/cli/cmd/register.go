@@ -38,12 +38,7 @@ type Dependencies struct {
 
 // ResolveConnection fills empty connection settings from the environment
 // (explicit value beats environment variable beats in-process default) and
-// builds the matching service clients. It exists so the root command can
-// re-resolve after cobra has parsed the persistent flags: commands are
-// registered before parsing, so flag values are not known at registration
-// time. When d.Clients is already set, the pointed-to struct is updated in
-// place so every command closure that captured the pointer at registration
-// time observes the new configuration.
+// builds the matching service clients via ApplyConnection.
 func (d *Dependencies) ResolveConnection() error {
 	if d.ServerAddress == "" {
 		d.ServerAddress = os.Getenv("DEPUTY_SERVER")
@@ -51,7 +46,19 @@ func (d *Dependencies) ResolveConnection() error {
 	if d.AuthToken == "" {
 		d.AuthToken = os.Getenv("DEPUTY_AUTH_TOKEN")
 	}
+	return d.ApplyConnection()
+}
 
+// ApplyConnection builds service clients from the connection settings as they
+// stand, without consulting the environment: an empty ServerAddress selects
+// in-process mode and an empty AuthToken sends no bearer token. It exists so
+// the root command can re-apply the settings after cobra has parsed the
+// persistent flags (commands are registered before parsing) and honor flags
+// that were explicitly set to empty values over environment variables. When
+// d.Clients is already set, the pointed-to struct is updated in place so
+// every command closure that captured the pointer at registration time
+// observes the new configuration.
+func (d *Dependencies) ApplyConnection() error {
 	var clients *services.Clients
 	if d.ServerAddress != "" {
 		// Remote mode with optional bearer auth.

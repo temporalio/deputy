@@ -91,6 +91,47 @@ func TestRootServerFlagRoutesRemote(t *testing.T) {
 	}
 }
 
+// TestRootAuthTokenFlagClearsEnvToken pins the explicit-empty contract for
+// credentials: --auth-token= (set to an empty value) must clear a token
+// coming from DEPUTY_AUTH_TOKEN, so no Authorization header leaks to the
+// selected server.
+func TestRootAuthTokenFlagClearsEnvToken(t *testing.T) {
+	t.Setenv("DEPUTY_SERVER", "")
+	t.Setenv("DEPUTY_AUTH_TOKEN", "env-secret")
+
+	srv, requests := recordingServer(t)
+	chdirToGoModFixture(t)
+
+	_ = executeRoot(t, "--server", srv.URL, "--auth-token=", "list")
+
+	got := requests()
+	if len(got) == 0 {
+		t.Fatal("no request reached the --server address")
+	}
+	if got[0].auth != "" {
+		t.Errorf("Authorization = %q, want empty; explicit --auth-token= must clear the env token", got[0].auth)
+	}
+}
+
+// TestRootServerFlagEmptyForcesInProcess pins the explicit-empty contract for
+// the server address: --server= (set to an empty value) beats DEPUTY_SERVER
+// by the same flag-first rule and selects the in-process default, so nothing
+// is sent to the env-configured server.
+func TestRootServerFlagEmptyForcesInProcess(t *testing.T) {
+	t.Setenv("DEPUTY_AUTH_TOKEN", "")
+
+	envSrv, envRequests := recordingServer(t)
+	t.Setenv("DEPUTY_SERVER", envSrv.URL)
+	chdirToGoModFixture(t)
+
+	if err := executeRoot(t, "--server=", "list"); err != nil {
+		t.Errorf("in-process list failed: %v", err)
+	}
+	if got := envRequests(); len(got) != 0 {
+		t.Errorf("DEPUTY_SERVER address received %d request(s); explicit --server= must force in-process mode", len(got))
+	}
+}
+
 // TestRootServerFlagBeatsEnv pins the precedence contract: an explicit
 // --server flag wins over the DEPUTY_SERVER environment variable.
 func TestRootServerFlagBeatsEnv(t *testing.T) {
