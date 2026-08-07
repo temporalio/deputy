@@ -219,7 +219,11 @@ Common Patterns:
 }
 
 func runExec(ctx context.Context, deps *Dependencies, flags *execFlags, command []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	if deps.ServerAddress != "" || os.Getenv("DEPUTY_SERVER") != "" {
+	// deps.ServerAddress carries the resolved connection state (flag beats
+	// environment variable beats in-process default), so re-reading the raw
+	// DEPUTY_SERVER variable here would wrongly refuse when an explicit
+	// --server= selected in-process mode.
+	if deps.ServerAddress != "" {
 		return fmt.Errorf("exec is only available in local mode; remove --server or unset DEPUTY_SERVER to run locally")
 	}
 

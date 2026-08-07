@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -129,6 +130,56 @@ func TestRootServerFlagEmptyForcesInProcess(t *testing.T) {
 	}
 	if got := envRequests(); len(got) != 0 {
 		t.Errorf("DEPUTY_SERVER address received %d request(s); explicit --server= must force in-process mode", len(got))
+	}
+}
+
+// TestRootExecGuardUsesResolvedServer pins the exec local-mode guard to the
+// resolved connection state instead of the raw DEPUTY_SERVER variable: an
+// explicit --server= selects in-process mode, so exec must be allowed to run
+// locally, while an env- or flag-selected remote server must still refuse.
+// The cases use --runtime plugin without --plugin, which fails fast right
+// after the guard, so a "--plugin is required" error proves the guard passed
+// without executing anything.
+func TestRootExecGuardUsesResolvedServer(t *testing.T) {
+	t.Setenv("DEPUTY_AUTH_TOKEN", "")
+	chdirToGoModFixture(t)
+
+	const pastGuard = "--plugin is required"
+	const refused = "only available in local mode"
+
+	tests := []struct {
+		name    string
+		env     string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "env server with explicit empty --server runs locally",
+			env:     "https://127.0.0.1:9",
+			args:    []string{"--server=", "exec", "--runtime", "plugin", "--", "true"},
+			wantErr: pastGuard,
+		},
+		{
+			name:    "env server without flag still refuses",
+			env:     "https://127.0.0.1:9",
+			args:    []string{"exec", "--runtime", "plugin", "--", "true"},
+			wantErr: refused,
+		},
+		{
+			name:    "nonempty server flag refuses",
+			env:     "",
+			args:    []string{"--server", "https://127.0.0.1:9", "exec", "--runtime", "plugin", "--", "true"},
+			wantErr: refused,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("DEPUTY_SERVER", test.env)
+			err := executeRoot(t, test.args...)
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Errorf("error = %v, want containing %q", err, test.wantErr)
+			}
+		})
 	}
 }
 
