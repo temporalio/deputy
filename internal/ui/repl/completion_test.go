@@ -145,6 +145,9 @@ func TestCompletionEngine_PartialFieldAccess(t *testing.T) {
 
 	// "vulnerability.adv" should filter to advisory-related fields
 	completions := engine.Complete("vulnerability.adv", 17)
+	if len(completions) == 0 {
+		t.Fatal("expected completions for 'vulnerability.adv'")
+	}
 
 	for _, c := range completions {
 		if c.Text != "advisoryId" && c.Text != "advisory" {

@@ -796,6 +796,9 @@ func TestMCPToolInputSchemasAvoidTopLevelComposition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
+	if len(tools.Tools) == 0 {
+		t.Fatal("expected registered tools, got none; schema checks below would be vacuous")
+	}
 
 	for _, tool := range tools.Tools {
 		schema := toolInputSchema(t, tool)
@@ -1651,6 +1654,10 @@ func TestToolAnnotationsExposeReadOnlySafetyHints(t *testing.T) {
 	tools, err := clientSession.ListTools(ctx, nil)
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
+	}
+
+	if len(tools.Tools) == 0 {
+		t.Fatal("expected registered tools, got none; annotation checks below would be vacuous")
 	}
 
 	closedWorldTools := map[string]bool{
@@ -3588,10 +3595,20 @@ func TestTriageVulnerabilitiesDoesNotRecommendDirectUpdateForTransitiveFix(t *te
 	if result.UnfixableCount != 1 {
 		t.Errorf("unfixable count = %d, want 1", result.UnfixableCount)
 	}
+	// Prove recommendations were produced at all before asserting what they
+	// must not contain: the transitive fixable vulnerability must yield the
+	// transitive review recommendation.
+	foundTransitiveReview := false
 	for _, recommendation := range result.Recommendations {
 		if strings.Contains(recommendation, "Update or migrate direct dependencies") {
 			t.Fatalf("unexpected direct dependency recommendation: %q", recommendation)
 		}
+		if strings.Contains(recommendation, "transitive dependency vulnerability") {
+			foundTransitiveReview = true
+		}
+	}
+	if !foundTransitiveReview {
+		t.Fatalf("expected transitive review recommendation, got %+v", result.Recommendations)
 	}
 }
 

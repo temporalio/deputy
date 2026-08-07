@@ -1,6 +1,7 @@
 package scanning
 
 import (
+	"slices"
 	"testing"
 
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
@@ -387,34 +388,49 @@ func TestFilterByCEL_DocumentedExamples(t *testing.T) {
 	ctx := t.Context()
 	result := testResult()
 
-	// These are the exact examples from docs/commands/scan.md
+	// These are the exact examples from docs/commands/scan.md, each with its
+	// expected outcome against the testResult fixture so a filter that
+	// silently matches nothing (or everything) fails the test.
 	documentedExamples := []struct {
-		name   string
-		filter string
+		name    string
+		filter  string
+		wantIDs []string
 	}{
 		{
-			name:   "critical severity (from docs)",
-			filter: "vulnerability.advisory.severity.level == severity.critical",
+			name:    "critical severity (from docs)",
+			filter:  "vulnerability.advisory.severity.level == severity.critical",
+			wantIDs: []string{"CVE-2024-0001"},
 		},
 		{
-			name:   "high and critical (from docs)",
-			filter: "vulnerability.advisory.severity.level in [severity.critical, severity.high]",
+			name:    "high and critical (from docs)",
+			filter:  "vulnerability.advisory.severity.level in [severity.critical, severity.high]",
+			wantIDs: []string{"CVE-2024-0001", "CVE-2024-0002"},
 		},
 		{
-			name:   "direct dependencies (from docs)",
-			filter: "vulnerability.package.direct == true",
+			name:    "direct dependencies (from docs)",
+			filter:  "vulnerability.package.direct == true",
+			wantIDs: []string{"CVE-2024-0001", "CVE-2024-0003"},
 		},
 		{
-			name:   "fix available (from docs)",
-			filter: "size(vulnerability.advisory.fixed_versions) > 0",
+			name:    "fix available (from docs)",
+			filter:  "size(vulnerability.advisory.fixed_versions) > 0",
+			wantIDs: []string{"CVE-2024-0001", "CVE-2024-0002", "CVE-2024-0004"},
 		},
 	}
 
 	for _, ex := range documentedExamples {
 		t.Run(ex.name, func(t *testing.T) {
-			_, err := FilterByCEL(ctx, result, ex.filter)
+			filtered, err := FilterByCEL(ctx, result, ex.filter)
 			if err != nil {
-				t.Errorf("documented example failed: %v", err)
+				t.Fatalf("documented example failed: %v", err)
+			}
+			gotIDs := make([]string, 0, len(filtered.Findings))
+			for _, f := range filtered.Findings {
+				gotIDs = append(gotIDs, f.AdvisoryID)
+			}
+			slices.Sort(gotIDs)
+			if !slices.Equal(gotIDs, ex.wantIDs) {
+				t.Errorf("filtered advisory IDs = %v, want %v", gotIDs, ex.wantIDs)
 			}
 		})
 	}

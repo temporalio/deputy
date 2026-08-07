@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -14,7 +15,7 @@ import (
 
 func TestIsMutableTag(t *testing.T) {
 	tests := []struct {
-		tag      string
+		tag         string
 		wantMutable bool
 	}{
 		// Explicitly mutable tags
@@ -26,7 +27,7 @@ func TestIsMutableTag(t *testing.T) {
 		{"snapshot", true},
 		{"master", true},
 		{"main", true},
-		{"LATEST", true},  // Case insensitive
+		{"LATEST", true}, // Case insensitive
 		{"Latest", true},
 
 		// Digest references (immutable)
@@ -87,8 +88,8 @@ func TestLooksLikeSemver(t *testing.T) {
 		{"alpine", false},
 		{"v", false},
 		{"", false},
-		{"v1", false},  // Single component
-		{"1", false},   // Single component
+		{"v1", false}, // Single component
+		{"1", false},  // Single component
 	}
 
 	for _, tt := range tests {
@@ -251,7 +252,7 @@ func TestOCIConfigEffectiveMethods(t *testing.T) {
 	t.Run("strict mode overrides", func(t *testing.T) {
 		cfg := &OCIConfig{
 			StrictMode:       true,
-			AllowMutableTags: true, // Should be overridden
+			AllowMutableTags: true,  // Should be overridden
 			PinDigests:       false, // Should be overridden
 		}
 		if cfg.EffectiveAllowMutableTags() {
@@ -280,11 +281,14 @@ func TestOCIConfigEffectiveMethods(t *testing.T) {
 func TestOCIHandler_DigestPinning(t *testing.T) {
 	pinnedDigest := "sha256:" + strings.Repeat("a", 64)
 
+	// Count upstream invocations and capture the proxied path so the digest
+	// rewrite is asserted on a request that provably happened; an in-callback
+	// assertion alone is vacuous if the proxy never reaches upstream.
+	var upstreamCalls atomic.Int32
+	var upstreamPath atomic.Value
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify the request path was rewritten to use the digest
-		if !strings.Contains(r.URL.Path, pinnedDigest) {
-			t.Errorf("upstream request should use pinned digest, got path: %s", r.URL.Path)
-		}
+		upstreamCalls.Add(1)
+		upstreamPath.Store(r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(upstream.Close)
@@ -323,6 +327,15 @@ func TestOCIHandler_DigestPinning(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://deputy.local/v2/library/nginx/manifests/latest", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
+
+	// Verify the request was actually proxied and its path rewritten to the
+	// pinned digest.
+	if upstreamCalls.Load() == 0 {
+		t.Fatalf("upstream was never called; digest rewrite was not exercised (status=%d body=%s)", rr.Code, rr.Body.String())
+	}
+	if got, _ := upstreamPath.Load().(string); !strings.Contains(got, pinnedDigest) {
+		t.Errorf("upstream request should use pinned digest, got path: %s", got)
+	}
 
 	// Verify the pinned digest header was set
 	if got := rr.Header().Get(HeaderPinnedDigest); got != pinnedDigest {
