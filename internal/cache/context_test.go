@@ -77,17 +77,17 @@ func TestShouldBypass(t *testing.T) {
 	}{
 		{
 			name: "default context",
-			ctx:  context.Background(),
+			ctx:  t.Context(),
 			want: false,
 		},
 		{
 			name: "bypass all",
-			ctx:  WithBypassAll(context.Background()),
+			ctx:  WithBypassAll(t.Context()),
 			want: true,
 		},
 		{
 			name: "bypass sources does not set bypass all",
-			ctx:  WithBypassSources(context.Background(), []string{"osv"}),
+			ctx:  WithBypassSources(t.Context(), []string{"osv"}),
 			want: false,
 		},
 	}
@@ -110,25 +110,25 @@ func TestShouldBypassSource(t *testing.T) {
 	}{
 		{
 			name:   "default context",
-			ctx:    context.Background(),
+			ctx:    t.Context(),
 			source: "osv",
 			want:   false,
 		},
 		{
 			name:   "bypass all affects any source",
-			ctx:    WithBypassAll(context.Background()),
+			ctx:    WithBypassAll(t.Context()),
 			source: "osv",
 			want:   true,
 		},
 		{
 			name:   "bypass specific source matches",
-			ctx:    WithBypassSources(context.Background(), []string{"osv", "kev"}),
+			ctx:    WithBypassSources(t.Context(), []string{"osv", "kev"}),
 			source: "osv",
 			want:   true,
 		},
 		{
 			name:   "bypass specific source does not match other",
-			ctx:    WithBypassSources(context.Background(), []string{"osv", "kev"}),
+			ctx:    WithBypassSources(t.Context(), []string{"osv", "kev"}),
 			source: "epss",
 			want:   false,
 		},
@@ -185,7 +185,7 @@ func TestApplyNoCacheFlag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := ApplyNoCacheFlag(context.Background(), tt.value)
+			ctx := ApplyNoCacheFlag(t.Context(), tt.value)
 			var got bool
 			if tt.checkBypass {
 				got = ShouldBypass(ctx)

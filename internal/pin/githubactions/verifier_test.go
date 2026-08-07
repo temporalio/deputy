@@ -1,7 +1,6 @@
 package githubactions
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -47,7 +46,7 @@ func TestVerifier_SignedCommit(t *testing.T) {
 	client := testGHClient(t, srv.URL)
 	v := NewVerifier(client)
 
-	result, err := v.Verify(context.Background(), owner, repo, sha)
+	result, err := v.Verify(t.Context(), owner, repo, sha)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +93,7 @@ func TestVerifier_UnsignedCommit(t *testing.T) {
 	client := testGHClient(t, srv.URL)
 	v := NewVerifier(client)
 
-	result, err := v.Verify(context.Background(), owner, repo, sha)
+	result, err := v.Verify(t.Context(), owner, repo, sha)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +122,7 @@ func TestVerifier_NotFound(t *testing.T) {
 	client := testGHClient(t, srv.URL)
 	v := NewVerifier(client)
 
-	result, err := v.Verify(context.Background(), owner, repo, sha)
+	result, err := v.Verify(t.Context(), owner, repo, sha)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +161,7 @@ func TestVerifier_BranchNotReachable(t *testing.T) {
 	client := testGHClient(t, srv.URL)
 	v := NewVerifier(client)
 
-	result, err := v.Verify(context.Background(), owner, repo, sha)
+	result, err := v.Verify(t.Context(), owner, repo, sha)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +199,7 @@ func TestVerifier_ImposterHeuristic(t *testing.T) {
 	client := testGHClient(t, srv.URL)
 	v := NewVerifier(client)
 
-	result, err := v.Verify(context.Background(), owner, repo, sha)
+	result, err := v.Verify(t.Context(), owner, repo, sha)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +264,7 @@ func TestVerifier_AnnotatedTagObject(t *testing.T) {
 	client := testGHClient(t, srv.URL)
 	v := NewVerifier(client)
 
-	result, err := v.Verify(context.Background(), owner, repo, tagObjSHA)
+	result, err := v.Verify(t.Context(), owner, repo, tagObjSHA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +308,7 @@ func TestVerifier_RenamedRepoGraceful(t *testing.T) {
 	client := testGHClient(t, srv.URL)
 	v := NewVerifier(client)
 
-	result, err := v.Verify(context.Background(), owner, repo, sha)
+	result, err := v.Verify(t.Context(), owner, repo, sha)
 	if err != nil {
 		t.Fatalf("expected graceful degradation, got error: %v", err)
 	}
@@ -351,7 +350,7 @@ func TestVerifier_RateLimited_Unverifiable(t *testing.T) {
 	client := testGHClient(t, srv.URL)
 	v := NewVerifier(client)
 
-	result, err := v.Verify(context.Background(), owner, repo, sha)
+	result, err := v.Verify(t.Context(), owner, repo, sha)
 	if err != nil {
 		t.Fatalf("expected graceful handling, got error: %v", err)
 	}
@@ -396,7 +395,7 @@ func TestVerifier_RateLimited_SignedPasses(t *testing.T) {
 	client := testGHClient(t, srv.URL)
 	v := NewVerifier(client)
 
-	result, err := v.Verify(context.Background(), owner, repo, sha)
+	result, err := v.Verify(t.Context(), owner, repo, sha)
 	if err != nil {
 		t.Fatalf("expected graceful handling, got error: %v", err)
 	}
@@ -460,7 +459,7 @@ func TestVerifier_NestedAnnotatedTags(t *testing.T) {
 	client := testGHClient(t, srv.URL)
 	v := NewVerifier(client)
 
-	result, err := v.Verify(context.Background(), owner, repo, outerTagSHA)
+	result, err := v.Verify(t.Context(), owner, repo, outerTagSHA)
 	if err != nil {
 		t.Fatal(err)
 	}

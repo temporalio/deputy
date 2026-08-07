@@ -1,7 +1,6 @@
 package gradlex
 
 import (
-	"context"
 	"io"
 	"testing"
 
@@ -142,7 +141,7 @@ func TestVerificationMetadataExtractor_Extract(t *testing.T) {
 		Reader: newBytesReader(content),
 	}
 
-	inv, err := e.Extract(context.Background(), input)
+	inv, err := e.Extract(t.Context(), input)
 	if err != nil {
 		t.Fatalf("Extract failed: %v", err)
 	}

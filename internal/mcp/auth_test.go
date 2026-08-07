@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -246,7 +245,7 @@ func TestAuthMiddleware_OptionalMode(t *testing.T) {
 
 func TestClaimsFromContext(t *testing.T) {
 	t.Run("no claims", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		claims := ClaimsFromContext(ctx)
 		if claims != nil {
 			t.Error("expected nil claims")
@@ -255,7 +254,7 @@ func TestClaimsFromContext(t *testing.T) {
 
 	t.Run("with claims", func(t *testing.T) {
 		expected := &Claims{Subject: "test-user"}
-		ctx := jwt.ContextWithClaims(context.Background(), expected)
+		ctx := jwt.ContextWithClaims(t.Context(), expected)
 		claims := ClaimsFromContext(ctx)
 		if claims == nil {
 			t.Fatal("expected non-nil claims")

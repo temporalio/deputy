@@ -1,7 +1,6 @@
 package osv
 
 import (
-	"context"
 	"slices"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 // TestAWSV1Integration ensures real OSV data marks fixed versions correctly.
 func TestAWSV1Integration(t *testing.T) {
 	t.Skip("network access required")
-	ctx := context.Background()
+	ctx := t.Context()
 	client := osvdev.DefaultClient()
 	vulns, err := QueryRaw(ctx, client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/aws/aws-sdk-go", Version: "1.55.6", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {

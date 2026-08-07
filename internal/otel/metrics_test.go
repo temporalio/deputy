@@ -101,7 +101,7 @@ func TestSeverityAttr(t *testing.T) {
 }
 
 func TestRecordScanMetrics_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	severity := map[string]int{
 		"CRITICAL": 1,
 		"HIGH":     2,
@@ -152,7 +152,7 @@ func findMetric(rm *metricdata.ResourceMetrics, name string) *metricdata.Metrics
 
 func TestRecordScanMetrics_RecordsValues(t *testing.T) {
 	reader := setupTestMeterProvider(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	severity := map[string]int{
 		"CRITICAL": 2,
@@ -227,7 +227,7 @@ func TestRecordScanMetrics_RecordsValues(t *testing.T) {
 
 func TestRecordProxyRequest_RecordsValues(t *testing.T) {
 	reader := setupTestMeterProvider(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	RecordProxyRequest(ctx, 0.25, "npm", 200)
 	RecordProxyRequest(ctx, 0.15, "npm", 200)
@@ -279,7 +279,7 @@ func TestRecordProxyRequest_RecordsValues(t *testing.T) {
 
 func TestRecordPolicyEvaluation_RecordsValues(t *testing.T) {
 	reader := setupTestMeterProvider(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	RecordPolicyEvaluation(ctx, 0.05, "allow")
 	RecordPolicyEvaluation(ctx, 0.10, "allow")
@@ -337,7 +337,7 @@ func TestRecordPolicyEvaluation_RecordsValues(t *testing.T) {
 
 func TestRecordOSVCacheAccess_RecordsValues(t *testing.T) {
 	reader := setupTestMeterProvider(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	RecordOSVCacheAccess(ctx, true)
 	RecordOSVCacheAccess(ctx, true)
@@ -390,7 +390,7 @@ func TestRecordOSVCacheAccess_RecordsValues(t *testing.T) {
 
 func TestRecordProxyAuth_RecordsValues(t *testing.T) {
 	reader := setupTestMeterProvider(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	RecordProxyAuth(ctx, "success", "")
 	RecordProxyAuth(ctx, "success", "")
@@ -422,7 +422,7 @@ func TestRecordProxyAuth_RecordsValues(t *testing.T) {
 }
 
 func TestRecordOSVQuery_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Should not panic
 	RecordOSVQuery(ctx, 0.5, "batch", true)
@@ -430,7 +430,7 @@ func TestRecordOSVQuery_DoesNotPanic(t *testing.T) {
 }
 
 func TestRecordOSVCacheAccess_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Should not panic
 	RecordOSVCacheAccess(ctx, true)
@@ -438,7 +438,7 @@ func TestRecordOSVCacheAccess_DoesNotPanic(t *testing.T) {
 }
 
 func TestRecordPolicyEvaluation_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Should not panic
 	RecordPolicyEvaluation(ctx, 0.1, "allow")
@@ -447,7 +447,7 @@ func TestRecordPolicyEvaluation_DoesNotPanic(t *testing.T) {
 }
 
 func TestRecordProxyRequest_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Should not panic
 	RecordProxyRequest(ctx, 0.5, "go", 200)
@@ -455,7 +455,7 @@ func TestRecordProxyRequest_DoesNotPanic(t *testing.T) {
 }
 
 func TestRecordProxyAuth_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Should not panic
 	RecordProxyAuth(ctx, "success", "")
@@ -464,7 +464,7 @@ func TestRecordProxyAuth_DoesNotPanic(t *testing.T) {
 }
 
 func TestRecordProxyPolicyDenial_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Should not panic
 	RecordProxyPolicyDenial(ctx, "go", "block-critical")
@@ -525,7 +525,7 @@ func TestCacheTypeAttr(t *testing.T) {
 }
 
 func TestRecordCacheStats_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	stats := CacheStats{
 		Hits:    100,
@@ -544,7 +544,7 @@ func TestRecordCacheStats_DoesNotPanic(t *testing.T) {
 
 func TestRecordCacheStats_RecordsValues(t *testing.T) {
 	reader := setupTestMeterProvider(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	stats := CacheStats{
 		Hits:    100,
@@ -584,7 +584,7 @@ func TestRecordCacheStats_RecordsValues(t *testing.T) {
 
 func TestRecordCacheHitMiss_RecordsValues(t *testing.T) {
 	reader := setupTestMeterProvider(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	RecordCacheHit(ctx, "depsdev")
 	RecordCacheHit(ctx, "depsdev")
@@ -637,7 +637,7 @@ func TestRecordCacheHitMiss_RecordsValues(t *testing.T) {
 
 func TestRecordCacheEvictionExpiration_RecordsValues(t *testing.T) {
 	reader := setupTestMeterProvider(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	RecordCacheEviction(ctx, "depsdev")
 	RecordCacheEviction(ctx, "depsdev")
@@ -688,25 +688,25 @@ func TestRecordCacheEvictionExpiration_RecordsValues(t *testing.T) {
 }
 
 func TestRecordCacheHit_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	// Should not panic
 	RecordCacheHit(ctx, "test")
 }
 
 func TestRecordCacheMiss_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	// Should not panic
 	RecordCacheMiss(ctx, "test")
 }
 
 func TestRecordCacheEviction_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	// Should not panic
 	RecordCacheEviction(ctx, "test")
 }
 
 func TestRecordCacheExpiration_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	// Should not panic
 	RecordCacheExpiration(ctx, "test")
 }

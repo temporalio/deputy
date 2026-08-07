@@ -1,7 +1,6 @@
 package secrets
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -208,7 +207,7 @@ func TestMatchesPathFilter_RecursiveGlob(t *testing.T) {
 }
 
 func TestBaselineScanner(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a mock scanner that returns fixed findings
 	engine, err := NewEngine()
@@ -305,7 +304,7 @@ func TestParseInlineAllowlist(t *testing.T) {
 }
 
 func TestInlineAllowlistScanner(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	engine, err := NewEngine()
 	if err != nil {
@@ -416,7 +415,7 @@ func TestBaseline_Merge(t *testing.T) {
 }
 
 func TestGenerateBaseline(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create temp directory with test files
 	tmpDir := t.TempDir()

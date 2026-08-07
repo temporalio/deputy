@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 )
 
@@ -32,7 +31,7 @@ func TestHexResolver_ResolveEdges_MixLock(t *testing.T) {
 	g := New()
 	r := NewHexResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}
@@ -94,7 +93,7 @@ func TestHexResolver_ResolveEdges_GitDependency(t *testing.T) {
 	g := New()
 	r := NewHexResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}
@@ -129,7 +128,7 @@ func TestHexResolver_ResolveEdges_NoFiles(t *testing.T) {
 	g := New()
 	r := NewHexResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}

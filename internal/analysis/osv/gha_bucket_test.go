@@ -328,7 +328,7 @@ func TestResolveGitHubActionsVersion_Table(t *testing.T) {
 				}
 				return tc.refsWithHashes, nil
 			}
-			got := resolveGitHubActionsVersion(context.Background(), &sync.Map{}, tc.repo, tc.version)
+			got := resolveGitHubActionsVersion(t.Context(), &sync.Map{}, tc.repo, tc.version)
 			if got != tc.want {
 				t.Fatalf("resolveGitHubActionsVersion(%q,%q)=%q want %q", tc.repo, tc.version, got, tc.want)
 			}
@@ -392,7 +392,7 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionAvoidsFalsePositive(t *testing
 	}
 	t.Cleanup(func() { ghaListRemoteRefs = origList })
 
-	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+	got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{Name: "actions/download-artifact", Version: "v4", Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
@@ -449,7 +449,7 @@ func TestQueryOSVGHABucketBatch_UnresolvedFloatingTagDoesNotDefaultToAffected(t 
 	}
 	t.Cleanup(func() { ghaListRemoteRefs = origList })
 
-	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+	got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{Name: "actions/download-artifact", Version: "v4.1", Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
@@ -507,7 +507,7 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionReportsEffectiveVersion(t *tes
 	}
 	t.Cleanup(func() { ghaListRemoteRefs = origList })
 
-	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+	got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{Name: "actions/download-artifact", Version: "v4", Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
@@ -572,7 +572,7 @@ func TestQueryOSVGHABucketBatch_SHAResolutionAvoidsFalsePositive(t *testing.T) {
 	}
 	t.Cleanup(func() { ghaListRemoteRefsWithHashes = origListWithHashes })
 
-	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+	got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{Name: "anthropics/claude-code-action", Version: sha, Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
@@ -630,7 +630,7 @@ func TestQueryRaw_GitHubActionsPURLOnlySHAResolutionAvoidsFalsePositive(t *testi
 	}
 	t.Cleanup(func() { ghaListRemoteRefsWithHashes = origListWithHashes })
 
-	got, err := QueryRaw(context.Background(), nil, []PkgInput{
+	got, err := QueryRaw(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{PURL: "pkg:githubactions/anthropics/claude-code-action@" + sha + "#sub/action.yml"}},
 	})
 	if err != nil {
@@ -687,7 +687,7 @@ func TestQueryOSVGHABucketBatch_SHAResolutionReportsEffectiveVersion(t *testing.
 	}
 	t.Cleanup(func() { ghaListRemoteRefsWithHashes = origListWithHashes })
 
-	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+	got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{Name: "owner/repo", Version: sha, Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
@@ -746,7 +746,7 @@ func TestQueryOSVGHABucketBatch_UnresolvedSHADoesNotDefaultToAffected(t *testing
 	}
 	t.Cleanup(func() { ghaListRemoteRefsWithHashes = origListWithHashes })
 
-	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+	got, err := queryOSVGHABucketBatch(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{Name: "owner/repo", Version: "1111111111111111111111111111111111111111", Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
@@ -791,7 +791,7 @@ func TestBuildGHAVulnIndex_UsesCacheZip(t *testing.T) {
 	now := time.Now()
 	_ = os.Chtimes(zipPath, now, now)
 
-	idx, err := buildGHAVulnIndex(context.Background())
+	idx, err := buildGHAVulnIndex(t.Context())
 	if err != nil {
 		t.Fatalf("buildGHAVulnIndex: %v", err)
 	}
@@ -856,7 +856,7 @@ func TestEnsureGHACacheZip_UsesETagConditionalRequest(t *testing.T) {
 		ghaDownloadTTL = origTTL
 	})
 
-	p1, err := ensureGHACacheZip(context.Background())
+	p1, err := ensureGHACacheZip(t.Context())
 	if err != nil {
 		t.Fatalf("ensureGHACacheZip (first): %v", err)
 	}
@@ -868,7 +868,7 @@ func TestEnsureGHACacheZip_UsesETagConditionalRequest(t *testing.T) {
 	}
 
 	// Second call should send If-None-Match and receive 304.
-	p2, err := ensureGHACacheZip(context.Background())
+	p2, err := ensureGHACacheZip(t.Context())
 	if err != nil {
 		t.Fatalf("ensureGHACacheZip (second): %v", err)
 	}
@@ -994,7 +994,7 @@ func TestLoadGHAVulnIndex_RefreshesAfterTTL(t *testing.T) {
 	ghaDownloadTTL = 0
 
 	ghaIndexTTL = time.Hour
-	idx1, err := loadGHAVulnIndex(context.Background())
+	idx1, err := loadGHAVulnIndex(t.Context())
 	if err != nil {
 		t.Fatalf("loadGHAVulnIndex (v1): %v", err)
 	}
@@ -1006,7 +1006,7 @@ func TestLoadGHAVulnIndex_RefreshesAfterTTL(t *testing.T) {
 	body = zipV2
 	etag = `W/"v2"`
 
-	idx2, err := loadGHAVulnIndex(context.Background())
+	idx2, err := loadGHAVulnIndex(t.Context())
 	if err != nil {
 		t.Fatalf("loadGHAVulnIndex (still cached): %v", err)
 	}
@@ -1019,7 +1019,7 @@ func TestLoadGHAVulnIndex_RefreshesAfterTTL(t *testing.T) {
 
 	// Force refresh and confirm new content appears.
 	ghaIndexTTL = 0
-	idx3, err := loadGHAVulnIndex(context.Background())
+	idx3, err := loadGHAVulnIndex(t.Context())
 	if err != nil {
 		t.Fatalf("loadGHAVulnIndex (refresh): %v", err)
 	}

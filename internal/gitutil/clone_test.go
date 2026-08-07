@@ -13,7 +13,7 @@ import (
 
 func TestCloneContext_InvalidURL(t *testing.T) {
 	dir := t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	_, cleanup, err := CloneContext(ctx, dir, &git.CloneOptions{
@@ -27,7 +27,7 @@ func TestCloneContext_InvalidURL(t *testing.T) {
 
 func TestCloneContext_CancelledContext(t *testing.T) {
 	dir := t.TempDir()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // Cancel immediately
 
 	_, cleanup, err := CloneContext(ctx, dir, &git.CloneOptions{
@@ -65,7 +65,7 @@ func TestCloneContext_LocalRepo(t *testing.T) {
 
 	// Clone to a new directory
 	destDir := t.TempDir()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	clonedRepo, cleanup, err := CloneContext(ctx, destDir, &git.CloneOptions{
 		URL: srcDir,

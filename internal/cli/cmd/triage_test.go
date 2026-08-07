@@ -305,7 +305,7 @@ func newTriageTestCommand(t *testing.T) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 	cmd.SetIn(strings.NewReader(""))
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})

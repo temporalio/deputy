@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"slices"
 	"strings"
 	"testing"
@@ -28,7 +27,7 @@ func TestPolicyREPLCommands(t *testing.T) {
 	}, "\n")
 	in := strings.NewReader(script)
 	var out bytes.Buffer
-	if err := runPolicyREPL(context.Background(), in, &out); err != nil {
+	if err := runPolicyREPL(t.Context(), in, &out); err != nil {
 		t.Fatalf("runPolicyREPL error: %v", err)
 	}
 	text := out.String()

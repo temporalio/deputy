@@ -5,7 +5,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -221,7 +220,7 @@ func TestArchiveScanner_ScanZip(t *testing.T) {
 	}
 
 	// Scan the zip from reader
-	result, err := scanner.ScanArchiveReader(context.Background(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
+	result, err := scanner.ScanArchiveReader(t.Context(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +297,7 @@ func TestArchiveScanner_ScanTarGz(t *testing.T) {
 	}
 
 	// Scan the tar.gz from reader
-	result, err := scanner.ScanArchiveReader(context.Background(), bytes.NewReader(buf.Bytes()), FormatTarGz, "test.tar.gz")
+	result, err := scanner.ScanArchiveReader(t.Context(), bytes.NewReader(buf.Bytes()), FormatTarGz, "test.tar.gz")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +353,7 @@ func TestArchiveScanner_PathTraversalProtection(t *testing.T) {
 	}
 
 	// Scan - should skip the malicious path
-	result, err := scanner.ScanArchiveReader(context.Background(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
+	result, err := scanner.ScanArchiveReader(t.Context(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +400,7 @@ func TestArchiveScanner_SizeLimits(t *testing.T) {
 	}
 
 	// Scan - should stop at limit
-	result, err := scanner.ScanArchiveReader(context.Background(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
+	result, err := scanner.ScanArchiveReader(t.Context(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +438,7 @@ func TestArchiveScanner_NestedArchives(t *testing.T) {
 	}
 
 	// Scan - should find secret in nested archive
-	result, err := scanner.ScanArchiveReader(context.Background(), bytes.NewReader(outerBuf.Bytes()), FormatZip, "outer.zip")
+	result, err := scanner.ScanArchiveReader(t.Context(), bytes.NewReader(outerBuf.Bytes()), FormatZip, "outer.zip")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +474,7 @@ func TestSafeExtractArchive(t *testing.T) {
 	tmpFile.Close()
 
 	// Extract safely
-	root, tempDir, err := SafeExtractArchive(context.Background(), tmpFile.Name(), 1024*1024)
+	root, tempDir, err := SafeExtractArchive(t.Context(), tmpFile.Name(), 1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +517,7 @@ func TestArchiveScanner_BinaryStrings(t *testing.T) {
 	binaryContent.Write([]byte{0x00, 0x00})
 
 	// Scan binary content
-	findings, err := scanner.ScanBinaryContent(context.Background(), binaryContent.Bytes(), "test.bin")
+	findings, err := scanner.ScanBinaryContent(t.Context(), binaryContent.Bytes(), "test.bin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,7 +693,7 @@ func TestArchiveScanner_ZipBombInRealArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := scanner.ScanArchiveReader(context.Background(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
+	result, err := scanner.ScanArchiveReader(t.Context(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -738,7 +737,7 @@ func TestArchiveScanner_WindowsPathTraversal(t *testing.T) {
 	}
 
 	// Scan
-	result, err := scanner.ScanArchiveReader(context.Background(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
+	result, err := scanner.ScanArchiveReader(t.Context(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -783,7 +782,7 @@ func TestArchiveScanner_NullByteInjection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := scanner.ScanArchiveReader(context.Background(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
+	result, err := scanner.ScanArchiveReader(t.Context(), bytes.NewReader(buf.Bytes()), FormatZip, "test.zip")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -839,7 +838,7 @@ func TestArchiveScanner_TarSymlinkBlocking(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := scanner.ScanArchiveReader(context.Background(), bytes.NewReader(buf.Bytes()), FormatTar, "test.tar")
+	result, err := scanner.ScanArchiveReader(t.Context(), bytes.NewReader(buf.Bytes()), FormatTar, "test.tar")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -881,7 +880,7 @@ func TestArchiveScanner_TarHardlinkBlocking(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := scanner.ScanArchiveReader(context.Background(), bytes.NewReader(buf.Bytes()), FormatTar, "test.tar")
+	result, err := scanner.ScanArchiveReader(t.Context(), bytes.NewReader(buf.Bytes()), FormatTar, "test.tar")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -917,7 +916,7 @@ func TestArchiveScanner_NegativeSizeProtection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := scanner.ScanArchiveReader(context.Background(), bytes.NewReader(buf.Bytes()), FormatTar, "test.tar")
+	result, err := scanner.ScanArchiveReader(t.Context(), bytes.NewReader(buf.Bytes()), FormatTar, "test.tar")
 	if err != nil {
 		t.Fatal(err)
 	}

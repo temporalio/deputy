@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -91,7 +90,7 @@ func TestServerAuthModeDisabled(t *testing.T) {
 	client := listv1connect.NewListServiceClient(http.DefaultClient, ts.URL)
 
 	// Request without auth should succeed
-	resp, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	resp, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err != nil {
 		t.Fatalf("request should succeed with auth disabled: %v", err)
 	}
@@ -120,7 +119,7 @@ func TestServerAuthModeRequired_NoToken(t *testing.T) {
 	client := listv1connect.NewListServiceClient(http.DefaultClient, ts.URL)
 
 	// Request without auth should fail
-	_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err == nil {
 		t.Fatal("expected error for unauthenticated request when auth required")
 	}
@@ -165,7 +164,7 @@ func TestServerAuthModeRequired_ValidToken(t *testing.T) {
 	client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
 	// Request with valid token should succeed
-	resp, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	resp, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err != nil {
 		t.Fatalf("request with valid token should succeed: %v", err)
 	}
@@ -204,7 +203,7 @@ func TestServerAuthModeRequired_ExpiredToken(t *testing.T) {
 	client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
 	// Request with expired token should fail
-	_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err == nil {
 		t.Fatal("expected error for expired token")
 	}
@@ -248,7 +247,7 @@ func TestServerAuthIssuerValidation(t *testing.T) {
 		}
 		client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
-		_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+		_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 		if err != nil {
 			t.Fatalf("request with valid issuer should succeed: %v", err)
 		}
@@ -266,7 +265,7 @@ func TestServerAuthIssuerValidation(t *testing.T) {
 		}
 		client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
-		_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+		_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 		if err == nil {
 			t.Fatal("expected error for invalid issuer")
 		}
@@ -311,7 +310,7 @@ func TestServerAuthAudienceValidation(t *testing.T) {
 		}
 		client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
-		_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+		_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 		if err != nil {
 			t.Fatalf("request with valid audience should succeed: %v", err)
 		}
@@ -329,7 +328,7 @@ func TestServerAuthAudienceValidation(t *testing.T) {
 		}
 		client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
-		_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+		_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 		if err == nil {
 			t.Fatal("expected error for invalid audience")
 		}
@@ -439,7 +438,7 @@ func TestServerMultiTenantIdentities(t *testing.T) {
 			}
 			client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
-			_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+			_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 
 			if tc.wantErr {
 				if err == nil {
@@ -606,7 +605,7 @@ func TestScanServiceAuth(t *testing.T) {
 	t.Run("unauthenticated scan request rejected", func(t *testing.T) {
 		client := scanv1connect.NewScanServiceClient(http.DefaultClient, ts.URL)
 
-		_, err := client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+		_, err := client.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{
 			Target: "github.com/test/repo",
 		}))
 		if err == nil {
@@ -635,7 +634,7 @@ func TestScanServiceAuth(t *testing.T) {
 
 		// Request should pass auth, but may fail on scan validation
 		// (that's fine - we're testing auth, not scan logic)
-		_, err := client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+		_, err := client.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{
 			Target: "", // Empty target should cause InvalidArgument, not Unauthenticated
 		}))
 
@@ -713,7 +712,7 @@ policies:
 		}
 		client := scanv1connect.NewScanServiceClient(httpClient, ts.URL)
 
-		_, err := client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+		_, err := client.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{
 			Target: "github.com/test/repo",
 		}))
 		if err == nil {
@@ -742,7 +741,7 @@ policies:
 		client := scanv1connect.NewScanServiceClient(httpClient, ts.URL)
 
 		// Request should pass policy, but may fail on scan validation
-		_, err := client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+		_, err := client.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{
 			Target: "", // Empty target - auth and policy passed
 		}))
 
@@ -767,7 +766,7 @@ policies:
 		}
 		client := scanv1connect.NewScanServiceClient(httpClient, ts.URL)
 
-		_, err := client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+		_, err := client.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{
 			Target: "",
 		}))
 
@@ -819,7 +818,7 @@ func TestServerSecurity_AlgorithmConfusion(t *testing.T) {
 	}
 	client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
-	_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err == nil {
 		t.Fatal("SECURITY VULNERABILITY: Server accepted alg=none token")
 	}
@@ -832,7 +831,7 @@ func TestServerSecurity_AlgorithmConfusion(t *testing.T) {
 	}
 	client2 := listv1connect.NewListServiceClient(httpClient2, ts.URL)
 
-	_, err = client2.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	_, err = client2.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err == nil {
 		t.Fatal("SECURITY VULNERABILITY: Server accepted HS256 token when ES256 expected")
 	}
@@ -867,7 +866,7 @@ func TestServerSecurity_TokenReplay(t *testing.T) {
 	}
 	client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
-	_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err == nil {
 		t.Fatal("SECURITY: Server accepted expired token")
 	}
@@ -912,7 +911,7 @@ func TestServerSecurity_WrongKeyID(t *testing.T) {
 	}
 	client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
-	_, err = client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	_, err = client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err == nil {
 		t.Fatal("SECURITY: Server accepted token with unknown key ID")
 	}
@@ -994,7 +993,7 @@ policies:
 		}
 		client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
-		_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+		_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 		if err != nil {
 			t.Fatalf("trusted org should be allowed: %v", err)
 		}
@@ -1018,7 +1017,7 @@ policies:
 		}
 		client := scanv1connect.NewScanServiceClient(httpClient, ts.URL)
 
-		_, err := client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+		_, err := client.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{
 			Target: "github.com/test/repo",
 		}))
 		if err == nil {
@@ -1048,7 +1047,7 @@ policies:
 		}
 		client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
-		_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+		_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 		if err == nil {
 			t.Fatal("wrong issuer should be denied")
 		}
@@ -1079,7 +1078,7 @@ policies:
 		}
 		client := listv1connect.NewListServiceClient(httpClient, ts.URL)
 
-		_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+		_, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 		if err == nil {
 			t.Fatal("wrong audience should be denied")
 		}
@@ -1137,7 +1136,7 @@ policies:
 		client := scanv1connect.NewScanServiceClient(httpClient, ts.URL)
 
 		// Scanning a target in the same tenant should pass policy (fail on validation)
-		_, err := client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+		_, err := client.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{
 			Target: "github.com/acme/internal-app",
 		}))
 
@@ -1163,7 +1162,7 @@ policies:
 		client := scanv1connect.NewScanServiceClient(httpClient, ts.URL)
 
 		// Scanning a target from different tenant should be denied
-		_, err := client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+		_, err := client.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{
 			Target: "github.com/other-company/secret-app",
 		}))
 		if err == nil {

@@ -2,7 +2,6 @@ package repl
 
 import (
 	"bytes"
-	"context"
 	"strings"
 	"testing"
 )
@@ -20,7 +19,7 @@ func TestReadLine_NonTTY(t *testing.T) {
 	}
 
 	// Read first line
-	line, err := rl.Read(context.Background(), "> ")
+	line, err := rl.Read(t.Context(), "> ")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -29,7 +28,7 @@ func TestReadLine_NonTTY(t *testing.T) {
 	}
 
 	// Read second line
-	line, err = rl.Read(context.Background(), "> ")
+	line, err = rl.Read(t.Context(), "> ")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -38,7 +37,7 @@ func TestReadLine_NonTTY(t *testing.T) {
 	}
 
 	// Read third line
-	line, err = rl.Read(context.Background(), "> ")
+	line, err = rl.Read(t.Context(), "> ")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

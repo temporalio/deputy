@@ -93,7 +93,7 @@ func TestRegistry(t *testing.T) {
 		}
 
 		// Verify by calling GetInfo
-		ctx := context.Background()
+		ctx := t.Context()
 		info, err := got.GetInfo(ctx, connect.NewRequest(&agentv1.GetInfoRequest{}))
 		if err != nil {
 			t.Fatalf("GetInfo failed: %v", err)
@@ -188,7 +188,7 @@ func TestAsExecutor(t *testing.T) {
 		}
 
 		// Test ExecuteIter
-		ctx := context.Background()
+		ctx := t.Context()
 		req := &agentv1.ExecuteRequest{Prompt: "test"}
 		var count int
 		for event, err := range exec.ExecuteIter(ctx, req) {
@@ -247,7 +247,7 @@ func TestGetOrDiscover(t *testing.T) {
 		handler := newMockHandler("registered")
 		_ = reg.RegisterBuiltin("registered", handler)
 
-		ctx := context.Background()
+		ctx := t.Context()
 		got, err := reg.GetOrDiscover(ctx, "registered")
 		if err != nil {
 			t.Fatalf("GetOrDiscover failed: %v", err)
@@ -259,7 +259,7 @@ func TestGetOrDiscover(t *testing.T) {
 
 	t.Run("returns error for unknown plugin not in PATH", func(t *testing.T) {
 		reg := NewRegistry()
-		ctx := context.Background()
+		ctx := t.Context()
 
 		_, err := reg.GetOrDiscover(ctx, "nonexistent-plugin-xyz")
 		if err == nil {

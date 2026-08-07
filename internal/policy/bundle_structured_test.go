@@ -1,7 +1,6 @@
 package policy
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
@@ -52,7 +51,7 @@ func TestLiteralsNestedListsAndMapsEvaluate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("toCELSource: %v", err)
 	}
-	val, err := Evaluate(context.Background(), src, nil)
+	val, err := Evaluate(t.Context(), src, nil)
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}

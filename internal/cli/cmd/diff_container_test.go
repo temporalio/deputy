@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -191,7 +190,7 @@ func TestDiffCommandRejectsMixedContainerAndGitRefs(t *testing.T) {
 	AddDiffCommand(root, nil)
 	root.SetArgs([]string{"diff", "--repo", repo, "docker://nginx:1.24", "main"})
 
-	err := root.ExecuteContext(context.Background())
+	err := root.ExecuteContext(t.Context())
 	if err == nil {
 		t.Fatal("expected mixed ref error")
 	}

@@ -14,7 +14,7 @@ func TestTokenSource(t *testing.T) {
 		&TokenCredential{Token: "gh_token", AllowedHosts: []string{"api.github.com"}},
 	)
 	store := NewStore(WithProvider(provider))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("returns token source for valid host", func(t *testing.T) {
 		ts, err := store.TokenSource(ctx, "api.github.com")
@@ -57,7 +57,7 @@ func TestTokenSourceWithBasicCredential(t *testing.T) {
 		},
 	)
 	store := NewStore(WithProvider(provider))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	ts, err := store.TokenSource(ctx, "custom.registry.io")
 	if err != nil {
@@ -104,7 +104,7 @@ func TestTokenSourceExpiredNonRefreshable(t *testing.T) {
 		&TokenCredential{Token: "old", AllowedHosts: []string{"api.github.com"}, Expiry: &past},
 	)
 	store := NewStore(WithProvider(provider))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	ts, err := store.TokenSource(ctx, "api.github.com")
 	if err != nil {
@@ -130,7 +130,7 @@ func TestTokenSourceExpiredRefreshable(t *testing.T) {
 	}
 	provider := NewStaticProvider(ref)
 	store := NewStore(WithProvider(provider))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	ts, err := store.TokenSource(ctx, "api.github.com")
 	if err != nil {
@@ -161,7 +161,7 @@ func TestTokenSourceRejectsSSHCredential(t *testing.T) {
 		},
 	)
 	store := NewStore(WithProvider(provider))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	ts, err := store.TokenSource(ctx, "github.com")
 	if err != nil {

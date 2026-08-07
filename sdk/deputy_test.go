@@ -1,12 +1,11 @@
 package sdk
 
 import (
-	"context"
 	"testing"
 )
 
 func TestNewClient(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client, err := NewClient(ctx)
 	if err != nil {
 		t.Fatalf("NewClient failed: %v", err)
@@ -20,7 +19,7 @@ func TestNewClient(t *testing.T) {
 }
 
 func TestNewClientWithOptions(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("force in-process mode", func(t *testing.T) {
 		client, err := NewClientWithOptions(ctx, Options{

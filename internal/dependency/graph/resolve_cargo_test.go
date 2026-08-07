@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 )
 
@@ -93,7 +92,7 @@ tokio = "1.32"
 	})
 
 	resolver := NewCargoResolver()
-	err := resolver.ResolveEdges(context.Background(), g, files)
+	err := resolver.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges failed: %v", err)
 	}

@@ -1,7 +1,6 @@
 package scanning
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
@@ -46,7 +45,7 @@ func TestCheckSupplyChain_SkipsExpressionImage(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			findings, _ := checkSupplyChain(context.Background(), []*extractor.Package{tc.pkg}, nil, "")
+			findings, _ := checkSupplyChain(t.Context(), []*extractor.Package{tc.pkg}, nil, "")
 			if len(findings) != 0 {
 				t.Errorf("expected 0 findings for expression image, got %d", len(findings))
 			}
@@ -60,7 +59,7 @@ func TestCheckSupplyChain_SkipsExpressionAction(t *testing.T) {
 	pkgs := []*extractor.Package{
 		{Name: "foo/bar", Version: "${{ env.REF }}", PURLType: "githubactions"},
 	}
-	findings, _ := checkSupplyChain(context.Background(), pkgs, nil, "")
+	findings, _ := checkSupplyChain(t.Context(), pkgs, nil, "")
 	if len(findings) != 0 {
 		t.Errorf("expected 0 findings for expression action ref, got %d", len(findings))
 	}
@@ -75,7 +74,7 @@ func TestCheckSupplyChain_UnpinnedAction(t *testing.T) {
 		},
 	}
 
-	findings, advisories := checkSupplyChain(context.Background(), pkgs, nil, "")
+	findings, advisories := checkSupplyChain(t.Context(), pkgs, nil, "")
 
 	if len(findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(findings))
@@ -116,7 +115,7 @@ func TestCheckSupplyChain_SelfReferenceSkipped(t *testing.T) {
 		},
 	}
 
-	findings, _ := checkSupplyChain(context.Background(), pkgs, nil, "temporalio/deputy")
+	findings, _ := checkSupplyChain(t.Context(), pkgs, nil, "temporalio/deputy")
 
 	if len(findings) != 1 {
 		t.Fatalf("expected 1 finding (third-party only), got %d", len(findings))
@@ -135,7 +134,7 @@ func TestCheckSupplyChain_SelfReferenceCaseInsensitive(t *testing.T) {
 		},
 	}
 
-	findings, _ := checkSupplyChain(context.Background(), pkgs, nil, "temporalio/deputy")
+	findings, _ := checkSupplyChain(t.Context(), pkgs, nil, "temporalio/deputy")
 
 	if len(findings) != 0 {
 		t.Errorf("expected self-reference match to be case-insensitive, got %d findings", len(findings))
@@ -151,7 +150,7 @@ func TestCheckSupplyChain_PinnedActionSkipped(t *testing.T) {
 		},
 	}
 
-	findings, advisories := checkSupplyChain(context.Background(), pkgs, nil, "")
+	findings, advisories := checkSupplyChain(t.Context(), pkgs, nil, "")
 
 	if len(findings) != 0 {
 		t.Errorf("expected 0 findings for pinned action, got %d", len(findings))
@@ -170,7 +169,7 @@ func TestCheckSupplyChain_NonGHASkipped(t *testing.T) {
 		},
 	}
 
-	findings, advisories := checkSupplyChain(context.Background(), pkgs, nil, "")
+	findings, advisories := checkSupplyChain(t.Context(), pkgs, nil, "")
 
 	if len(findings) != 0 {
 		t.Errorf("expected 0 findings for non-GHA package, got %d", len(findings))
@@ -190,7 +189,7 @@ func TestCheckSupplyChain_MixedPackages(t *testing.T) {
 		nil, // nil package should be skipped
 	}
 
-	findings, advisories := checkSupplyChain(context.Background(), pkgs, nil, "")
+	findings, advisories := checkSupplyChain(t.Context(), pkgs, nil, "")
 
 	if len(findings) != 2 {
 		t.Fatalf("expected 2 findings (2 unpinned actions), got %d", len(findings))
@@ -215,7 +214,7 @@ func TestCheckSupplyChain_MixedPackages(t *testing.T) {
 }
 
 func TestCheckSupplyChain_EmptyPackages(t *testing.T) {
-	findings, advisories := checkSupplyChain(context.Background(), nil, nil, "")
+	findings, advisories := checkSupplyChain(t.Context(), nil, nil, "")
 	if len(findings) != 0 {
 		t.Errorf("expected 0 findings, got %d", len(findings))
 	}
@@ -234,7 +233,7 @@ func TestCheckSupplyChain_LocationsPreserved(t *testing.T) {
 		},
 	}
 
-	findings, _ := checkSupplyChain(context.Background(), pkgs, nil, "")
+	findings, _ := checkSupplyChain(t.Context(), pkgs, nil, "")
 
 	if len(findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(findings))
@@ -255,7 +254,7 @@ func TestCheckSupplyChain_AdvisoryMetadata(t *testing.T) {
 		{Name: "actions/checkout", Version: "v4", PURLType: "githubactions"},
 	}
 
-	_, advisories := checkSupplyChain(context.Background(), pkgs, nil, "")
+	_, advisories := checkSupplyChain(t.Context(), pkgs, nil, "")
 
 	adv := advisories[AdvisoryUnpinnedAction]
 	if adv == nil {
@@ -289,7 +288,7 @@ func TestCheckSupplyChain_EcosystemField(t *testing.T) {
 		{Name: "actions/checkout", Version: "v4", PURLType: "githubactions"},
 	}
 
-	findings, _ := checkSupplyChain(context.Background(), pkgs, nil, "")
+	findings, _ := checkSupplyChain(t.Context(), pkgs, nil, "")
 
 	if len(findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(findings))
@@ -306,7 +305,7 @@ func TestCheckSupplyChain_UnpinnedImage(t *testing.T) {
 		{Name: "alpine", Version: "3.19", PURLType: "docker"},
 	}
 
-	findings, advisories := checkSupplyChain(context.Background(), pkgs, nil, "")
+	findings, advisories := checkSupplyChain(t.Context(), pkgs, nil, "")
 
 	if len(findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(findings))
@@ -332,7 +331,7 @@ func TestCheckSupplyChain_PinnedImageSkipped(t *testing.T) {
 		{Name: "ghcr.io/owner/image", Version: "v1@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", PURLType: "oci"},
 	}
 
-	findings, advisories := checkSupplyChain(context.Background(), pkgs, nil, "")
+	findings, advisories := checkSupplyChain(t.Context(), pkgs, nil, "")
 
 	if len(findings) != 0 {
 		t.Errorf("expected 0 findings for pinned images, got %d", len(findings))
@@ -347,7 +346,7 @@ func TestCheckSupplyChain_UnpinnedOCIImage(t *testing.T) {
 		{Name: "ghcr.io/owner/image", Version: "v2", PURLType: "oci"},
 	}
 
-	findings, advisories := checkSupplyChain(context.Background(), pkgs, nil, "")
+	findings, advisories := checkSupplyChain(t.Context(), pkgs, nil, "")
 
 	if len(findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(findings))
@@ -367,7 +366,7 @@ func TestCheckSupplyChain_MixedActionsAndImages(t *testing.T) {
 		{Name: "lodash", Version: "4.17.21", PURLType: "npm"},
 	}
 
-	findings, advisories := checkSupplyChain(context.Background(), pkgs, nil, "")
+	findings, advisories := checkSupplyChain(t.Context(), pkgs, nil, "")
 
 	if len(findings) != 2 {
 		t.Fatalf("expected 2 findings (1 action + 1 image), got %d", len(findings))

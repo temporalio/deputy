@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,7 +14,7 @@ import (
 
 func TestTargetsOpenLocalDirectory(t *testing.T) {
 	dir := t.TempDir()
-	mat, err := targets.Open(context.Background(), dir, nil)
+	mat, err := targets.Open(t.Context(), dir, nil)
 	if err != nil {
 		t.Fatalf("open local dir: %v", err)
 	}
@@ -29,7 +28,7 @@ func TestTargetsOpenLocalDirectory(t *testing.T) {
 
 func TestTargetsOpenLocalGitRepo(t *testing.T) {
 	dir := initGitRepo(t, false)
-	mat, err := targets.Open(context.Background(), dir, nil)
+	mat, err := targets.Open(t.Context(), dir, nil)
 	if err != nil {
 		t.Fatalf("open local git repo: %v", err)
 	}
@@ -45,7 +44,7 @@ func TestTargetsOpenLocalGitRepo(t *testing.T) {
 func TestTargetsOpenRemoteGitFileURL(t *testing.T) {
 	origin := initGitRepo(t, false)
 	remote := fmt.Sprintf("file://%s", origin)
-	mat, err := targets.Open(context.Background(), remote, map[string]string{"ref": "HEAD"})
+	mat, err := targets.Open(t.Context(), remote, map[string]string{"ref": "HEAD"})
 	if err != nil {
 		t.Fatalf("open remote git repo: %v", err)
 	}

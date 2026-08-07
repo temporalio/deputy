@@ -36,7 +36,7 @@ func setupTracetestProvider(t *testing.T) *tracetest.SpanRecorder {
 func TestStartSpan_RecordsSpan(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	ctx, span := StartSpan(context.Background(), "test.operation")
+	ctx, span := StartSpan(t.Context(), "test.operation")
 	span.End()
 
 	spans := recorder.Ended()
@@ -64,7 +64,7 @@ func TestStartSpan_RecordsSpan(t *testing.T) {
 func TestSetSpanErrorRecordsErrorStatus(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	ctx, span := StartSpan(context.Background(), "test.error")
+	ctx, span := StartSpan(t.Context(), "test.error")
 	_ = ctx // ctx unused in this test
 	testErr := errors.New("something went wrong")
 	SetSpanError(span, testErr)
@@ -102,7 +102,7 @@ func TestSetSpanErrorRecordsErrorStatus(t *testing.T) {
 func TestSetSpanOK_RecordsOKStatus(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	_, span := StartSpan(context.Background(), "test.success")
+	_, span := StartSpan(t.Context(), "test.success")
 	SetSpanOK(span)
 	span.End()
 
@@ -120,7 +120,7 @@ func TestSetSpanOK_RecordsOKStatus(t *testing.T) {
 func TestRecordScanResults_SetsAttributes(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	_, span := StartSpan(context.Background(), "deputy.scan")
+	_, span := StartSpan(t.Context(), "deputy.scan")
 	RecordScanResults(span, 100, 15, 2, 5, 6, 2)
 	span.End()
 
@@ -164,7 +164,7 @@ func TestRecordScanResults_SetsAttributes(t *testing.T) {
 func TestAddSpanEvent_RecordsEvent(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	_, span := StartSpan(context.Background(), "test.events")
+	_, span := StartSpan(t.Context(), "test.events")
 	AddSpanEvent(span, "cache.access",
 		AttrCacheType.String("osv"),
 		AttrCacheHit.Bool(true),
@@ -204,7 +204,7 @@ func TestAddSpanEvent_RecordsEvent(t *testing.T) {
 func TestRecordCacheAccess_AddsEvent(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	_, span := StartSpan(context.Background(), "test.cache")
+	_, span := StartSpan(t.Context(), "test.cache")
 	RecordCacheAccess(span, "depsdev", true, "pkg:golang/example")
 	RecordCacheAccess(span, "osv", false, "CVE-2021-1234")
 	span.End()
@@ -231,7 +231,7 @@ func TestRecordCacheAccess_AddsEvent(t *testing.T) {
 func TestRecordPolicyResult_AddsEvent(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	_, span := StartSpan(context.Background(), "test.policy")
+	_, span := StartSpan(t.Context(), "test.policy")
 	RecordPolicyResult(span, "block-critical", "deny")
 	span.End()
 
@@ -267,7 +267,7 @@ func TestRecordPolicyResult_AddsEvent(t *testing.T) {
 func TestWithCommandAttrs_SetsCommandAttribute(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	_, span := StartSpan(context.Background(), "deputy.cli",
+	_, span := StartSpan(t.Context(), "deputy.cli",
 		WithCommandAttrs("scan"))
 	span.End()
 
@@ -293,7 +293,7 @@ func TestWithCommandAttrs_SetsCommandAttribute(t *testing.T) {
 func TestWithTargetAttrs_SetsTargetAttributes(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	_, span := StartSpan(context.Background(), "deputy.scan",
+	_, span := StartSpan(t.Context(), "deputy.scan",
 		WithTargetAttrs("/path/to/repo", "v1.2.3", false))
 	span.End()
 
@@ -323,7 +323,7 @@ func TestWithTargetAttrs_SetsTargetAttributes(t *testing.T) {
 func TestNestedSpans_PreservesHierarchy(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	ctx, parentSpan := StartSpan(context.Background(), "parent")
+	ctx, parentSpan := StartSpan(t.Context(), "parent")
 	ctx, childSpan := StartSpan(ctx, "child")
 	_, grandchildSpan := StartSpan(ctx, "grandchild")
 
@@ -368,7 +368,7 @@ func TestNestedSpans_PreservesHierarchy(t *testing.T) {
 func TestSeverityCounts_Integration(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	ctx, span := StartSpan(context.Background(), "deputy.scan")
+	ctx, span := StartSpan(t.Context(), "deputy.scan")
 
 	sc := SeverityCounts{
 		Critical: 1,
@@ -407,7 +407,7 @@ func TestSeverityCounts_Integration(t *testing.T) {
 // TestSpanFromContext_ReturnsNoOpWhenMissing verifies graceful handling.
 func TestSpanFromContext_ReturnsNoOpWhenMissing(t *testing.T) {
 	// Don't set up a provider - use empty context
-	span := SpanFromContext(context.Background())
+	span := SpanFromContext(t.Context())
 
 	// Should return a no-op span that doesn't panic
 	span.SetAttributes(attribute.String("key", "value"))
@@ -428,7 +428,7 @@ func TestConcurrentSpans_ThreadSafe(t *testing.T) {
 
 	for i := range numGoroutines {
 		go func(id int) {
-			_, span := StartSpan(context.Background(), "concurrent.span")
+			_, span := StartSpan(t.Context(), "concurrent.span")
 			span.SetAttributes(attribute.Int("goroutine.id", id))
 			span.End()
 			done <- true
@@ -450,7 +450,7 @@ func TestConcurrentSpans_ThreadSafe(t *testing.T) {
 func TestOSVAttributes_Correctness(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	_, span := StartSpan(context.Background(), "deputy.osv.query",
+	_, span := StartSpan(t.Context(), "deputy.osv.query",
 		WithOSVAttrs(50, "batch"))
 	span.End()
 
@@ -477,7 +477,7 @@ func TestOSVAttributes_Correctness(t *testing.T) {
 func TestPolicyAttributes_Correctness(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	_, span := StartSpan(context.Background(), "deputy.policy.eval",
+	_, span := StartSpan(t.Context(), "deputy.policy.eval",
 		WithPolicyAttrs("block-critical", "scan_vulnerability"))
 	span.End()
 
@@ -504,7 +504,7 @@ func TestPolicyAttributes_Correctness(t *testing.T) {
 func TestProxyAttributes_Correctness(t *testing.T) {
 	recorder := setupTracetestProvider(t)
 
-	_, span := StartSpan(context.Background(), "deputy.proxy.request",
+	_, span := StartSpan(t.Context(), "deputy.proxy.request",
 		WithProxyAttrs("go-proxy", "go", "github.com/foo/bar", "v1.2.3"))
 	span.End()
 

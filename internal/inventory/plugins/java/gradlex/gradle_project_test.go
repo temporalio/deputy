@@ -1,7 +1,6 @@
 package gradlex
 
 import (
-	"context"
 	"io"
 	"io/fs"
 	"slices"
@@ -75,7 +74,7 @@ dependencies {
 		Reader: newBytesReader(memFS["settings.gradle"].Data),
 	}
 
-	inv, err := e.Extract(context.Background(), input)
+	inv, err := e.Extract(t.Context(), input)
 	if err != nil {
 		t.Fatalf("Extract failed: %v", err)
 	}
@@ -141,7 +140,7 @@ dependencies {
 		Reader: newBytesReader(memFS["settings.gradle"].Data),
 	}
 
-	inv, err := e.Extract(context.Background(), input)
+	inv, err := e.Extract(t.Context(), input)
 	if err != nil {
 		t.Fatalf("Extract failed: %v", err)
 	}
@@ -205,7 +204,7 @@ dependencies {
 		Reader: newBytesReader(memFS["settings.gradle"].Data),
 	}
 
-	inv, err := e.Extract(context.Background(), input)
+	inv, err := e.Extract(t.Context(), input)
 	if err != nil {
 		t.Fatalf("Extract failed: %v", err)
 	}
@@ -267,7 +266,7 @@ dependencies {
 		Reader: newBytesReader(memFS["settings.gradle"].Data),
 	}
 
-	inv, err := e.Extract(context.Background(), input)
+	inv, err := e.Extract(t.Context(), input)
 	if err != nil {
 		t.Fatalf("Extract failed: %v", err)
 	}

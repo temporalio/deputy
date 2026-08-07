@@ -72,7 +72,7 @@ func TestDirectIsolator(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Setup should return original path
 	path, err := isolator.Setup(ctx)
@@ -128,7 +128,7 @@ func TestSnapshotIsolator(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Setup should create snapshot
 	snapshotPath, err := isolator.Setup(ctx)
@@ -208,7 +208,7 @@ func TestSnapshotIsolatorSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	snapshotPath, err := isolator.Setup(ctx)
 	if err != nil {
@@ -274,7 +274,7 @@ func TestSnapshotIsolatorSyncPatterns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	snapshotPath, err := isolator.Setup(ctx)
 	if err != nil {
@@ -324,7 +324,7 @@ func TestGitWorktreeIsolator(t *testing.T) {
 	repoDir := t.TempDir()
 
 	// Initialize git repo
-	ctx := context.Background()
+	ctx := t.Context()
 	runGit := func(args ...string) error {
 		cmd := newExecCommand(ctx, "git", args...)
 		cmd.Dir = repoDir

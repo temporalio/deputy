@@ -1,7 +1,6 @@
 package jwt
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -237,7 +236,7 @@ func TestClaimsFromContext(t *testing.T) {
 	})
 
 	t.Run("context without claims", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		claims := ClaimsFromContext(ctx)
 		if claims != nil {
 			t.Error("expected nil claims")
@@ -246,7 +245,7 @@ func TestClaimsFromContext(t *testing.T) {
 
 	t.Run("context with claims", func(t *testing.T) {
 		expected := &Claims{Subject: "user123"}
-		ctx := ContextWithClaims(context.Background(), expected)
+		ctx := ContextWithClaims(t.Context(), expected)
 		claims := ClaimsFromContext(ctx)
 		if claims == nil {
 			t.Fatal("expected non-nil claims")
@@ -357,7 +356,7 @@ func TestAuthenticator_StaticKeys(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		claims, err := auth.Authenticate(context.Background(), req)
+		claims, err := auth.Authenticate(t.Context(), req)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -371,7 +370,7 @@ func TestAuthenticator_StaticKeys(t *testing.T) {
 	t.Run("no token - returns nil", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-		claims, err := auth.Authenticate(context.Background(), req)
+		claims, err := auth.Authenticate(t.Context(), req)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -389,7 +388,7 @@ func TestAuthenticator_StaticKeys(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		_, err := auth.Authenticate(context.Background(), req)
+		_, err := auth.Authenticate(t.Context(), req)
 		if err == nil {
 			t.Error("expected error for expired token")
 		}
@@ -465,7 +464,7 @@ func TestAuthenticator_RejectsNoneAlgorithm(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer "+noneToken)
 
-	_, err = auth.Authenticate(context.Background(), req)
+	_, err = auth.Authenticate(t.Context(), req)
 	if err == nil {
 		t.Fatal("expected error for 'none' algorithm token, got nil - SECURITY VULNERABILITY")
 	}
@@ -508,7 +507,7 @@ func TestAuthenticator_RejectsSymmetricAlgorithms(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer "+hs256Token)
 
-	_, err = auth.Authenticate(context.Background(), req)
+	_, err = auth.Authenticate(t.Context(), req)
 	if err == nil {
 		t.Fatal("expected error for HS256 algorithm token, got nil - SECURITY VULNERABILITY")
 	}
@@ -577,7 +576,7 @@ func TestAuthenticator_IssuerValidation(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		claims, err := auth.Authenticate(context.Background(), req)
+		claims, err := auth.Authenticate(t.Context(), req)
 		if err != nil {
 			t.Errorf("unexpected error for trusted issuer: %v", err)
 		}
@@ -596,7 +595,7 @@ func TestAuthenticator_IssuerValidation(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		_, err := auth.Authenticate(context.Background(), req)
+		_, err := auth.Authenticate(t.Context(), req)
 		if err == nil {
 			t.Fatal("expected error for untrusted issuer")
 		}
@@ -619,7 +618,7 @@ func TestAuthenticator_IssuerValidation(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		_, err := auth.Authenticate(context.Background(), req)
+		_, err := auth.Authenticate(t.Context(), req)
 		if err == nil {
 			t.Fatal("expected error for missing issuer when issuers configured")
 		}
@@ -661,7 +660,7 @@ func TestAuthenticator_AudienceValidation(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		claims, err := auth.Authenticate(context.Background(), req)
+		claims, err := auth.Authenticate(t.Context(), req)
 		if err != nil {
 			t.Errorf("unexpected error for matching audience: %v", err)
 		}
@@ -680,7 +679,7 @@ func TestAuthenticator_AudienceValidation(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		claims, err := auth.Authenticate(context.Background(), req)
+		claims, err := auth.Authenticate(t.Context(), req)
 		if err != nil {
 			t.Errorf("unexpected error when one audience matches: %v", err)
 		}
@@ -699,7 +698,7 @@ func TestAuthenticator_AudienceValidation(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		_, err := auth.Authenticate(context.Background(), req)
+		_, err := auth.Authenticate(t.Context(), req)
 		if err == nil {
 			t.Fatal("expected error for wrong audience")
 		}
@@ -722,7 +721,7 @@ func TestAuthenticator_AudienceValidation(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		_, err := auth.Authenticate(context.Background(), req)
+		_, err := auth.Authenticate(t.Context(), req)
 		if err == nil {
 			t.Fatal("expected error for missing audience when audiences configured")
 		}
@@ -765,7 +764,7 @@ func TestAuthenticator_RequiredClaims(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		claims, err := auth.Authenticate(context.Background(), req)
+		claims, err := auth.Authenticate(t.Context(), req)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -785,7 +784,7 @@ func TestAuthenticator_RequiredClaims(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		_, err := auth.Authenticate(context.Background(), req)
+		_, err := auth.Authenticate(t.Context(), req)
 		if err == nil {
 			t.Fatal("expected error for missing required claim")
 		}
@@ -829,7 +828,7 @@ func TestAuthenticator_TokenSizeLimit(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		_, err := auth.Authenticate(context.Background(), req)
+		_, err := auth.Authenticate(t.Context(), req)
 		if err == nil {
 			t.Fatal("expected error for oversized token")
 		}
@@ -924,7 +923,7 @@ func TestAuthenticator_NotBeforeValidation(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		_, err := auth.Authenticate(context.Background(), req)
+		_, err := auth.Authenticate(t.Context(), req)
 		if err == nil {
 			t.Fatal("expected error for token not yet valid")
 		}
@@ -951,7 +950,7 @@ func TestAuthenticator_NotBeforeValidation(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
-		claims, err := auth.Authenticate(context.Background(), req)
+		claims, err := auth.Authenticate(t.Context(), req)
 		if err != nil {
 			t.Errorf("token with past nbf should be accepted: %v", err)
 		}
@@ -971,7 +970,7 @@ func TestTenantFromContext(t *testing.T) {
 	})
 
 	t.Run("context without claims (anonymous)", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		tenant := TenantFromContext(ctx)
 		if tenant != "" {
 			t.Errorf("expected empty string for context without claims, got %q", tenant)
@@ -983,7 +982,7 @@ func TestTenantFromContext(t *testing.T) {
 			Subject: "user123",
 			Custom:  map[string]any{},
 		}
-		ctx := ContextWithClaims(context.Background(), claims)
+		ctx := ContextWithClaims(t.Context(), claims)
 		tenant := TenantFromContext(ctx)
 		if tenant != "" {
 			t.Errorf("expected empty string for claims without tenant, got %q", tenant)
@@ -997,7 +996,7 @@ func TestTenantFromContext(t *testing.T) {
 				"tenant": "acme-corp",
 			},
 		}
-		ctx := ContextWithClaims(context.Background(), claims)
+		ctx := ContextWithClaims(t.Context(), claims)
 		tenant := TenantFromContext(ctx)
 		if tenant != "acme-corp" {
 			t.Errorf("expected tenant 'acme-corp', got %q", tenant)
@@ -1011,7 +1010,7 @@ func TestTenantFromContext(t *testing.T) {
 				"tenant": []byte("byte-tenant"),
 			},
 		}
-		ctx := ContextWithClaims(context.Background(), claims)
+		ctx := ContextWithClaims(t.Context(), claims)
 		tenant := TenantFromContext(ctx)
 		if tenant != "byte-tenant" {
 			t.Errorf("expected tenant 'byte-tenant', got %q", tenant)
@@ -1025,7 +1024,7 @@ func TestTenantFromContext(t *testing.T) {
 				"tenant": 12345, // integer, not string
 			},
 		}
-		ctx := ContextWithClaims(context.Background(), claims)
+		ctx := ContextWithClaims(t.Context(), claims)
 		tenant := TenantFromContext(ctx)
 		if tenant != "" {
 			t.Errorf("expected empty string for non-string tenant, got %q", tenant)
@@ -1039,7 +1038,7 @@ func TestTenantFromContext(t *testing.T) {
 				"tenant": nil,
 			},
 		}
-		ctx := ContextWithClaims(context.Background(), claims)
+		ctx := ContextWithClaims(t.Context(), claims)
 		tenant := TenantFromContext(ctx)
 		if tenant != "" {
 			t.Errorf("expected empty string for nil tenant value, got %q", tenant)
@@ -1063,7 +1062,7 @@ func TestTenantFromContextWithKey(t *testing.T) {
 				"org_id": "organization-456",
 			},
 		}
-		ctx := ContextWithClaims(context.Background(), claims)
+		ctx := ContextWithClaims(t.Context(), claims)
 		tenant := TenantFromContextWithKey(ctx, "org_id")
 		if tenant != "organization-456" {
 			t.Errorf("expected tenant 'organization-456', got %q", tenant)
@@ -1077,7 +1076,7 @@ func TestTenantFromContextWithKey(t *testing.T) {
 				"tenant": "acme-corp",
 			},
 		}
-		ctx := ContextWithClaims(context.Background(), claims)
+		ctx := ContextWithClaims(t.Context(), claims)
 		tenant := TenantFromContextWithKey(ctx, "org_id")
 		if tenant != "" {
 			t.Errorf("expected empty string for missing key, got %q", tenant)
@@ -1091,7 +1090,7 @@ func TestTenantFromContextWithKey(t *testing.T) {
 				"tenant": "acme-corp",
 			},
 		}
-		ctx := ContextWithClaims(context.Background(), claims)
+		ctx := ContextWithClaims(t.Context(), claims)
 		tenant := TenantFromContextWithKey(ctx, "")
 		if tenant != "" {
 			t.Errorf("expected empty string for empty key, got %q", tenant)
@@ -1104,7 +1103,7 @@ func TestTenantFromContextWithKey(t *testing.T) {
 			Subject: "tenant-from-subject",
 			Custom:  map[string]any{},
 		}
-		ctx := ContextWithClaims(context.Background(), claims)
+		ctx := ContextWithClaims(t.Context(), claims)
 		tenant := TenantFromContextWithKey(ctx, "sub")
 		if tenant != "tenant-from-subject" {
 			t.Errorf("expected tenant 'tenant-from-subject', got %q", tenant)
@@ -1118,7 +1117,7 @@ func TestTenantFromContextWithKey(t *testing.T) {
 			Issuer:  "https://acme.auth.com",
 			Custom:  map[string]any{},
 		}
-		ctx := ContextWithClaims(context.Background(), claims)
+		ctx := ContextWithClaims(t.Context(), claims)
 		tenant := TenantFromContextWithKey(ctx, "iss")
 		if tenant != "https://acme.auth.com" {
 			t.Errorf("expected tenant 'https://acme.auth.com', got %q", tenant)

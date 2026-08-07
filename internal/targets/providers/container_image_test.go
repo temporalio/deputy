@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -343,7 +342,7 @@ func TestParsePlatform(t *testing.T) {
 func TestContainerImageProviderDetect(t *testing.T) {
 	t.Parallel()
 	provider := containerImageProvider{}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		target string

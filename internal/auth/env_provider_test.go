@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"testing"
 )
 
@@ -13,7 +12,7 @@ func TestEnvProvider_GitHub(t *testing.T) {
 		getenv: func(key string) string { return env[key] },
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{Host: "github.com", Hint: "git"}
 
 	cred, err := p.Lookup(ctx, scope)
@@ -54,7 +53,7 @@ func TestEnvProvider_GitLab(t *testing.T) {
 		getenv: func(key string) string { return env[key] },
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{Host: "gitlab.com", Hint: "git"}
 
 	cred, err := p.Lookup(ctx, scope)
@@ -82,7 +81,7 @@ func TestEnvProvider_Anthropic(t *testing.T) {
 		getenv: func(key string) string { return env[key] },
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{Host: "api.anthropic.com", Hint: "llm"}
 
 	cred, err := p.Lookup(ctx, scope)
@@ -117,7 +116,7 @@ func TestEnvProvider_NoToken(t *testing.T) {
 		getenv: func(key string) string { return "" },
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{Host: "github.com", Hint: "git"}
 
 	cred, err := p.Lookup(ctx, scope)
@@ -138,7 +137,7 @@ func TestEnvProvider_Prefix(t *testing.T) {
 		getenv: func(key string) string { return env[key] },
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{Host: "github.com", Hint: "git"}
 
 	cred, err := p.Lookup(ctx, scope)
@@ -159,7 +158,7 @@ func TestEnvProvider_GitHubEnterprise(t *testing.T) {
 		getenv: func(key string) string { return env[key] },
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{Host: "github.mycompany.com", Hint: "git"}
 
 	cred, err := p.Lookup(ctx, scope)
@@ -190,7 +189,7 @@ func TestEnvProvider_NPM(t *testing.T) {
 		getenv: func(key string) string { return env[key] },
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{Host: "registry.npmjs.org", Hint: "registry"}
 
 	cred, err := p.Lookup(ctx, scope)
@@ -211,7 +210,7 @@ func TestEnvProvider_DockerHub(t *testing.T) {
 		getenv: func(key string) string { return env[key] },
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{Host: "index.docker.io", Hint: "container"}
 
 	cred, err := p.Lookup(ctx, scope)
@@ -239,7 +238,7 @@ func TestEnvProvider_GHCR(t *testing.T) {
 		getenv: func(key string) string { return env[key] },
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{Host: "ghcr.io", Hint: "container"}
 
 	cred, err := p.Lookup(ctx, scope)
@@ -261,7 +260,7 @@ func TestEnvProvider_GHCR(t *testing.T) {
 
 func TestEnvProvider_InvalidScope(t *testing.T) {
 	p := NewEnvProvider()
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{} // missing Host
 
 	_, err := p.Lookup(ctx, scope)
@@ -279,7 +278,7 @@ func TestEnvProvider_GHToken(t *testing.T) {
 		getenv: func(key string) string { return env[key] },
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{Host: "github.com", Hint: "git"}
 
 	cred, err := p.Lookup(ctx, scope)
@@ -309,7 +308,7 @@ func TestEnvProvider_GitHubTokenPrecedence(t *testing.T) {
 		getenv: func(key string) string { return env[key] },
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := Scope{Host: "github.com", Hint: "git"}
 
 	cred, err := p.Lookup(ctx, scope)

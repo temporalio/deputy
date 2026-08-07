@@ -1,7 +1,6 @@
 package otel
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -11,7 +10,7 @@ import (
 )
 
 func TestStartSpan(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	newCtx, span := StartSpan(ctx, "test.span")
 
 	if newCtx == nil {
@@ -25,7 +24,7 @@ func TestStartSpan(t *testing.T) {
 }
 
 func TestSpanFromContext_NoSpan(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	span := SpanFromContext(ctx)
 
 	if span == nil {
@@ -38,7 +37,7 @@ func TestSpanFromContext_NoSpan(t *testing.T) {
 }
 
 func TestSetSpanError_NilError(t *testing.T) {
-	_, span := StartSpan(context.Background(), "test")
+	_, span := StartSpan(t.Context(), "test")
 	defer span.End()
 
 	// Should not panic
@@ -47,7 +46,7 @@ func TestSetSpanError_NilError(t *testing.T) {
 
 func TestSetSpanError_WithError(t *testing.T) {
 	// Use a recording span to verify the error was set
-	_, span := StartSpan(context.Background(), "test")
+	_, span := StartSpan(t.Context(), "test")
 	defer span.End()
 
 	testErr := errors.New("test error")
@@ -59,7 +58,7 @@ func TestSetSpanError_WithError(t *testing.T) {
 }
 
 func TestSetSpanOK(t *testing.T) {
-	_, span := StartSpan(context.Background(), "test")
+	_, span := StartSpan(t.Context(), "test")
 	defer span.End()
 
 	// Should not panic
@@ -67,7 +66,7 @@ func TestSetSpanOK(t *testing.T) {
 }
 
 func TestAddSpanEvent(t *testing.T) {
-	_, span := StartSpan(context.Background(), "test")
+	_, span := StartSpan(t.Context(), "test")
 	defer span.End()
 
 	// Should not panic
@@ -139,7 +138,7 @@ func TestWithProxyAttrs(t *testing.T) {
 }
 
 func TestRecordScanResults(t *testing.T) {
-	_, span := StartSpan(context.Background(), "test")
+	_, span := StartSpan(t.Context(), "test")
 	defer span.End()
 
 	// Should not panic
@@ -147,7 +146,7 @@ func TestRecordScanResults(t *testing.T) {
 }
 
 func TestRecordCacheAccess(t *testing.T) {
-	_, span := StartSpan(context.Background(), "test")
+	_, span := StartSpan(t.Context(), "test")
 	defer span.End()
 
 	// Should not panic
@@ -156,7 +155,7 @@ func TestRecordCacheAccess(t *testing.T) {
 }
 
 func TestRecordPolicyResult(t *testing.T) {
-	_, span := StartSpan(context.Background(), "test")
+	_, span := StartSpan(t.Context(), "test")
 	defer span.End()
 
 	// Should not panic
@@ -206,7 +205,7 @@ func TestSetSpanOK_SetsStatus(t *testing.T) {
 }
 
 func TestRecordScanCompletion_DoesNotPanic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	_, span := StartSpan(ctx, "test")
 	defer span.End()
 

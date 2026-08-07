@@ -196,7 +196,7 @@ func TestMultiProgress_DuplicateTaskID(t *testing.T) {
 
 func TestProgressFunc(t *testing.T) {
 	var buf bytes.Buffer
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test successful function
 	result, err := ProgressFunc(ctx, &buf, "Computing", func() (int, error) {
@@ -214,7 +214,7 @@ func TestProgressFunc(t *testing.T) {
 
 func TestProgressFunc_Error(t *testing.T) {
 	var buf bytes.Buffer
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test failing function
 	_, err := ProgressFunc(ctx, &buf, "Failing", func() (int, error) {

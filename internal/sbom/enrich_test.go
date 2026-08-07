@@ -1,7 +1,6 @@
 package sbomx
 
 import (
-	"context"
 	"testing"
 
 	pb "deps.dev/api/v3"
@@ -536,7 +535,7 @@ func TestEnrichDependencyEdges_nilHandling(t *testing.T) {
 
 	t.Run("nil document", func(t *testing.T) {
 		t.Parallel()
-		count, err := enrichDependencyEdges(context.Background(), nil, nil, 10)
+		count, err := enrichDependencyEdges(t.Context(), nil, nil, 10)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -548,7 +547,7 @@ func TestEnrichDependencyEdges_nilHandling(t *testing.T) {
 	t.Run("empty document", func(t *testing.T) {
 		t.Parallel()
 		doc := &sbom.Document{}
-		count, err := enrichDependencyEdges(context.Background(), nil, doc, 10)
+		count, err := enrichDependencyEdges(t.Context(), nil, doc, 10)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}

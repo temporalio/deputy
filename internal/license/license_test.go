@@ -25,7 +25,7 @@ func (f *fakeDepsClientErr) GetVersion(ctx context.Context, req *pb.GetVersionRe
 func Test_FetchLicensesForPackage_success(t *testing.T) {
 	ResetLicenseCachesForTest(t)
 	client := &fakeDepsClientOK{}
-	got := FetchLicensesForPackage(context.Background(), client, "github.com/example/pkg", "1.2.3")
+	got := FetchLicensesForPackage(t.Context(), client, "github.com/example/pkg", "1.2.3")
 	if len(got) != 1 || got[0] != "MIT" {
 		t.Fatalf("unexpected licenses: %v", got)
 	}
@@ -34,7 +34,7 @@ func Test_FetchLicensesForPackage_success(t *testing.T) {
 func Test_FetchLicensesForPackage_error_returns_unknown(t *testing.T) {
 	ResetLicenseCachesForTest(t)
 	client := &fakeDepsClientErr{}
-	got := FetchLicensesForPackage(context.Background(), client, "github.com/example/pkg", "1.2.3")
+	got := FetchLicensesForPackage(t.Context(), client, "github.com/example/pkg", "1.2.3")
 	if len(got) != 1 || got[0] != "?" {
 		t.Fatalf("expected unknown license on error, got %v", got)
 	}
@@ -51,8 +51,8 @@ func (c *countingDepsClient) GetVersion(ctx context.Context, req *pb.GetVersionR
 func Test_FetchLicensesForPackage_cache(t *testing.T) {
 	ResetLicenseCachesForTest(t)
 	client := &countingDepsClient{}
-	FetchLicensesForPackage(context.Background(), client, "github.com/example/pkg", "1.2.3")
-	FetchLicensesForPackage(context.Background(), client, "github.com/example/pkg", "1.2.3")
+	FetchLicensesForPackage(t.Context(), client, "github.com/example/pkg", "1.2.3")
+	FetchLicensesForPackage(t.Context(), client, "github.com/example/pkg", "1.2.3")
 	if client.calls != 1 {
 		t.Fatalf("expected 1 call, got %d", client.calls)
 	}

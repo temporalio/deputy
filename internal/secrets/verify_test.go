@@ -1,7 +1,6 @@
 package secrets
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -29,7 +28,7 @@ func TestGitHubVerifier_DoesNotLeakResponseBody(t *testing.T) {
 	}
 
 	verifier := newGitHubVerifier(client)
-	result := verifier.Verify(context.Background(), "ghp_example123", TypeGitHubToken)
+	result := verifier.Verify(t.Context(), "ghp_example123", TypeGitHubToken)
 
 	if result.Status != StatusError {
 		t.Fatalf("expected StatusError, got %s", result.Status)

@@ -202,7 +202,7 @@ func TestRunProxyExecSetsEnv(t *testing.T) {
 		upstream:  "https://proxy.golang.org",
 		envPrep:   prepareGoEnv,
 	}
-	if err := runProxyExec(context.Background(), cfg, []string{"echo"}, nil, io.Discard, io.Discard); err != nil {
+	if err := runProxyExec(t.Context(), cfg, []string{"echo"}, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("runProxyExec error: %v", err)
 	}
 	if !containsEnv(captured, "GOPROXY=http://127.0.0.1:5555,direct") {
@@ -224,7 +224,7 @@ func TestStartProxyInstance(t *testing.T) {
 		t.Fatalf("http get: %v", err)
 	}
 	resp.Body.Close()
-	if err := inst.stop(context.Background()); err != nil {
+	if err := inst.stop(t.Context()); err != nil {
 		t.Fatalf("stop error: %v", err)
 	}
 }

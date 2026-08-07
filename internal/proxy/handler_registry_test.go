@@ -196,7 +196,7 @@ func TestGenericHandler_ServeHTTP(t *testing.T) {
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/lodash", nil)
-		req = req.WithContext(context.Background())
+		req = req.WithContext(t.Context())
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)
@@ -215,7 +215,7 @@ func TestGenericHandler_ServeHTTP(t *testing.T) {
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/github.com/foo/bar/@v/list", nil)
-		req = req.WithContext(context.Background())
+		req = req.WithContext(t.Context())
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)
@@ -233,7 +233,7 @@ func TestGenericHandler_ServeHTTP(t *testing.T) {
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/invalid/path", nil)
-		req = req.WithContext(context.Background())
+		req = req.WithContext(t.Context())
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)

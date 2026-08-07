@@ -1,7 +1,6 @@
 package misex
 
 import (
-	"context"
 	"io/fs"
 	"strings"
 	"testing"
@@ -61,7 +60,7 @@ python = ["3.11", "3.12"]
 terraform = "1.9"
 `
 	ext := New()
-	inv, err := ext.Extract(context.Background(), &filesystem.ScanInput{
+	inv, err := ext.Extract(t.Context(), &filesystem.ScanInput{
 		Path:   "mise.toml",
 		Reader: strings.NewReader(content),
 	})
@@ -133,7 +132,7 @@ checksum = "sha256:abc123"
 	if err != nil {
 		t.Fatal(err)
 	}
-	inv, err := ext.Extract(context.Background(), &filesystem.ScanInput{
+	inv, err := ext.Extract(t.Context(), &filesystem.ScanInput{
 		Path:   "mise.toml",
 		Reader: f,
 		FS:     fsys,

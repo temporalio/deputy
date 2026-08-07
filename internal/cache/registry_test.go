@@ -150,7 +150,7 @@ func TestRegistry_Status(t *testing.T) {
 	reg.Register(s1)
 	reg.Register(s2)
 
-	statuses, err := reg.Status(context.Background())
+	statuses, err := reg.Status(t.Context())
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -181,7 +181,7 @@ func TestRegistry_PopulateAll(t *testing.T) {
 	reg.Register(s2)
 	reg.Register(s3)
 
-	err := reg.PopulateAll(context.Background(), PopulateOptions{})
+	err := reg.PopulateAll(t.Context(), PopulateOptions{})
 
 	// Should have error from s2
 	if err == nil {
@@ -204,7 +204,7 @@ func TestRegistry_Populate(t *testing.T) {
 	reg.Register(s2)
 
 	// Populate only s1
-	err := reg.Populate(context.Background(), []string{"s1"}, PopulateOptions{})
+	err := reg.Populate(t.Context(), []string{"s1"}, PopulateOptions{})
 	if err != nil {
 		t.Fatalf("Populate() error = %v", err)
 	}
@@ -221,7 +221,7 @@ func TestRegistry_Populate_UnknownSource(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(&mockSource{name: "known"})
 
-	err := reg.Populate(context.Background(), []string{"unknown"}, PopulateOptions{})
+	err := reg.Populate(t.Context(), []string{"unknown"}, PopulateOptions{})
 	if err == nil {
 		t.Error("Populate() with unknown source should return error")
 	}
@@ -236,7 +236,7 @@ func TestRegistry_ClearAll(t *testing.T) {
 	reg.Register(s1)
 	reg.Register(s2)
 
-	err := reg.ClearAll(context.Background())
+	err := reg.ClearAll(t.Context())
 	if err != nil {
 		t.Fatalf("ClearAll() error = %v", err)
 	}
@@ -255,7 +255,7 @@ func TestRegistry_Clear(t *testing.T) {
 	reg.Register(s1)
 	reg.Register(s2)
 
-	err := reg.Clear(context.Background(), []string{"s1"})
+	err := reg.Clear(t.Context(), []string{"s1"})
 	if err != nil {
 		t.Fatalf("Clear() error = %v", err)
 	}
@@ -280,7 +280,7 @@ func TestRegistry_TotalSize(t *testing.T) {
 		status: &SourceStatus{Size: 2000},
 	})
 
-	total, err := reg.TotalSize(context.Background())
+	total, err := reg.TotalSize(t.Context())
 	if err != nil {
 		t.Fatalf("TotalSize() error = %v", err)
 	}

@@ -3,7 +3,6 @@ package cmd
 import (
 	"archive/tar"
 	"bytes"
-	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,7 +26,7 @@ func TestSBOMImageRoundTrip(t *testing.T) {
 	target := "tarball://" + tarPath
 
 	// Generate SBOM from image
-	result, err := sbomx.GenerateImage(context.Background(), target, nil, sbomx.Options{
+	result, err := sbomx.GenerateImage(t.Context(), target, nil, sbomx.Options{
 		Ecosystems: []string{"go"},
 	})
 	if err != nil {
@@ -166,7 +165,7 @@ func TestSBOMLayerDetailsRoundTrip(t *testing.T) {
 	tarPath := buildMultiLayerTestImage(t)
 	target := "tarball://" + tarPath
 
-	result, err := sbomx.GenerateImage(context.Background(), target, nil, sbomx.Options{
+	result, err := sbomx.GenerateImage(t.Context(), target, nil, sbomx.Options{
 		Ecosystems: []string{"go"},
 	})
 	if err != nil {

@@ -48,7 +48,7 @@ func TestPluginSourceQueryIsProtoOneToOne(t *testing.T) {
 	}
 
 	pkgs := []*dependencyv1.Package{{Name: "lodash", Version: "4.17.20", Ecosystem: "npm", Purl: "pkg:npm/lodash@4.17.20", Direct: true}}
-	res, err := src.Query(context.Background(), pkgs)
+	res, err := src.Query(t.Context(), pkgs)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,18 +2,17 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/spf13/cobra"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
-	"github.com/spf13/cobra"
 )
 
 func newTestRoot(out, errW *bytes.Buffer) *cobra.Command {
@@ -90,7 +89,7 @@ func TestCLIOutput_TriageFromReport_WritesToCommandOut(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	root := newTestRoot(&out, &errBuf)
 	root.SetArgs([]string{"triage", "--report", path, "--format", "text"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := root.ExecuteContext(t.Context()); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 
@@ -142,7 +141,7 @@ func TestCLIOutput_FixFromReport_WritesToCommandOut(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	root := newTestRoot(&out, &errBuf)
 	root.SetArgs([]string{"fix", "--report", path, "--format", "text"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := root.ExecuteContext(t.Context()); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 
@@ -154,4 +153,3 @@ func TestCLIOutput_FixFromReport_WritesToCommandOut(t *testing.T) {
 		t.Fatalf("expected stdout to contain remediation header, got %q", got)
 	}
 }
-

@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,7 +21,7 @@ func TestNewReviewSession(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := isolator.Setup(ctx); err != nil {
 		t.Fatalf("Setup() error = %v", err)
 	}
@@ -49,7 +48,7 @@ func TestReviewSessionLoadChanges(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	isolatedPath, err := isolator.Setup(ctx)
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)
@@ -92,7 +91,7 @@ func TestReviewSessionSummary(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	isolatedPath, err := isolator.Setup(ctx)
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)
@@ -134,7 +133,7 @@ func TestReviewSessionSelection(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	isolatedPath, err := isolator.Setup(ctx)
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)
@@ -192,7 +191,7 @@ func TestReviewSessionApplySelected(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	isolatedPath, err := isolator.Setup(ctx)
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)
@@ -245,7 +244,7 @@ func TestReviewSessionDiscard(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	isolatedPath, err := isolator.Setup(ctx)
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)
@@ -287,7 +286,7 @@ func TestReviewSessionPreserve(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	isolatedPath, err := isolator.Setup(ctx)
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)
@@ -329,7 +328,7 @@ func TestReviewSessionPrintChanges(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	isolatedPath, err := isolator.Setup(ctx)
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)
@@ -375,7 +374,7 @@ func TestReviewSessionGetDiff(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	isolatedPath, err := isolator.Setup(ctx)
 	if err != nil {
 		t.Fatalf("Setup() error = %v", err)
@@ -423,7 +422,7 @@ func TestReviewSessionNoChanges(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := isolator.Setup(ctx); err != nil {
 		t.Fatalf("Setup() error = %v", err)
 	}

@@ -71,7 +71,7 @@ func TestScanHandler_Trace_InvalidArgument(t *testing.T) {
 
 	client := scanv1connect.NewScanServiceClient(http.DefaultClient, ts.URL)
 
-	_, err = client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+	_, err = client.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{
 		Target: "",
 	}))
 	if err == nil {
@@ -106,7 +106,7 @@ func TestScanHandler_Trace_TargetAttribute(t *testing.T) {
 	client := scanv1connect.NewScanServiceClient(http.DefaultClient, ts.URL)
 
 	// Use a remote target that passes validation but will fail later
-	_, _ = client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+	_, _ = client.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{
 		Target: "github.com/nonexistent/repo",
 	}))
 
@@ -137,7 +137,7 @@ func TestListHandler_Trace_Ecosystems(t *testing.T) {
 
 	client := listv1connect.NewListServiceClient(http.DefaultClient, ts.URL)
 
-	resp, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	resp, err := client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err != nil {
 		t.Fatalf("ListEcosystems failed: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestSecretsHandler_Trace_ListDetectors(t *testing.T) {
 
 	client := secretsv1connect.NewSecretsServiceClient(http.DefaultClient, ts.URL)
 
-	resp, err := client.ListDetectors(context.Background(), connect.NewRequest(&secretsv1.ListDetectorsRequest{}))
+	resp, err := client.ListDetectors(t.Context(), connect.NewRequest(&secretsv1.ListDetectorsRequest{}))
 	if err != nil {
 		t.Fatalf("ListDetectors failed: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestSecretsHandler_Trace_ScanError(t *testing.T) {
 
 	client := secretsv1connect.NewSecretsServiceClient(http.DefaultClient, ts.URL)
 
-	_, err = client.Scan(context.Background(), connect.NewRequest(&secretsv1.ScanRequest{
+	_, err = client.Scan(t.Context(), connect.NewRequest(&secretsv1.ScanRequest{
 		Target: "",
 	}))
 	if err == nil {
@@ -241,7 +241,7 @@ func TestHandler_Trace_SpanParenting(t *testing.T) {
 
 	client := listv1connect.NewListServiceClient(http.DefaultClient, ts.URL)
 
-	_, err = client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	_, err = client.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -275,9 +275,9 @@ func TestOtelconnect_Integration(t *testing.T) {
 	listClient := listv1connect.NewListServiceClient(http.DefaultClient, ts.URL)
 	secretsClient := secretsv1connect.NewSecretsServiceClient(http.DefaultClient, ts.URL)
 
-	_, _ = scanClient.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{Target: ""}))
-	_, _ = listClient.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
-	_, _ = secretsClient.ListDetectors(context.Background(), connect.NewRequest(&secretsv1.ListDetectorsRequest{}))
+	_, _ = scanClient.Scan(t.Context(), connect.NewRequest(&scanv1.ScanRequest{Target: ""}))
+	_, _ = listClient.ListEcosystems(t.Context(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	_, _ = secretsClient.ListDetectors(t.Context(), connect.NewRequest(&secretsv1.ListDetectorsRequest{}))
 
 	spans := recorder.Ended()
 	if len(spans) == 0 {
@@ -306,7 +306,7 @@ func TestScanHandler_Direct_Trace(t *testing.T) {
 	handler := NewScanHandler(WithLocalMode())
 	req := connect.NewRequest(&scanv1.ScanRequest{Target: "."})
 
-	_, err := handler.Scan(context.Background(), req)
+	_, err := handler.Scan(t.Context(), req)
 	if err != nil {
 		t.Logf("scan error (may be expected): %v", err)
 	}
@@ -328,7 +328,7 @@ func TestListHandler_Direct_Trace(t *testing.T) {
 	handler := NewListHandler(WithListLocalMode())
 	req := connect.NewRequest(&listv1.ListEcosystemsRequest{})
 
-	resp, err := handler.ListEcosystems(context.Background(), req)
+	resp, err := handler.ListEcosystems(t.Context(), req)
 	if err != nil {
 		t.Fatalf("ListEcosystems failed: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestSecretsHandler_Direct_Trace(t *testing.T) {
 	}
 
 	req := connect.NewRequest(&secretsv1.ListDetectorsRequest{})
-	resp, err := handler.ListDetectors(context.Background(), req)
+	resp, err := handler.ListDetectors(t.Context(), req)
 	if err != nil {
 		t.Fatalf("ListDetectors failed: %v", err)
 	}

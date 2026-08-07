@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,7 +33,7 @@ func TestDockerfileProviderDetect(t *testing.T) {
 	}
 
 	provider := dockerfileProvider{}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for name, expected := range files {
 		path := filepath.Join(tmpDir, name)
@@ -65,7 +64,7 @@ ENTRYPOINT ["/main"]
 	}
 
 	provider := dockerfileProvider{}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	mat, err := provider.Open(ctx, dockerfilePath, nil)
 	if err != nil {

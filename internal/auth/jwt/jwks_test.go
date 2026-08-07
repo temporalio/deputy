@@ -1,7 +1,6 @@
 package jwt
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -58,7 +57,7 @@ func TestJWKSCache_BasicFetch(t *testing.T) {
 	defer cache.Close()
 
 	// Get key from cache
-	key, err := cache.GetKey(context.Background(), "test-key-1")
+	key, err := cache.GetKey(t.Context(), "test-key-1")
 	if err != nil {
 		t.Fatalf("failed to get key: %v", err)
 	}
@@ -106,7 +105,7 @@ func TestJWKSCache_RSAKey(t *testing.T) {
 	}
 	defer cache.Close()
 
-	key, err := cache.GetKey(context.Background(), "rsa-key-1")
+	key, err := cache.GetKey(t.Context(), "rsa-key-1")
 	if err != nil {
 		t.Fatalf("failed to get key: %v", err)
 	}
@@ -138,7 +137,7 @@ func TestJWKSCache_KeyNotFound(t *testing.T) {
 	defer cache.Close()
 
 	// Try to get a non-existent key
-	_, err = cache.GetKey(context.Background(), "non-existent-key")
+	_, err = cache.GetKey(t.Context(), "non-existent-key")
 	if err == nil {
 		t.Error("expected error for non-existent key")
 	}
@@ -209,7 +208,7 @@ func TestJWKSCache_ConcurrentAccess(t *testing.T) {
 
 	for range 100 {
 		wg.Go(func() {
-			_, err := cache.GetKey(context.Background(), "concurrent-key")
+			_, err := cache.GetKey(t.Context(), "concurrent-key")
 			if err != nil {
 				errors <- err
 			}
@@ -259,7 +258,7 @@ func TestJWKSCache_OIDCDiscovery(t *testing.T) {
 	defer cache.Close()
 
 	// Should be able to get key
-	_, err = cache.GetKey(context.Background(), "oidc-key")
+	_, err = cache.GetKey(t.Context(), "oidc-key")
 	if err != nil {
 		t.Errorf("failed to get key via OIDC discovery: %v", err)
 	}
@@ -339,7 +338,7 @@ func TestJWKSCache_ForceRefresh(t *testing.T) {
 	initialCount := refreshCount.Load()
 
 	// Force refresh should be rate-limited (within minJWKSRefreshInterval)
-	err = cache.ForceRefresh(context.Background())
+	err = cache.ForceRefresh(t.Context())
 	if err != nil {
 		t.Errorf("ForceRefresh returned error: %v", err)
 	}
@@ -389,13 +388,13 @@ func TestJWKSCache_WithMetrics(t *testing.T) {
 	}
 
 	// Key lookup
-	_, _ = cache.GetKey(context.Background(), "metrics-key")
+	_, _ = cache.GetKey(t.Context(), "metrics-key")
 	if keyLookups.Load() < 1 {
 		t.Error("expected key lookup to be recorded")
 	}
 
 	// Key miss
-	_, _ = cache.GetKey(context.Background(), "non-existent")
+	_, _ = cache.GetKey(t.Context(), "non-existent")
 	if keyMisses.Load() < 1 {
 		t.Error("expected key miss to be recorded")
 	}

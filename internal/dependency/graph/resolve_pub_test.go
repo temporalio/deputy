@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"testing"
 )
 
@@ -80,7 +79,7 @@ sdks:
 	g := New()
 	r := NewPubResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}
@@ -159,7 +158,7 @@ sdks:
 	g := New()
 	r := NewPubResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}
@@ -196,7 +195,7 @@ func TestPubResolver_ResolveEdges_NoFiles(t *testing.T) {
 	g := New()
 	r := NewPubResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}
@@ -287,7 +286,7 @@ sdks:
 	g := New()
 	r := NewPubResolver()
 
-	err := r.ResolveEdges(context.Background(), g, files)
+	err := r.ResolveEdges(t.Context(), g, files)
 	if err != nil {
 		t.Fatalf("ResolveEdges() error = %v", err)
 	}

@@ -1,7 +1,6 @@
 package actionsx
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -105,7 +104,7 @@ jobs:
 			}
 			defer f.Close()
 			ext := &Extractor{}
-			inv, err := ext.Extract(context.Background(), &filesystem.ScanInput{
+			inv, err := ext.Extract(t.Context(), &filesystem.ScanInput{
 				FS:     fs,
 				Path:   filepath.ToSlash(tc.entry),
 				Reader: f,
@@ -145,7 +144,7 @@ jobs:
 	defer f.Close()
 
 	ext := &Extractor{}
-	inv, err := ext.Extract(context.Background(), &filesystem.ScanInput{
+	inv, err := ext.Extract(t.Context(), &filesystem.ScanInput{
 		FS:     fs,
 		Path:   ".github/workflows/c.yml",
 		Reader: f,
