@@ -39,9 +39,18 @@ func TestEvaluatePoliciesForCommand_Scan_NoPanic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluatePoliciesForCommand: %v", err)
 	}
+	// Empty licenses trigger the policy's warn rule; asserting the warn fires
+	// also proves the policy was actually evaluated for the scan command.
+	warned := false
 	for _, act := range actions {
 		if act.Type == "deny" {
 			t.Fatalf("unexpected deny for scan payload: %+v", act)
 		}
+		if act.Type == "warn" {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatalf("expected warn for missing licenses, got %+v", actions)
 	}
 }

@@ -82,10 +82,10 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for distant name: %+v", actions)
-			}
+		// The policy's only rule is the typosquat deny; a distant name must
+		// produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for distant name, got %+v", actions)
 		}
 	})
 
@@ -99,10 +99,8 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for scoped package: %+v", actions)
-			}
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for scoped package, got %+v", actions)
 		}
 	})
 
@@ -116,10 +114,8 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for numeric suffix: %+v", actions)
-			}
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for numeric suffix, got %+v", actions)
 		}
 	})
 
@@ -133,10 +129,8 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny outside proxy: %+v", actions)
-			}
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions outside proxy, got %+v", actions)
 		}
 	})
 }
@@ -406,11 +400,10 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		// Should not trigger deny or warn (only HIGH and CRITICAL trigger)
-		for _, a := range actions {
-			if a.Type == "deny" || a.Type == "warn" {
-				t.Fatalf("did not expect deny/warn for medium severity vulnerability, got %+v", actions)
-			}
+		// Only HIGH and CRITICAL trigger the bundle's deny/warn rules, so a
+		// medium severity vulnerability must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for medium severity vulnerability, got %+v", actions)
 		}
 	})
 
@@ -434,11 +427,10 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		// Should not trigger any action since policies check has(vulnerability.package.layer_details)
-		for _, a := range actions {
-			if a.Type == "deny" || a.Type == "warn" {
-				t.Fatalf("did not expect deny/warn without layer details, got %+v", actions)
-			}
+		// Every rule in the bundle guards on has(vulnerability.package.layer_details),
+		// so a non-container finding must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions without layer details, got %+v", actions)
 		}
 	})
 }

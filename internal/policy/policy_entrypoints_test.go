@@ -91,11 +91,10 @@ func TestLicenseAllowlistEntrypoints(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		// The policy may emit a warn for missing licenses; just ensure no deny.
-		for _, act := range actions {
-			if act.Type == "deny" {
-				t.Fatalf("did not expect deny for scan payload: %+v", act)
-			}
+		// The policy has no command scoping, so the missing-license warn rule
+		// fires for scan payloads too; the deny rule must not.
+		if len(actions) != 1 || actions[0].Type != "warn" {
+			t.Fatalf("expected one warn action for scan payload, got %+v", actions)
 		}
 	})
 }
@@ -200,10 +199,10 @@ func TestLicenseAllowlistHappySadPaths(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if strings.EqualFold(a.Type, "deny") {
-				t.Fatalf("did not expect deny: %+v", a)
-			}
+		// Permissive licenses match neither the deny rule nor the
+		// missing-license warn rule, so no actions may fire at all.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for permissive license, got %+v", actions)
 		}
 	})
 
@@ -269,10 +268,9 @@ func TestDenyAwsSdkV1Policy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for v2: %+v", actions)
-			}
+		// The policy's only rule is the v1 deny; v2 must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for v2, got %+v", actions)
 		}
 	})
 }
@@ -321,10 +319,10 @@ func TestGoModRegistryAllowlist(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for approved org: %+v", actions)
-			}
+		// The policy's only rule is the org-allowlist deny; an approved org
+		// must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for approved org, got %+v", actions)
 		}
 	})
 }
@@ -394,10 +392,10 @@ func TestGoPseudoVersionDenyPolicy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for tagged release: %+v", actions)
-			}
+		// The policy's only rule is the pseudo-version deny; a tagged release
+		// must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for tagged release, got %+v", actions)
 		}
 	})
 }
@@ -434,10 +432,10 @@ func TestPrereleaseGuardPolicy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for stable release: %+v", actions)
-			}
+		// The policy's only rule is the pre-release deny; a stable release
+		// must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for stable release, got %+v", actions)
 		}
 	})
 }
@@ -503,10 +501,10 @@ func TestDirectHighFixBlock(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for medium: %+v", actions)
-			}
+		// The policy's only rule denies HIGH/CRITICAL with a fix; a medium
+		// severity vulnerability must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for medium severity, got %+v", actions)
 		}
 	})
 }
@@ -555,10 +553,10 @@ func TestNewDependencyReview(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for approved addition: %+v", actions)
-			}
+		// The policy's only rule is the unapproved-addition deny; an approved
+		// prefix must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for approved addition, got %+v", actions)
 		}
 	})
 }
@@ -605,10 +603,10 @@ func TestFixStepCommandAllowlist(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for allowed command: %+v", actions)
-			}
+		// The policy's only rule is the command-allowlist deny; a vetted
+		// command must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for allowed command, got %+v", actions)
 		}
 	})
 }
@@ -656,10 +654,10 @@ func TestSbomMetadataQuality(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "warn" || a.Type == "deny" {
-				t.Fatalf("did not expect warn/deny for complete metadata: %+v", actions)
-			}
+		// The policy's only rule is the missing-metadata warn; complete
+		// metadata must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for complete metadata, got %+v", actions)
 		}
 	})
 }
@@ -706,10 +704,10 @@ func TestUnstableMajorGuard(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "warn" || a.Type == "deny" {
-				t.Fatalf("did not expect warn/deny for stable version: %+v", actions)
-			}
+		// The policy's only rule is the unstable-version warn; a stable
+		// version must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for stable version, got %+v", actions)
 		}
 	})
 }
@@ -764,10 +762,10 @@ func TestPypiPrefixAllowlist(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for approved PyPI package: %+v", actions)
-			}
+		// The policy's only rule is the prefix-allowlist deny; an approved
+		// prefix must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for approved PyPI package, got %+v", actions)
 		}
 	})
 }
@@ -819,12 +817,10 @@ func TestLicensePresentBlocker(t *testing.T) {
 	}
 	if actions, err := EvaluateMap(t.Context(), sources, allowPayload); err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
-	} else {
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny: %+v", actions)
-			}
-		}
+	} else if len(actions) != 0 {
+		// The policy's only rule is the missing-license deny; present license
+		// metadata must produce zero actions.
+		t.Fatalf("expected no actions for present license metadata, got %+v", actions)
 	}
 }
 
@@ -1017,10 +1013,10 @@ func TestExploitAvailableBlocker(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny without exploit: %+v", actions)
-			}
+		// The policy's only rule is the exploit-indicator deny; a plain
+		// advisory reference must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions without exploit indicators, got %+v", actions)
 		}
 	})
 }
@@ -1069,10 +1065,10 @@ func TestDeprecatedModuleBlock(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for non-deprecated issue: %+v", actions)
-			}
+		// The policy's only rule is the deprecated-text deny; a non-deprecated
+		// summary must produce zero actions.
+		if len(actions) != 0 {
+			t.Fatalf("expected no actions for non-deprecated issue, got %+v", actions)
 		}
 	})
 }
@@ -1122,12 +1118,10 @@ func TestGoDowngradeGuard(t *testing.T) {
 	}
 	if actions, err := EvaluateMap(t.Context(), sources, allowPayload); err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
-	} else {
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for upgrade: %+v", actions)
-			}
-		}
+	} else if len(actions) != 0 {
+		// The policy's only rule is the downgrade deny; an upgrade must
+		// produce zero actions.
+		t.Fatalf("expected no actions for upgrade, got %+v", actions)
 	}
 }
 
@@ -1231,12 +1225,10 @@ func TestNpmScopeAllowlist(t *testing.T) {
 	}
 	if actions, err := EvaluateMap(t.Context(), sources, allowPayload); err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
-	} else {
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for allowlisted package: %+v", actions)
-			}
-		}
+	} else if len(actions) != 0 {
+		// lodash is allowlisted and not an @acme pre-release, so neither the
+		// deny nor the warn rule may fire.
+		t.Fatalf("expected no actions for allowlisted package, got %+v", actions)
 	}
 }
 
