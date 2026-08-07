@@ -313,6 +313,21 @@ func TestNoOrValueOnNonOptional(t *testing.T) {
 				},
 			},
 			{
+				name:          "ternary receiver is flagged",
+				when:          `size((change.added ? packages : changes).orValue([])) > 0`,
+				wantReceivers: []string{`change.added ? packages : changes`},
+			},
+			{
+				name:          "plain call with an optional argument is flagged",
+				when:          `size(base64.decode(config.?registry.orValue("")).orValue(b"")) > 0`,
+				wantReceivers: []string{`base64.decode(config.?registry.orValue(""))`},
+			},
+			{
+				name:          "string literal containing a question mark is flagged",
+				when:          `size(config["?"].orValue([])) > 0`,
+				wantReceivers: []string{`config["?"]`},
+			},
+			{
 				name:          "chained orValue on an already defaulted value is flagged",
 				when:          `jwt.?sub.orValue("").orValue("fallback") == ""`,
 				wantReceivers: []string{`jwt.?sub.orValue("")`},
