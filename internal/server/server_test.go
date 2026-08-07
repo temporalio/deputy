@@ -4,9 +4,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 
 	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
 	"github.com/temporalio/deputy/gen/deputy/list/v1/listv1connect"
@@ -235,6 +238,12 @@ func TestListServiceRegistered(t *testing.T) {
 	}
 }
 
+// TestAllServicesRegistered derives the procedure corpus from the services the
+// server actually registers: every recorded service path maps to a proto
+// service descriptor, and every method of every registered service must route
+// (anything but 404). Deriving from srv.servicePaths plus the descriptors
+// keeps the corpus in lockstep with server registration instead of
+// hand-maintaining endpoint strings that silently go stale.
 func TestAllServicesRegistered(t *testing.T) {
 	srv, err := New(DefaultConfig())
 	if err != nil {
@@ -245,43 +254,51 @@ func TestAllServicesRegistered(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	// Test that all service endpoints respond (not 404)
-	// We use actual method paths since ConnectRPC routes service/method
-	serviceEndpoints := []struct {
-		path        string
-		contentType string
-	}{
-		// Scan service
-		{"/deputy.scan.v1.ScanService/Scan", "application/json"},
-		// List service
-		{"/deputy.list.v1.ListService/ListPackages", "application/json"},
-		{"/deputy.list.v1.ListService/ListEcosystems", "application/json"},
-		// SBOM service
-		{"/deputy.sbom.v1.SBOMService/Generate", "application/json"},
-		{"/deputy.sbom.v1.SBOMService/Diff", "application/json"},
-		// Remediation service
-		{"/deputy.remediation.v1.RemediationService/GeneratePlan", "application/json"},
-		// Secrets service
-		{"/deputy.secrets.v1.SecretsService/Scan", "application/json"},
-		{"/deputy.secrets.v1.SecretsService/ListDetectors", "application/json"},
+	// Sanity floor: the server currently registers 7 services; fewer means
+	// registration (or path recording) broke, not that the corpus shrank.
+	if len(srv.servicePaths) < 7 {
+		t.Fatalf("server recorded %d service paths, want at least 7: %v", len(srv.servicePaths), srv.servicePaths)
 	}
 
-	for _, ep := range serviceEndpoints {
-		req, err := http.NewRequest(http.MethodPost, ts.URL+ep.path, nil)
+	var procedures []string
+	for _, path := range srv.servicePaths {
+		name := protoreflect.FullName(strings.Trim(path, "/"))
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName(name)
 		if err != nil {
-			t.Fatalf("failed to create request for %s: %v", ep.path, err)
+			t.Fatalf("registered service %q has no proto descriptor: %v", name, err)
 		}
-		req.Header.Set("Content-Type", ep.contentType)
+		svc, ok := desc.(protoreflect.ServiceDescriptor)
+		if !ok {
+			t.Fatalf("descriptor %q is %T, want a service descriptor", name, desc)
+		}
+		methods := svc.Methods()
+		for i := range methods.Len() {
+			procedures = append(procedures, path+string(methods.Get(i).Name()))
+		}
+	}
+
+	// Sanity floor: 25 procedures across the registered services today.
+	if len(procedures) < 25 {
+		t.Fatalf("derived %d procedures, want at least 25: %v", len(procedures), procedures)
+	}
+
+	for _, procedure := range procedures {
+		req, err := http.NewRequest(http.MethodPost, ts.URL+procedure, nil)
+		if err != nil {
+			t.Fatalf("failed to create request for %s: %v", procedure, err)
+		}
+		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			t.Fatalf("request to %s failed: %v", ep.path, err)
+			t.Fatalf("request to %s failed: %v", procedure, err)
 		}
 		resp.Body.Close()
 
-		// Should not be 404 (service is registered)
+		// Should not be 404 (procedure is registered); streaming procedures
+		// reject the unary content type with a non-404 status, which is fine.
 		if resp.StatusCode == http.StatusNotFound {
-			t.Errorf("endpoint %s returned 404 - not registered", ep.path)
+			t.Errorf("procedure %s returned 404 - not registered", procedure)
 		}
 	}
 }
