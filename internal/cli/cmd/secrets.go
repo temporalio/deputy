@@ -18,6 +18,7 @@ import (
 
 	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
 	"github.com/temporalio/deputy/internal/container/image"
+	deputyerrors "github.com/temporalio/deputy/internal/errors"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
 	"github.com/temporalio/deputy/internal/globmatch"
 	internalproto "github.com/temporalio/deputy/internal/proto"
@@ -54,6 +55,7 @@ func AddSecretsCommand(root *cobra.Command, c *services.Clients) {
 		excludeGlob    string
 		noRedact       bool
 		verifyFlag     bool
+		alwaysExitZero bool
 		historyFlag    bool
 		maxCommits     int
 		sinceFlag      string
@@ -219,15 +221,19 @@ CI/CD WORKFLOWS:
   # Check for new secrets in PR (exit non-zero if found)
   deputy secrets --diff $BASE_SHA $HEAD_SHA --format json
 
-  # Scan full history in initial audit
-  deputy secrets --history --include-removed --format json > secrets-audit.json
+  # Scan full history in initial audit (report only, do not fail the step)
+  deputy secrets --history --include-removed --format json --always-exit-zero > secrets-audit.json
 
 GITHUB ACTIONS INTEGRATION:
-  # Upload SARIF to GitHub Code Scanning
+  # Fail the job as soon as a secret is found
   - name: Scan for secrets
-    run: deputy secrets --format sarif > secrets.sarif
+    run: deputy secrets
+
+  # Or report first and gate later: --always-exit-zero keeps the upload reachable
+  - name: Scan for secrets (report)
+    run: deputy secrets --format sarif --always-exit-zero > secrets.sarif
   - name: Upload SARIF
-    uses: github/codeql-action/upload-sarif@v2
+    uses: github/codeql-action/upload-sarif@v3
     with:
       sarif_file: secrets.sarif
 
@@ -296,7 +302,8 @@ FILTERING:
 					baseRef = args[1]
 					targetRef = args[2]
 				}
-				return runDiffSecretsScan(ctx, out, errW, target, baseRef, targetRef, formatFlag, noRedact, pathFilter)
+				found, err := runDiffSecretsScan(ctx, out, errW, target, baseRef, targetRef, formatFlag, noRedact, pathFilter)
+				return secretsExit(found, err, alwaysExitZero)
 			}
 
 			// Default to current directory for non-diff modes
@@ -318,17 +325,20 @@ FILTERING:
 					pathFilter:     pathFilter,
 					includeRemoved: includeRemoved,
 				}
-				return runHistoricalSecretsScan(ctx, out, errW, historyOpts)
+				found, err := runHistoricalSecretsScan(ctx, out, errW, historyOpts)
+				return secretsExit(found, err, alwaysExitZero)
 			}
 
 			// Check if target is a VM/rootfs image
 			if isVMImageTarget(target) {
-				return runVMImageSecretsScan(ctx, out, errW, target, formatFlag, noRedact, includeGlob, excludeGlob)
+				found, err := runVMImageSecretsScan(ctx, out, errW, target, formatFlag, noRedact, includeGlob, excludeGlob)
+				return secretsExit(found, err, alwaysExitZero)
 			}
 
 			// Check if target is a container image reference
 			if isImageTargetScheme(target) || looksLikeContainerReference(target) {
-				return runContainerSecretsScan(ctx, out, errW, target, formatFlag, noRedact, deepScan)
+				found, err := runContainerSecretsScan(ctx, out, errW, target, formatFlag, noRedact, deepScan)
+				return secretsExit(found, err, alwaysExitZero)
 			}
 
 			// Check if target is a remote Git URL (e.g., github.com/owner/repo)
@@ -386,14 +396,16 @@ FILTERING:
 						Stats:               stats,
 					}
 
+					var renderErr error
 					switch formatFlag {
 					case "json":
-						return outputSecretsProtoJSON(out, resp.Msg)
+						renderErr = outputSecretsProtoJSON(out, resp.Msg)
 					case "sarif":
-						return renderSecretsSARIF(out, result, target)
+						renderErr = renderSecretsSARIF(out, result, target)
 					default:
-						return renderSecretsTextWithVerification(out, result, noRedact, nil)
+						renderErr = renderSecretsTextWithVerification(out, result, noRedact, nil)
 					}
+					return secretsExit(len(findings), renderErr, alwaysExitZero)
 				}
 				return fmt.Errorf("accessing target: %w", err)
 			}
@@ -402,7 +414,8 @@ FILTERING:
 			if !info.IsDir() {
 				format, _ := secrets.DetectArchiveFormat(target)
 				if format != secrets.FormatUnknown {
-					return runArchiveSecretsScan(ctx, out, errW, target, format, formatFlag, noRedact, deepScan)
+					found, err := runArchiveSecretsScan(ctx, out, errW, target, format, formatFlag, noRedact, deepScan)
+					return secretsExit(found, err, alwaysExitZero)
 				}
 			}
 
@@ -476,18 +489,21 @@ FILTERING:
 				Stats:               stats,
 			}
 
+			var renderErr error
 			switch formatFlag {
 			case "json":
 				// JSON output when no post-processing was needed
 				if baselinePath == "" && !verifyFlag {
-					return outputSecretsProtoJSON(out, resp.Msg)
+					renderErr = outputSecretsProtoJSON(out, resp.Msg)
+				} else {
+					renderErr = renderSecretsJSONWithVerification(out, result, verificationResults)
 				}
-				return renderSecretsJSONWithVerification(out, result, verificationResults)
 			case "sarif":
-				return renderSecretsSARIF(out, result, target)
+				renderErr = renderSecretsSARIF(out, result, target)
 			default:
-				return renderSecretsTextWithVerification(out, result, noRedact, verificationResults)
+				renderErr = renderSecretsTextWithVerification(out, result, noRedact, verificationResults)
 			}
+			return secretsExit(len(findings), renderErr, alwaysExitZero)
 		},
 	}
 
@@ -496,6 +512,7 @@ FILTERING:
 	secretsCmd.Flags().StringVar(&excludeGlob, "exclude", "", "Comma-separated globs to exclude (e.g., 'vendor/**,node_modules/**')")
 	secretsCmd.Flags().BoolVar(&noRedact, "no-redact", false, "Show actual secret values (use with caution)")
 	secretsCmd.Flags().BoolVar(&verifyFlag, "verify", false, "Verify if detected secrets are still active")
+	secretsCmd.Flags().BoolVar(&alwaysExitZero, "always-exit-zero", false, "Exit 0 even when secrets are found (report without failing)")
 
 	// History scanning flags
 	secretsCmd.Flags().BoolVar(&historyFlag, "history", false, "Scan git history for secrets")
@@ -740,6 +757,23 @@ func isBinaryContent(content []byte) bool {
 	return false
 }
 
+// secretsExit maps a completed secrets scan onto the command's exit status.
+// Finding a secret is a failure condition: the documented contract is exit 1
+// so CI gates catch leaked credentials, and --always-exit-zero opts out for
+// report-only runs (for example generating SARIF for later upload).
+//
+// Scan errors take precedence and are returned unchanged. A findings exit
+// carries no message because the findings themselves were already rendered.
+func secretsExit(found int, err error, alwaysExitZero bool) error {
+	if err != nil {
+		return err
+	}
+	if found > 0 && !alwaysExitZero {
+		return deputyerrors.Silent(deputyerrors.WithExitCode(nil, 1))
+	}
+	return nil
+}
+
 // outputSecretsProtoJSON writes a secrets response as JSON using protojson.
 func outputSecretsProtoJSON(w io.Writer, resp *secretsv1.ScanResponse) error {
 	opts := internalproto.CLIJSONMarshalOptions()
@@ -822,13 +856,13 @@ type historyScanOptions struct {
 }
 
 // runHistoricalSecretsScan performs git history scanning for secrets.
-func runHistoricalSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, opts historyScanOptions) error {
+func runHistoricalSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, opts historyScanOptions) (int, error) {
 	// Parse since time if provided
 	var sinceTime *time.Time
 	if opts.since != "" {
 		t, err := parseRelativeTime(opts.since)
 		if err != nil {
-			return fmt.Errorf("invalid --since value: %w", err)
+			return 0, fmt.Errorf("invalid --since value: %w", err)
 		}
 		sinceTime = &t
 	}
@@ -838,7 +872,7 @@ func runHistoricalSecretsScan(ctx context.Context, out io.Writer, errW io.Writer
 	if opts.until != "" {
 		t, err := parseRelativeTime(opts.until)
 		if err != nil {
-			return fmt.Errorf("invalid --until value: %w", err)
+			return 0, fmt.Errorf("invalid --until value: %w", err)
 		}
 		untilTime = &t
 	}
@@ -865,7 +899,7 @@ func runHistoricalSecretsScan(ctx context.Context, out io.Writer, errW io.Writer
 
 	scanner, err := secrets.NewHistoryScanner(config)
 	if err != nil {
-		return fmt.Errorf("initializing history scanner: %w", err)
+		return 0, fmt.Errorf("initializing history scanner: %w", err)
 	}
 
 	// Build progress message
@@ -880,29 +914,30 @@ func runHistoricalSecretsScan(ctx context.Context, out io.Writer, errW io.Writer
 
 	result, err := scanner.ScanRepository(ctx, opts.target)
 	if err != nil {
-		return fmt.Errorf("scanning repository history: %w", err)
+		return 0, fmt.Errorf("scanning repository history: %w", err)
 	}
 
+	found := len(result.Findings)
 	if opts.format == "json" {
-		return renderHistoricalSecretsJSON(out, result)
+		return found, renderHistoricalSecretsJSON(out, result)
 	}
-	return renderHistoricalSecretsText(out, result, opts.noRedact)
+	return found, renderHistoricalSecretsText(out, result, opts.noRedact)
 }
 
 // runDiffSecretsScan scans for secrets introduced between two git refs.
 // This is ideal for CI/CD pipelines to detect new secrets in PRs.
-func runDiffSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, repoPath, baseRef, targetRef, format string, noRedact bool, pathFilter string) error {
+func runDiffSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, repoPath, baseRef, targetRef, format string, noRedact bool, pathFilter string) (int, error) {
 	// Open repository
 	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
-		return fmt.Errorf("opening git repository: %w", err)
+		return 0, fmt.Errorf("opening git repository: %w", err)
 	}
 
 	// Resolve base ref (use default branch if empty)
 	if baseRef == "" {
 		defaultBranch, err := gitx.GetDefaultBranch(repo)
 		if err != nil {
-			return fmt.Errorf("determining default branch: %w", err)
+			return 0, fmt.Errorf("determining default branch: %w", err)
 		}
 		baseRef = defaultBranch
 	}
@@ -912,18 +947,18 @@ func runDiffSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, repo
 	if err != nil {
 		suggestions := gitx.GetReferenceSuggestions(repo, baseRef)
 		if len(suggestions) > 0 {
-			return fmt.Errorf("invalid base reference %q: %v\nDid you mean one of these?\n  %s", baseRef, err, strings.Join(suggestions, "\n  "))
+			return 0, fmt.Errorf("invalid base reference %q: %v\nDid you mean one of these?\n  %s", baseRef, err, strings.Join(suggestions, "\n  "))
 		}
-		return fmt.Errorf("invalid base reference %q: %w", baseRef, err)
+		return 0, fmt.Errorf("invalid base reference %q: %w", baseRef, err)
 	}
 
 	targetHash, err := gitx.ResolveRevisionEnhanced(repo, targetRef)
 	if err != nil {
 		suggestions := gitx.GetReferenceSuggestions(repo, targetRef)
 		if len(suggestions) > 0 {
-			return fmt.Errorf("invalid target reference %q: %v\nDid you mean one of these?\n  %s", targetRef, err, strings.Join(suggestions, "\n  "))
+			return 0, fmt.Errorf("invalid target reference %q: %v\nDid you mean one of these?\n  %s", targetRef, err, strings.Join(suggestions, "\n  "))
 		}
-		return fmt.Errorf("invalid target reference %q: %w", targetRef, err)
+		return 0, fmt.Errorf("invalid target reference %q: %w", targetRef, err)
 	}
 
 	fmt.Fprintf(errW, "%s\n", ui.StyleMeta.Render(fmt.Sprintf("Scanning for new secrets: %s → %s", baseRef, targetRef)))
@@ -941,13 +976,13 @@ func runDiffSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, repo
 
 	scanner, err := secrets.NewHistoryScanner(config)
 	if err != nil {
-		return fmt.Errorf("initializing scanner: %w", err)
+		return 0, fmt.Errorf("initializing scanner: %w", err)
 	}
 
 	// Scan for secrets in the diff
 	findings, err := scanner.ScanDiff(ctx, repoPath, baseHash.String(), targetHash.String())
 	if err != nil {
-		return fmt.Errorf("scanning diff: %w", err)
+		return 0, fmt.Errorf("scanning diff: %w", err)
 	}
 
 	// Build result
@@ -962,10 +997,11 @@ func runDiffSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, repo
 		Findings:   findings,
 	}
 
+	found := len(findings)
 	if format == "json" {
-		return renderDiffSecretsJSON(out, result)
+		return found, renderDiffSecretsJSON(out, result)
 	}
-	return renderDiffSecretsText(out, result, noRedact)
+	return found, renderDiffSecretsText(out, result, noRedact)
 }
 
 // SecretsDiffResult contains results from a diff-based secret scan.
@@ -1507,7 +1543,7 @@ func verificationStatusLabel(status secrets.VerificationStatus) string {
 // runContainerSecretsScan scans a container image for secrets in its config,
 // environment variables, build history, labels, and layer contents.
 // When deepScan is true, it also scans files within each layer using SCALIBR.
-func runContainerSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, target, format string, noRedact, deepScan bool) error {
+func runContainerSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, target, format string, noRedact, deepScan bool) (int, error) {
 	fmt.Fprintln(errW, ui.StyleMeta.Render("Loading container image..."))
 
 	// Normalize target to include scheme if needed
@@ -1516,7 +1552,7 @@ func runContainerSecretsScan(ctx context.Context, out io.Writer, errW io.Writer,
 	// Open the container image using Deputy's target system
 	mat, err := targets.Open(ctx, normalizedTarget, nil)
 	if err != nil {
-		return fmt.Errorf("loading container image: %w", err)
+		return 0, fmt.Errorf("loading container image: %w", err)
 	}
 	if mat.Cleanup != nil {
 		defer mat.Cleanup()
@@ -1525,19 +1561,19 @@ func runContainerSecretsScan(ctx context.Context, out io.Writer, errW io.Writer,
 	// Extract ContainerImageData which contains both SCALIBR image and v1.Image
 	imgData, ok := mat.Data.(*providers.ContainerImageData)
 	if !ok || imgData == nil {
-		return fmt.Errorf("target %q is not a container image", target)
+		return 0, fmt.Errorf("target %q is not a container image", target)
 	}
 
 	// Extract v1.Image for config access
 	v1Img := imgData.V1Image
 	if v1Img == nil {
-		return fmt.Errorf("image config extraction not available for this transport; try using docker:// scheme for remote images")
+		return 0, fmt.Errorf("image config extraction not available for this transport; try using docker:// scheme for remote images")
 	}
 
 	// Extract image info (config, metadata, history)
 	imageInfo, err := image.Extract(v1Img)
 	if err != nil {
-		return fmt.Errorf("extracting image configuration: %w", err)
+		return 0, fmt.Errorf("extracting image configuration: %w", err)
 	}
 
 	fmt.Fprintln(errW, ui.StyleMeta.Render("Scanning image configuration for secrets..."))
@@ -1546,7 +1582,7 @@ func runContainerSecretsScan(ctx context.Context, out io.Writer, errW io.Writer,
 	config := secrets.DefaultContainerScanConfig()
 	scanner, err := secrets.NewContainerScanner(config)
 	if err != nil {
-		return fmt.Errorf("initializing container scanner: %w", err)
+		return 0, fmt.Errorf("initializing container scanner: %w", err)
 	}
 
 	// Build ImageConfig from extracted info for the scanner
@@ -1555,7 +1591,7 @@ func runContainerSecretsScan(ctx context.Context, out io.Writer, errW io.Writer,
 	// Scan image config (env vars, labels, history, entrypoint)
 	findings, err := scanner.ScanImageConfig(ctx, imgConfig)
 	if err != nil {
-		return fmt.Errorf("scanning image config: %w", err)
+		return 0, fmt.Errorf("scanning image config: %w", err)
 	}
 
 	// Deep layer scanning if requested
@@ -1565,7 +1601,7 @@ func runContainerSecretsScan(ctx context.Context, out io.Writer, errW io.Writer,
 		// Get SCALIBR layers from the image data
 		layers, err := imgData.Layers()
 		if err != nil {
-			return fmt.Errorf("getting image layers for deep scan: %w", err)
+			return 0, fmt.Errorf("getting image layers for deep scan: %w", err)
 		}
 
 		if len(layers) > 0 {
@@ -1618,21 +1654,22 @@ func runContainerSecretsScan(ctx context.Context, out io.Writer, errW io.Writer,
 		Stats:         stats,
 	}
 
+	found := len(findings)
 	if format == "json" {
-		return renderContainerSecretsJSON(out, result)
+		return found, renderContainerSecretsJSON(out, result)
 	}
-	return renderContainerSecretsText(out, result, noRedact)
+	return found, renderContainerSecretsText(out, result, noRedact)
 }
 
 // runVMImageSecretsScan scans a VM disk image or rootfs for secrets.
 // It opens the disk image, extracts the filesystem, and walks it to find secrets.
-func runVMImageSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, target, format string, noRedact bool, includeGlob, excludeGlob string) error {
+func runVMImageSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, target, format string, noRedact bool, includeGlob, excludeGlob string) (int, error) {
 	fmt.Fprintln(errW, ui.StyleMeta.Render("Loading VM image..."))
 
 	// Open the VM image using Deputy's target system
 	mat, err := targets.Open(ctx, target, nil)
 	if err != nil {
-		return fmt.Errorf("loading VM image: %w", err)
+		return 0, fmt.Errorf("loading VM image: %w", err)
 	}
 	if mat.Cleanup != nil {
 		defer mat.Cleanup()
@@ -1640,7 +1677,7 @@ func runVMImageSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, t
 
 	// Verify we got a filesystem
 	if mat.FS == nil {
-		return fmt.Errorf("VM image %q did not provide a filesystem", target)
+		return 0, fmt.Errorf("VM image %q did not provide a filesystem", target)
 	}
 
 	fmt.Fprintln(errW, ui.StyleMeta.Render("Scanning VM filesystem for secrets..."))
@@ -1648,13 +1685,13 @@ func runVMImageSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, t
 	// Create secret detection engine
 	engine, err := secrets.NewEngine()
 	if err != nil {
-		return fmt.Errorf("creating secrets engine: %w", err)
+		return 0, fmt.Errorf("creating secrets engine: %w", err)
 	}
 
 	// Scan the filesystem for secrets
 	findings, filesScanned, err := scanFilesystem(ctx, engine, mat.FS, includeGlob, excludeGlob)
 	if err != nil {
-		return fmt.Errorf("scanning VM filesystem: %w", err)
+		return 0, fmt.Errorf("scanning VM filesystem: %w", err)
 	}
 
 	// Build stats
@@ -1677,6 +1714,8 @@ func runVMImageSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, t
 		Stats:               stats,
 	}
 
+	found := len(findings)
+
 	// Add provenance info if available
 	if mat.Meta.Provenance != nil {
 		if format == "json" {
@@ -1691,17 +1730,17 @@ func runVMImageSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, t
 			}
 			enc := json.NewEncoder(out)
 			enc.SetIndent("", "  ")
-			return enc.Encode(vmResult)
+			return found, enc.Encode(vmResult)
 		}
 	}
 
 	if format == "json" {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
-		return enc.Encode(result)
+		return found, enc.Encode(result)
 	}
 
-	return renderVMSecretsText(out, result, mat.Meta.Provenance, noRedact)
+	return found, renderVMSecretsText(out, result, mat.Meta.Provenance, noRedact)
 }
 
 // scanFilesystem scans an fs.FS for secrets.
@@ -2083,7 +2122,7 @@ func normalizeContainerTarget(target string) string {
 
 // runArchiveSecretsScan scans an archive file (zip, tar, tar.gz, etc.) for secrets.
 // When deepScan is true, it also scans binary files for embedded strings.
-func runArchiveSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, target string, format secrets.ArchiveFormat, outputFormat string, noRedact, deepScan bool) error {
+func runArchiveSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, target string, format secrets.ArchiveFormat, outputFormat string, noRedact, deepScan bool) (int, error) {
 	fmt.Fprintf(errW, "%s\n", ui.StyleMeta.Render(fmt.Sprintf("Scanning %s archive: %s", format, filepath.Base(target))))
 
 	// Create archive scanner with configuration
@@ -2094,13 +2133,13 @@ func runArchiveSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, t
 
 	scanner, err := secrets.NewArchiveScanner(config)
 	if err != nil {
-		return fmt.Errorf("initializing archive scanner: %w", err)
+		return 0, fmt.Errorf("initializing archive scanner: %w", err)
 	}
 
 	// Scan the archive
 	result, err := scanner.ScanArchive(ctx, target)
 	if err != nil {
-		return fmt.Errorf("scanning archive: %w", err)
+		return 0, fmt.Errorf("scanning archive: %w", err)
 	}
 
 	// Report any non-fatal errors
@@ -2112,10 +2151,11 @@ func runArchiveSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, t
 		fmt.Fprintf(errW, "Warning: scan truncated: %s\n", result.TruncationReason)
 	}
 
+	found := len(result.Findings)
 	if outputFormat == "json" {
-		return renderArchiveSecretsJSON(out, result)
+		return found, renderArchiveSecretsJSON(out, result)
 	}
-	return renderArchiveSecretsText(out, result, noRedact)
+	return found, renderArchiveSecretsText(out, result, noRedact)
 }
 
 // renderArchiveSecretsJSON outputs archive scan results as JSON.
