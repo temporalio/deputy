@@ -352,15 +352,16 @@ func TestCommandsFromConsolidatedGoToolchain(t *testing.T) {
 }
 
 func TestCommandsFromConsolidatedMiseBackendTool(t *testing.T) {
-	// A vulnerable mise-managed backend tool fixes via `mise use <key>@<version>`,
-	// using the exact config key (with backend prefix), not the canonical name.
+	// A vulnerable mise-managed backend tool fixes via a deputy-internal config
+	// edit, using the exact config key (with backend prefix), not the
+	// canonical name.
 	tests := []struct {
 		name         string
 		componentKey string
 		wantCommand  string
 	}{
-		{"npm backend tool", "npm:lodash", "mise use --path mise.toml npm:lodash@4.17.21"},
-		{"cargo backend tool", "cargo:ripgrep", "mise use --path mise.toml cargo:ripgrep@4.17.21"},
+		{"npm backend tool", "npm:lodash", "deputy:mise:update mise.toml npm:lodash 4.17.21 4.17.20"},
+		{"cargo backend tool", "cargo:ripgrep", "deputy:mise:update mise.toml cargo:ripgrep 4.17.21 4.17.20"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -407,8 +408,8 @@ func TestCommandsFromConsolidatedStdlibSourceAware(t *testing.T) {
 	if !hasCommand("go get go@1.20.1") {
 		t.Errorf("expected go.mod toolchain command 'go get go@1.20.1'; commands=%+v", commands)
 	}
-	if !hasCommand("mise use --path mise.toml go@1.20.1") {
-		t.Errorf("expected mise command 'mise use --path mise.toml go@1.20.1'; commands=%+v", commands)
+	if !hasCommand("deputy:mise:update mise.toml go 1.20.1 1.20.0") {
+		t.Errorf("expected mise command 'deputy:mise:update mise.toml go 1.20.1 1.20.0'; commands=%+v", commands)
 	}
 }
 
@@ -433,8 +434,40 @@ func TestCommandsFromConsolidatedStdlibMiseOnly(t *testing.T) {
 	if hasCommand("go get go@1.20.1") {
 		t.Errorf("did not expect a go.mod command for a mise-only stdlib finding; commands=%+v", commands)
 	}
-	if !hasCommand("mise use --path mise.toml go@1.20.1") {
-		t.Errorf("expected 'mise use --path mise.toml go@1.20.1'; commands=%+v", commands)
+	if !hasCommand("deputy:mise:update mise.toml go 1.20.1 1.20.0") {
+		t.Errorf("expected 'deputy:mise:update mise.toml go 1.20.1 1.20.0'; commands=%+v", commands)
+	}
+}
+
+func TestCommandsFromConsolidatedStdlibAmbiguousCurrent(t *testing.T) {
+	// Two stdlib findings with different current Go versions: the mise edit
+	// cannot know which declaration to target, so the generated command must
+	// omit the current version (the apply path then fails closed on
+	// multi-version arrays instead of rewriting the wrong element).
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:     "GO-2025-1234",
+			Package:       "stdlib",
+			Version:       "1.20.0",
+			FixedVersions: []string{"1.20.1"},
+			ManifestRefs: []dependencyv1.ManifestRef{
+				dependency.NewManifestRef("mise.toml", "mise", nil, "go"),
+			},
+		},
+		{
+			PrimaryID:     "GO-2025-5678",
+			Package:       "stdlib",
+			Version:       "1.21.0",
+			FixedVersions: []string{"1.21.5"},
+			ManifestRefs: []dependencyv1.ManifestRef{
+				dependency.NewManifestRef("mise.toml", "mise", nil, "go"),
+			},
+		},
+	}
+	commands, _ := CommandsFromConsolidated(cons)
+
+	if !slices.ContainsFunc(commands, func(c Command) bool { return c.Command == "deputy:mise:update mise.toml go 1.21.5" }) {
+		t.Errorf("expected untargeted 'deputy:mise:update mise.toml go 1.21.5'; commands=%+v", commands)
 	}
 }
 

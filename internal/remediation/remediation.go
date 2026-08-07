@@ -82,10 +82,16 @@ type packageUpgrade struct {
 
 // CommandsFromConsolidated derives recommended commands and stdlib upgrades.
 func CommandsFromConsolidated(cons []vulnerability.Consolidated) ([]Command, string) {
-	upgrades, stdlib, stdlibRefs, stdlibVulnIDs := buildUpgradeRecommendations(cons)
+	upgrades, stdlib, stdlibRefs, stdlibVulnIDs, stdlibCurrents := buildUpgradeRecommendations(cons)
 	cmds := dedupeCommands(upgrades)
 	if stdlib != "" {
-		cmds = append(cmds, stdlibCommands(stdlib, stdlibRefs, stdlibVulnIDs)...)
+		// Only an unambiguous current version can safely target a declaration
+		// (mixed currents would steer the mise edit at the wrong element).
+		stdlibCurrent := ""
+		if len(stdlibCurrents) == 1 {
+			stdlibCurrent = stdlibCurrents[0]
+		}
+		cmds = append(cmds, stdlibCommands(stdlib, stdlibCurrent, stdlibRefs, stdlibVulnIDs)...)
 	}
 	slices.SortFunc(cmds, func(a, b Command) int {
 		if n := cmp.Compare(a.managerRank, b.managerRank); n != 0 {
@@ -103,10 +109,14 @@ func CommandsFromConsolidated(cons []vulnerability.Consolidated) ([]Command, str
 // the best fixed versions for each affected package. It separates standard library
 // upgrades from regular dependency upgrades. When multiple vulnerabilities affect
 // the same package, it recommends the highest required version to fix all issues.
-func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUpgrade, string, []dependencyv1.ManifestRef, []string) {
+// The final return value lists the unique current Go versions across the stdlib
+// findings, so fixes that edit a manifest in place can target the vulnerable
+// declaration when it is unambiguous.
+func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUpgrade, string, []dependencyv1.ManifestRef, []string, []string) {
 	var stdlibRec string
 	var stdlibRefs []dependencyv1.ManifestRef
 	var stdlibVulnIDs []string
+	var stdlibCurrents []string
 
 	// Track the best (highest) recommended version per package
 	pkgBest := map[string]*packageUpgrade{}
@@ -130,6 +140,9 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 			// the Go version (go.mod vs mise.toml vs .tool-versions) distinctly.
 			stdlibRefs = mergeManifestRefs(stdlibRefs, v.ManifestRefs)
 			stdlibVulnIDs = append(stdlibVulnIDs, v.PrimaryID)
+			if cur := strings.TrimSpace(v.Version); cur != "" && !slices.Contains(stdlibCurrents, cur) {
+				stdlibCurrents = append(stdlibCurrents, cur)
+			}
 			continue
 		}
 
@@ -178,7 +191,7 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 		upgrades = append(upgrades, *u)
 	}
 
-	return upgrades, stdlibRec, stdlibRefs, stdlibVulnIDs
+	return upgrades, stdlibRec, stdlibRefs, stdlibVulnIDs, stdlibCurrents
 }
 
 // upgradeTargetFor determines the remediation target for a consolidated
@@ -305,7 +318,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 			if u.Migration {
 				rec = migrationCommand(u.TargetModule, u.Recommended, u.IsDirect)
 			} else {
-				rec = recommendCommand(ref.Manager, ref.Path, u.Name, u.Recommended, dependency.ManifestRefGroups(ref), dependency.ManifestRefComponentKey(ref))
+				rec = recommendCommand(ref.Manager, ref.Path, u.Name, u.Current, u.Recommended, dependency.ManifestRefGroups(ref), dependency.ManifestRefComponentKey(ref))
 			}
 			if rec.command == "" {
 				continue
@@ -457,10 +470,13 @@ func buildGoToolchainCommand(version string) (Command, bool) {
 // upgrade. The same Go version may be declared in more than one place (go.mod,
 // mise.toml, .tool-versions), each needing a distinct fix: a go.mod-sourced
 // finding bumps the go directive (`go get go@X`), while a mise/asdf-sourced one
-// bumps the tool in that config (`mise use --path mise.toml go@X`). When both declare it, both
-// commands are emitted. With no attributable source, it falls back to the
-// go.mod command to preserve prior behavior.
-func stdlibCommands(version string, refs []dependencyv1.ManifestRef, vulnIDs []string) []Command {
+// bumps the tool in that config (a deputy:mise:update edit for mise). When both
+// declare it, both commands are emitted. With no attributable source, it falls
+// back to the go.mod command to preserve prior behavior. currentVersion is the
+// vulnerable Go version when it is unambiguous across the findings ("" when
+// unknown or mixed); the mise edit uses it to target the right element of a
+// multi-version declaration.
+func stdlibCommands(version, currentVersion string, refs []dependencyv1.ManifestRef, vulnIDs []string) []Command {
 	var cmds []Command
 	seen := collections.NewSet[string]()
 	sawManaged := false
@@ -478,7 +494,7 @@ func stdlibCommands(version string, refs []dependencyv1.ManifestRef, vulnIDs []s
 		switch strings.ToLower(strings.TrimSpace(ref.Manager)) {
 		case "mise", "asdf":
 			sawManaged = true
-			rec := recommendCommand(ref.Manager, ref.Path, "stdlib", version, nil, dependency.ManifestRefComponentKey(ref))
+			rec := recommendCommand(ref.Manager, ref.Path, "stdlib", currentVersion, version, nil, dependency.ManifestRefComponentKey(ref))
 			if rec.command == "" {
 				continue
 			}
@@ -590,20 +606,41 @@ type commandResult struct {
 	executable   bool
 }
 
-// miseUseArgs builds the argv for a mise fix, explicitly targeting the
-// detected manifest file with --path. Without it, `mise use` picks its own
-// write target (the lowest-precedence config in the working directory), so a
-// finding from e.g. mise.production.toml would be "fixed" by adding the tool
-// to mise.toml while the vulnerable higher-precedence pin stays in effect.
-// The apply paths run the command in the manifest's directory, so the
-// basename addresses the exact file; with no usable manifest path the flag is
-// omitted and mise's default write-target resolution applies.
-func miseUseArgs(manifestPath, toolSpec string) []string {
-	args := []string{"mise", "use"}
-	if base := path.Base(strings.TrimSpace(manifestPath)); base != "." && base != "/" {
-		args = append(args, "--path", base)
+// quoteCommandArg quotes a command token for a display command string that
+// round-trips through ParseCommandArgs (deputy-internal commands are re-parsed
+// from the command text at apply time, so a manifest path with spaces must not
+// split into separate tokens). Tokens without whitespace or quotes are
+// returned unchanged to keep the common case readable.
+func quoteCommandArg(s string) string {
+	if !strings.ContainsAny(s, " \t\"'\\") {
+		return s
 	}
-	return append(args, toolSpec)
+	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return `"` + replacer.Replace(s) + `"`
+}
+
+// miseUpdateCommand renders the deputy-internal command that bumps a tool
+// version in a mise config. Deputy edits the detected file in place instead of
+// shelling out to `mise use`, which refuses untrusted configs (fatal in fresh
+// checkouts and CI), picks its own write target rather than the detected
+// manifest, and collapses multi-version arrays to a scalar. currentVersion
+// targets the vulnerable element in array declarations and is appended only
+// when known.
+func miseUpdateCommand(manifestPath, tool, currentVersion, version string) commandResult {
+	parts := []string{
+		"deputy:mise:update",
+		quoteCommandArg(manifestPath),
+		quoteCommandArg(tool),
+		quoteCommandArg(version),
+	}
+	if strings.TrimSpace(currentVersion) != "" {
+		parts = append(parts, quoteCommandArg(currentVersion))
+	}
+	return commandResult{
+		command:    strings.Join(parts, " "),
+		hint:       "then run: mise install",
+		executable: true,
+	}
 }
 
 // miseToolName resolves the tool key to use in a mise/asdf fix command. It
@@ -622,8 +659,11 @@ func miseToolName(componentKey, pkg, runtimeName string) string {
 // manifest: executable command text and args when the manager supports a safe
 // direct invocation, or manual guidance text with a hint otherwise. The
 // componentKey targets the manifest's own name for a dependency when it
-// differs from the reported package (e.g. mise tool keys).
-func recommendCommand(manager, manifestPath, pkg, version string, groups []string, componentKey string) commandResult {
+// differs from the reported package (e.g. mise tool keys). currentVersion is
+// the installed version being fixed; managers whose fix edits the manifest in
+// place (mise) use it to target the vulnerable declaration and it may be empty
+// when unknown.
+func recommendCommand(manager, manifestPath, pkg, currentVersion, version string, groups []string, componentKey string) commandResult {
 	m := strings.ToLower(manager)
 
 	// Handle JS package managers with a unified approach
@@ -674,17 +714,16 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 	// "stdlib"/"toolchain"; map those back to the declared runtime tool.
 	case "mise":
 		tool := miseToolName(componentKey, pkg, "go")
-		// The follow-up `mise install` needs no targeting: `mise use` already
-		// installs the tool it pins, and install reads the full config
-		// resolution chain from the manifest's directory.
-		args := miseUseArgs(manifestPath, fmt.Sprintf("%s@%s", tool, version))
-		return commandResult{
-			command:      strings.Join(args, " "),
-			args:         args,
-			followUp:     "mise install",
-			followUpArgs: []string{"mise", "install"},
-			executable:   true,
+		if strings.TrimSpace(manifestPath) == "" {
+			// Without a detected manifest there is no file to edit; surface
+			// manual guidance instead of a fix deputy cannot apply.
+			return commandResult{
+				command:    fmt.Sprintf("Update %s to %s in the mise config", tool, version),
+				hint:       fmt.Sprintf("run: mise use %s@%s", tool, version),
+				executable: false,
+			}
 		}
+		return miseUpdateCommand(manifestPath, tool, currentVersion, version)
 	case "asdf":
 		tool := miseToolName(componentKey, pkg, "golang")
 		// asdf has no single "set version + install" verb that edits

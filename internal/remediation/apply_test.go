@@ -634,6 +634,124 @@ COPY . /usr/share/nginx/html
 			wantErr: false,
 		},
 		{
+			name: "mise update scalar preserves comments and layout",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = "1.22.12" # pinned toolchain
+node = "20.11.1"
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = "1.24.3" # pinned toolchain
+node = "20.11.1"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			// Pins the array contract: only the vulnerable element is replaced
+			// and the other pinned versions survive. `mise use` would collapse
+			// the whole array to a scalar, which is why remediation must not
+			// shell out to it.
+			name: "mise update replaces only the vulnerable array element",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.24.3", "1.23.8"]
+`,
+			},
+			wantErr: false,
+		},
+		{
+			// Fail closed: a multi-version array with no known current version
+			// must not be rewritten at all.
+			name: "mise update multi-version array without current version fails",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			},
+			wantErr: true,
+		},
+		{
+			name: "mise update backend-prefixed tool in hidden manifest",
+			cmd:  "deputy:mise:update .mise.toml npm:lodash 4.17.21 4.17.20",
+			setup: map[string]string{
+				".mise.toml": `[tools]
+"npm:lodash" = "4.17.20"
+`,
+			},
+			want: map[string]string{
+				".mise.toml": `[tools]
+"npm:lodash" = "4.17.21"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			name: "mise update targets nested config path",
+			cmd:  "deputy:mise:update .config/mise/config.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				".config/mise/config.toml": `[tools]
+go = "1.22.12"
+`,
+			},
+			want: map[string]string{
+				".config/mise/config.toml": `[tools]
+go = "1.24.3"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			name: "mise update quoted path with spaces",
+			cmd:  `deputy:mise:update "tool config/mise.toml" go 1.24.3 1.22.12`,
+			setup: map[string]string{
+				"tool config/mise.toml": `[tools]
+go = "1.22.12"
+`,
+			},
+			want: map[string]string{
+				"tool config/mise.toml": `[tools]
+go = "1.24.3"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			name: "mise update tool not declared fails",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+node = "20.11.1"
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+node = "20.11.1"
+`,
+			},
+			wantErr: true,
+		},
+		{
+			name:    "invalid mise command (missing args)",
+			cmd:     "deputy:mise:update mise.toml go",
+			wantErr: true,
+		},
+		{
 			name:    "unknown command",
 			cmd:     "deputy:unknown:command arg1 arg2",
 			wantErr: true,

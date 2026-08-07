@@ -192,6 +192,154 @@ func TestReplaceVersionInValue(t *testing.T) {
 	}
 }
 
+func TestRewriteToolVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		tool    string
+		current string
+		version string
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "scalar with comment",
+			input: `[tools]
+go = "1.22.12" # toolchain
+`,
+			tool: "go", current: "1.22.12", version: "1.24.3",
+			want: `[tools]
+go = "1.24.3" # toolchain
+`,
+		},
+		{
+			// The remediation contract for arrays: replace only the vulnerable
+			// element, preserve every other pinned version.
+			name: "multi-version array element-wise",
+			input: `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			tool: "go", current: "1.22.12", version: "1.24.3",
+			want: `[tools]
+go = ["1.24.3", "1.23.8"]
+`,
+		},
+		{
+			name: "multi-version array second element with comment",
+			input: `[tools]
+go = ["1.22.12", "1.23.8"] # test matrix
+`,
+			tool: "go", current: "1.23.8", version: "1.24.3",
+			want: `[tools]
+go = ["1.22.12", "1.24.3"] # test matrix
+`,
+		},
+		{
+			name: "multi-version array bare elements",
+			input: `[tools]
+node = [20, 22]
+`,
+			tool: "node", current: "20", version: "20.11.1",
+			want: `[tools]
+node = ["20.11.1", 22]
+`,
+		},
+		{
+			name: "multi-version array without current fails closed",
+			input: `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			tool: "go", current: "", version: "1.24.3",
+			want: `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			wantErr: true,
+		},
+		{
+			name: "multi-version array with unmatched current fails closed",
+			input: `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			tool: "go", current: "1.21.0", version: "1.24.3",
+			want: `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			wantErr: true,
+		},
+		{
+			name: "single-version array without current",
+			input: `[tools]
+go = ["1.22.12"]
+`,
+			tool: "go", current: "", version: "1.24.3",
+			want: `[tools]
+go = ["1.24.3"]
+`,
+		},
+		{
+			name: "tools subtable version key",
+			input: `[tools.go]
+version = "1.22.12"
+`,
+			tool: "go", current: "1.22.12", version: "1.24.3",
+			want: `[tools.go]
+version = "1.24.3"
+`,
+		},
+		{
+			name: "undeclared tool fails",
+			input: `[tools]
+node = "20.11.1"
+`,
+			tool: "go", current: "1.22.12", version: "1.24.3",
+			want: `[tools]
+node = "20.11.1"
+`,
+			wantErr: true,
+		},
+		{
+			name: "non-concrete new version rejected",
+			input: `[tools]
+go = "1.22.12"
+`,
+			tool: "go", current: "1.22.12", version: "latest",
+			want: `[tools]
+go = "1.22.12"
+`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "mise.toml"), []byte(tt.input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			err = RewriteToolVersion(root, "mise.toml", tt.tool, tt.current, tt.version)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected rewrite error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("rewrite: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("rewrite mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateMiseUpdate(t *testing.T) {
 	if err := validateMiseUpdate(pin.Update{Name: "node", PinnedValue: "20.11.0"}); err != nil {
 		t.Errorf("valid update rejected: %v", err)

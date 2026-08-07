@@ -9,6 +9,7 @@ import (
 
 	"github.com/temporalio/deputy/internal/pin"
 	"github.com/temporalio/deputy/internal/pin/githubactions"
+	pinmise "github.com/temporalio/deputy/internal/pin/mise"
 )
 
 // IsDeputyInternalCommand checks if a command is a deputy-internal command
@@ -52,6 +53,25 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 		sha := parts[3]
 		tag := parts[4]
 		return applyActionPin(repoDir, file, actionRef, sha, tag)
+
+	case "deputy:mise:update":
+		// Format: deputy:mise:update <file> <tool> <new-version> [<current-version>]
+		// The current version targets the vulnerable element when the tool
+		// declares multiple versions in an array.
+		if len(parts) < 4 {
+			return fmt.Errorf("invalid mise update command: expected at least 4 parts, got %d", len(parts))
+		}
+		file, err := safeJoinPath(repoDir, parts[1])
+		if err != nil {
+			return fmt.Errorf("invalid file path: %w", err)
+		}
+		tool := parts[2]
+		newVersion := parts[3]
+		currentVersion := ""
+		if len(parts) > 4 {
+			currentVersion = parts[4]
+		}
+		return applyMiseUpdate(repoDir, file, tool, currentVersion, newVersion)
 
 	case "deputy:dockerfile:update":
 		// Format: deputy:dockerfile:update <file> <image> <new-version>
@@ -300,6 +320,41 @@ func applyDockerfileUpdate(filePath, image, newVersion string) error {
 		return fmt.Errorf("writing %s: %w", filePath, err)
 	}
 
+	return nil
+}
+
+// applyMiseUpdate bumps a tool version in a mise.toml-family config by editing
+// the file directly, so applying the fix never shells out to mise: `mise use`
+// refuses untrusted configs (fatal in fresh checkouts and CI), picks its own
+// write target instead of the detected manifest, and collapses multi-version
+// arrays to a scalar. Delegates to pinmise.RewriteToolVersion for a single
+// source of truth on format-preserving mise config rewrites. The filePath must
+// be under repoDir; currentVersion may be empty when unknown (array
+// declarations then fail closed rather than guess).
+func applyMiseUpdate(repoDir, filePath, tool, currentVersion, newVersion string) error {
+	root, err := os.OpenRoot(repoDir)
+	if err != nil {
+		return fmt.Errorf("opening repo root: %w", err)
+	}
+	defer root.Close()
+
+	// filePath comes from safeJoinPath and is symlink-resolved; resolve the
+	// base the same way so the relative path stays inside the root.
+	base, err := filepath.Abs(repoDir)
+	if err != nil {
+		return fmt.Errorf("resolving repo directory: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(base); err == nil {
+		base = resolved
+	}
+	relPath, err := filepath.Rel(base, filePath)
+	if err != nil {
+		return fmt.Errorf("computing relative path: %w", err)
+	}
+
+	if err := pinmise.RewriteToolVersion(root, filepath.ToSlash(relPath), tool, currentVersion, newVersion); err != nil {
+		return fmt.Errorf("updating mise config: %w", err)
+	}
 	return nil
 }
 

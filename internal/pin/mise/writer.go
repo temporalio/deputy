@@ -34,6 +34,37 @@ func rewriteMiseVersions(root *os.Root, relPath string, updates []pin.Update) er
 		}
 		want[u.Name] = u.PinnedValue
 	}
+	return rewriteToolsTable(root, relPath, want, replaceVersionInValue)
+}
+
+// RewriteToolVersion rewrites the declared version of a single tool in a
+// mise.toml-family config, for remediation: Deputy edits the exact detected
+// file in place instead of shelling out to `mise use`, which refuses untrusted
+// configs, picks its own write target, and collapses multi-version arrays to a
+// scalar. Formatting, comments, and unrelated entries are preserved. Arrays
+// are handled element-wise: the element equal to currentVersion is replaced
+// and the other pinned versions survive; a multi-version array with no
+// matching currentVersion fails closed (an error naming the tool) rather than
+// rewriting the wrong declaration. currentVersion may be empty when unknown,
+// which still rewrites scalar and single-version declarations.
+func RewriteToolVersion(root *os.Root, relPath, tool, currentVersion, newVersion string) error {
+	if err := validateMiseUpdate(pin.Update{Name: tool, PinnedValue: newVersion}); err != nil {
+		return err
+	}
+	replace := func(value, pinned string) (string, bool) {
+		return replaceVersionInValueTargeting(value, currentVersion, pinned)
+	}
+	return rewriteToolsTable(root, relPath, map[string]string{tool: newVersion}, replace)
+}
+
+// rewriteToolsTable walks a mise.toml-family config and applies replace to the
+// value of every [tools] entry (or [tools.<tool>] version key) named in want,
+// writing the file back only when something changed. It is the shared engine
+// behind pinning (rewriteMiseVersions) and remediation (RewriteToolVersion);
+// replace receives the raw value text after `=` and the pinned version, and
+// reports the new value text and whether it changed. Entries in want that no
+// replace call rewrote produce an error so callers never silently skip a tool.
+func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, replace func(value, pinned string) (string, bool)) error {
 	applied := make(map[string]bool, len(want))
 
 	rootFS := root.FS()
@@ -80,7 +111,7 @@ func rewriteMiseVersions(root *os.Root, relPath string, updates []pin.Update) er
 			if !ok {
 				continue
 			}
-			newValue, changed := replaceVersionInValue(line[eq+1:], pinned)
+			newValue, changed := replace(line[eq+1:], pinned)
 			if changed {
 				lines[i] = line[:eq+1] + newValue
 				applied[toolTable] = true
@@ -93,7 +124,7 @@ func rewriteMiseVersions(root *os.Root, relPath string, updates []pin.Update) er
 		if !ok {
 			continue
 		}
-		newValue, changed := replaceVersionInValue(line[eq+1:], pinned)
+		newValue, changed := replace(line[eq+1:], pinned)
 		if changed {
 			lines[i] = line[:eq+1] + newValue
 			applied[key] = true
@@ -158,6 +189,74 @@ func replaceVersionInValue(value, pinned string) (string, bool) {
 	}
 	newValue := m[1] + quoted + m[3]
 	return newValue, newValue != value
+}
+
+// replaceVersionInValueTargeting is replaceVersionInValue extended with
+// element-wise array handling for remediation: in a multi-version array it
+// replaces only the element equal to current, preserving the other pinned
+// versions (the pin path skips such arrays entirely). Scalars, inline tables,
+// and single-version arrays keep replaceVersionInValue semantics.
+func replaceVersionInValueTargeting(value, current, pinned string) (string, bool) {
+	valuePart, comment := splitTomlComment(value)
+	spans, ok := arrayElementSpans(valuePart)
+	if !ok {
+		return replaceVersionInValue(value, pinned)
+	}
+	quoted := `"` + pinned + `"`
+
+	// A single-version array is unambiguous: replace it like a scalar.
+	if len(spans) == 1 {
+		newValue := valuePart[:spans[0][0]] + quoted + valuePart[spans[0][1]:] + comment
+		return newValue, newValue != value
+	}
+
+	// Multiple versions: only the element matching the known current version
+	// may be replaced; anything else stays untouched so the caller fails
+	// closed instead of guessing.
+	if current == "" {
+		return value, false
+	}
+	for _, span := range spans {
+		if unquoteKey(valuePart[span[0]:span[1]]) != current {
+			continue
+		}
+		newValue := valuePart[:span[0]] + quoted + valuePart[span[1]:] + comment
+		return newValue, newValue != value
+	}
+	return value, false
+}
+
+// arrayElementSpans returns the [start, end) offsets of each element token in
+// a TOML array value (the text after `=`, with any trailing comment already
+// stripped). ok is false when the value is not an array or is malformed, in
+// which case callers should fall back to non-array handling.
+func arrayElementSpans(s string) (spans [][2]int, ok bool) {
+	i := skipTomlSpaces(s, 0)
+	if i >= len(s) || s[i] != '[' {
+		return nil, false
+	}
+	i++
+	for i < len(s) {
+		i = skipTomlSpaces(s, i)
+		if i >= len(s) {
+			break
+		}
+		switch s[i] {
+		case ']':
+			return spans, true
+		case ',':
+			i++
+		default:
+			end := tomlValueEnd(s, i)
+			if end <= i {
+				return nil, false
+			}
+			spans = append(spans, [2]int{i, end})
+			i = end
+		}
+	}
+	// Unterminated array.
+	return nil, false
 }
 
 func inlineTableVersionValue(s string) (start, end int, ok bool) {
@@ -231,7 +330,7 @@ func tomlValueEnd(s string, i int) int {
 	}
 	for j := i; j < len(s); j++ {
 		switch s[j] {
-		case ' ', '\t', ',', '}':
+		case ' ', '\t', ',', '}', ']':
 			return j
 		}
 	}

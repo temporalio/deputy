@@ -279,7 +279,7 @@ func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidat
 		step := 1
 		if summary.StdlibRecommendation != "" {
 			// The per-source steps below specify exactly where to apply this
-			// (go.mod via `go get go@X` and/or mise.toml via `mise use go@X`), so
+			// (go.mod via `go get go@X` and/or a mise.toml config edit), so
 			// we don't hardcode go.mod here; a Go runtime can be declared in
 			// mise.toml with no go.mod present.
 			fmt.Fprintf(w, "  %d. %s %s\n", step, ui.StyleBold.Render("Upgrade Go toolchain to"), ui.StyleUpgraded.Render(summary.StdlibRecommendation))

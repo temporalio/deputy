@@ -134,10 +134,10 @@ func ValidateExecutable(manager string, args []string) error {
 // are permitted to invoke. A manager that generates executable commands but has
 // no entry here produces fixes deputy can never apply, so keep this in sync
 // with recommendCommand (TestManagerExecutablesCoverGeneratedCommands enforces
-// the pairing).
+// the pairing). mise is intentionally absent: its fix is a deputy-internal
+// manifest edit (deputy:mise:update), never a mise invocation.
 var managerExecutables = map[string][]string{
 	"go":        {"go"},
-	"mise":      {"mise"},
 	"npm":       {"npm"},
 	"yarn":      {"yarn"},
 	"pnpm":      {"pnpm"},
