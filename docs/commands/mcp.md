@@ -41,8 +41,10 @@ sum to the total. Assessment tools honor the target's vulnerability
 suppressions (`.deputyignore.yaml` and friends), exactly like the CLI:
 suppressed findings are excluded from results and counted in
 `ignoredCount`. Directory tools load suppressions from the scanned path;
-container-image tools have no target directory, so they load them from the
-server process's working directory, matching a CLI image scan run there.
+container-image tools have no target directory, so they take an optional
+`ignorePath` (a directory to discover rules in, or a rules file directly) and
+default to the server process's working directory, matching a CLI image scan
+run there.
 
 ```mermaid
 flowchart LR

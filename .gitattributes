@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Generated artifacts: collapse in diffs and exclude from language stats.
+internal/proto/descriptorset/descriptorset.binpb -diff linguist-generated=true
+gen/** linguist-generated=true
