@@ -100,6 +100,10 @@ func fetchJSON(ctx context.Context, url string, headers map[string]string, v any
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
+	// crates.io rejects requests without a User-Agent (403 for Go's default),
+	// and other registries ask for one as a courtesy. Set it before the
+	// caller's headers so an explicit override still wins.
+	req.Header.Set("User-Agent", "deputy-license-scan")
 	for k, val := range headers {
 		req.Header.Set(k, val)
 	}
