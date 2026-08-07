@@ -1,12 +1,16 @@
 package remediation
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
+	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/pin"
 	"github.com/temporalio/deputy/internal/pin/githubactions"
 	pinmise "github.com/temporalio/deputy/internal/pin/mise"
@@ -55,8 +59,8 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 		return applyActionPin(repoDir, file, actionRef, sha, tag)
 
 	case "deputy:mise:update":
-		// Format: deputy:mise:update <file> <tool> <new-version> [<current-version>]
-		// The current version targets the vulnerable element when the tool
+		// Format: deputy:mise:update <file> <tool> <new-version> [<current-version>...]
+		// The current versions target the vulnerable elements when the tool
 		// declares multiple versions in an array.
 		if len(parts) < 4 {
 			return fmt.Errorf("invalid mise update command: expected at least 4 parts, got %d", len(parts))
@@ -67,11 +71,8 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 		}
 		tool := parts[2]
 		newVersion := parts[3]
-		currentVersion := ""
-		if len(parts) > 4 {
-			currentVersion = parts[4]
-		}
-		return applyMiseUpdate(repoDir, file, tool, currentVersion, newVersion)
+		currentVersions := parts[4:]
+		return applyMiseUpdate(repoDir, file, tool, currentVersions, newVersion)
 
 	case "deputy:dockerfile:update":
 		// Format: deputy:dockerfile:update <file> <image> <new-version>
@@ -328,10 +329,12 @@ func applyDockerfileUpdate(filePath, image, newVersion string) error {
 // refuses untrusted configs (fatal in fresh checkouts and CI), picks its own
 // write target instead of the detected manifest, and collapses multi-version
 // arrays to a scalar. Delegates to pinmise.RewriteToolVersion for a single
-// source of truth on format-preserving mise config rewrites. The filePath must
-// be under repoDir; currentVersion may be empty when unknown (array
-// declarations then fail closed rather than guess).
-func applyMiseUpdate(repoDir, filePath, tool, currentVersion, newVersion string) error {
+// source of truth on format-preserving mise config rewrites, then prunes any
+// stale sibling mise.lock entries so lock resolution cannot keep substituting
+// the vulnerable version the fix just removed. The filePath must be under
+// repoDir; currentVersions may be empty when unknown (array declarations then
+// fail closed rather than guess).
+func applyMiseUpdate(repoDir, filePath, tool string, currentVersions []string, newVersion string) error {
 	root, err := os.OpenRoot(repoDir)
 	if err != nil {
 		return fmt.Errorf("opening repo root: %w", err)
@@ -352,8 +355,66 @@ func applyMiseUpdate(repoDir, filePath, tool, currentVersion, newVersion string)
 		return fmt.Errorf("computing relative path: %w", err)
 	}
 
-	if err := pinmise.RewriteToolVersion(root, filepath.ToSlash(relPath), tool, currentVersion, newVersion); err != nil {
+	relPath = filepath.ToSlash(relPath)
+	if err := pinmise.RewriteToolVersion(root, relPath, tool, currentVersions, newVersion); err != nil {
 		return fmt.Errorf("updating mise config: %w", err)
+	}
+	if err := pruneStaleMiseLock(root, relPath, tool, currentVersions, newVersion); err != nil {
+		return fmt.Errorf("updating mise lockfile: %w", err)
+	}
+	return nil
+}
+
+// pruneStaleMiseLock removes lock entries for the replaced versions from the
+// config's sibling mise.lock, when one exists. Without this the fix looks
+// applied but keeps scanning vulnerable: the extractor substitutes the locked
+// version for the declared one, and lock lookup falls back to a sole stale
+// entry. The entry is removed rather than updated because its per-platform
+// checksums describe the old artifact; `mise install` re-locks the new
+// version. When no replaced versions are known, every entry not matching the
+// new version is stale by definition (the config no longer declares it).
+func pruneStaleMiseLock(root *os.Root, configRelPath, tool string, currentVersions []string, newVersion string) error {
+	lockRel := mise.LockfilePath(configRelPath)
+	if lockRel == "" {
+		return nil
+	}
+	data, err := fs.ReadFile(root.FS(), lockRel)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", lockRel, err)
+	}
+
+	keys := []string{tool}
+	if _, name := mise.SplitBackend(tool); name != "" && name != tool {
+		keys = append(keys, name)
+	}
+	stale := func(version string) bool {
+		if len(currentVersions) > 0 {
+			return slices.Contains(currentVersions, version)
+		}
+		return version != newVersion
+	}
+	pruned, changed := mise.PruneLockedVersions(data, keys, stale)
+	if !changed {
+		return nil
+	}
+
+	info, err := fs.Stat(root.FS(), lockRel)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", lockRel, err)
+	}
+	f, err := root.OpenFile(lockRel, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return fmt.Errorf("writing %s: %w", lockRel, err)
+	}
+	_, writeErr := f.Write(pruned)
+	if closeErr := f.Close(); writeErr == nil {
+		writeErr = closeErr
+	}
+	if writeErr != nil {
+		return fmt.Errorf("writing %s: %w", lockRel, writeErr)
 	}
 	return nil
 }

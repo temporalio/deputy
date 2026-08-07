@@ -3,7 +3,12 @@ package remediation
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/fstest"
+
+	"github.com/google/osv-scalibr/extractor/filesystem"
+	"github.com/temporalio/deputy/internal/inventory/plugins/mise/misex"
 )
 
 func TestIsDeputyInternalCommand(t *testing.T) {
@@ -585,6 +590,88 @@ COPY app /app
 	}
 }
 
+// TestApplyMiseUpdatePrunesStaleLock pins the lockfile half of the mise fix:
+// after the config edit, a sibling mise.lock entry still pinning the old
+// version must be removed, otherwise the extractor substitutes the locked
+// version (falling back to the sole stale entry) and the applied fix keeps
+// scanning as vulnerable. Unrelated lock entries survive untouched.
+func TestApplyMiseUpdatePrunesStaleLock(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	writeFile := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(tmpDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("mise.toml", `[tools]
+go = "1.22.12"
+node = "20.11.0"
+`)
+	writeFile("mise.lock", `[[tools.go]]
+version = "1.22.12"
+backend = "core:go"
+
+[tools.go.platforms.linux-x64]
+checksum = "sha256:oldgo"
+size = 123
+
+[[tools.node]]
+version = "20.11.0"
+backend = "core:node"
+
+[tools.node.platforms.linux-x64]
+checksum = "sha256:node"
+`)
+
+	if err := ApplyDeputyCommand(tmpDir, "deputy:mise:update mise.toml go 1.24.3 1.22.12"); err != nil {
+		t.Fatalf("ApplyDeputyCommand: %v", err)
+	}
+
+	lock, err := os.ReadFile(filepath.Join(tmpDir, "mise.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(lock), "1.22.12") || strings.Contains(string(lock), "sha256:oldgo") {
+		t.Errorf("stale go lock entry survived:\n%s", lock)
+	}
+	if !strings.Contains(string(lock), "20.11.0") || !strings.Contains(string(lock), "sha256:node") {
+		t.Errorf("unrelated node lock entry was damaged:\n%s", lock)
+	}
+
+	// The real proof: the extractor must no longer report the old version.
+	fsys := fstest.MapFS{}
+	for _, name := range []string{"mise.toml", "mise.lock"} {
+		data, err := os.ReadFile(filepath.Join(tmpDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fsys[name] = &fstest.MapFile{Data: data}
+	}
+	f, err := fsys.Open("mise.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, err := misex.New().Extract(t.Context(), &filesystem.ScanInput{
+		Path:   "mise.toml",
+		Reader: f,
+		FS:     fsys,
+	})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	var goVersion string
+	for _, pkg := range inv.Packages {
+		if pkg.Name == "go" {
+			goVersion = pkg.Version
+		}
+	}
+	if goVersion != "1.24.3" {
+		t.Errorf("extractor reports go %q after fix, want 1.24.3", goVersion)
+	}
+}
+
 func TestApplyDeputyCommand(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -727,6 +814,87 @@ go = "1.22.12"
 			want: map[string]string{
 				"tool config/mise.toml": `[tools]
 go = "1.24.3"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			// Multiline arrays are a first-class layout for multi-version
+			// pins; the vulnerable element is replaced in place.
+			name: "mise update multiline array element",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = [
+  "1.22.12",
+  "1.23.8",
+]
+node = "20.11.1"
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = [
+  "1.24.3",
+  "1.23.8",
+]
+node = "20.11.1"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			// The corruption regression: an unmatched multiline array must
+			// fail closed with the file byte-identical, never a half-replaced
+			// bracket.
+			name: "mise update multiline array unmatched fails byte-identical",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.21.0",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = [
+  "1.22.12",
+  "1.23.8",
+]
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = [
+  "1.22.12",
+  "1.23.8",
+]
+`,
+			},
+			wantErr: true,
+		},
+		{
+			// Several vulnerable versions in one array: the command carries
+			// every current and each matching element is replaced.
+			name: "mise update replaces every vulnerable array element",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12 1.23.8",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.22.12", "1.23.8", "1.24.0"]
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.24.3", "1.24.3", "1.24.0"]
+`,
+			},
+			wantErr: false,
+		},
+		{
+			// mise's parser accepts root-level dotted keys; the rewriter must
+			// handle what inventory can emit a fix for.
+			name: "mise update root dotted key",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				"mise.toml": `tools.go = "1.22.12"
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `tools.go = "1.24.3"
 `,
 			},
 			wantErr: false,

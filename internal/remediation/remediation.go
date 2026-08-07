@@ -64,8 +64,13 @@ type Command struct {
 // packageUpgrade represents a suggested dependency update to resolve a vulnerability.
 // It contains details about the package, the current version, and the target version.
 type packageUpgrade struct {
-	Name        string
-	Current     string
+	Name    string
+	Current string
+	// Currents lists every distinct installed version the merged findings
+	// reported for this package (Current is the first seen). Fixes that edit
+	// a manifest in place use them to target each vulnerable declaration,
+	// e.g. the elements of a mise multi-version array.
+	Currents    []string
 	Recommended string
 	IsDirect    bool
 	Ecosystem   string
@@ -85,13 +90,7 @@ func CommandsFromConsolidated(cons []vulnerability.Consolidated) ([]Command, str
 	upgrades, stdlib, stdlibRefs, stdlibVulnIDs, stdlibCurrents := buildUpgradeRecommendations(cons)
 	cmds := dedupeCommands(upgrades)
 	if stdlib != "" {
-		// Only an unambiguous current version can safely target a declaration
-		// (mixed currents would steer the mise edit at the wrong element).
-		stdlibCurrent := ""
-		if len(stdlibCurrents) == 1 {
-			stdlibCurrent = stdlibCurrents[0]
-		}
-		cmds = append(cmds, stdlibCommands(stdlib, stdlibCurrent, stdlibRefs, stdlibVulnIDs)...)
+		cmds = append(cmds, stdlibCommands(stdlib, stdlibCurrents, stdlibRefs, stdlibVulnIDs)...)
 	}
 	slices.SortFunc(cmds, func(a, b Command) int {
 		if n := cmp.Compare(a.managerRank, b.managerRank); n != 0 {
@@ -151,6 +150,7 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 			pkgBest[v.Package] = &packageUpgrade{
 				Name:         v.Package,
 				Current:      v.Version,
+				Currents:     currentVersionsOf(v.Version),
 				Recommended:  best,
 				IsDirect:     v.IsDirect,
 				Ecosystem:    v.Ecosystem,
@@ -175,6 +175,7 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 			// Merge references
 			existing.References = mergeManifestRefs(existing.References, v.ManifestRefs)
 			existing.Locations = mergeStrings(existing.Locations, v.Locations)
+			existing.Currents = mergeStrings(existing.Currents, currentVersionsOf(v.Version))
 			if existing.PURL == "" {
 				existing.PURL = v.PURL
 			}
@@ -278,6 +279,15 @@ func mergeManifestRefs(a, b []dependencyv1.ManifestRef) []dependencyv1.ManifestR
 }
 
 // mergeStrings combines two slices of strings, deduplicating.
+// currentVersionsOf wraps one finding's installed version as a Currents
+// slice, dropping blanks so merges never accumulate empty entries.
+func currentVersionsOf(version string) []string {
+	if v := strings.TrimSpace(version); v != "" {
+		return []string{v}
+	}
+	return nil
+}
+
 func mergeStrings(a, b []string) []string {
 	seen := collections.NewSet[string]()
 	result := make([]string, 0, len(a)+len(b))
@@ -318,7 +328,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 			if u.Migration {
 				rec = migrationCommand(u.TargetModule, u.Recommended, u.IsDirect)
 			} else {
-				rec = recommendCommand(ref.Manager, ref.Path, u.Name, u.Current, u.Recommended, dependency.ManifestRefGroups(ref), dependency.ManifestRefComponentKey(ref))
+				rec = recommendCommand(ref.Manager, ref.Path, u.Name, u.Currents, u.Recommended, dependency.ManifestRefGroups(ref), dependency.ManifestRefComponentKey(ref))
 			}
 			if rec.command == "" {
 				continue
@@ -472,11 +482,10 @@ func buildGoToolchainCommand(version string) (Command, bool) {
 // finding bumps the go directive (`go get go@X`), while a mise/asdf-sourced one
 // bumps the tool in that config (a deputy:mise:update edit for mise). When both
 // declare it, both commands are emitted. With no attributable source, it falls
-// back to the go.mod command to preserve prior behavior. currentVersion is the
-// vulnerable Go version when it is unambiguous across the findings ("" when
-// unknown or mixed); the mise edit uses it to target the right element of a
-// multi-version declaration.
-func stdlibCommands(version, currentVersion string, refs []dependencyv1.ManifestRef, vulnIDs []string) []Command {
+// back to the go.mod command to preserve prior behavior. currentVersions are
+// the vulnerable Go versions across the findings; the mise edit uses them to
+// target the matching elements of a multi-version declaration.
+func stdlibCommands(version string, currentVersions []string, refs []dependencyv1.ManifestRef, vulnIDs []string) []Command {
 	var cmds []Command
 	seen := collections.NewSet[string]()
 	sawManaged := false
@@ -494,7 +503,7 @@ func stdlibCommands(version, currentVersion string, refs []dependencyv1.Manifest
 		switch strings.ToLower(strings.TrimSpace(ref.Manager)) {
 		case "mise", "asdf":
 			sawManaged = true
-			rec := recommendCommand(ref.Manager, ref.Path, "stdlib", currentVersion, version, nil, dependency.ManifestRefComponentKey(ref))
+			rec := recommendCommand(ref.Manager, ref.Path, "stdlib", currentVersions, version, nil, dependency.ManifestRefComponentKey(ref))
 			if rec.command == "" {
 				continue
 			}
@@ -623,18 +632,25 @@ func quoteCommandArg(s string) string {
 // version in a mise config. Deputy edits the detected file in place instead of
 // shelling out to `mise use`, which refuses untrusted configs (fatal in fresh
 // checkouts and CI), picks its own write target rather than the detected
-// manifest, and collapses multi-version arrays to a scalar. currentVersion
-// targets the vulnerable element in array declarations and is appended only
-// when known.
-func miseUpdateCommand(manifestPath, tool, currentVersion, version string) commandResult {
+// manifest, and collapses multi-version arrays to a scalar. currentVersions
+// target the vulnerable elements in array declarations; they are appended
+// sorted and deduplicated so the command string is deterministic.
+func miseUpdateCommand(manifestPath, tool string, currentVersions []string, version string) commandResult {
 	parts := []string{
 		"deputy:mise:update",
 		quoteCommandArg(manifestPath),
 		quoteCommandArg(tool),
 		quoteCommandArg(version),
 	}
-	if strings.TrimSpace(currentVersion) != "" {
-		parts = append(parts, quoteCommandArg(currentVersion))
+	currents := make([]string, 0, len(currentVersions))
+	for _, cur := range currentVersions {
+		if cur = strings.TrimSpace(cur); cur != "" {
+			currents = append(currents, cur)
+		}
+	}
+	slices.Sort(currents)
+	for _, cur := range slices.Compact(currents) {
+		parts = append(parts, quoteCommandArg(cur))
 	}
 	return commandResult{
 		command:    strings.Join(parts, " "),
@@ -659,11 +675,11 @@ func miseToolName(componentKey, pkg, runtimeName string) string {
 // manifest: executable command text and args when the manager supports a safe
 // direct invocation, or manual guidance text with a hint otherwise. The
 // componentKey targets the manifest's own name for a dependency when it
-// differs from the reported package (e.g. mise tool keys). currentVersion is
-// the installed version being fixed; managers whose fix edits the manifest in
-// place (mise) use it to target the vulnerable declaration and it may be empty
-// when unknown.
-func recommendCommand(manager, manifestPath, pkg, currentVersion, version string, groups []string, componentKey string) commandResult {
+// differs from the reported package (e.g. mise tool keys). currentVersions
+// are the installed versions being fixed; managers whose fix edits the
+// manifest in place (mise) use them to target the vulnerable declarations and
+// they may be empty when unknown.
+func recommendCommand(manager, manifestPath, pkg string, currentVersions []string, version string, groups []string, componentKey string) commandResult {
 	m := strings.ToLower(manager)
 
 	// Handle JS package managers with a unified approach
@@ -723,7 +739,7 @@ func recommendCommand(manager, manifestPath, pkg, currentVersion, version string
 				executable: false,
 			}
 		}
-		return miseUpdateCommand(manifestPath, tool, currentVersion, version)
+		return miseUpdateCommand(manifestPath, tool, currentVersions, version)
 	case "asdf":
 		tool := miseToolName(componentKey, pkg, "golang")
 		// asdf has no single "set version + install" verb that edits

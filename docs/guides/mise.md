@@ -160,9 +160,18 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
   like `go = ["1.22.12", "1.23.8"]` to a scalar. The direct edit preserves
   formatting and comments, targets the exact detected file (`mise.toml`,
   `.mise.toml`, `mise.<env>.toml`, `.config/mise/config.toml`, `conf.d`
-  drop-ins), and replaces only the vulnerable array element; an ambiguous
-  multi-version declaration fails with an error instead of guessing. After
-  applying, run `mise install` to install the updated tool.
+  drop-ins), and replaces only the vulnerable array elements, single-line or
+  multiline, carrying every vulnerable version so one command can fix several
+  pins in one array; a multi-version declaration with no matching version
+  fails with an error instead of guessing. All declaration forms mise accepts
+  are handled: `[tools]` entries, `[tools.<name>]` tables, dotted keys
+  (`tools.go = "..."`), inline tables, and arrays of inline tables (tool
+  options survive).
+- A sibling `mise.lock` is kept honest: entries pinning the replaced versions
+  are removed (their checksums describe the old artifact, so updating them in
+  place would lie), which stops scans from re-reporting the old locked
+  version. After applying, run `mise install` to install the updated tool and
+  re-lock it.
 
 ## Hardening
 

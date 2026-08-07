@@ -138,7 +138,7 @@ func TestRecommendCommand_MiseInternal(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			rec := recommendCommand("mise", tt.manifestPath, "stdlib", "1.22.0", "1.24.5", nil, "go")
+			rec := recommendCommand("mise", tt.manifestPath, "stdlib", []string{"1.22.0"}, "1.24.5", nil, "go")
 			if !rec.executable {
 				t.Fatalf("expected mise recommendation to be executable, got %#v", rec)
 			}
@@ -182,7 +182,7 @@ func TestRecommendCommand_MiseInternal(t *testing.T) {
 func TestRecommendCommand_MiseWithoutManifestPath(t *testing.T) {
 	t.Parallel()
 
-	rec := recommendCommand("mise", "", "stdlib", "1.22.0", "1.24.5", nil, "go")
+	rec := recommendCommand("mise", "", "stdlib", []string{"1.22.0"}, "1.24.5", nil, "go")
 	if rec.executable {
 		t.Fatalf("expected non-executable guidance, got %#v", rec)
 	}
@@ -242,7 +242,7 @@ func TestManagerExecutablesCoverGeneratedCommands(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.manager, func(t *testing.T) {
 			t.Parallel()
-			rec := recommendCommand(tt.manager, tt.manifestPath, "example", "1.0.0", "1.2.3", nil, "")
+			rec := recommendCommand(tt.manager, tt.manifestPath, "example", []string{"1.0.0"}, "1.2.3", nil, "")
 			if !rec.executable || IsDeputyInternalCommand(rec.command) {
 				return
 			}

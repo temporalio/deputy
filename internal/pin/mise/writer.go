@@ -42,17 +42,18 @@ func rewriteMiseVersions(root *os.Root, relPath string, updates []pin.Update) er
 // file in place instead of shelling out to `mise use`, which refuses untrusted
 // configs, picks its own write target, and collapses multi-version arrays to a
 // scalar. Formatting, comments, and unrelated entries are preserved. Arrays
-// are handled element-wise: the element equal to currentVersion is replaced
-// and the other pinned versions survive; a multi-version array with no
-// matching currentVersion fails closed (an error naming the tool) rather than
-// rewriting the wrong declaration. currentVersion may be empty when unknown,
-// which still rewrites scalar and single-version declarations.
-func RewriteToolVersion(root *os.Root, relPath, tool, currentVersion, newVersion string) error {
+// (single-line or multiline) are handled element-wise: every element equal to
+// one of currentVersions is replaced and the other pinned versions survive; a
+// multi-version array with no matching current version fails closed (an error
+// naming the tool) rather than rewriting the wrong declaration.
+// currentVersions may be empty when unknown, which still rewrites scalar and
+// single-version declarations.
+func RewriteToolVersion(root *os.Root, relPath, tool string, currentVersions []string, newVersion string) error {
 	if err := validateMiseUpdate(pin.Update{Name: tool, PinnedValue: newVersion}); err != nil {
 		return err
 	}
 	replace := func(value, pinned string) (string, bool) {
-		return replaceVersionInValueTargeting(value, currentVersion, pinned)
+		return replaceVersionInValueTargeting(value, currentVersions, pinned)
 	}
 	return rewriteToolsTable(root, relPath, map[string]string{tool: newVersion}, replace)
 }
@@ -78,15 +79,20 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 	}
 
 	lines := strings.Split(string(content), "\n")
+	inRoot := true
 	inTools := false
 	toolTable := ""
 	modified := false
 
-	for i, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 		if header, ok := tomlHeader(trimmed); ok {
 			// Track whether we're inside the [tools] table, or in a
-			// [tools.<tool>] table where the version is a child key.
+			// [tools.<tool>] table where the version is a child key. Root
+			// context ends at the first table header (TOML places all
+			// root-level keys before it).
+			inRoot = false
 			inTools = header == "tools"
 			toolTable = ""
 			if key, ok := toolsSubtableKey(header); ok {
@@ -94,42 +100,93 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 			}
 			continue
 		}
-		if (!inTools && toolTable == "") || trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		if (!inRoot && !inTools && toolTable == "") || trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 		eq := strings.IndexByte(line, '=')
 		if eq < 0 {
 			continue
 		}
-		key := unquoteKey(strings.TrimSpace(line[:eq]))
+		segs := mise.SplitKeyPath(strings.TrimSpace(line[:eq]))
+		if len(segs) == 0 {
+			continue
+		}
 
-		if toolTable != "" {
-			if key != "version" {
-				continue
+		// Resolve which tool this key declares a version for, covering every
+		// form mise's parser accepts: [tools] entries and their dotted
+		// `<tool>.version` variant, `version` inside a [tools.<tool>] table,
+		// root-level dotted keys (`tools.<tool>` / `tools.<tool>.version`),
+		// and the root inline table (`tools = { ... }`).
+		toolKey := ""
+		inlineTools := false
+		switch {
+		case toolTable != "":
+			if len(segs) == 1 && segs[0] == "version" {
+				toolKey = toolTable
 			}
-			pinned, ok := want[toolTable]
-			if !ok {
-				continue
+		case inTools:
+			switch {
+			case len(segs) == 1:
+				toolKey = segs[0]
+			case len(segs) == 2 && segs[1] == "version":
+				toolKey = segs[0]
 			}
-			newValue, changed := replace(line[eq+1:], pinned)
-			if changed {
+		default: // root context
+			switch {
+			case len(segs) == 1 && segs[0] == "tools":
+				inlineTools = true
+			case len(segs) == 2 && segs[0] == "tools":
+				toolKey = segs[1]
+			case len(segs) == 3 && segs[0] == "tools" && segs[2] == "version":
+				toolKey = segs[1]
+			}
+		}
+
+		if inlineTools {
+			value := line[eq+1:]
+			newValue := value
+			for name, pinned := range want {
+				if nv, changed := replaceInlineToolValue(newValue, name, pinned, replace); changed {
+					newValue = nv
+					applied[name] = true
+				}
+			}
+			if newValue != value {
 				lines[i] = line[:eq+1] + newValue
-				applied[toolTable] = true
 				modified = true
 			}
 			continue
 		}
 
-		pinned, ok := want[key]
-		if !ok {
-			continue
+		// Gather the full logical value: a TOML array may span multiple
+		// lines, and treating only the first line as the value corrupts the
+		// file (a bare `[` looks like a scalar to the fallback path).
+		value := line[eq+1:]
+		end := i
+		for !tomlBracketsBalanced(value) && end+1 < len(lines) {
+			end++
+			value += "\n" + lines[end]
 		}
-		newValue, changed := replace(line[eq+1:], pinned)
-		if changed {
-			lines[i] = line[:eq+1] + newValue
-			applied[key] = true
-			modified = true
+		if !tomlBracketsBalanced(value) {
+			// Unterminated array: malformed TOML, leave the file untouched.
+			break
 		}
+
+		pinned, ok := want[toolKey]
+		if toolKey != "" && ok {
+			newValue, changed := replace(value, pinned)
+			if changed {
+				// The replacement only rewrites version tokens, so the line
+				// count is preserved; splice the new lines back in place.
+				repl := strings.Split(line[:eq+1]+newValue, "\n")
+				if len(repl) == end-i+1 {
+					copy(lines[i:end+1], repl)
+					applied[toolKey] = true
+					modified = true
+				}
+			}
+		}
+		i = end
 	}
 
 	if err := unappliedUpdatesError(relPath, want, applied); err != nil {
@@ -182,6 +239,13 @@ func replaceVersionInValue(value, pinned string) (string, bool) {
 		return newValue, newValue != value
 	}
 
+	// An array we could not rewrite as a single version (multi-version or
+	// exotic layout): never fall through to the scalar path, which would
+	// replace the opening bracket and corrupt the file.
+	if valuePart, _ := splitTomlComment(value); strings.HasPrefix(strings.TrimSpace(valuePart), "[") {
+		return value, false
+	}
+
 	// Scalar value (possibly with trailing comment).
 	m := scalarValueRe.FindStringSubmatch(value)
 	if m == nil {
@@ -193,43 +257,69 @@ func replaceVersionInValue(value, pinned string) (string, bool) {
 
 // replaceVersionInValueTargeting is replaceVersionInValue extended with
 // element-wise array handling for remediation: in a multi-version array it
-// replaces only the element equal to current, preserving the other pinned
-// versions (the pin path skips such arrays entirely). Scalars, inline tables,
-// and single-version arrays keep replaceVersionInValue semantics.
-func replaceVersionInValueTargeting(value, current, pinned string) (string, bool) {
-	valuePart, comment := splitTomlComment(value)
-	spans, ok := arrayElementSpans(valuePart)
+// replaces every element equal to one of the current (vulnerable) versions,
+// preserving the other pinned versions (the pin path skips such arrays
+// entirely). Scalars, inline tables, and single-version arrays keep
+// replaceVersionInValue semantics. The value may span multiple lines; only
+// version tokens are rewritten, so line structure and comments survive.
+func replaceVersionInValueTargeting(value string, currents []string, pinned string) (string, bool) {
+	spans, ok := arrayElementSpans(value)
 	if !ok {
 		return replaceVersionInValue(value, pinned)
 	}
 	quoted := `"` + pinned + `"`
 
 	// A single-version array is unambiguous: replace it like a scalar.
-	if len(spans) == 1 {
-		newValue := valuePart[:spans[0][0]] + quoted + valuePart[spans[0][1]:] + comment
-		return newValue, newValue != value
-	}
-
-	// Multiple versions: only the element matching the known current version
-	// may be replaced; anything else stays untouched so the caller fails
+	// Multiple versions: replace exactly the elements matching a known
+	// vulnerable version; with no match nothing changes so the caller fails
 	// closed instead of guessing.
-	if current == "" {
+	targets := spans
+	if len(spans) > 1 {
+		targets = targets[:0:0]
+		for _, span := range spans {
+			if slices.Contains(currents, unquoteKey(value[span[0]:span[1]])) {
+				targets = append(targets, span)
+			}
+		}
+	}
+	if len(targets) == 0 {
 		return value, false
 	}
-	for _, span := range spans {
-		if unquoteKey(valuePart[span[0]:span[1]]) != current {
-			continue
+
+	var b strings.Builder
+	b.Grow(len(value) + len(targets)*(len(quoted)+2))
+	last := 0
+	replaced := false
+	for _, span := range targets {
+		elem := value[span[0]:span[1]]
+		repl := quoted
+		if strings.HasPrefix(elem, "{") {
+			// An inline-table element ({ version = "...", ... }): replace only
+			// its version field so tool options survive; when that fails the
+			// element stays untouched and the caller fails closed.
+			nv, changed := replaceVersionInValue(elem, pinned)
+			if !changed {
+				continue
+			}
+			repl = nv
 		}
-		newValue := valuePart[:span[0]] + quoted + valuePart[span[1]:] + comment
-		return newValue, newValue != value
+		b.WriteString(value[last:span[0]])
+		b.WriteString(repl)
+		last = span[1]
+		replaced = true
 	}
-	return value, false
+	if !replaced {
+		return value, false
+	}
+	b.WriteString(value[last:])
+	newValue := b.String()
+	return newValue, newValue != value
 }
 
 // arrayElementSpans returns the [start, end) offsets of each element token in
-// a TOML array value (the text after `=`, with any trailing comment already
-// stripped). ok is false when the value is not an array or is malformed, in
-// which case callers should fall back to non-array handling.
+// a TOML array value (the raw text after `=`, which may span multiple lines
+// and contain comments). ok is false when the value is not an array or is
+// malformed, in which case callers should fall back to non-array handling.
 func arrayElementSpans(s string) (spans [][2]int, ok bool) {
 	i := skipTomlSpaces(s, 0)
 	if i >= len(s) || s[i] != '[' {
@@ -237,17 +327,17 @@ func arrayElementSpans(s string) (spans [][2]int, ok bool) {
 	}
 	i++
 	for i < len(s) {
-		i = skipTomlSpaces(s, i)
-		if i >= len(s) {
-			break
-		}
-		switch s[i] {
-		case ']':
-			return spans, true
-		case ',':
+		switch c := s[i]; {
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',':
 			i++
+		case c == '#':
+			for i < len(s) && s[i] != '\n' {
+				i++
+			}
+		case c == ']':
+			return spans, true
 		default:
-			end := tomlValueEnd(s, i)
+			end := tomlValueSpan(s, i)
 			if end <= i {
 				return nil, false
 			}
@@ -257,6 +347,148 @@ func arrayElementSpans(s string) (spans [][2]int, ok bool) {
 	}
 	// Unterminated array.
 	return nil, false
+}
+
+// tomlBracketsBalanced reports whether every square bracket opened in a TOML
+// value has been closed, ignoring brackets inside strings and comments. The
+// walker uses it to gather the continuation lines of a multiline array into
+// one logical value.
+func tomlBracketsBalanced(s string) bool {
+	depth := 0
+	inSingle, inDouble, escaped := false, false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case escaped:
+			escaped = false
+		case inDouble && c == '\\':
+			escaped = true
+		case !inDouble && c == '\'':
+			inSingle = !inSingle
+		case !inSingle && c == '"':
+			inDouble = !inDouble
+		case inSingle || inDouble:
+		case c == '#':
+			for i < len(s) && s[i] != '\n' {
+				i++
+			}
+		case c == '[':
+			depth++
+		case c == ']':
+			depth--
+		}
+	}
+	return depth <= 0
+}
+
+// replaceInlineToolValue rewrites the value of one tool key inside a root
+// `tools = { ... }` inline table, a form mise's parser accepts. It locates
+// the key (bare or quoted) at the table's top level and applies replace to
+// its value token; nested values it does not understand are skipped, leaving
+// the caller to fail closed.
+func replaceInlineToolValue(s, tool, pinned string, replace func(value, pinned string) (string, bool)) (string, bool) {
+	depth := 0
+	i := 0
+	for i < len(s) {
+		switch c := s[i]; {
+		case c == ' ' || c == '\t' || c == ',':
+			i++
+		case c == '{':
+			depth++
+			i++
+		case c == '}':
+			depth--
+			i++
+		case c == '#':
+			return s, false
+		default:
+			// A token: either a key (followed by `=`) or a bare value.
+			var name string
+			end := i
+			if c == '"' || c == '\'' {
+				end = tomlValueEnd(s, i)
+				if end <= i+1 || s[end-1] != c {
+					return s, false
+				}
+				name = s[i+1 : end-1]
+			} else {
+				for end < len(s) && isTomlKeyPathChar(s[end]) {
+					end++
+				}
+				name = s[i:end]
+			}
+			if end == i {
+				// Not a key-like token; skip a whole value.
+				if end = tomlValueSpan(s, i); end <= i {
+					return s, false
+				}
+				i = end
+				continue
+			}
+			j := skipTomlSpaces(s, end)
+			if j >= len(s) || s[j] != '=' {
+				// A bare value token (e.g. an array element); move past it.
+				i = end
+				continue
+			}
+			vstart := skipTomlSpaces(s, j+1)
+			vend := tomlValueSpan(s, vstart)
+			if vend <= vstart {
+				return s, false
+			}
+			if depth == 1 && name == tool {
+				newSub, changed := replace(s[vstart:vend], pinned)
+				if !changed {
+					return s, false
+				}
+				return s[:vstart] + newSub + s[vend:], true
+			}
+			i = vend
+		}
+	}
+	return s, false
+}
+
+// tomlValueSpan returns the end offset of the TOML value starting at i,
+// spanning quoted strings, whole arrays, and whole inline tables (so nested
+// structures are consumed as one token). Bare values end at the same
+// delimiters as tomlValueEnd.
+func tomlValueSpan(s string, i int) int {
+	if i >= len(s) {
+		return i
+	}
+	open := s[i]
+	if open != '[' && open != '{' {
+		return tomlValueEnd(s, i)
+	}
+	closing := byte(']')
+	if open == '{' {
+		closing = '}'
+	}
+	depth := 0
+	inSingle, inDouble, escaped := false, false, false
+	for j := i; j < len(s); j++ {
+		c := s[j]
+		switch {
+		case escaped:
+			escaped = false
+		case inDouble && c == '\\':
+			escaped = true
+		case !inDouble && c == '\'':
+			inSingle = !inSingle
+		case !inSingle && c == '"':
+			inDouble = !inDouble
+		case inSingle || inDouble:
+		case c == open:
+			depth++
+		case c == closing:
+			depth--
+			if depth == 0 {
+				return j + 1
+			}
+		}
+	}
+	return len(s)
 }
 
 func inlineTableVersionValue(s string) (start, end int, ok bool) {
@@ -330,7 +562,7 @@ func tomlValueEnd(s string, i int) int {
 	}
 	for j := i; j < len(s); j++ {
 		switch s[j] {
-		case ' ', '\t', ',', '}', ']':
+		case ' ', '\t', '\n', '\r', ',', '}', ']':
 			return j
 		}
 	}

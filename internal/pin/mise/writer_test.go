@@ -194,20 +194,20 @@ func TestReplaceVersionInValue(t *testing.T) {
 
 func TestRewriteToolVersion(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		tool    string
-		current string
-		version string
-		want    string
-		wantErr bool
+		name     string
+		input    string
+		tool     string
+		currents []string
+		version  string
+		want     string
+		wantErr  bool
 	}{
 		{
 			name: "scalar with comment",
 			input: `[tools]
 go = "1.22.12" # toolchain
 `,
-			tool: "go", current: "1.22.12", version: "1.24.3",
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
 			want: `[tools]
 go = "1.24.3" # toolchain
 `,
@@ -219,7 +219,7 @@ go = "1.24.3" # toolchain
 			input: `[tools]
 go = ["1.22.12", "1.23.8"]
 `,
-			tool: "go", current: "1.22.12", version: "1.24.3",
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
 			want: `[tools]
 go = ["1.24.3", "1.23.8"]
 `,
@@ -229,9 +229,21 @@ go = ["1.24.3", "1.23.8"]
 			input: `[tools]
 go = ["1.22.12", "1.23.8"] # test matrix
 `,
-			tool: "go", current: "1.23.8", version: "1.24.3",
+			tool: "go", currents: []string{"1.23.8"}, version: "1.24.3",
 			want: `[tools]
 go = ["1.22.12", "1.24.3"] # test matrix
+`,
+		},
+		{
+			// Every element matching any vulnerable version is replaced, so
+			// one command can honestly cover several vulnerable pins.
+			name: "multiple vulnerable elements all replaced",
+			input: `[tools]
+go = ["1.22.12", "1.23.8", "1.24.0"]
+`,
+			tool: "go", currents: []string{"1.22.12", "1.23.8"}, version: "1.24.3",
+			want: `[tools]
+go = ["1.24.3", "1.24.3", "1.24.0"]
 `,
 		},
 		{
@@ -239,7 +251,7 @@ go = ["1.22.12", "1.24.3"] # test matrix
 			input: `[tools]
 node = [20, 22]
 `,
-			tool: "node", current: "20", version: "20.11.1",
+			tool: "node", currents: []string{"20"}, version: "20.11.1",
 			want: `[tools]
 node = ["20.11.1", 22]
 `,
@@ -249,7 +261,7 @@ node = ["20.11.1", 22]
 			input: `[tools]
 go = ["1.22.12", "1.23.8"]
 `,
-			tool: "go", current: "", version: "1.24.3",
+			tool: "go", currents: nil, version: "1.24.3",
 			want: `[tools]
 go = ["1.22.12", "1.23.8"]
 `,
@@ -260,7 +272,7 @@ go = ["1.22.12", "1.23.8"]
 			input: `[tools]
 go = ["1.22.12", "1.23.8"]
 `,
-			tool: "go", current: "1.21.0", version: "1.24.3",
+			tool: "go", currents: []string{"1.21.0"}, version: "1.24.3",
 			want: `[tools]
 go = ["1.22.12", "1.23.8"]
 `,
@@ -271,19 +283,125 @@ go = ["1.22.12", "1.23.8"]
 			input: `[tools]
 go = ["1.22.12"]
 `,
-			tool: "go", current: "", version: "1.24.3",
+			tool: "go", currents: nil, version: "1.24.3",
 			want: `[tools]
 go = ["1.24.3"]
 `,
+		},
+		{
+			// Multiline arrays are first-class: the vulnerable element is
+			// replaced in place, preserving line structure and comments.
+			name: "multiline array element-wise",
+			input: `[tools]
+go = [
+  "1.22.12", # vulnerable
+  "1.23.8",
+]
+node = "20.11.1"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = [
+  "1.24.3", # vulnerable
+  "1.23.8",
+]
+node = "20.11.1"
+`,
+		},
+		{
+			// The corruption regression: a multiline array whose elements
+			// match nothing must leave the file byte-identical, never rewrite
+			// the opening bracket as a scalar.
+			name: "multiline array unmatched current fails closed",
+			input: `[tools]
+go = [
+  "1.22.12",
+  "1.23.8",
+]
+node = "20.11.1"
+`,
+			tool: "go", currents: []string{"1.21.0"}, version: "1.24.3",
+			want: `[tools]
+go = [
+  "1.22.12",
+  "1.23.8",
+]
+node = "20.11.1"
+`,
+			wantErr: true,
 		},
 		{
 			name: "tools subtable version key",
 			input: `[tools.go]
 version = "1.22.12"
 `,
-			tool: "go", current: "1.22.12", version: "1.24.3",
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
 			want: `[tools.go]
 version = "1.24.3"
+`,
+		},
+		{
+			// Forms mise's parser accepts beyond the [tools] table: root-level
+			// dotted keys, dotted version keys, and the root inline table.
+			name: "root dotted key",
+			input: `tools.go = "1.22.12"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `tools.go = "1.24.3"
+`,
+		},
+		{
+			name: "root dotted quoted key",
+			input: `tools."npm:lodash" = "4.17.20"
+`,
+			tool: "npm:lodash", currents: []string{"4.17.20"}, version: "4.17.21",
+			want: `tools."npm:lodash" = "4.17.21"
+`,
+		},
+		{
+			name: "root dotted version key",
+			input: `tools.go.version = "1.22.12"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `tools.go.version = "1.24.3"
+`,
+		},
+		{
+			name: "dotted version key inside tools table",
+			input: `[tools]
+go.version = "1.22.12"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go.version = "1.24.3"
+`,
+		},
+		{
+			name: "root inline tools table",
+			input: `tools = { go = "1.22.12", node = "20.11.1" }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `tools = { go = "1.24.3", node = "20.11.1" }
+`,
+		},
+		{
+			name: "root inline tools table quoted key",
+			input: `tools = { "npm:lodash" = "4.17.20" }
+`,
+			tool: "npm:lodash", currents: []string{"4.17.20"}, version: "4.17.21",
+			want: `tools = { "npm:lodash" = "4.17.21" }
+`,
+		},
+		{
+			// Array of inline tables (another form mise's parser accepts):
+			// replace the version field, preserve tool options.
+			name: "single-element array of inline tables",
+			input: `[tools]
+go = [{ version = "1.22.12", postinstall = "go version" }]
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = [{ version = "1.24.3", postinstall = "go version" }]
 `,
 		},
 		{
@@ -291,7 +409,7 @@ version = "1.24.3"
 			input: `[tools]
 node = "20.11.1"
 `,
-			tool: "go", current: "1.22.12", version: "1.24.3",
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
 			want: `[tools]
 node = "20.11.1"
 `,
@@ -302,7 +420,7 @@ node = "20.11.1"
 			input: `[tools]
 go = "1.22.12"
 `,
-			tool: "go", current: "1.22.12", version: "latest",
+			tool: "go", currents: []string{"1.22.12"}, version: "latest",
 			want: `[tools]
 go = "1.22.12"
 `,
@@ -322,7 +440,7 @@ go = "1.22.12"
 			}
 			defer root.Close()
 
-			err = RewriteToolVersion(root, "mise.toml", tt.tool, tt.current, tt.version)
+			err = RewriteToolVersion(root, "mise.toml", tt.tool, tt.currents, tt.version)
 			if tt.wantErr && err == nil {
 				t.Fatal("expected rewrite error")
 			}

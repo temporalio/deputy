@@ -439,11 +439,11 @@ func TestCommandsFromConsolidatedStdlibMiseOnly(t *testing.T) {
 	}
 }
 
-func TestCommandsFromConsolidatedStdlibAmbiguousCurrent(t *testing.T) {
-	// Two stdlib findings with different current Go versions: the mise edit
-	// cannot know which declaration to target, so the generated command must
-	// omit the current version (the apply path then fails closed on
-	// multi-version arrays instead of rewriting the wrong element).
+func TestCommandsFromConsolidatedStdlibMultipleCurrents(t *testing.T) {
+	// Two stdlib findings with different current Go versions (e.g. a
+	// multi-version array where both pins are vulnerable): the single mise
+	// edit must carry every vulnerable version, sorted, so the apply replaces
+	// each matching element.
 	cons := []vulnerability.Consolidated{
 		{
 			PrimaryID:     "GO-2025-1234",
@@ -466,8 +466,9 @@ func TestCommandsFromConsolidatedStdlibAmbiguousCurrent(t *testing.T) {
 	}
 	commands, _ := CommandsFromConsolidated(cons)
 
-	if !slices.ContainsFunc(commands, func(c Command) bool { return c.Command == "deputy:mise:update mise.toml go 1.21.5" }) {
-		t.Errorf("expected untargeted 'deputy:mise:update mise.toml go 1.21.5'; commands=%+v", commands)
+	want := "deputy:mise:update mise.toml go 1.21.5 1.20.0 1.21.0"
+	if !slices.ContainsFunc(commands, func(c Command) bool { return c.Command == want }) {
+		t.Errorf("expected %q; commands=%+v", want, commands)
 	}
 }
 
