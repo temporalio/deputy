@@ -129,8 +129,15 @@ func ValidateExecutable(manager string, args []string) error {
 	return fmt.Errorf("executable %q not allowed for manager %q", executable, manager)
 }
 
+// managerExecutables is the execution allowlist: for each manager string the
+// remediation generator can emit, the executables its commands (and follow-ups)
+// are permitted to invoke. A manager that generates executable commands but has
+// no entry here produces fixes deputy can never apply, so keep this in sync
+// with recommendCommand (TestManagerExecutablesCoverGeneratedCommands enforces
+// the pairing).
 var managerExecutables = map[string][]string{
 	"go":        {"go"},
+	"mise":      {"mise"},
 	"npm":       {"npm"},
 	"yarn":      {"yarn"},
 	"pnpm":      {"pnpm"},

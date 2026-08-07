@@ -44,3 +44,140 @@ func TestExecArgs_RejectsUnknownExecutable(t *testing.T) {
 		t.Fatal("ExecArgs should reject unknown executable")
 	}
 }
+
+// TestValidateExecutable pins the allowlist contract: a manager's own
+// executable passes, anything else (wrong executable, unknown manager,
+// missing inputs) is rejected before execution.
+func TestValidateExecutable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		manager string
+		args    []string
+		wantErr bool
+	}{
+		{name: "go allowed", manager: "go", args: []string{"go", "get", "example.com/mod@v1.2.3"}},
+		{name: "npm allowed", manager: "npm", args: []string{"npm", "install", "lodash@4.17.21"}},
+		{name: "mise allowed", manager: "mise", args: []string{"mise", "use", "go@1.24.5"}},
+		{name: "mise follow-up allowed", manager: "mise", args: []string{"mise", "install"}},
+		{name: "manager case and path insensitive", manager: " GO ", args: []string{"/usr/local/bin/go", "get", "example.com/mod@v1.2.3"}},
+		{name: "wrong executable for manager", manager: "go", args: []string{"npm", "install"}, wantErr: true},
+		{name: "shell rejected", manager: "npm", args: []string{"sh", "-c", "rm -rf /"}, wantErr: true},
+		{name: "unknown manager", manager: "not-a-manager", args: []string{"not-a-manager", "install"}, wantErr: true},
+		{name: "empty manager", manager: "", args: []string{"go", "get"}, wantErr: true},
+		{name: "missing args", manager: "go", args: nil, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateExecutable(tt.manager, tt.args)
+			if tt.wantErr && err == nil {
+				t.Fatalf("ValidateExecutable(%q, %v) = nil, want error", tt.manager, tt.args)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("ValidateExecutable(%q, %v) = %v, want nil", tt.manager, tt.args, err)
+			}
+		})
+	}
+}
+
+// TestExecArgs_MiseCommand pins the end-to-end path for a generated mise fix:
+// the generator marks `mise use` executable, so the allowlist must accept it,
+// otherwise deputy recommends a fix it can never apply.
+func TestExecArgs_MiseCommand(t *testing.T) {
+	t.Parallel()
+
+	rec := recommendCommand("mise", "mise.toml", "stdlib", "1.24.5", nil, "go")
+	if !rec.executable {
+		t.Fatalf("expected mise recommendation to be executable, got %#v", rec)
+	}
+
+	cmd := Command{
+		Manager:    "mise",
+		Command:    rec.command,
+		Args:       rec.args,
+		Executable: rec.executable,
+	}
+	args, err := ExecArgs(cmd)
+	if err != nil {
+		t.Fatalf("ExecArgs error: %v", err)
+	}
+	if len(args) == 0 || args[0] != "mise" {
+		t.Fatalf("unexpected args: %#v", args)
+	}
+	if err := ValidateExecutable(cmd.Manager, rec.followUpArgs); err != nil {
+		t.Fatalf("follow-up %v not allowed: %v", rec.followUpArgs, err)
+	}
+}
+
+// TestManagerExecutablesCoverGeneratedCommands is a coherence check between
+// the command generator and the execution allowlist: every manager for which
+// recommendCommand emits an executable command (or executable follow-up) must
+// have a managerExecutables entry that accepts it. Deputy-internal commands
+// are exempt because ExecArgs routes them to a separate applier.
+func TestManagerExecutablesCoverGeneratedCommands(t *testing.T) {
+	t.Parallel()
+
+	// One sample per generator branch; manifest paths are chosen to hit the
+	// executable variants where the branch is manifest-sensitive.
+	tests := []struct {
+		manager      string
+		manifestPath string
+	}{
+		{"go", "go.mod"},
+		{"npm", "package-lock.json"},
+		{"yarn", "yarn.lock"},
+		{"pnpm", "pnpm-lock.yaml"},
+		{"pip", "requirements.txt"},
+		{"pipenv", "Pipfile.lock"},
+		{"poetry", "poetry.lock"},
+		{"uv", "uv.lock"},
+		{"pdm", "pdm.lock"},
+		{"conda", "environment.yml"},
+		{"mise", "mise.toml"},
+		{"asdf", ".tool-versions"},
+		{"gem", "Gemfile.lock"},
+		{"bundler", "Gemfile.lock"},
+		{"composer", "composer.lock"},
+		{"cargo", "Cargo.lock"},
+		{"maven", "pom.xml"},
+		{"gradle", "gradle.lockfile"},
+		{"nuget", "packages.lock.json"},
+		{"dotnet", "app.csproj"},
+		{"hex", "mix.lock"},
+		{"mix", "mix.lock"},
+		{"pub", "pubspec.lock"},
+		{"dart", "pubspec.lock"},
+		{"flutter", "pubspec.lock"},
+		{"cocoapods", "Podfile.lock"},
+		{"pod", "Podfile.lock"},
+		{"renv", "renv.lock"},
+		{"conan", "conanfile.txt"},
+		{"swift", "Package.swift"},
+		{"cabal", "example.cabal"},
+		{"stack", "stack.yaml"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.manager, func(t *testing.T) {
+			t.Parallel()
+			rec := recommendCommand(tt.manager, tt.manifestPath, "example", "1.2.3", nil, "")
+			if !rec.executable || IsDeputyInternalCommand(rec.command) {
+				return
+			}
+			if len(rec.args) == 0 {
+				t.Fatalf("manager %q: executable recommendation has no args: %#v", tt.manager, rec)
+			}
+			if err := ValidateExecutable(tt.manager, rec.args); err != nil {
+				t.Errorf("manager %q: generated command %v rejected by allowlist: %v", tt.manager, rec.args, err)
+			}
+			if len(rec.followUpArgs) > 0 {
+				if err := ValidateExecutable(tt.manager, rec.followUpArgs); err != nil {
+					t.Errorf("manager %q: generated follow-up %v rejected by allowlist: %v", tt.manager, rec.followUpArgs, err)
+				}
+			}
+		})
+	}
+}
