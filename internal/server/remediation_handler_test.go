@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -21,6 +24,7 @@ import (
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/agent"
+	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
@@ -123,20 +127,22 @@ func newRemediationTestClient(t *testing.T, h *RemediationHandler) remediationv1
 }
 
 // executePlanForTest runs ExecutePlan with the given options against a
-// two-step plan and returns the streamed events and the terminal error.
-func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.ExecutionOptions) ([]*remediationv1.ExecutionEvent, error) {
+// two-step plan (plus any extra steps) and returns the streamed events and
+// the terminal error.
+func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.ExecutionOptions, extraSteps ...*remediationv1.Step) ([]*remediationv1.ExecutionEvent, error) {
 	t.Helper()
 
 	handler := NewRemediationHandler(WithRemediationLocalMode())
 	handler.execStep = rec.run
 	client := newRemediationTestClient(t, handler)
 
+	steps := []*remediationv1.Step{
+		{Id: "step-1", Title: "bump widget", Command: "go get example.com/widget@v1.5.0", Manager: "go", Executable: true},
+		{Id: "step-2", Title: "bump gadget", Command: "go get example.com/gadget@v2.0.1", Manager: "go", Executable: true},
+	}
 	plan := &remediationv1.Plan{
-		Id: "plan-test",
-		Steps: []*remediationv1.Step{
-			{Id: "step-1", Title: "bump widget", Command: "go get example.com/widget@v1.5.0", Manager: "go", Executable: true},
-			{Id: "step-2", Title: "bump gadget", Command: "go get example.com/gadget@v2.0.1", Manager: "go", Executable: true},
-		},
+		Id:    "plan-test",
+		Steps: append(steps, extraSteps...),
 	}
 
 	stream, err := client.ExecutePlan(t.Context(), connect.NewRequest(&remediationv1.ExecutePlanRequest{
@@ -161,6 +167,7 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 	tests := []struct {
 		name         string
 		options      *remediationv1.ExecutionOptions
+		extraSteps   []*remediationv1.Step
 		wantCode     connect.Code // zero means the stream must succeed
 		wantExecuted []string
 		wantMessages []string // substrings that must appear across event messages
@@ -219,12 +226,24 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 				"Dry run complete: 1 steps would execute, nothing was changed (1 skipped)",
 			},
 		},
+		{
+			name:    "dry run counts only executable steps",
+			options: &remediationv1.ExecutionOptions{DryRun: true},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "manual review", Command: "review the dependency change", Executable: false},
+			},
+			wantExecuted: nil,
+			wantMessages: []string{
+				"[dry run] Step 3/3 is manual: review the dependency change",
+				"Dry run complete: 2 steps would execute, nothing was changed",
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := &stepRecorder{}
-			events, err := executePlanForTest(t, rec, tt.options)
+			events, err := executePlanForTest(t, rec, tt.options, tt.extraSteps...)
 
 			if tt.wantCode != 0 {
 				if connect.CodeOf(err) != tt.wantCode {
@@ -316,8 +335,68 @@ func TestExecutePlanTimeout(t *testing.T) {
 	}
 }
 
+// TestExecuteStepRespectsCancellation pins the timeout contract for
+// deputy-internal steps: ApplyDeputyCommand edits files without a context,
+// so an expired deadline must stop the step before any modification. The
+// same step under a live context is the positive control proving the step
+// would otherwise modify the file.
+func TestExecuteStepRespectsCancellation(t *testing.T) {
+	const original = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
+	writeWorkflow := func(t *testing.T) (dir, path string) {
+		t.Helper()
+		dir = t.TempDir()
+		wfDir := filepath.Join(dir, ".github", "workflows")
+		if err := os.MkdirAll(wfDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		path = filepath.Join(wfDir, "ci.yml")
+		if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+		return dir, path
+	}
+	step := &remediationv1.Step{
+		Id:         "step-1",
+		Title:      "update checkout action",
+		Command:    "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+		Executable: true,
+	}
+
+	t.Run("expired deadline modifies nothing", func(t *testing.T) {
+		dir, path := writeWorkflow(t)
+		ctx, cancel := context.WithTimeout(t.Context(), -time.Second)
+		defer cancel()
+
+		if _, err := executeStep(ctx, dir, step); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("executeStep error = %v, want context.DeadlineExceeded", err)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile failed: %v", err)
+		}
+		if string(got) != original {
+			t.Fatalf("workflow modified despite expired deadline:\n%s", got)
+		}
+	})
+
+	t.Run("live context applies the update", func(t *testing.T) {
+		dir, path := writeWorkflow(t)
+		if _, err := executeStep(t.Context(), dir, step); err != nil {
+			t.Fatalf("executeStep failed: %v", err)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile failed: %v", err)
+		}
+		if !strings.Contains(string(got), "actions/checkout@v5") {
+			t.Fatalf("workflow not updated, positive control is vacuous:\n%s", got)
+		}
+	})
+}
+
 // TestConvertAgentDoneEvent pins the Done event conversion: token usage must
-// not overwrite the terminal summary; both are emitted, tokens first.
+// not overwrite the terminal summary; both are emitted, tokens first with a
+// nonterminal phase so the summary is the first terminal event consumers see.
 func TestConvertAgentDoneEvent(t *testing.T) {
 	doneWithUsage := &agentv1.ExecuteEvent{
 		Phase: agentv1.ExecutionPhase_EXECUTION_PHASE_COMPLETED,
@@ -345,12 +424,21 @@ func TestConvertAgentDoneEvent(t *testing.T) {
 	if tokens.GetTotalTokens() != 125 || tokens.GetPromptTokens() != 100 || tokens.GetCompletionTokens() != 25 {
 		t.Errorf("tokens event = %+v, want 100/25/125", tokens)
 	}
+	if phase := events[0].GetPhase(); internalproto.IsAgentTerminal(phase) {
+		t.Errorf("tokens event phase %v is terminal; consumers would stop before the summary", phase)
+	}
 	summary := events[1].GetSummary()
 	if summary == nil {
 		t.Fatalf("second event details = %T, want summary", events[1].GetDetails())
 	}
 	if !summary.GetSuccess() || summary.GetSessionId() != "agent-sess" {
 		t.Errorf("summary event = %+v, want success for agent-sess", summary)
+	}
+	if phase := events[1].GetPhase(); !internalproto.IsAgentTerminal(phase) {
+		t.Errorf("summary event phase %v is not terminal", phase)
+	}
+	if last := events[len(events)-1]; last.GetSummary() == nil {
+		t.Errorf("last event details = %T, want summary last", last.GetDetails())
 	}
 
 	doneWithoutUsage := &agentv1.ExecuteEvent{

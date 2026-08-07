@@ -339,6 +339,7 @@ func (h *RemediationHandler) ExecutePlan(
 	}
 	executed := 0
 	skipped := 0
+	wouldExecute := 0
 	for i, step := range steps {
 		stepID := step.GetId()
 		if stepID == "" {
@@ -362,8 +363,13 @@ func (h *RemediationHandler) ExecutePlan(
 
 		// Dry run: describe what would run without ever reaching command
 		// execution. This branch must stay ahead of the execStep call so the
-		// simulation can never execute anything.
+		// simulation can never execute anything. Only executable steps with
+		// commands count toward the would-execute total; manual and
+		// commandless steps are described but never run.
 		if dryRun {
+			if step.GetCommand() != "" && step.GetExecutable() {
+				wouldExecute++
+			}
 			if err := stream.Send(&remediationv1.ExecutionEvent{
 				Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
 				StepId:    stepID,
@@ -429,7 +435,7 @@ func (h *RemediationHandler) ExecutePlan(
 	// Send completion event
 	completionMsg := fmt.Sprintf("Successfully executed %d steps", executed)
 	if dryRun {
-		completionMsg = fmt.Sprintf("Dry run complete: %d steps would execute, nothing was changed", len(steps)-skipped)
+		completionMsg = fmt.Sprintf("Dry run complete: %d steps would execute, nothing was changed", wouldExecute)
 	}
 	if skipped > 0 {
 		completionMsg = fmt.Sprintf("%s (%d skipped)", completionMsg, skipped)
@@ -515,6 +521,13 @@ func resolveWorkDir(dir string) (string, error) {
 
 // executeStep runs a single remediation step and returns output.
 func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) (string, error) {
+	// Both execution paths must respect cancellation: exec.CommandContext
+	// does on its own, but deputy-internal commands apply file edits without
+	// a context, so an expired timeout must stop the step before it starts.
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("step not started: %w", err)
+	}
+
 	cmd := step.GetCommand()
 	if cmd == "" {
 		return "", nil // Nothing to execute
@@ -1009,8 +1022,9 @@ func buildAgentPrompt(req *remediationv1.ExecuteWithAgentRequest) string {
 // the remediationv1.AgentEvents to stream, in send order. Most upstream
 // events map one-to-one, but a remediation event carries a single details
 // payload, so a Done event that also reports token usage expands into two
-// events: the tokens event first, then the terminal summary, keeping the
-// summary the last detail a client sees for the session.
+// events: the tokens event first (with a nonterminal phase), then the
+// terminal summary, so the summary is both the first terminal event and the
+// last detail a client sees for the session.
 func convertAgentEventToRemediationEvents(event *agentv1.ExecuteEvent, sessionID string) []*remediationv1.AgentEvent {
 	remEvent := &remediationv1.AgentEvent{
 		SessionId: sessionID,
@@ -1093,7 +1107,10 @@ func convertAgentEventToRemediationEvents(event *agentv1.ExecuteEvent, sessionID
 			tokensEvent := &remediationv1.AgentEvent{
 				SessionId: sessionID,
 				Timestamp: remEvent.GetTimestamp(),
-				Phase:     remEvent.GetPhase(),
+				// A nonterminal phase: consumers detect stream completion
+				// through terminal phases (IsAgentTerminal), so the summary
+				// must be the first terminal event they see.
+				Phase: remediationv1.AgentPhase_AGENT_PHASE_EXECUTING,
 				Details: &remediationv1.AgentEvent_Tokens{
 					Tokens: &remediationv1.AgentTokensEvent{
 						PromptTokens:     usage.GetPromptTokens(),
