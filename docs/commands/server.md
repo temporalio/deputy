@@ -17,13 +17,13 @@ deputy server [flags]
 
 ## Connection Modes
 
-Deputy supports three execution modes:
+Deputy supports two execution modes today, with a third reserved:
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
 | **In-process** | Direct function calls (default) | CLI usage, zero overhead |
-| **Local daemon** | Unix socket connection | Shared caching, faster repeat scans |
 | **Remote server** | HTTP/2 (ConnectRPC) | Team deployments, enterprise features |
+| **Local daemon** | Reserved, not yet implemented (the `--daemon` flag currently has no effect) | Shared caching, faster repeat scans |
 
 The `server` command starts Deputy in remote server mode, listening for client connections.
 
