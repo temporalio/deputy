@@ -4,6 +4,7 @@ import (
 	"context"
 	crypto_rand "crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -283,7 +284,15 @@ func (h *RemediationHandler) ExecutePlan(
 	for _, id := range opts.GetSkipStepIds() {
 		skipSteps[id] = struct{}{}
 	}
-	if timeout := opts.GetTimeout().AsDuration(); timeout > 0 {
+	// A negative timeout is a malformed safety limit, not "no timeout":
+	// silently executing without a deadline would disable a control the
+	// client asked for. Zero or absent keeps meaning no timeout.
+	timeout := opts.GetTimeout().AsDuration()
+	if timeout < 0 {
+		return connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("options.timeout must not be negative, got %s", timeout))
+	}
+	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -412,7 +421,7 @@ func (h *RemediationHandler) ExecutePlan(
 				return err
 			}
 			// Return the error to stop execution
-			return connect.NewError(connect.CodeInternal, fmt.Errorf("step %s failed: %w", stepID, execErr))
+			return connect.NewError(stepFailureCode(execErr), fmt.Errorf("step %s failed: %w", stepID, execErr))
 		}
 		executed++
 
@@ -457,6 +466,21 @@ func (h *RemediationHandler) ExecutePlan(
 	)
 
 	return nil
+}
+
+// stepFailureCode maps a step execution error onto the connect code clients
+// need to distinguish causes: a step stopped by the client-configured timeout
+// or a cancelled call must not masquerade as a server-side internal failure.
+// The context sentinels arrive wrapped, so match with errors.Is.
+func stepFailureCode(err error) connect.Code {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return connect.CodeDeadlineExceeded
+	case errors.Is(err, context.Canceled):
+		return connect.CodeCanceled
+	default:
+		return connect.CodeInternal
+	}
 }
 
 // rejectUnsupportedApprovalMode fails closed on approval modes ExecutePlan

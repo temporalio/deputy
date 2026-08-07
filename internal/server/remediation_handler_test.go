@@ -228,6 +228,11 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			},
 		},
 		{
+			name:     "negative timeout is rejected",
+			options:  &remediationv1.ExecutionOptions{Timeout: durationpb.New(-time.Second)},
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
 			name:    "dry run counts only executable steps",
 			options: &remediationv1.ExecutionOptions{DryRun: true},
 			extraSteps: []*remediationv1.Step{
@@ -333,6 +338,36 @@ func TestExecutePlanTimeout(t *testing.T) {
 				t.Fatalf("step context deadline = %v, want %v", rec.hadDeadline, tt.wantDeadline)
 			}
 		})
+	}
+}
+
+// TestExecutePlanExpiredTimeoutCode pins error code fidelity: a step stopped
+// by the client-requested timeout must surface as CodeDeadlineExceeded, not
+// CodeInternal, so clients can tell their own limit from a server failure.
+// The plan uses a deputy-internal step and the real executeStep so the whole
+// path (timeout wrap, pre-step check, code mapping) is exercised end to end.
+func TestExecutePlanExpiredTimeoutCode(t *testing.T) {
+	handler := NewRemediationHandler(WithRemediationLocalMode())
+	client := newRemediationTestClient(t, handler)
+
+	plan := &remediationv1.Plan{
+		Id: "plan-timeout",
+		Steps: []*remediationv1.Step{
+			{Id: "step-1", Title: "update checkout action", Command: "deputy:action:update .github/workflows/ci.yml actions/checkout v5", Executable: true},
+		},
+	}
+	stream, err := client.ExecutePlan(t.Context(), connect.NewRequest(&remediationv1.ExecutePlanRequest{
+		Source:     &remediationv1.ExecutePlanRequest_Plan{Plan: plan},
+		TargetPath: t.TempDir(),
+		Options:    &remediationv1.ExecutionOptions{Timeout: durationpb.New(time.Nanosecond)},
+	}))
+	if err == nil {
+		for stream.Receive() {
+		}
+		err = stream.Err()
+	}
+	if got := connect.CodeOf(err); got != connect.CodeDeadlineExceeded {
+		t.Fatalf("ExecutePlan error = %v (code %v), want CodeDeadlineExceeded", err, got)
 	}
 }
 
