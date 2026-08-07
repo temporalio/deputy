@@ -145,11 +145,17 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
 
 `deputy fix` proposes source-aware remediation:
 
-- A vulnerable backend tool → `mise use npm:lodash@<fixed>`.
+- A vulnerable backend tool → `mise use --path mise.toml npm:lodash@<fixed>`.
 - A Go stdlib/toolchain CVE is fixed at **each** declaring source: a `go.mod`
   `go` directive gets `go get go@<fixed>`, while a `mise.toml` `go` entry gets a
-  distinct `mise use go@<fixed>`. If both declare the Go version, both fixes are
-  produced.
+  distinct `mise use --path mise.toml go@<fixed>`. If both declare the Go
+  version, both fixes are produced.
+- Fix commands always target the detected config file via `--path` (by
+  basename, since the command runs in the manifest's directory). Without it,
+  `mise use` picks its own write target, so a finding from an
+  environment-specific config like `mise.production.toml` would otherwise be
+  "fixed" in `mise.toml` while the vulnerable higher-precedence pin stays in
+  effect.
 
 ## Hardening
 

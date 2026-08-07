@@ -1,6 +1,9 @@
 package remediation
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestParseCommandArgs(t *testing.T) {
 	t.Parallel()
@@ -85,30 +88,84 @@ func TestValidateExecutable(t *testing.T) {
 
 // TestExecArgs_MiseCommand pins the end-to-end path for a generated mise fix:
 // the generator marks `mise use` executable, so the allowlist must accept it,
-// otherwise deputy recommends a fix it can never apply.
+// otherwise deputy recommends a fix it can never apply. It also pins the
+// --path targeting: `mise use` chooses its own write target by default (the
+// lowest-precedence config in the working directory), so the generated
+// command must address the detected manifest explicitly by basename (the
+// apply paths run the command in the manifest's directory).
 func TestExecArgs_MiseCommand(t *testing.T) {
 	t.Parallel()
 
-	rec := recommendCommand("mise", "mise.toml", "stdlib", "1.24.5", nil, "go")
-	if !rec.executable {
-		t.Fatalf("expected mise recommendation to be executable, got %#v", rec)
+	tests := []struct {
+		name         string
+		manifestPath string
+		wantArgs     []string
+	}{
+		{
+			name:         "default manifest",
+			manifestPath: "mise.toml",
+			wantArgs:     []string{"mise", "use", "--path", "mise.toml", "go@1.24.5"},
+		},
+		{
+			name:         "hidden manifest",
+			manifestPath: ".mise.toml",
+			wantArgs:     []string{"mise", "use", "--path", ".mise.toml", "go@1.24.5"},
+		},
+		{
+			name:         "environment-specific manifest",
+			manifestPath: "mise.production.toml",
+			wantArgs:     []string{"mise", "use", "--path", "mise.production.toml", "go@1.24.5"},
+		},
+		{
+			// The apply paths chdir to .config/mise, so the basename is the
+			// correct relative target there.
+			name:         "config directory manifest",
+			manifestPath: ".config/mise/config.toml",
+			wantArgs:     []string{"mise", "use", "--path", "config.toml", "go@1.24.5"},
+		},
+		{
+			name:         "conf.d drop-in",
+			manifestPath: ".config/mise/conf.d/tools.toml",
+			wantArgs:     []string{"mise", "use", "--path", "tools.toml", "go@1.24.5"},
+		},
+		{
+			// With no manifest path, omit --path and let mise resolve its
+			// default write target.
+			name:         "no manifest path",
+			manifestPath: "",
+			wantArgs:     []string{"mise", "use", "go@1.24.5"},
+		},
 	}
 
-	cmd := Command{
-		Manager:    "mise",
-		Command:    rec.command,
-		Args:       rec.args,
-		Executable: rec.executable,
-	}
-	args, err := ExecArgs(cmd)
-	if err != nil {
-		t.Fatalf("ExecArgs error: %v", err)
-	}
-	if len(args) == 0 || args[0] != "mise" {
-		t.Fatalf("unexpected args: %#v", args)
-	}
-	if err := ValidateExecutable(cmd.Manager, rec.followUpArgs); err != nil {
-		t.Fatalf("follow-up %v not allowed: %v", rec.followUpArgs, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rec := recommendCommand("mise", tt.manifestPath, "stdlib", "1.24.5", nil, "go")
+			if !rec.executable {
+				t.Fatalf("expected mise recommendation to be executable, got %#v", rec)
+			}
+			if !slices.Equal(rec.args, tt.wantArgs) {
+				t.Fatalf("recommendCommand args = %v, want %v", rec.args, tt.wantArgs)
+			}
+
+			cmd := Command{
+				Manager:    "mise",
+				Command:    rec.command,
+				Args:       rec.args,
+				Executable: rec.executable,
+			}
+			args, err := ExecArgs(cmd)
+			if err != nil {
+				t.Fatalf("ExecArgs error: %v", err)
+			}
+			if !slices.Equal(args, tt.wantArgs) {
+				t.Fatalf("ExecArgs = %v, want %v", args, tt.wantArgs)
+			}
+			if err := ValidateExecutable(cmd.Manager, rec.followUpArgs); err != nil {
+				t.Fatalf("follow-up %v not allowed: %v", rec.followUpArgs, err)
+			}
+		})
 	}
 }
 

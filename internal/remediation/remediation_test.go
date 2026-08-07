@@ -359,8 +359,8 @@ func TestCommandsFromConsolidatedMiseBackendTool(t *testing.T) {
 		componentKey string
 		wantCommand  string
 	}{
-		{"npm backend tool", "npm:lodash", "mise use npm:lodash@4.17.21"},
-		{"cargo backend tool", "cargo:ripgrep", "mise use cargo:ripgrep@4.17.21"},
+		{"npm backend tool", "npm:lodash", "mise use --path mise.toml npm:lodash@4.17.21"},
+		{"cargo backend tool", "cargo:ripgrep", "mise use --path mise.toml cargo:ripgrep@4.17.21"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -407,8 +407,8 @@ func TestCommandsFromConsolidatedStdlibSourceAware(t *testing.T) {
 	if !hasCommand("go get go@1.20.1") {
 		t.Errorf("expected go.mod toolchain command 'go get go@1.20.1'; commands=%+v", commands)
 	}
-	if !hasCommand("mise use go@1.20.1") {
-		t.Errorf("expected mise command 'mise use go@1.20.1'; commands=%+v", commands)
+	if !hasCommand("mise use --path mise.toml go@1.20.1") {
+		t.Errorf("expected mise command 'mise use --path mise.toml go@1.20.1'; commands=%+v", commands)
 	}
 }
 
@@ -433,8 +433,8 @@ func TestCommandsFromConsolidatedStdlibMiseOnly(t *testing.T) {
 	if hasCommand("go get go@1.20.1") {
 		t.Errorf("did not expect a go.mod command for a mise-only stdlib finding; commands=%+v", commands)
 	}
-	if !hasCommand("mise use go@1.20.1") {
-		t.Errorf("expected 'mise use go@1.20.1'; commands=%+v", commands)
+	if !hasCommand("mise use --path mise.toml go@1.20.1") {
+		t.Errorf("expected 'mise use --path mise.toml go@1.20.1'; commands=%+v", commands)
 	}
 }
 

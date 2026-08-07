@@ -457,7 +457,7 @@ func buildGoToolchainCommand(version string) (Command, bool) {
 // upgrade. The same Go version may be declared in more than one place (go.mod,
 // mise.toml, .tool-versions), each needing a distinct fix: a go.mod-sourced
 // finding bumps the go directive (`go get go@X`), while a mise/asdf-sourced one
-// bumps the tool in that config (`mise use go@X`). When both declare it, both
+// bumps the tool in that config (`mise use --path mise.toml go@X`). When both declare it, both
 // commands are emitted. With no attributable source, it falls back to the
 // go.mod command to preserve prior behavior.
 func stdlibCommands(version string, refs []dependencyv1.ManifestRef, vulnIDs []string) []Command {
@@ -590,6 +590,22 @@ type commandResult struct {
 	executable   bool
 }
 
+// miseUseArgs builds the argv for a mise fix, explicitly targeting the
+// detected manifest file with --path. Without it, `mise use` picks its own
+// write target (the lowest-precedence config in the working directory), so a
+// finding from e.g. mise.production.toml would be "fixed" by adding the tool
+// to mise.toml while the vulnerable higher-precedence pin stays in effect.
+// The apply paths run the command in the manifest's directory, so the
+// basename addresses the exact file; with no usable manifest path the flag is
+// omitted and mise's default write-target resolution applies.
+func miseUseArgs(manifestPath, toolSpec string) []string {
+	args := []string{"mise", "use"}
+	if base := path.Base(strings.TrimSpace(manifestPath)); base != "." && base != "/" {
+		args = append(args, "--path", base)
+	}
+	return append(args, toolSpec)
+}
+
 // miseToolName resolves the tool key to use in a mise/asdf fix command. It
 // prefers the manifest-declared componentKey; otherwise it falls back to the
 // advisory's package name, translating the Go runtime's canonical
@@ -658,9 +674,13 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 	// "stdlib"/"toolchain"; map those back to the declared runtime tool.
 	case "mise":
 		tool := miseToolName(componentKey, pkg, "go")
+		// The follow-up `mise install` needs no targeting: `mise use` already
+		// installs the tool it pins, and install reads the full config
+		// resolution chain from the manifest's directory.
+		args := miseUseArgs(manifestPath, fmt.Sprintf("%s@%s", tool, version))
 		return commandResult{
-			command:      fmt.Sprintf("mise use %s@%s", tool, version),
-			args:         []string{"mise", "use", fmt.Sprintf("%s@%s", tool, version)},
+			command:      strings.Join(args, " "),
+			args:         args,
 			followUp:     "mise install",
 			followUpArgs: []string{"mise", "install"},
 			executable:   true,
