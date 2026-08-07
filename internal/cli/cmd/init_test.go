@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 func TestInit(t *testing.T) {
@@ -183,7 +186,7 @@ func TestInit_PolicyContent(t *testing.T) {
 	expectedStrings := []string{
 		"policies:",
 		"block-critical-high",
-		"vulnerability.severity",
+		"vulnerability.?advisory.severity.level",
 		"action: deny",
 	}
 
@@ -191,6 +194,137 @@ func TestInit_PolicyContent(t *testing.T) {
 		if !strings.Contains(string(policyContent), s) {
 			t.Errorf("Policy file missing expected content: %s", s)
 		}
+	}
+}
+
+// TestInit_PolicyTemplateEvaluates is the drift gate for the starter policy:
+// the file that `deputy init` generates must compile AND evaluate cleanly
+// against representative Finding payloads at its declared entrypoint, and the
+// rules must actually fire on the findings they claim to catch. If the
+// template ever references fields that do not exist on the runtime contract
+// (e.g. vulnerability.severity or vulnerability.inKEV), evaluation errors and
+// this test fails.
+func TestInit_PolicyTemplateEvaluates(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	root := &cobra.Command{Use: "deputy"}
+	AddInitCommand(root)
+	root.SetArgs([]string{"init", "--policy-only", tmpDir})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	policyPath := filepath.Join(tmpDir, "policy", "deputy.yaml")
+
+	inKEV := true
+	epss := 0.9
+	tests := []struct {
+		name          string
+		vulnerability *vulnerabilityv1.Finding
+		// wantDenyFrom names the policy expected to deny the finding
+		// (evaluatePoliciesForCommand turns the first deny into an error).
+		// Empty means the finding must pass without a deny.
+		wantDenyFrom string
+		// wantWarn expects exactly one warn action when no deny fires.
+		wantWarn bool
+	}{
+		{
+			name: "critical finding in KEV with high EPSS",
+			vulnerability: &vulnerabilityv1.Finding{
+				AdvisoryId: "CVE-2021-23337",
+				Package:    &dependencyv1.Package{Name: "lodash", Version: "4.17.20", Ecosystem: "npm", Direct: true},
+				Advisory: &vulnerabilityv1.Advisory{
+					Id:            "CVE-2021-23337",
+					FixedVersions: []string{"4.17.21"},
+					Severity:      &vulnerabilityv1.Severity{Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL},
+				},
+				InKev:    &inKEV,
+				Epss:     &epss,
+				Affected: true,
+			},
+			wantDenyFrom: "block-critical-high",
+		},
+		{
+			name: "high severity finding",
+			vulnerability: &vulnerabilityv1.Finding{
+				AdvisoryId: "CVE-2024-0001",
+				Package:    &dependencyv1.Package{Name: "foo", Version: "1.0.0", Ecosystem: "npm", Direct: true},
+				Advisory: &vulnerabilityv1.Advisory{
+					Id:       "CVE-2024-0001",
+					Severity: &vulnerabilityv1.Severity{Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH},
+				},
+				Affected: true,
+			},
+			wantDenyFrom: "block-critical-high",
+		},
+		{
+			name: "medium severity finding without enrichment",
+			vulnerability: &vulnerabilityv1.Finding{
+				AdvisoryId: "CVE-2024-0002",
+				Package:    &dependencyv1.Package{Name: "bar", Version: "1.0.0", Ecosystem: "npm", Direct: true},
+				Advisory: &vulnerabilityv1.Advisory{
+					Id:       "CVE-2024-0002",
+					Severity: &vulnerabilityv1.Severity{Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM},
+				},
+				Affected: true,
+			},
+			wantWarn: true,
+		},
+		{
+			name: "low severity finding",
+			vulnerability: &vulnerabilityv1.Finding{
+				AdvisoryId: "CVE-2024-0003",
+				Package:    &dependencyv1.Package{Name: "baz", Version: "2.0.0", Ecosystem: "go", Direct: false},
+				Advisory: &vulnerabilityv1.Advisory{
+					Id:       "CVE-2024-0003",
+					Severity: &vulnerabilityv1.Severity{Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW},
+				},
+				Affected: true,
+			},
+		},
+		{
+			name: "finding without advisory details",
+			vulnerability: &vulnerabilityv1.Finding{
+				AdvisoryId: "CVE-2024-0004",
+				Package:    &dependencyv1.Package{Name: "qux", Version: "3.0.0", Ecosystem: "pypi", Direct: true},
+				Affected:   true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := map[string]any{"vulnerability": tt.vulnerability}
+			actions, err := evaluatePoliciesForCommand(t.Context(), []string{policyPath}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
+			if err != nil {
+				// Distinguish an expected policy denial from a template that
+				// references fields missing on the runtime contract.
+				if !strings.Contains(err.Error(), "denied command") {
+					t.Fatalf("generated starter policy failed to evaluate: %v", err)
+				}
+				if tt.wantDenyFrom == "" {
+					t.Fatalf("unexpected deny from starter policy: %v", err)
+				}
+				if !strings.Contains(err.Error(), tt.wantDenyFrom) {
+					t.Errorf("deny error %q does not mention policy %q", err, tt.wantDenyFrom)
+				}
+				return
+			}
+			if tt.wantDenyFrom != "" {
+				t.Fatalf("expected deny from %q, got actions %+v", tt.wantDenyFrom, actions)
+			}
+			var warns int
+			for _, a := range actions {
+				if a.Type == "warn" {
+					warns++
+				}
+			}
+			if tt.wantWarn && warns != 1 {
+				t.Errorf("expected exactly one warn action, got %d (%+v)", warns, actions)
+			}
+			if !tt.wantWarn && warns != 0 {
+				t.Errorf("expected no warn actions, got %d (%+v)", warns, actions)
+			}
+		})
 	}
 }
 
