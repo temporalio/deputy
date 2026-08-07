@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
 	deputyerrors "github.com/temporalio/deputy/internal/errors"
 	"github.com/temporalio/deputy/internal/policy"
@@ -20,7 +21,6 @@ import (
 	"github.com/temporalio/deputy/internal/sandbox/runtimes/none"
 	"github.com/temporalio/deputy/internal/sandbox/runtimes/plugin"
 	"github.com/temporalio/deputy/internal/sandbox/runtimes/sandboxexec"
-	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -77,7 +77,7 @@ type execFlags struct {
 }
 
 // AddExecCommand adds the exec command to the root command.
-func AddExecCommand(root *cobra.Command, deps Dependencies) {
+func AddExecCommand(root *cobra.Command, deps *Dependencies) {
 	flags := &execFlags{}
 
 	cmd := &cobra.Command{
@@ -218,9 +218,9 @@ Common Patterns:
 	root.AddCommand(cmd)
 }
 
-func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command []string, stdin io.Reader, stdout, stderr io.Writer) error {
+func runExec(ctx context.Context, deps *Dependencies, flags *execFlags, command []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if deps.ServerAddress != "" || os.Getenv("DEPUTY_SERVER") != "" {
-		return fmt.Errorf("exec is only available in local mode; unset DEPUTY_SERVER to run locally")
+		return fmt.Errorf("exec is only available in local mode; remove --server or unset DEPUTY_SERVER to run locally")
 	}
 
 	runtimeType, err := parseSandboxRuntime(flags.runtime)
