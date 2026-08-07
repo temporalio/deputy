@@ -88,14 +88,17 @@ func (s *osvSource) Query(ctx context.Context, pkgs []*dependencyv1.Package) (*R
 		if adv == nil {
 			continue
 		}
-		adv.Kind = advisoryKind(adv)
+		adv.Kind = AdvisoryKind(adv)
 	}
 	return &Result{Findings: findings, Advisories: advisories}, nil
 }
 
-// advisoryKind classifies an advisory as malware or vulnerability. OSV publishes
-// malicious-package records under the "MAL-" identifier prefix.
-func advisoryKind(adv *vulnerabilityv1.Advisory) vulnerabilityv1.FindingKind {
+// AdvisoryKind classifies an advisory as malware or vulnerability. OSV publishes
+// malicious-package records under the "MAL-" identifier prefix, on either the
+// record itself or one of its aliases. It is exported so every surface that
+// serves OSV advisories (scan findings, advisory lookups) classifies them
+// identically.
+func AdvisoryKind(adv *vulnerabilityv1.Advisory) vulnerabilityv1.FindingKind {
 	if isMalwareID(adv.GetId()) || slices.ContainsFunc(adv.GetAliases(), isMalwareID) {
 		return vulnerabilityv1.FindingKind_FINDING_KIND_MALWARE
 	}
