@@ -233,6 +233,16 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			wantCode: connect.CodeInvalidArgument,
 		},
 		{
+			name:     "malformed timeout is rejected",
+			options:  &remediationv1.ExecutionOptions{Timeout: &durationpb.Duration{Seconds: 1, Nanos: -1}},
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			name:     "expired timeout aborts a dry run",
+			options:  &remediationv1.ExecutionOptions{DryRun: true, Timeout: durationpb.New(time.Nanosecond)},
+			wantCode: connect.CodeDeadlineExceeded,
+		},
+		{
 			name:    "dry run counts only executable steps",
 			options: &remediationv1.ExecutionOptions{DryRun: true},
 			extraSteps: []*remediationv1.Step{
@@ -360,6 +370,49 @@ func TestExecutePlanExpiredTimeoutCode(t *testing.T) {
 		Source:     &remediationv1.ExecutePlanRequest_Plan{Plan: plan},
 		TargetPath: t.TempDir(),
 		Options:    &remediationv1.ExecutionOptions{Timeout: durationpb.New(time.Nanosecond)},
+	}))
+	if err == nil {
+		for stream.Receive() {
+		}
+		err = stream.Err()
+	}
+	if got := connect.CodeOf(err); got != connect.CodeDeadlineExceeded {
+		t.Fatalf("ExecutePlan error = %v (code %v), want CodeDeadlineExceeded", err, got)
+	}
+}
+
+// TestExecutePlanMidCommandTimeoutCode pins error code fidelity for
+// timeouts that expire while a command is running: exec.CommandContext kills
+// the process and reports an exit error (signal: killed) that does not wrap
+// the context sentinel, so the failure path must consult the context to
+// report CodeDeadlineExceeded instead of CodeInternal. Uses a real sleeping
+// `go run` command so the kill path is exercised end to end.
+func TestExecutePlanMidCommandTimeoutCode(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module sleeper\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile go.mod failed: %v", err)
+	}
+	// Keep the sleep short: `go run` is the process that gets killed, and its
+	// compiled child holds the output pipes until it exits on its own, so the
+	// sleep bounds how long CombinedOutput blocks after the kill.
+	main := "package main\n\nimport \"time\"\n\nfunc main() { time.Sleep(5 * time.Second) }\n"
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(main), 0o644); err != nil {
+		t.Fatalf("WriteFile main.go failed: %v", err)
+	}
+
+	handler := NewRemediationHandler(WithRemediationLocalMode())
+	client := newRemediationTestClient(t, handler)
+
+	plan := &remediationv1.Plan{
+		Id: "plan-sleeper",
+		Steps: []*remediationv1.Step{
+			{Id: "step-1", Title: "sleep", Command: "go run .", Manager: "go", Executable: true},
+		},
+	}
+	stream, err := client.ExecutePlan(t.Context(), connect.NewRequest(&remediationv1.ExecutePlanRequest{
+		Source:     &remediationv1.ExecutePlanRequest_Plan{Plan: plan},
+		TargetPath: dir,
+		Options:    &remediationv1.ExecutionOptions{Timeout: durationpb.New(1500 * time.Millisecond)},
 	}))
 	if err == nil {
 		for stream.Receive() {

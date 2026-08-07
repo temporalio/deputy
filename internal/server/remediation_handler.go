@@ -284,9 +284,15 @@ func (h *RemediationHandler) ExecutePlan(
 	for _, id := range opts.GetSkipStepIds() {
 		skipSteps[id] = struct{}{}
 	}
-	// A negative timeout is a malformed safety limit, not "no timeout":
-	// silently executing without a deadline would disable a control the
-	// client asked for. Zero or absent keeps meaning no timeout.
+	// A malformed or negative timeout is a broken safety limit, not "no
+	// timeout": silently executing without a deadline would disable a
+	// control the client asked for. Zero or absent keeps meaning no timeout.
+	if timeoutpb := opts.GetTimeout(); timeoutpb != nil {
+		if err := timeoutpb.CheckValid(); err != nil {
+			return connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("options.timeout is invalid: %w", err))
+		}
+	}
 	timeout := opts.GetTimeout().AsDuration()
 	if timeout < 0 {
 		return connect.NewError(connect.CodeInvalidArgument,
@@ -350,6 +356,14 @@ func (h *RemediationHandler) ExecutePlan(
 	skipped := 0
 	wouldExecute := 0
 	for i, step := range steps {
+		// executeStep is the only branch that observes the context on its
+		// own; skip and dry-run steps would otherwise sail past an expired
+		// timeout, so enforce it here before every step regardless of branch.
+		if err := ctx.Err(); err != nil {
+			return connect.NewError(stepFailureCode(ctx, err),
+				fmt.Errorf("plan execution stopped before step %d/%d: %w", i+1, len(steps), err))
+		}
+
 		stepID := step.GetId()
 		if stepID == "" {
 			stepID = fmt.Sprintf("step-%d", i+1)
@@ -421,7 +435,7 @@ func (h *RemediationHandler) ExecutePlan(
 				return err
 			}
 			// Return the error to stop execution
-			return connect.NewError(stepFailureCode(execErr), fmt.Errorf("step %s failed: %w", stepID, execErr))
+			return connect.NewError(stepFailureCode(ctx, execErr), fmt.Errorf("step %s failed: %w", stepID, execErr))
 		}
 		executed++
 
@@ -439,6 +453,13 @@ func (h *RemediationHandler) ExecutePlan(
 		}); err != nil {
 			return err
 		}
+	}
+
+	// A plan must not report success under an expired or cancelled context,
+	// even when every step branch already ran (for example all steps skipped).
+	if err := ctx.Err(); err != nil {
+		return connect.NewError(stepFailureCode(ctx, err),
+			fmt.Errorf("plan execution stopped before completion: %w", err))
 	}
 
 	// Send completion event
@@ -471,8 +492,14 @@ func (h *RemediationHandler) ExecutePlan(
 // stepFailureCode maps a step execution error onto the connect code clients
 // need to distinguish causes: a step stopped by the client-configured timeout
 // or a cancelled call must not masquerade as a server-side internal failure.
-// The context sentinels arrive wrapped, so match with errors.Is.
-func stepFailureCode(err error) connect.Code {
+// The context is consulted first because a command killed mid-run surfaces as
+// an exec exit error (signal: killed) that does not wrap the context
+// sentinel; when the context is still live, the sentinels arrive wrapped, so
+// match with errors.Is.
+func stepFailureCode(ctx context.Context, err error) connect.Code {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		err = ctxErr
+	}
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		return connect.CodeDeadlineExceeded
