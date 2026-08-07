@@ -125,3 +125,87 @@ func TestExampleCategoriesCoverAllEntrypoints(t *testing.T) {
 		}
 	}
 }
+
+// undeclaredBindingVars lists variables that a BindingProfile advertises but
+// the CEL environment never declares, so any policy using them fails to
+// compile with "undeclared reference".
+//
+// These are real defects, tracked in #129, not exemptions. The list exists so
+// the gap is enforced at its current size instead of growing quietly. Every
+// entry is a promise the docs make and the engine cannot keep: all three
+// sandbox entrypoints are unusable because every variable they declare is on
+// this list, and `licenses` is advertised at four proxy entrypoints.
+//
+// TestBindingProfilesDeclareRealVariables fails both when a new name appears
+// here and when a listed name starts working, so fixing one requires deleting
+// its line and the list cannot rot.
+var undeclaredBindingVars = map[string]string{
+	"command":          "#129 sandbox_command, sandbox_execution",
+	"context":          "#129 sandbox_network, sandbox_command, sandbox_execution",
+	"host":             "#129 sandbox_network",
+	"licenses":         "#129 the four *_artifact_request entrypoints",
+	"port":             "#129 sandbox_network",
+	"protocol":         "#129 sandbox_network",
+	"requested_config": "#129 sandbox_execution",
+	"sandbox_config":   "#129 sandbox_network, sandbox_command",
+	"source":           "#129 sandbox_execution",
+	"workspace_dir":    "#129 sandbox_execution",
+}
+
+// TestBindingProfilesDeclareRealVariables pins the contract that
+// internal/policy/bindings.go claims to be "the authoritative source for what's
+// available where": a variable an entrypoint advertises must actually be
+// declared in the CEL environment.
+//
+// Nothing enforced this before, so the two lists drifted and the docs generated
+// from BindingProfiles told authors to use variables that cannot compile.
+func TestBindingProfilesDeclareRealVariables(t *testing.T) {
+	t.Parallel()
+	declared := DefaultVariableNames()
+
+	missing := map[string][]string{}
+	for ep, profile := range BindingProfiles {
+		for _, name := range profile.Variables() {
+			if !slices.Contains(declared, name) {
+				missing[name] = append(missing[name], string(ep))
+			}
+		}
+	}
+
+	for name, entrypoints := range missing {
+		if _, known := undeclaredBindingVars[name]; !known {
+			slices.Sort(entrypoints)
+			t.Errorf("binding profiles advertise %q at %v but the CEL env does not declare it; "+
+				"add it to DefaultVariableNames or remove it from the profile",
+				name, entrypoints)
+		}
+	}
+
+	// The other direction: a known gap that has been closed must leave the list,
+	// otherwise it stops describing reality and starts hiding regressions.
+	for name, ref := range undeclaredBindingVars {
+		if _, still := missing[name]; !still {
+			t.Errorf("%q is declared now (%s); delete it from undeclaredBindingVars", name, ref)
+		}
+	}
+}
+
+// TestRequiredVariablesAreDeclared is the sharper half of the same contract.
+// "Required" tells authors in bindings.go that they "can rely on these without
+// null checks", so a Required variable that is not even declared is the worst
+// case: the documentation is actively wrong rather than merely incomplete.
+func TestRequiredVariablesAreDeclared(t *testing.T) {
+	t.Parallel()
+	declared := DefaultVariableNames()
+	for ep, profile := range BindingProfiles {
+		for _, name := range profile.Required {
+			if slices.Contains(declared, name) {
+				continue
+			}
+			if _, known := undeclaredBindingVars[name]; known {
+				continue
+			}
+			t.Errorf("entrypoint %q requires %q, which the CEL env does not declare", ep, name)
+		}
+	}
+}
