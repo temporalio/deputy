@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 func TestPolicyREPLCommands(t *testing.T) {
@@ -173,4 +175,49 @@ func TestCompleteREPLCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestREPLEntrypointCommand covers the two ways :entrypoint used to mislead:
+// it listed a hardcoded 12 of the 37 real entrypoints (including "proxy",
+// which is a command, not an entrypoint), and it accepted any string, so a
+// typo silently set a context that could never match a policy.
+func TestREPLEntrypointCommand(t *testing.T) {
+	run := func(t *testing.T, lines ...string) string {
+		t.Helper()
+		script := strings.Join(append(lines, ":exit", ""), "\n")
+		var out bytes.Buffer
+		if err := runPolicyREPL(t.Context(), strings.NewReader(script), &out); err != nil {
+			t.Fatalf("runPolicyREPL error: %v", err)
+		}
+		return out.String()
+	}
+
+	t.Run("lists every entrypoint", func(t *testing.T) {
+		text := run(t, ":entrypoint")
+		for _, ep := range policy.AllEntrypoints {
+			if !strings.Contains(text, string(ep)) {
+				t.Errorf("entrypoint %q missing from :entrypoint listing", ep)
+			}
+		}
+		if strings.Contains(text, "  proxy\n") {
+			t.Error(`":entrypoint" listed "proxy", which is a command, not an entrypoint`)
+		}
+	})
+
+	t.Run("accepts a real entrypoint", func(t *testing.T) {
+		text := run(t, ":entrypoint sbom_report")
+		if !strings.Contains(text, "entrypoint set to sbom_report") {
+			t.Errorf("expected sbom_report to be accepted, got:\n%s", text)
+		}
+	})
+
+	t.Run("rejects an unknown entrypoint", func(t *testing.T) {
+		text := run(t, ":entrypoint scan_reprot")
+		if strings.Contains(text, "entrypoint set to scan_reprot") {
+			t.Error("typo was accepted; :entrypoint must validate against AllEntrypoints")
+		}
+		if !strings.Contains(text, "unknown entrypoint") {
+			t.Errorf("expected an unknown-entrypoint error, got:\n%s", text)
+		}
+	})
 }

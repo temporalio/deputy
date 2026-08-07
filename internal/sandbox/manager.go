@@ -277,9 +277,9 @@ func (m *Manager) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		if m.policyEngine != nil {
 			if err := m.evaluateExecutionPolicy(ctx, req); err != nil {
 				// Audit: Log policy denial
-				m.auditor.LogPolicyDenied(ctx, executionID, runtimeType, "sandbox_execution", err.Error())
+				m.auditor.LogPolicyDenied(ctx, executionID, runtimeType, string(policy.EntrypointSandboxExecution), err.Error())
 				// Record OTel metric for policy denial
-				otel.RecordSandboxPolicyDenial(ctx, runtimeType.String(), "sandbox_execution")
+				otel.RecordSandboxPolicyDenial(ctx, runtimeType.String(), string(policy.EntrypointSandboxExecution))
 				yield(&sandboxv1.ExecuteEvent{
 					ExecutionId: executionID,
 					Timestamp:   timestamppb.Now(),
@@ -481,7 +481,7 @@ func (m *Manager) evaluateExecutionPolicy(ctx context.Context, req *sandboxv1.Ex
 		"context":          req.GetContext(),
 	}
 
-	actions, err := m.policyEngine.EvaluateAllMap(ctx, input, "sandbox", "sandbox_execution")
+	actions, err := m.policyEngine.EvaluateAllMap(ctx, input, "sandbox", string(policy.EntrypointSandboxExecution))
 	if err != nil {
 		return fmt.Errorf("policy evaluation failed: %w", err)
 	}
