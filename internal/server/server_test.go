@@ -254,6 +254,36 @@ func TestAllServicesRegistered(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
+	procedures := registeredProcedures(t, srv)
+
+	for _, procedure := range procedures {
+		req, err := http.NewRequest(http.MethodPost, ts.URL+procedure, nil)
+		if err != nil {
+			t.Fatalf("failed to create request for %s: %v", procedure, err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request to %s failed: %v", procedure, err)
+		}
+		resp.Body.Close()
+
+		// Should not be 404 (procedure is registered); streaming procedures
+		// reject the unary content type with a non-404 status, which is fine.
+		if resp.StatusCode == http.StatusNotFound {
+			t.Errorf("procedure %s returned 404 - not registered", procedure)
+		}
+	}
+}
+
+// registeredProcedures expands the server's recorded service paths into the
+// complete list of Connect procedure paths via the proto service descriptors,
+// enforcing floors so an empty or shrunken registration set fails instead of
+// hollowing out the callers' corpora.
+func registeredProcedures(t *testing.T, srv *Server) []string {
+	t.Helper()
+
 	// Sanity floor: the server currently registers 7 services; fewer means
 	// registration (or path recording) broke, not that the corpus shrank.
 	if len(srv.servicePaths) < 7 {
@@ -281,24 +311,53 @@ func TestAllServicesRegistered(t *testing.T) {
 	if len(procedures) < 25 {
 		t.Fatalf("derived %d procedures, want at least 25: %v", len(procedures), procedures)
 	}
+	return procedures
+}
 
-	for _, procedure := range procedures {
-		req, err := http.NewRequest(http.MethodPost, ts.URL+procedure, nil)
-		if err != nil {
-			t.Fatalf("failed to create request for %s: %v", procedure, err)
+// stalePolicyProcedures are procedureToEntrypoint keys that do not match any
+// procedure the server registers, meaning server policies for those
+// entrypoints are silently never evaluated (unknown procedures are allowed by
+// default). KNOWN DEFECT, pinned rather than hidden: DiffService's real
+// procedures are DiffPackages/DiffVulnerabilities/DiffContainerImages and
+// GraphService's are BuildGraph/WhyDependency/QueryGraph, so the
+// service_diff_request and service_graph_request entrypoints currently guard
+// nothing. Fixing the map (a behavior change: those RPCs become policy
+// enforced) must remove the entry here, which makes this list self-cleaning.
+var stalePolicyProcedures = map[string]bool{
+	"/deputy.diff.v1.DiffService/Diff":      true,
+	"/deputy.graph.v1.GraphService/Resolve": true,
+	"/deputy.graph.v1.GraphService/Why":     true,
+}
+
+// TestPolicyProcedureMapMatchesRegisteredProcedures checks every key of
+// procedureToEntrypoint against the procedures the server actually registers.
+// Procedures absent from the map bypass policy evaluation entirely, so a
+// stale key silently disables authorization for that RPC. Known-stale keys
+// are pinned in stalePolicyProcedures; this test fails when a new stale key
+// appears or when a pinned one is fixed without unpinning it.
+func TestPolicyProcedureMapMatchesRegisteredProcedures(t *testing.T) {
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	registered := make(map[string]bool)
+	for _, procedure := range registeredProcedures(t, srv) {
+		registered[procedure] = true
+	}
+
+	for procedure := range procedureToEntrypoint {
+		switch {
+		case registered[procedure] && stalePolicyProcedures[procedure]:
+			t.Errorf("procedure %s is registered again; remove it from stalePolicyProcedures", procedure)
+		case !registered[procedure] && !stalePolicyProcedures[procedure]:
+			t.Errorf("procedureToEntrypoint key %s matches no registered procedure; its policy entrypoint is silently never evaluated", procedure)
 		}
-		req.Header.Set("Content-Type", "application/json")
+	}
 
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("request to %s failed: %v", procedure, err)
-		}
-		resp.Body.Close()
-
-		// Should not be 404 (procedure is registered); streaming procedures
-		// reject the unary content type with a non-404 status, which is fine.
-		if resp.StatusCode == http.StatusNotFound {
-			t.Errorf("procedure %s returned 404 - not registered", procedure)
+	for procedure := range stalePolicyProcedures {
+		if _, ok := procedureToEntrypoint[procedure]; !ok {
+			t.Errorf("stalePolicyProcedures entry %s is no longer in procedureToEntrypoint; remove it", procedure)
 		}
 	}
 }

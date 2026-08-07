@@ -1033,24 +1033,28 @@ func recoveryInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
+// procedureToEntrypoint maps RPC procedures to the policy entrypoints that
+// authorize them. Procedures absent from this map are allowed without policy
+// evaluation, so every entry is security-relevant: a stale procedure name
+// silently disables enforcement for that RPC. A drift test checks each key
+// against the procedures the server actually registers.
+var procedureToEntrypoint = map[string]policy.Entrypoint{
+	"/deputy.scan.v1.ScanService/Scan":           policy.EntrypointServiceScanRequest,
+	"/deputy.scan.v1.ScanService/StreamScan":     policy.EntrypointServiceScanRequest,
+	"/deputy.list.v1.ListService/ListPackages":   policy.EntrypointServiceListRequest,
+	"/deputy.list.v1.ListService/ListEcosystems": policy.EntrypointServiceListRequest,
+	"/deputy.sbom.v1.SBOMService/Generate":       policy.EntrypointServiceSBOMRequest,
+	"/deputy.sbom.v1.SBOMService/Diff":           policy.EntrypointServiceSBOMRequest,
+	"/deputy.diff.v1.DiffService/Diff":           policy.EntrypointServiceDiffRequest,
+	"/deputy.secrets.v1.SecretsService/Scan":     policy.EntrypointServiceSecretsRequest,
+	"/deputy.graph.v1.GraphService/Resolve":      policy.EntrypointServiceGraphRequest,
+	"/deputy.graph.v1.GraphService/Why":          policy.EntrypointServiceGraphRequest,
+}
+
 // policyInterceptor evaluates service-level policies for authorization.
 // It maps RPC procedures to policy entrypoints and evaluates policies with
 // JWT claims (jwt.*), request metadata, and target information.
 func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
-	// Map RPC procedures to policy entrypoints
-	procedureToEntrypoint := map[string]policy.Entrypoint{
-		"/deputy.scan.v1.ScanService/Scan":           policy.EntrypointServiceScanRequest,
-		"/deputy.scan.v1.ScanService/StreamScan":     policy.EntrypointServiceScanRequest,
-		"/deputy.list.v1.ListService/ListPackages":   policy.EntrypointServiceListRequest,
-		"/deputy.list.v1.ListService/ListEcosystems": policy.EntrypointServiceListRequest,
-		"/deputy.sbom.v1.SBOMService/Generate":       policy.EntrypointServiceSBOMRequest,
-		"/deputy.sbom.v1.SBOMService/Diff":           policy.EntrypointServiceSBOMRequest,
-		"/deputy.diff.v1.DiffService/Diff":           policy.EntrypointServiceDiffRequest,
-		"/deputy.secrets.v1.SecretsService/Scan":     policy.EntrypointServiceSecretsRequest,
-		"/deputy.graph.v1.GraphService/Resolve":      policy.EntrypointServiceGraphRequest,
-		"/deputy.graph.v1.GraphService/Why":          policy.EntrypointServiceGraphRequest,
-	}
-
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			procedure := req.Spec().Procedure
