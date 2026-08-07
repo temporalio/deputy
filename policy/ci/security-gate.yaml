@@ -26,7 +26,7 @@ policies:
     entrypoints: [scan_report]
     rules:
       - action: deny
-        when: vulnerabilities.orValue([]).exists(v, v.advisory.severity.level == severity.critical)
+        when: vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
         reason: Critical vulnerability blocks CI pipeline
         remediation: Upgrade affected packages to patched versions
 
@@ -36,7 +36,7 @@ policies:
     entrypoints: [scan_report]
     rules:
       - action: deny
-        when: vulnerabilities.orValue([]).exists(v, v.advisory.severity.level == severity.high && size(v.advisory.fixed_versions) > 0)
+        when: vulnerabilities.exists(v, v.advisory.severity.level == severity.high && size(v.advisory.fixed_versions) > 0)
         reason: High severity vulnerability has an available fix
         remediation: Upgrade to a fixed version
 
@@ -46,6 +46,6 @@ policies:
     entrypoints: [scan_report]
     rules:
       - action: warn
-        when: vulnerabilities.orValue([]).exists(v, v.advisory.severity.level == severity.high && size(v.advisory.fixed_versions) == 0)
+        when: vulnerabilities.exists(v, v.advisory.severity.level == severity.high && size(v.advisory.fixed_versions) == 0)
         reason: High severity vulnerability (no fix available yet)
         remediation: Monitor for upstream fix availability

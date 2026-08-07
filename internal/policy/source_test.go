@@ -110,27 +110,33 @@ func TestLoadStructuredBundle(t *testing.T) {
 	}
 }
 
+// shippedPolicyPaths returns every policy bundle this repo ships, resolving the
+// repo root from whichever directory the test binary runs in. Both the examples
+// and the gates Deputy runs on its own PRs are included: policy/ci was outside
+// the corpus when all three gates broke on a cel-go bump, so anything asserting
+// a property of "our policies" has to cover it.
+func shippedPolicyPaths(t *testing.T) []string {
+	t.Helper()
+	for _, prefix := range []string{"policy", "../policy", "../../policy"} {
+		var paths []string
+		for _, dir := range []string{"examples", "ci"} {
+			matches, err := filepath.Glob(filepath.Join(prefix, dir, "*.yaml"))
+			if err != nil {
+				t.Fatalf("glob %s/%s: %v", prefix, dir, err)
+			}
+			paths = append(paths, matches...)
+		}
+		if len(paths) > 0 {
+			return paths
+		}
+	}
+	t.Fatal("no shipped policies found")
+	return nil
+}
+
 func TestExampleBundlesCompile(t *testing.T) {
 	t.Parallel()
-	patterns := []string{
-		"policy/examples/*.yaml",
-		"../policy/examples/*.yaml",
-		"../../policy/examples/*.yaml",
-	}
-	var paths []string
-	for _, pattern := range patterns {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			t.Fatalf("glob %s: %v", pattern, err)
-		}
-		if len(matches) > 0 {
-			paths = matches
-			break
-		}
-	}
-	if len(paths) == 0 {
-		t.Fatalf("no example policies found")
-	}
+	paths := shippedPolicyPaths(t)
 	extraVars := []string{"licenses"}
 	for _, path := range paths {
 		t.Run(filepath.Base(path), func(t *testing.T) {
@@ -147,5 +153,87 @@ func TestExampleBundlesCompile(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// receiverOf returns the receiver expression immediately preceding the
+// ".orValue(" that ends at idx, by walking back over the identifier/selector
+// chain. Stops at anything that cannot be part of a receiver path so that
+// "a && b.orValue(x)" yields "b", not "a && b".
+func receiverOf(expr string, idx int) string {
+	start := idx
+	depth := 0
+	for start > 0 {
+		c := expr[start-1]
+		switch {
+		case c == ')' || c == ']':
+			depth++
+		case c == '(' || c == '[':
+			if depth == 0 {
+				return expr[start:idx]
+			}
+			depth--
+		case depth > 0:
+			// inside a nested call or index; keep consuming
+		case c == '.' || c == '?' || c == '_' ||
+			(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'):
+			// part of the receiver path
+		default:
+			return expr[start:idx]
+		}
+		start--
+	}
+	return expr[start:idx]
+}
+
+// TestNoOrValueOnNonOptional pins the rule that .orValue() may only be applied
+// to something that is actually optional, meaning the receiver chain contains
+// a ?. select or a [?] index.
+//
+// Applying it to a plain variable is a silent no-op, not a default: through
+// cel-go v0.26 the runtime handed the receiver back without ever evaluating
+// the argument, and it does not rescue an unbound variable either, because
+// attribute resolution fails before the call. cel-go v0.28 turned the same
+// expression into "no such overload", which broke all three CI gates at once.
+//
+// Neither a compile check nor an eval check catches this on the pinned
+// version, since the bad form both compiles and evaluates there. A static
+// check is the only thing that holds across cel-go versions.
+func TestNoOrValueOnNonOptional(t *testing.T) {
+	t.Parallel()
+	for _, path := range shippedPolicyPaths(t) {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			for i, line := range strings.Split(string(body), "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					continue // comment, not an expression
+				}
+				for _, m := range orValueSites(line) {
+					if !strings.Contains(m, "?") {
+						t.Errorf("%s:%d: .orValue() applied to non-optional receiver %q; "+
+							"guard the hop that can actually be absent (x.?y.orValue(z)) or drop the call",
+							filepath.Base(path), i+1, m)
+					}
+				}
+			}
+		})
+	}
+}
+
+// orValueSites returns the receiver of every ".orValue(" occurrence in line.
+func orValueSites(line string) []string {
+	const marker = ".orValue("
+	var out []string
+	for off := 0; ; {
+		j := strings.Index(line[off:], marker)
+		if j < 0 {
+			return out
+		}
+		at := off + j
+		out = append(out, receiverOf(line, at))
+		off = at + len(marker)
 	}
 }

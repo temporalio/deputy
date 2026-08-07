@@ -11,7 +11,7 @@ policies:
     mode: advisory
     entrypoints: ["go_artifact_request", "npm_artifact_request", "pypi_artifact_request", "rubygems_artifact_request"]
     vars:
-      vulns: 'vulnerabilities.orValue([])'
+      vulns: 'vulnerabilities'
     rules:
       - action: deny
         when: vulns.exists(v, v.advisory.severity.level == severity.critical)

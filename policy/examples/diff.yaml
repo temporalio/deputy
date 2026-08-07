@@ -65,7 +65,7 @@ policies:
     rules:
       - action: deny
         when: |
-          vulnerabilities.orValue([]).exists(v, v.advisory.severity.level == severity.critical)
+          vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
         reason: "Critical vulnerability introduced by dependency change"
         remediation: "Update to a patched version or choose an alternative package"
 
@@ -75,7 +75,7 @@ policies:
     rules:
       - action: warn
         when: |
-          vulnerabilities.orValue([]).exists(v, v.advisory.severity.level == severity.high)
+          vulnerabilities.exists(v, v.advisory.severity.level == severity.high)
         reason: "High severity vulnerability found in dependency changes"
         remediation: "Review vulnerabilities and update to patched versions"
 
