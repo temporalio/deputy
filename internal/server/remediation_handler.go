@@ -872,12 +872,20 @@ func (h *RemediationHandler) ListAgents(
 		info := infoResp.Msg
 		caps := info.GetCapabilities()
 
+		// Execution requires everything ExecuteWithAgent checks before
+		// running: local mode (remote servers refuse agent execution
+		// outright), the agentic flag, and in-process executor support.
+		executes := h.localMode && caps.GetAgentic() && agent.AsExecutor(entry.Handler) != nil
+		approvals := executes && agent.SupportsApprovals(entry.Handler)
+
 		agents = append(agents, &remediationv1.AgentInfo{
 			Name:         info.GetName(),
 			DisplayName:  info.GetDisplayName(),
 			Description:  info.GetDescription(),
-			Capabilities: remediationAgentCapabilities(caps, agent.AsExecutor(entry.Handler) != nil),
-			IsAvailable:  true,
+			Capabilities: remediationAgentCapabilities(caps, executes, approvals),
+			// Availability reflects registry presence; what the agent may do
+			// through this handler is expressed by the capability flags.
+			IsAvailable: true,
 		})
 	}
 
@@ -888,18 +896,17 @@ func (h *RemediationHandler) ListAgents(
 
 // remediationAgentCapabilities maps the agent plugin capability contract onto
 // the remediation API's capability fields so ListAgents advertises what an
-// agent can actually do. The plugin contract does not model code execution,
-// file modification, or approval workflows as separate flags: its agentic
-// flag means autonomous code execution (which modifies files). All three
-// therefore require both the agentic flag and in-process execution support
-// (inProcessExecutor), because ExecuteWithAgent refuses handlers without an
-// agent.Executor implementation: an agentic handler that cannot run
-// in-process must not advertise execution it cannot deliver. Approval
-// workflows share the same gate because they are structural for in-process
-// execution: the handler runs the ApproveStep round-trip for every such
-// session, and Approve is part of the plugin service contract.
-func remediationAgentCapabilities(caps *agentv1.AgentCapabilities, inProcessExecutor bool) *remediationv1.AgentCapabilities {
-	executes := caps.GetAgentic() && inProcessExecutor
+// agent can actually do through this handler. The plugin contract does not
+// model code execution, file modification, or approval workflows as separate
+// flags, so the caller supplies them: executes reports whether
+// ExecuteWithAgent could actually run the agent (local mode, agentic flag,
+// in-process agent.Executor support), and drives code_execution and
+// file_modification because agentic means autonomous code execution.
+// approvals additionally requires an explicit agent.ApprovalSupporter
+// declaration: every plugin structurally has an Approve method, so only an
+// explicit declaration distinguishes real approval delivery from the
+// Unimplemented stub that ExecuteWithAgent's handoff would silently drop.
+func remediationAgentCapabilities(caps *agentv1.AgentCapabilities, executes, approvals bool) *remediationv1.AgentCapabilities {
 	return &remediationv1.AgentCapabilities{
 		Streaming:         caps.GetStreaming(),
 		ToolUse:           caps.GetToolUse(),
@@ -907,7 +914,7 @@ func remediationAgentCapabilities(caps *agentv1.AgentCapabilities, inProcessExec
 		SessionResumption: caps.GetSessionResumption(),
 		CodeExecution:     executes,
 		FileModification:  executes,
-		ApprovalWorkflows: executes,
+		ApprovalWorkflows: approvals,
 	}
 }
 

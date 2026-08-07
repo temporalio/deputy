@@ -623,9 +623,20 @@ func (f *fakeExecutorAgentHandler) ResumeIter(context.Context, *agentv1.ResumeRe
 	return func(func(*agentv1.ExecuteEvent, error) bool) {}
 }
 
-// TestListAgentsCapabilities pins the capability mapping: only agentic agents
-// that support in-process execution (what ExecuteWithAgent actually requires)
-// advertise code execution, file modification, and approval workflows.
+// fakeApprovalExecutorAgentHandler additionally declares working approval
+// delivery via agent.ApprovalSupporter.
+type fakeApprovalExecutorAgentHandler struct {
+	fakeExecutorAgentHandler
+}
+
+// SupportsApprovals declares real approval delivery for the fake.
+func (f *fakeApprovalExecutorAgentHandler) SupportsApprovals() bool { return true }
+
+// TestListAgentsCapabilities pins the capability mapping: execution
+// capabilities require local mode, the agentic flag, and in-process executor
+// support (what ExecuteWithAgent actually requires), and approval workflows
+// additionally require an explicit agent.ApprovalSupporter declaration, since
+// every handler structurally has an Approve method.
 func TestListAgentsCapabilities(t *testing.T) {
 	agenticCaps := &agentv1.AgentCapabilities{
 		Streaming:         true,
@@ -634,13 +645,28 @@ func TestListAgentsCapabilities(t *testing.T) {
 		SessionResumption: true,
 	}
 	tests := []struct {
-		name    string
-		handler agentv1connect.AgentPluginHandler
-		want    *remediationv1.AgentCapabilities
+		name      string
+		handler   agentv1connect.AgentPluginHandler
+		localMode bool
+		want      *remediationv1.AgentCapabilities
 	}{
 		{
-			name:    "agentic in-process executor advertises execution capabilities",
-			handler: &fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: agenticCaps}},
+			name:      "agentic executor without approval declaration",
+			handler:   &fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: agenticCaps}},
+			localMode: true,
+			want: &remediationv1.AgentCapabilities{
+				Streaming:         true,
+				ToolUse:           true,
+				Agentic:           true,
+				SessionResumption: true,
+				CodeExecution:     true,
+				FileModification:  true,
+			},
+		},
+		{
+			name:      "agentic executor declaring approval support",
+			handler:   &fakeApprovalExecutorAgentHandler{fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: agenticCaps}}},
+			localMode: true,
 			want: &remediationv1.AgentCapabilities{
 				Streaming:         true,
 				ToolUse:           true,
@@ -652,8 +678,9 @@ func TestListAgentsCapabilities(t *testing.T) {
 			},
 		},
 		{
-			name:    "agentic non-executor advertises no execution capabilities",
-			handler: &fakeAgentHandler{name: "fake", caps: agenticCaps},
+			name:      "agentic non-executor advertises no execution capabilities",
+			handler:   &fakeAgentHandler{name: "fake", caps: agenticCaps},
+			localMode: true,
 			want: &remediationv1.AgentCapabilities{
 				Streaming:         true,
 				ToolUse:           true,
@@ -662,9 +689,21 @@ func TestListAgentsCapabilities(t *testing.T) {
 			},
 		},
 		{
-			name:    "non-agentic executor advertises no execution capabilities",
-			handler: &fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: &agentv1.AgentCapabilities{Streaming: true}}},
-			want:    &remediationv1.AgentCapabilities{Streaming: true},
+			name:      "non-agentic executor advertises no execution capabilities",
+			handler:   &fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: &agentv1.AgentCapabilities{Streaming: true}}},
+			localMode: true,
+			want:      &remediationv1.AgentCapabilities{Streaming: true},
+		},
+		{
+			name:      "remote mode advertises no execution capabilities",
+			handler:   &fakeApprovalExecutorAgentHandler{fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: agenticCaps}}},
+			localMode: false,
+			want: &remediationv1.AgentCapabilities{
+				Streaming:         true,
+				ToolUse:           true,
+				Agentic:           true,
+				SessionResumption: true,
+			},
 		},
 	}
 
@@ -674,7 +713,11 @@ func TestListAgentsCapabilities(t *testing.T) {
 			if err := registry.RegisterBuiltin("fake", tt.handler); err != nil {
 				t.Fatalf("RegisterBuiltin failed: %v", err)
 			}
-			handler := NewRemediationHandler(WithRemediationRegistry(registry))
+			handlerOpts := []RemediationHandlerOption{WithRemediationRegistry(registry)}
+			if tt.localMode {
+				handlerOpts = append(handlerOpts, WithRemediationLocalMode())
+			}
+			handler := NewRemediationHandler(handlerOpts...)
 
 			resp, err := handler.ListAgents(t.Context(), connect.NewRequest(&remediationv1.ListAgentsRequest{}))
 			if err != nil {

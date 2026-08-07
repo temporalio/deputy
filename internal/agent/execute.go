@@ -26,3 +26,25 @@ func AsExecutor(handler agentv1connect.AgentPluginHandler) Executor {
 	}
 	return nil
 }
+
+// ApprovalSupporter is an optional interface handlers implement to declare
+// that their Approve RPC delivers real approval decisions to a running
+// session. Every handler structurally has an Approve method: it is part of
+// the plugin service contract, and embedding UnimplementedAgentPluginHandler
+// stubs it with CodeUnimplemented, so method presence cannot distinguish real
+// support; only an explicit declaration can. No builtin agent currently
+// declares support: claude and codex acknowledge Approve calls but manage
+// approvals inside their own CLIs and never emit approval-required events.
+type ApprovalSupporter interface {
+	// SupportsApprovals reports whether Approve delivers real decisions.
+	SupportsApprovals() bool
+}
+
+// SupportsApprovals reports whether the handler explicitly declares working
+// approval delivery via the ApprovalSupporter interface. Absent an explicit
+// declaration it reports false: advertising an approval workflow a handler
+// silently drops would be worse than not advertising one.
+func SupportsApprovals(handler agentv1connect.AgentPluginHandler) bool {
+	s, ok := handler.(ApprovalSupporter)
+	return ok && s.SupportsApprovals()
+}
