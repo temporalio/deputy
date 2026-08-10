@@ -51,12 +51,36 @@ func TestIsConfigPath(t *testing.T) {
 	}
 }
 
+// TestLockfilePath pins the mapping against mise's real behavior, captured
+// with `mise lock --dry-run` (which prints the lockfile it targets) on mise
+// 2026.7.3 for each layout below.
 func TestLockfilePath(t *testing.T) {
 	tests := map[string]string{
-		"mise.toml":                "mise.lock",
-		"a/b/mise.toml":            "a/b/mise.lock",
-		".config/mise/config.toml": ".config/mise/config.lock",
-		".tool-versions":           "",
+		// Flat configs: the lock is named for the config, minus a leading dot.
+		"mise.toml":             "mise.lock",
+		".mise.toml":            "mise.lock",
+		"a/b/mise.toml":         "a/b/mise.lock",
+		"a/b/.mise.toml":        "a/b/mise.lock",
+		"mise.production.toml":  "mise.production.lock",
+		".mise.production.toml": "mise.production.lock",
+		"mise.local.toml":       "mise.local.lock",
+		".mise.local.toml":      "mise.local.lock",
+		"sub/proj/.mise.toml":   "sub/proj/mise.lock",
+		".config/mise.toml":     ".config/mise.lock",
+		"./mise.toml":           "mise.lock",
+		"/abs/path/.mise.toml":  "/abs/path/mise.lock",
+		"a\\b\\.mise.toml":      "a/b/mise.lock",
+		// A config.toml inside a mise directory is named for the directory.
+		".config/mise/config.toml":   ".config/mise/mise.lock",
+		"mise/config.toml":           "mise/mise.lock",
+		"a/.config/mise/config.toml": "a/.config/mise/mise.lock",
+		// conf.d drop-ins share the enclosing mise directory's lockfile.
+		".config/mise/conf.d/tools.toml": ".config/mise/mise.lock",
+		"mise/conf.d/10-tools.toml":      "mise/mise.lock",
+		// Non-TOML configs are never locked.
+		".tool-versions": "",
+		"mise.json":      "",
+		".toml":          "",
 	}
 	for in, want := range tests {
 		if got := LockfilePath(in); got != want {

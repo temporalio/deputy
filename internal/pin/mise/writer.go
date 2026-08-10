@@ -215,11 +215,11 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 		// file (a bare `[` looks like a scalar to the fallback path).
 		value := line[eq+1:]
 		end := i
-		for !tomlBracketsBalanced(value) && end+1 < len(lines) {
+		for !tomlDelimitersBalanced(value) && end+1 < len(lines) {
 			end++
 			value += "\n" + lines[end]
 		}
-		if !tomlBracketsBalanced(value) {
+		if !tomlDelimitersBalanced(value) {
 			// Unterminated array: malformed TOML, leave the file untouched.
 			break
 		}
@@ -428,11 +428,14 @@ func arrayElementSpans(s string) (spans [][2]int, ok bool) {
 	return nil, false
 }
 
-// tomlBracketsBalanced reports whether every square bracket opened in a TOML
-// value has been closed, ignoring brackets inside strings and comments. The
-// walker uses it to gather the continuation lines of a multiline array into
-// one logical value.
-func tomlBracketsBalanced(s string) bool {
+// tomlDelimitersBalanced reports whether every array bracket and inline-table
+// brace opened in a TOML value has been closed, ignoring delimiters inside
+// strings and comments. The walker uses it to gather the continuation lines of
+// a value that spans several lines into one logical value. Braces count
+// because mise accepts inline tables written across multiple lines, and
+// treating only the first line as the value would either corrupt the file or
+// fail to apply a fix mise itself understands.
+func tomlDelimitersBalanced(s string) bool {
 	depth := 0
 	inSingle, inDouble, escaped := false, false, false
 	for i := 0; i < len(s); i++ {
@@ -451,9 +454,9 @@ func tomlBracketsBalanced(s string) bool {
 			for i < len(s) && s[i] != '\n' {
 				i++
 			}
-		case c == '[':
+		case c == '[', c == '{':
 			depth++
-		case c == ']':
+		case c == ']', c == '}':
 			depth--
 		}
 	}
@@ -575,7 +578,13 @@ func tomlValueSpan(s string, i int) int {
 // arrays and nested tables (not just the text up to the next comma), so an
 // array-valued version field is returned intact for element-wise rewriting
 // rather than being truncated into corrupt TOML.
+//
+// Only a version key at the table's own depth counts. A nested table may carry
+// its own version key (`{ opts = { version = "meta" }, version = "1.22.12" }`),
+// and mise reads the outer one as the tool's version, so matching the inner key
+// would rewrite unrelated metadata and leave the vulnerable version in place.
 func inlineTableVersionSpan(s string) (start, end int, ok bool) {
+	depth := 0
 	inSingle := false
 	inDouble := false
 	escaped := false
@@ -590,7 +599,12 @@ func inlineTableVersionSpan(s string) (start, end int, ok bool) {
 			inSingle = !inSingle
 		case !inSingle && c == '"':
 			inDouble = !inDouble
-		case !inSingle && !inDouble && hasBareKeyAt(s, i, "version"):
+		case inSingle || inDouble:
+		case c == '{':
+			depth++
+		case c == '}':
+			depth--
+		case depth == 1 && hasBareKeyAt(s, i, "version"):
 			j := i + len("version")
 			j = skipTomlSpaces(s, j)
 			if j >= len(s) || s[j] != '=' {

@@ -132,15 +132,52 @@ func IsLocalConfig(p string) bool {
 		strings.HasSuffix(base, ".local.toml")
 }
 
-// LockfilePath returns the mise.lock path that sits next to a TOML config file.
+// LockfilePath returns the lockfile mise associates with a TOML config file.
 // For .tool-versions or non-TOML configs it returns an empty string, since mise
-// only writes lockfiles alongside .toml configs.
+// only locks .toml configs.
+//
+// The name is not simply the config's own name with a .lock suffix. Verified
+// against mise 2026.7.3 (`mise lock --dry-run` reports its target, and
+// resolution honors only that file):
+//
+//	mise.toml                      -> mise.lock
+//	.mise.toml                     -> mise.lock            (not .mise.lock)
+//	mise.production.toml           -> mise.production.lock
+//	.mise.local.toml               -> mise.local.lock
+//	.config/mise.toml              -> .config/mise.lock
+//	.config/mise/config.toml       -> .config/mise/mise.lock
+//	.config/mise/conf.d/tools.toml -> .config/mise/mise.lock
+//
+// So: a leading dot is dropped from the config's basename, a config.toml
+// inside a mise directory is named for that directory, and conf.d drop-ins
+// share the lockfile of the mise directory they belong to. Getting this wrong
+// is not cosmetic: pointing at .mise.lock reads and writes a file mise ignores
+// entirely, leaving the real lock stale.
 func LockfilePath(configPath string) string {
 	cp := strings.ReplaceAll(configPath, "\\", "/")
 	if !strings.HasSuffix(cp, ".toml") {
 		return ""
 	}
-	return strings.TrimSuffix(cp, ".toml") + ".lock"
+	dir, base := path.Split(cp)
+	dir = path.Clean(dir)
+
+	// conf.d drop-ins are merged into the enclosing mise directory, which owns
+	// the lockfile for all of them.
+	if path.Base(dir) == "conf.d" && path.Base(path.Dir(dir)) == "mise" {
+		return path.Join(path.Dir(dir), "mise.lock")
+	}
+	// <...>/mise/config.toml is the directory's config; its lock is named for
+	// the directory, not the file.
+	if base == "config.toml" && path.Base(dir) == "mise" {
+		return path.Join(dir, "mise.lock")
+	}
+	// Otherwise the lock sits beside the config under the config's own name
+	// with any leading dot dropped.
+	base = strings.TrimPrefix(base, ".")
+	if !strings.HasSuffix(base, ".toml") {
+		return ""
+	}
+	return path.Join(dir, strings.TrimSuffix(base, ".toml")+".lock")
 }
 
 // knownBackends lists mise backend prefixes used in [tools] keys (e.g.

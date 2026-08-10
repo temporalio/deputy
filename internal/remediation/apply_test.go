@@ -590,6 +590,94 @@ COPY app /app
 	}
 }
 
+// TestApplyMiseUpdatePrunesLockForLayouts pins lock discovery across the
+// manifest layouts mise supports. The lockfile is not simply the manifest with
+// a .lock suffix: mise reads mise.lock for a .mise.toml config and
+// <dir>/mise.lock for a .config/mise/config.toml, so deriving the name from
+// the basename pruned a file mise ignores and left the real lock pinning the
+// vulnerable version. Each case asserts the stale entry is gone and that the
+// extractor, which substitutes the locked version, now reports the fixed one.
+func TestApplyMiseUpdatePrunesLockForLayouts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		configPath string
+		lockPath   string
+	}{
+		{name: "flat manifest", configPath: "mise.toml", lockPath: "mise.lock"},
+		{name: "hidden manifest", configPath: ".mise.toml", lockPath: "mise.lock"},
+		{name: "environment manifest", configPath: "mise.production.toml", lockPath: "mise.production.lock"},
+		{name: "nested config", configPath: ".config/mise/config.toml", lockPath: ".config/mise/mise.lock"},
+		{name: "conf.d drop-in", configPath: ".config/mise/conf.d/tools.toml", lockPath: ".config/mise/mise.lock"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			write := func(rel, content string) {
+				t.Helper()
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write(tt.configPath, "[tools]\ngo = \"1.22.12\"\n")
+			write(tt.lockPath, "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n")
+
+			cmd := "deputy:mise:update " + tt.configPath + " go 1.24.3 1.22.12"
+			if err := ApplyDeputyCommand(dir, cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			lock, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(tt.lockPath)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(lock), "1.22.12") {
+				t.Errorf("stale entry survived in %s:\n%s", tt.lockPath, lock)
+			}
+
+			// The extractor prefers the locked version, so it is the honest
+			// check that the fix actually took effect.
+			fsys := fstest.MapFS{}
+			for _, rel := range []string{tt.configPath, tt.lockPath} {
+				data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				fsys[rel] = &fstest.MapFile{Data: data}
+			}
+			f, err := fsys.Open(tt.configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv, err := misex.New().Extract(t.Context(), &filesystem.ScanInput{
+				Path:   tt.configPath,
+				Reader: f,
+				FS:     fsys,
+			})
+			if err != nil {
+				t.Fatalf("Extract: %v", err)
+			}
+			var got string
+			for _, pkg := range inv.Packages {
+				if pkg.Name == "go" {
+					got = pkg.Version
+				}
+			}
+			if got != "1.24.3" {
+				t.Errorf("extractor reports go %q after fix, want 1.24.3", got)
+			}
+		})
+	}
+}
+
 // TestApplyMiseUpdatePrunesStaleLock pins the lockfile half of the mise fix:
 // after the config edit, a sibling mise.lock entry still pinning the old
 // version must be removed, otherwise the extractor substitutes the locked

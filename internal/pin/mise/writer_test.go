@@ -477,6 +477,75 @@ go = [{ version = "1.22.12" }, { version = "1.23.8" }]
 			wantErr: true,
 		},
 		{
+			// Only a version key at the tool's own depth is the tool version;
+			// a nested table may carry an unrelated version key, and mise
+			// reads the outer one.
+			name: "nested table with its own version key",
+			input: `[tools]
+go = { opts = { version = "meta" }, version = "1.22.12" }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = { opts = { version = "meta" }, version = "1.24.3" }
+`,
+		},
+		{
+			name: "nested table version key after the real one",
+			input: `[tools]
+go = { version = "1.22.12", opts = { version = "meta" } }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = { version = "1.24.3", opts = { version = "meta" } }
+`,
+		},
+		{
+			name: "array element with a nested version key",
+			input: `[tools]
+go = [{ opts = { version = "meta" }, version = "1.22.12" }, { version = "1.23.8" }]
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = [{ opts = { version = "meta" }, version = "1.24.3" }, { version = "1.23.8" }]
+`,
+		},
+		{
+			name: "root inline table with a nested tool name",
+			input: `tools = { foo = { go = "9.9.9" }, go = "1.22.12" }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `tools = { foo = { go = "9.9.9" }, go = "1.24.3" }
+`,
+		},
+		{
+			name: "root inline table with a nested version key",
+			input: `tools = { go = { opts = { version = "meta" }, version = "1.22.12" } }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `tools = { go = { opts = { version = "meta" }, version = "1.24.3" } }
+`,
+		},
+		{
+			// mise accepts an inline table spread over several lines, so the
+			// rewriter must too rather than refusing a fix mise understands.
+			name: "multiline inline table",
+			input: `[tools]
+go = {
+  version = "1.22.12",
+  postinstall = "go version"
+}
+node = "20.11.1"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = {
+  version = "1.24.3",
+  postinstall = "go version"
+}
+node = "20.11.1"
+`,
+		},
+		{
 			name: "undeclared tool fails",
 			input: `[tools]
 node = "20.11.1"
