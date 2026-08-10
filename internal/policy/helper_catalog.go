@@ -69,7 +69,7 @@ var helperFunctions = []HelperFunction{
 	{Name: "graphMatch", Signature: "graphMatch(string, pattern) bool", Doc: "Check if string matches glob pattern. Supports exact, prefix (*), suffix (*), and contains (*x*) matching."},
 	{Name: "isDirectDep", Signature: "isDirectDep(node) bool", Doc: "Check if node is a direct dependency."},
 	{Name: "nodeDepth", Signature: "nodeDepth(node) int", Doc: "Get dependency depth of node (0 = direct, 1+ = transitive)."},
-	{Name: "nodeEcosystem", Signature: "nodeEcosystem(node) string", Doc: "Get ecosystem of node (e.g., 'npm', 'Go', 'PyPI')."},
+	{Name: "nodeEcosystem", Signature: "nodeEcosystem(node) string", Doc: "Get the canonical ecosystem token of node. Policies always see the lowercase token ('go', 'npm', 'pypi', 'github-actions'), never a display name."},
 	{Name: "hasVulnerabilities", Signature: "hasVulnerabilities(node) bool", Doc: "Check if node has any known vulnerabilities."},
 	{Name: "vulnerabilityCount", Signature: "vulnerabilityCount(node) int", Doc: "Get total vulnerability count for node."},
 
