@@ -207,6 +207,11 @@ func decodesWithPolicies(data []byte) bool {
 // so callers can report them all at once. A bundle that does not decode into
 // Deputy's types is still validated: the node walk reports what it can locate
 // and the decode failure is added on top.
+//
+// One run reports every independent defect, so an author fixes a file once
+// rather than peeling errors one lint at a time. That is why each policy is
+// walked and expanded on its own: nothing about one policy, and nothing the
+// document does elsewhere, withholds the diagnostics for the rest.
 func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	if IsCompiledBundle([]byte(text)) {
 		return nil, errors.New("compiled policy bundle: validate the authored policies it was built from")
@@ -227,8 +232,8 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	// of validation, and every other reader of a bundle, sees only plain nodes.
 	// The scan comes before the policies lookup because a root merge key can
 	// supply the whole list, which would otherwise read as a missing key. It does
-	// not stop the walk: a refused anchor must not hide an unrelated typo and
-	// cost the author a second lint run.
+	// not stop the checks that follow: a refused anchor must not hide an unrelated
+	// typo, or an uncompilable var, and cost the author a second lint run.
 	anchors := anchorIssues(root)
 	issues = append(issues, anchors...)
 	policiesNode := MappingValue(doc, bundlePoliciesKey)
@@ -252,93 +257,99 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 		return append(issues, issueAt(policiesNode, IssueError, "empty-policies", "'policies' must contain at least one policy")), nil
 	}
 	seenNames := map[string]struct{}{}
-	// Policy positions the walk already reported an error for. Their generated
-	// CEL is expected to fail too, so it is not compiled again; every other
-	// policy still is.
-	reported := map[int]bool{}
-	for i, item := range policiesNode.Content {
+	source := cmp.Or(opts.Source, "policy")
+	for _, item := range policiesNode.Content {
 		// Skip a policy that carries an anchor, an alias, or a merge key anywhere
 		// beneath it: it is already reported, and every further message the walk
 		// could produce would describe the alias node rather than the policy the
 		// author meant. Plain policies alongside it are still checked.
 		if len(anchorIssues(item)) > 0 {
-			reported[i] = true
 			continue
 		}
 		if item.Kind != yaml.MappingNode {
 			issues = append(issues, issueAt(item, IssueError, "policy-not-mapping", "policy must be a mapping"))
-			reported[i] = true
 			continue
 		}
-		policyIssues := validatePolicyNode(item, seenNames, opts)
-		if slices.ContainsFunc(policyIssues, func(is Issue) bool { return is.Severity == IssueError }) {
-			reported[i] = true
+		located := validatePolicyNode(item, seenNames, opts)
+		issues = append(issues, located...)
+		// A policy the walk already located an error in is not expanded: its
+		// expansion is expected to fail too, and restating that failure in
+		// generated CEL the author never wrote would only obscure the real defect.
+		if slices.ContainsFunc(located, func(is Issue) bool { return is.Severity == IssueError }) {
+			continue
 		}
-		issues = append(issues, policyIssues...)
+		issues = append(issues, expandedPolicyIssues(item, source, opts.ExtraVars, located)...)
 	}
-	// The loader stops at the first anchor it finds, so it has nothing to add to
-	// what the scan above already located.
-	if len(anchors) > 0 {
-		return issues, nil
-	}
-	// Load the whole bundle as a backstop for shapes the node walk does not model,
-	// such as a rule field of the wrong type. The loader stops at its first
-	// failure, so its message is dropped when a located issue already reports the
-	// same thing, and is anchored on the line it names when it names one.
-	source := cmp.Or(opts.Source, "policy")
-	sources, err := ParseStructuredSources([]byte(text), source)
-	if err != nil {
-		if message, duplicate := loaderMessage(err, source, issues); !duplicate {
-			issues = append(issues, Issue{
-				RuleIndex: NoRule,
-				Line:      lineFromYAMLError(message),
-				Column:    1,
-				Severity:  IssueWarning,
-				Code:      "bundle-error",
-				Message:   message,
-			})
+	// Loading the whole bundle is the last backstop, for the shapes that belong to
+	// no single policy, such as bundle metadata of the wrong type. It stops at its
+	// first failure, which is why it runs after every policy has been expanded on
+	// its own and adds only what is not already reported. A document carrying an
+	// anchor skips it outright: the loader stops at the first one, which the scan
+	// above already located.
+	if len(anchors) == 0 {
+		if _, err := ParseStructuredSources([]byte(text), source); err != nil {
+			issues = append(issues, backstopIssue(err, source, doc, issues)...)
 		}
-		return issues, nil
 	}
-	return append(issues, generatedSourceIssues(sources, policiesNode, opts.ExtraVars, reported)...), nil
+	return issues, nil
 }
 
-// generatedSourceIssues compiles the CEL each policy expands into, so a bundle
-// that lints clean is a bundle `deputy policy bundle` can compile. Loading a
-// bundle only generates that CEL; nothing before this compiles it. A rule's
-// condition is checked on its own, while a policy's vars wrap every condition in
-// a comprehension, so a var whose value or name is not valid CEL breaks the
-// generated body alone and no per-rule check can see it.
+// expandedPolicyIssues reports what only expanding one policy can find. Two
+// defects hide from the node walk: a field whose type the walk does not model,
+// such as a rule status written as a string, and the CEL a policy generates,
+// since a policy's vars wrap every condition in a comprehension that no per-rule
+// check compiles. Expanding here is what makes a bundle that lints clean a
+// bundle `deputy policy bundle` can compile.
 //
-// A policy the walk already located an error in is skipped, because its
-// generated body is then expected to fail too and restating that failure in
-// expanded CEL the author never wrote would only obscure the real defect. The
-// skip is per policy rather than bundle-wide: one policy with a bad condition
-// must not hide an unrelated bad var in the next one and cost the author a
-// second lint run. The loader returns one source per policy in document order,
-// which is how reported positions and failures alike are matched to the policy
-// they belong to.
-func generatedSourceIssues(sources []Source, policiesNode *yaml.Node, extraVars []string, reported map[int]bool) []Issue {
-	var issues []Issue
-	for i, src := range sources {
-		if reported[i] {
-			continue
-		}
-		err := Compile(src.Body, extraVars)
-		if err == nil {
-			continue
-		}
-		var node *yaml.Node
-		if i < len(policiesNode.Content) {
-			node = policiesNode.Content[i]
-		}
-		issue := issueAt(node, IssueError, "cel-error", err.Error())
-		if nameNode := MappingValue(node, "name"); nameNode != nil && nameNode.Kind == yaml.ScalarNode {
-			issue.Policy = strings.TrimSpace(nameNode.Value)
-		}
-		issues = append(issues, issue)
+// It works from the policy's own node rather than from a load of the whole
+// bundle, which is what lets one pass report every policy. A bundle-wide load
+// stops at its first failure, so one policy's mistyped field, or an anchor
+// written anywhere in the document, used to withhold the diagnostics for every
+// other policy and cost the author a lint run per defect.
+//
+// located is what the walk already reported for this policy, so a failure that
+// restates one of those is dropped and a single mistake stays a single issue.
+func expandedPolicyIssues(item *yaml.Node, source string, extraVars []string, located []Issue) []Issue {
+	var pol structuredPolicy
+	// Decoding resolves aliases, which the format refuses; that is safe here
+	// because a policy carrying one anywhere beneath it never reaches this point.
+	if err := item.Decode(&pol); err != nil {
+		return backstopIssue(fmt.Errorf("%s: %w", source, err), source, item, located)
 	}
-	return issues
+	pol.Name = strings.TrimSpace(pol.Name)
+	body, err := pol.toCELSource()
+	if err != nil {
+		return backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, err), source, item, located)
+	}
+	if err := Compile(body, extraVars); err != nil {
+		issue := issueAt(item, IssueError, "cel-error", err.Error())
+		issue.Policy = pol.Name
+		return []Issue{issue}
+	}
+	return nil
+}
+
+// backstopIssue renders a load failure as an issue, or nothing when a located
+// issue already describes the same defect. It is anchored on the line the
+// failure names, since the decoder names one for a field the walk does not
+// model, and otherwise on the node the failure came from.
+func backstopIssue(err error, source string, node *yaml.Node, located []Issue) []Issue {
+	message, duplicate := loaderMessage(err, source, located)
+	if duplicate {
+		return nil
+	}
+	issue := Issue{
+		RuleIndex: NoRule,
+		Line:      lineFromYAMLError(message),
+		Column:    1,
+		Severity:  IssueWarning,
+		Code:      "bundle-error",
+		Message:   message,
+	}
+	if issue.Line == 0 && node != nil {
+		issue.Line, issue.Column = node.Line, node.Column
+	}
+	return []Issue{issue}
 }
 
 // validatePolicyNode checks one policy mapping: its name uniqueness, its

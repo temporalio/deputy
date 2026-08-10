@@ -1159,16 +1159,23 @@ policies:
 }
 
 // TestValidateBundleChecksEveryHealthyPolicy pins that one broken policy does
-// not hide a defect in another. Generated-source failures are suppressed for the
-// policy the node walk already reported, because restating that failure in
-// expanded CEL the author never wrote obscures the real defect, but every other
-// policy in the bundle still has its generated CEL compiled. Without that the
-// author fixes one policy, reruns lint, and is handed the next one.
+// not hide a defect in another. Expansion failures are suppressed for the policy
+// the node walk already reported, because restating that failure in expanded CEL
+// the author never wrote obscures the real defect, but every other policy in the
+// bundle is still expanded and compiled. Without that the author fixes one
+// policy, reruns lint, and is handed the next one.
+//
+// The suppression is per policy whatever the defect: a field the decoder refuses
+// and an anchor the format refuses are both reported alongside the rest of the
+// bundle, not instead of it. Reading the whole bundle to expand it is what made
+// those two swallow every later diagnostic, since the loader stops at its first
+// failure.
 func TestValidateBundleChecksEveryHealthyPolicy(t *testing.T) {
 	cases := []struct {
 		name         string
 		bundle       string
 		wantPolicies []string
+		wantCodes    []string
 	}{
 		{
 			name: "a bad var behind a policy with a bad condition",
@@ -1229,6 +1236,45 @@ policies:
 `,
 			wantPolicies: []string{"first-bad-var", "second-bad-var"},
 		},
+		{
+			name: "a bad var behind a policy whose field the decoder refuses",
+			bundle: `
+policies:
+  - name: bad-status
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+        status: "four-oh-three"
+  - name: bad-var
+    vars:
+      threshold: '1 +'
+    rules:
+      - when: "true"
+        action: warn
+        reason: "r"
+`,
+			wantPolicies: []string{"bad-var"},
+			wantCodes:    []string{"bundle-error", "cel-error"},
+		},
+		{
+			name: "a bad var alongside a refused anchor",
+			bundle: `
+unused: &unused
+  name: never-referenced
+
+policies:
+  - name: bad-var
+    vars:
+      threshold: '1 +'
+    rules:
+      - when: "true"
+        action: warn
+        reason: "r"
+`,
+			wantPolicies: []string{"bad-var"},
+			wantCodes:    []string{"yaml-anchor", "cel-error"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1242,6 +1288,11 @@ policies:
 				})
 				if !found {
 					t.Fatalf("expected an error on policy %q, got %v", want, issues)
+				}
+			}
+			for _, want := range tc.wantCodes {
+				if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == want }) {
+					t.Fatalf("expected an issue with code %q, got %v", want, issues)
 				}
 			}
 		})
