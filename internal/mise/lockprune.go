@@ -98,19 +98,6 @@ func PruneLockedVersions(content []byte, toolKeys []string, stale func(version s
 	return []byte(strings.Join(out, "\n")), true
 }
 
-// HasLockedTool reports whether content declares any [[tools.<key>]] entry for
-// key. Callers use it to tell an exact lock key from a missing one before
-// falling back to an alternate spelling of the tool name.
-func HasLockedTool(content []byte, key string) bool {
-	for line := range strings.SplitSeq(string(content), "\n") {
-		segs, isArray, ok := lockHeaderPath(line)
-		if ok && isArray && len(segs) == 2 && segs[0] == "tools" && segs[1] == key {
-			return true
-		}
-	}
-	return false
-}
-
 // lockHeaderPath parses a TOML table header line from a mise.lock file,
 // returning its key path segments and whether it is an array-of-tables
 // ([[...]]) header. ok is false for non-header lines.

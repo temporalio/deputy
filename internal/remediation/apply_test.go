@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor/filesystem"
 	"github.com/temporalio/deputy/internal/inventory/plugins/mise/misex"
+	"github.com/temporalio/deputy/internal/mise"
 )
 
 func TestIsDeputyInternalCommand(t *testing.T) {
@@ -1128,9 +1129,14 @@ checksum = "sha256:node"
 // TestApplyMiseUpdateLockKeyPrecision pins which lock entries a fix may
 // touch. A config can declare a backend-qualified tool and its short name as
 // separate tools with independent lock entries, so fixing one must not prune
-// the other's integrity metadata. The backend-stripped name is only a
-// fallback, used when the lock has no entry under the exact configured key and
-// no other declaration in the config could own that short name.
+// the other's integrity metadata. The backend-stripped name is pruned too when
+// no other declaration in the config could own it, whether or not the exact
+// configured key is also locked.
+//
+// Every case additionally checks the outcome the pruning exists for: the
+// edited tool must not resolve back to a locked entry at the version the fix
+// removed. That is what a following scan does, and a fix that leaves such an
+// entry behind reports success while the vulnerability stands.
 func TestApplyMiseUpdateLockKeyPrecision(t *testing.T) {
 	t.Parallel()
 
@@ -1154,6 +1160,9 @@ checksum = "sha256:corenode"
 		config   string
 		lock     string
 		cmd      string
+		tool     string
+		fixed    string
+		stale    string
 		wantGone []string
 		wantKept []string
 	}{
@@ -1164,33 +1173,39 @@ checksum = "sha256:corenode"
 "npm:node" = "20.11.0"
 node = "20.11.0"
 `,
-			lock:     npmNodeEntry + "\n" + coreNodeEntry,
-			cmd:      `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			lock: npmNodeEntry + "\n" + coreNodeEntry,
+			cmd:  `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			tool: "npm:node", fixed: "20.12.0", stale: "20.11.0",
 			wantGone: []string{"sha256:npmnode"},
 			wantKept: []string{"sha256:corenode"},
 		},
 		{
 			// Only the qualified tool is declared and the lock keys it by the
-			// short name: the fallback applies, so the stale entry is pruned.
-			name: "short-name fallback when exact key absent",
+			// short name: the short name is uncontested, so the stale entry is
+			// pruned.
+			name: "short name pruned when exact key absent",
 			config: `[tools]
 "npm:node" = "20.11.0"
 `,
-			lock:     coreNodeEntry,
-			cmd:      `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			lock: coreNodeEntry,
+			cmd:  `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			tool: "npm:node", fixed: "20.12.0", stale: "20.11.0",
 			wantGone: []string{"sha256:corenode"},
 		},
 		{
-			// The exact key is locked, so no fallback: an unrelated short-name
-			// entry is left alone even though the config does not declare it.
-			name: "no fallback when exact key is locked",
+			// Both spellings locked but only one declared: an entry under the
+			// exact key does not make the legacy short-name entry someone
+			// else's. Nothing else claims the short name, so lock resolution
+			// would fall back to it once the exact entry is gone and hand the
+			// fixed tool its old version back; both spellings go.
+			name: "uncontested short name pruned even when the exact key is locked",
 			config: `[tools]
 "npm:node" = "20.11.0"
 `,
-			lock:     npmNodeEntry + "\n" + coreNodeEntry,
-			cmd:      `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
-			wantGone: []string{"sha256:npmnode"},
-			wantKept: []string{"sha256:corenode"},
+			lock: npmNodeEntry + "\n" + coreNodeEntry,
+			cmd:  `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			tool: "npm:node", fixed: "20.12.0", stale: "20.11.0",
+			wantGone: []string{"sha256:npmnode", "sha256:corenode"},
 		},
 		{
 			// Two qualified declarations strip to the same short name, so no
@@ -1203,8 +1218,9 @@ node = "20.11.0"
 "npm:node" = "20.11.0"
 "ubi:node" = "20.11.0"
 `,
-			lock:     coreNodeEntry,
-			cmd:      `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			lock: coreNodeEntry,
+			cmd:  `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			tool: "npm:node", fixed: "20.12.0", stale: "20.11.0",
 			wantKept: []string{"sha256:corenode"},
 		},
 		{
@@ -1214,8 +1230,9 @@ node = "20.11.0"
 			config: `[tools]
 "npm:node[exe=node]" = "20.11.0"
 `,
-			lock:     coreNodeEntry,
-			cmd:      `deputy:mise:update mise.toml "npm:node[exe=node]" 20.12.0 20.11.0`,
+			lock: coreNodeEntry,
+			cmd:  `deputy:mise:update mise.toml "npm:node[exe=node]" 20.12.0 20.11.0`,
+			tool: "npm:node[exe=node]", fixed: "20.12.0", stale: "20.11.0",
 			wantGone: []string{"sha256:corenode"},
 		},
 	}
@@ -1247,8 +1264,50 @@ node = "20.11.0"
 					t.Errorf("expected %q to survive:\n%s", marker, lock)
 				}
 			}
+			if got := lockedVersionAfterFix(t, dir, tt.tool, tt.fixed); got == tt.stale {
+				t.Errorf("edited tool %q resolves back to the pruned version %s:\n%s", tt.tool, tt.stale, lock)
+			}
 		})
 	}
+}
+
+// lockedVersionAfterFix resolves the edited tool against the pruned lockfile
+// the way a following scan does, returning the version lock resolution would
+// substitute for the declaration ("" when it substitutes nothing). It reads
+// both files back from disk and goes through mise.Lockfile.Lookup rather than
+// re-deriving the answer, so the test measures what inventory will actually
+// see rather than what pruning intended.
+func lockedVersionAfterFix(t *testing.T, dir, tool, version string) string {
+	t.Helper()
+
+	cfgData, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockData, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := mise.Parse("mise.toml", cfgData)
+	if err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	lf, err := mise.ParseLock("mise.lock", lockData)
+	if err != nil {
+		t.Fatalf("parse lock: %v", err)
+	}
+	claims := mise.NameClaims(cfg.Tools)
+	for _, spec := range cfg.Tools {
+		if spec.Key != tool {
+			continue
+		}
+		if locked := lf.Lookup(spec, version, claims); locked != nil {
+			return locked.Version
+		}
+		return ""
+	}
+	t.Fatalf("tool %q not declared in the config after the fix:\n%s", tool, cfgData)
+	return ""
 }
 
 // TestApplyMiseUpdateRetryAfterLockFailure pins recovery from a partial

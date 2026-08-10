@@ -215,36 +215,6 @@ version = "20.11.0"
 	}
 }
 
-func TestHasLockedTool(t *testing.T) {
-	const lock = `[[tools."npm:node"]]
-version = "20.11.0"
-
-[tools."npm:node"."platforms.linux-x64"]
-checksum = "sha256:npmnode"
-
-[[tools.go]]
-version = "1.22.12"
-`
-	tests := []struct {
-		key  string
-		want bool
-	}{
-		{"npm:node", true},
-		{"go", true},
-		// Only array-of-tables entry headers count, not platform sub-tables.
-		{"node", false},
-		{"terraform", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.key, func(t *testing.T) {
-			if got := HasLockedTool([]byte(lock), tt.key); got != tt.want {
-				t.Errorf("HasLockedTool(%q) = %v, want %v", tt.key, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSplitKeyPath(t *testing.T) {
 	tests := []struct {
 		key  string

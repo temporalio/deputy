@@ -186,12 +186,16 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
   (`.config/mise/config.toml` locks as `.config/mise/mise.lock`, and
   `.config/mise/config.production.toml` as
   `.config/mise/mise.production.lock`), and `conf.d` drop-ins share the
-  enclosing `mise` directory's lockfile. Only the edited tool's own lock key
-  is pruned, so a config that declares both `"npm:node"` and `node` keeps the
-  untouched declaration's integrity metadata. A legacy entry keyed by a bare
-  short name that more than one declaration could own (`"npm:foo"` and
-  `"ubi:foo"` with a `[[tools.foo]]` entry) is left alone, and inventory will
-  not read it either. After applying, run `mise install` to install the
+  enclosing `mise` directory's lockfile. Pruning follows the edited tool's own
+  lock key plus its backend-stripped short name, but only when no other
+  declaration could own that name: a config that declares both `"npm:node"`
+  and `node` keeps the untouched declaration's integrity metadata, and a
+  legacy entry keyed by a bare short name that more than one declaration could
+  own (`"npm:foo"` and `"ubi:foo"` with a `[[tools.foo]]` entry) is left
+  alone, which is also the entry inventory refuses to read. An uncontested
+  legacy entry is pruned even when the exact key is locked too, because lock
+  resolution would otherwise fall back to it and hand the fixed tool its old
+  version back. After applying, run `mise install` to install the
   updated tool and re-lock it.
 - Applying is idempotent, so a run interrupted between the config edit and the
   lockfile prune can simply be re-run to finish.

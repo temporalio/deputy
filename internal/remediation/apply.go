@@ -391,19 +391,26 @@ func applyMiseUpdate(repoDir, configRel, tool string, currentVersions []string, 
 }
 
 // miseLockKeys returns the mise.lock table keys to prune for the tool that was
-// just edited. It is deliberately narrow: only the configured key is pruned,
-// because a config can declare both a backend-qualified tool and its short
-// name as separate tools (`"npm:node"` and `node`) whose lock entries are
-// independent, and pruning both would discard integrity metadata for a
-// declaration that was never edited. The backend-stripped name is used only as
-// an unambiguous fallback: the lock has no entry under the exact key, and no
-// other declaration in the config could own that short name.
-func miseLockKeys(root *os.Root, configRelPath string, lockData []byte, tool string) []string {
+// just edited: always the configured key, plus its backend-stripped short name
+// when no other declaration could own that name. A config can declare both a
+// backend-qualified tool and its short name as separate tools (`"npm:node"`
+// and `node`), and pruning a contested name would discard integrity metadata
+// for a declaration that was never edited.
+//
+// Ownership is the claimant count from [mise.NameClaims], nothing else. In
+// particular, an entry under the exact key does not make a legacy entry under
+// the short name someone else's: with a single declaration, [mise.Lockfile.Lookup]
+// borrows the short-name entry through its sole-entry fallback once the exact
+// entry is gone, so leaving it behind restores the vulnerable version on the
+// next scan and the applied fix reads as ineffective. Pruning and enrichment
+// answer "who owns this name" the same way, so an entry one of them treats as
+// this tool's cannot be treated as another tool's by the other.
+func miseLockKeys(root *os.Root, configRelPath, tool string) []string {
 	_, name := mise.SplitBackend(tool)
 	if name == "" || name == tool {
 		return []string{tool}
 	}
-	if mise.HasLockedTool(lockData, tool) || shortNameContested(root, configRelPath, name) {
+	if shortNameContested(root, configRelPath, name) {
 		return []string{tool}
 	}
 	return []string{tool, name}
@@ -449,7 +456,7 @@ func pruneStaleMiseLock(root *os.Root, configRelPath, tool string, currentVersio
 		return fmt.Errorf("reading %s: %w", lockRel, err)
 	}
 
-	keys := miseLockKeys(root, configRelPath, data, tool)
+	keys := miseLockKeys(root, configRelPath, tool)
 	stale := func(version string) bool {
 		if len(currentVersions) > 0 {
 			return slices.Contains(currentVersions, version)
