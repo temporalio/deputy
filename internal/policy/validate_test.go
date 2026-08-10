@@ -231,7 +231,7 @@ policies:
 			wantCodes: []string{"missing-policies"},
 		},
 		{
-			name: "a policy written as an alias is validated",
+			name: "a policy written as an alias is rejected",
 			bundle: `
 base: &base
   name: aliased
@@ -244,9 +244,11 @@ base: &base
 policies:
   - *base
 `,
+			wantCodes: []string{"yaml-anchor"},
+			wantText:  []string{"do not support YAML anchors and aliases", "--policy file", "vars:"},
 		},
 		{
-			name: "merge keys supply inherited fields",
+			name: "a merge key is rejected",
 			bundle: `
 defaults: &defaults
   entrypoints: ["scan_vulnerability"]
@@ -259,70 +261,28 @@ policies:
   - <<: *defaults
     name: inherits-rules
 `,
+			wantCodes: []string{"yaml-anchor", "yaml-merge-key"},
+			wantText:  []string{"do not support YAML merge keys"},
 		},
 		{
-			name: "a direct key overrides the one it merges in",
+			name: "an unused anchor definition is rejected",
 			bundle: `
-defaults: &defaults
-  mode: enfroce
-  rules:
-    - when: "true"
-      action: deny
-      reason: "r"
+unused: &unused
+  name: never-referenced
 
 policies:
-  - <<: *defaults
-    name: overrides-mode
-    mode: advisory
+  - name: plain
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
 `,
+			wantCodes: []string{"yaml-anchor"},
 		},
 		{
-			name: "a defect inside an anchor is still reported",
-			bundle: `
-base: &base
-  name: aliased
-  rules:
-    - when: "true"
-      action: dney
-      reason: "bad action inside an anchor"
-
-policies:
-  - *base
-`,
-			wantCodes: []string{"invalid-action"},
-			wantText:  []string{`invalid action "dney"`},
-		},
-		{
-			name: "a defect inherited through a merge key is still reported",
-			bundle: `
-defaults: &defaults
-  mode: enfroce
-  rules:
-    - when: "true"
-      action: deny
-      reason: "r"
-
-policies:
-  - <<: *defaults
-    name: inherits-bad-mode
-`,
-			wantCodes: []string{"invalid-mode"},
-			wantText:  []string{`invalid mode "enfroce"`},
-		},
-		{
-			name: "an alias to something that is not a policy is rejected",
-			bundle: `
-base: &base "just a string"
-
-policies:
-  - *base
-`,
-			wantCodes: []string{"policy-not-mapping"},
-		},
-		{
-			name:      "a self-referential anchor terminates",
+			name:      "an anchored policies list is rejected",
 			bundle:    "policies: &loop\n  - *loop\n",
-			wantCodes: []string{"policy-not-mapping"},
+			wantCodes: []string{"yaml-anchor"},
 		},
 	}
 	for _, tc := range cases {
@@ -358,8 +318,9 @@ policies:
 // TestValidateBundleAgreesWithLoader pins the equivalence the two paths must
 // keep: a bundle the loader compiles has to validate clean, and one the loader
 // rejects has to be reported. Validation walks YAML nodes while the loader
-// decodes into Go types, so anything the decoder resolves for free, aliases and
-// merge keys among them, has to be resolved by the walk as well.
+// decodes into Go types, and the decoder resolves anchors for free, so the
+// constructs the format refuses have to be refused by both. This test is what
+// makes that refusal safe to rely on.
 func TestValidateBundleAgreesWithLoader(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -432,18 +393,32 @@ policies:
 `,
 		},
 		{
-			name: "invalid mode inherited through a merge key",
+			name:   "an anchored policies list",
+			bundle: "policies: &loop\n  - *loop\n",
+		},
+		{
+			name: "an unused anchor definition",
 			bundle: `
-defaults: &defaults
-  mode: enfroce
-  rules:
-    - when: "true"
-      action: deny
-      reason: "r"
+unused: &unused
+  name: never-referenced
 
 policies:
-  - <<: *defaults
-    name: inherits-bad-mode
+  - name: plain
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "a plain policy alongside an unknown action",
+			bundle: `
+policies:
+  - name: typo
+    rules:
+      - when: "true"
+        action: dney
+        reason: "r"
 `,
 		},
 	}

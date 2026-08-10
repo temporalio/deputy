@@ -179,6 +179,88 @@ func TestPolicyLintValidatesBeyondCEL(t *testing.T) {
 	}
 }
 
+// TestPolicyAnchorsRejectedByBothCommands pins that lint and bundle refuse the
+// same YAML constructs with the same message. Anchors are deliberately not part
+// of the bundle format, and the two commands must not disagree about that: a
+// bundle that compiles but does not lint, or the reverse, is the divergence this
+// restriction exists to prevent.
+func TestPolicyAnchorsRejectedByBothCommands(t *testing.T) {
+	cases := []struct {
+		name     string
+		bundle   string
+		wantText string
+	}{
+		{
+			name: "aliased policy",
+			bundle: `base: &base
+  name: aliased
+  rules:
+    - when: "true"
+      action: deny
+      reason: "r"
+
+policies:
+  - *base
+`,
+			wantText: "do not support YAML anchors and aliases",
+		},
+		{
+			name: "merge key",
+			bundle: `defaults: &defaults
+  rules:
+    - when: "true"
+      action: deny
+      reason: "r"
+
+policies:
+  - <<: *defaults
+    name: inherits
+`,
+			wantText: "do not support YAML merge keys",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "policy.yaml")
+			if err := os.WriteFile(path, []byte(tc.bundle), 0o600); err != nil {
+				t.Fatalf("write policy: %v", err)
+			}
+
+			lintOut, lintErr := runPolicyLint(t, tc.bundle)
+			if lintErr == nil {
+				t.Fatalf("expected lint to fail, output:\n%s", lintOut)
+			}
+			if !strings.Contains(lintOut, tc.wantText) {
+				t.Fatalf("lint output missing %q:\n%s", tc.wantText, lintOut)
+			}
+			if !strings.Contains(lintOut, "--policy file") || !strings.Contains(lintOut, "vars:") {
+				t.Fatalf("lint output should point at the alternatives:\n%s", lintOut)
+			}
+
+			bundleRoot := &cobra.Command{Use: "deputy"}
+			bundleRoot.AddCommand(newPolicyBundleCommand())
+			var bundleOut bytes.Buffer
+			bundleRoot.SetOut(&bundleOut)
+			bundleRoot.SetErr(&bundleOut)
+			bundleRoot.SetArgs([]string{"bundle", "--output", filepath.Join(dir, "out.json"), path})
+			err := bundleRoot.Execute()
+			if err == nil {
+				t.Fatalf("expected bundle to fail, output:\n%s", bundleOut.String())
+			}
+			// Lint lists every construct it finds while the loader stops at the
+			// first, so the loader's message has to be one lint also printed.
+			_, message, found := strings.Cut(err.Error(), "policy bundles do not support YAML")
+			if !found {
+				t.Fatalf("bundle error %q should refuse the construct by name", err)
+			}
+			if !strings.Contains(lintOut, "policy bundles do not support YAML"+message) {
+				t.Fatalf("bundle error %q is not among the messages lint printed:\n%s", err, lintOut)
+			}
+		})
+	}
+}
+
 // TestPolicyLintAcceptsCompiledBundle pins the round trip documented in the
 // policy framework reference: what `deputy policy bundle` writes must lint
 // clean. A compiled bundle is JSON, and JSON is valid YAML with a "policies"

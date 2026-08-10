@@ -151,6 +151,11 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 	if IsCompiledBundle(data) {
 		return nil, false, nil
 	}
+	// The decoder would resolve anchors silently, so refuse them here: loading
+	// and validating a bundle must agree on what the format accepts.
+	if err := bundleAnchorError(data, path); err != nil {
+		return nil, false, err
+	}
 	var bundle structuredBundle
 	if err := yaml.Unmarshal(data, &bundle); err != nil {
 		if LooksLikeStructuredBundle(data) {

@@ -95,8 +95,32 @@ Canonical entrypoints (snake_case):
 - Empty `policies` or missing `rules` is invalid; each policy must have at least one rule.
 - Policy names must be unique within a bundle.
 - String vars are CEL expressions; non-string values are treated as literals. Rules must include `action` and `when`.
+- `action` must be `allow`, `deny`, or `warn`.
 - `mode`, if set, must be `enforce` or `advisory`.
 - Canonical ecosystem strings used by built-in entrypoints: `go`, `npm`, `pypi`, `rubygems`, `oci`.
+- YAML anchors, aliases, and merge keys are rejected. See below.
+
+### YAML anchors are not supported
+
+A bundle may not use YAML anchors (`&name`), aliases (`*name`), or merge keys
+(`<<:`). Both `deputy policy lint` and bundle loading refuse them, naming the
+line and the alternatives.
+
+This is closed for now, not closed forever. Nothing prevents Deputy from
+resolving these constructs, and the decision can be revisited if a real need
+appears. Two reasons to say no today:
+
+- A policy bundle is a security control, and its job is to state plainly what it
+  blocks. An aliased policy means the text a reviewer reads is not the policy
+  that runs, and merge-key precedence adds a resolution rule the reviewer has to
+  know before they can tell what a policy does.
+- Every YAML feature the format allows has to be implemented identically by
+  every reader of a bundle, and several read the document as nodes rather than
+  decoding it. That divergence is not hypothetical: it once let an aliased
+  bundle compile fine and lint as broken.
+
+To share rules across bundles, pass a separate file with `--policy`, which is
+repeatable. To reuse an expression within a bundle, use `vars:`.
 
 ## Examples
 

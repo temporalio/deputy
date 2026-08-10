@@ -158,17 +158,18 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	if policiesNode == nil {
 		return append(issues, issueAt(doc, IssueError, "missing-policies", "missing required 'policies' list")), nil
 	}
+	// Anchors are rejected before anything else reads the document, so the rest
+	// of validation, and every other reader of a bundle, sees only plain nodes.
+	if anchors := anchorIssues(root); len(anchors) > 0 {
+		return append(issues, anchors...), nil
+	}
 	if policiesNode.Kind != yaml.SequenceNode {
 		return append(issues, issueAt(policiesNode, IssueError, "policies-not-list", "'policies' must be a list")), nil
 	}
 	seenNames := map[string]struct{}{}
-	for _, entry := range policiesNode.Content {
-		// A policy may be written as an alias to an anchor defined elsewhere in
-		// the document. Report against the alias, which is where the author can
-		// see the problem, but validate what it points at.
-		item := ResolveAlias(entry)
-		if item == nil || item.Kind != yaml.MappingNode {
-			issues = append(issues, issueAt(entry, IssueError, "policy-not-mapping", "policy must be a mapping"))
+	for _, item := range policiesNode.Content {
+		if item.Kind != yaml.MappingNode {
+			issues = append(issues, issueAt(item, IssueError, "policy-not-mapping", "policy must be a mapping"))
 			continue
 		}
 		issues = append(issues, validatePolicyNode(item, seenNames, opts)...)
@@ -473,69 +474,18 @@ func DeclaredVarNames(policyNode *yaml.Node) []string {
 	return names
 }
 
-// aliasDepthLimit bounds how far alias and merge-key resolution will follow
-// references. YAML anchors can be nested, but a document deep enough to exceed
-// this is either generated or malicious, and refusing to follow it keeps
-// validation from looping on a self-referential anchor.
-const aliasDepthLimit = 32
-
-// ResolveAlias follows a YAML alias to the node its anchor defines, so callers
-// can treat `- *policy` exactly as the typed decoder does. A node that is not an
-// alias is returned unchanged.
-func ResolveAlias(node *yaml.Node) *yaml.Node {
-	for depth := 0; node != nil && node.Kind == yaml.AliasNode; depth++ {
-		if depth >= aliasDepthLimit {
-			return nil
-		}
-		node = node.Alias
-	}
-	return node
-}
-
 // MappingValue returns the value node for a key inside a YAML mapping node, or
-// nil when the node is not a mapping or the key is absent. Aliases are followed
-// on both the mapping and the value, and merge keys are searched after the
-// mapping's own keys, matching how the decoder resolves inherited fields: a key
-// written directly on a policy overrides one it merges in.
+// nil when the node is not a mapping or the key is absent. It reads only what
+// the document says: anchors, aliases, and merge keys are rejected before the
+// walk runs (see anchorIssues), so no reader has to resolve them.
 func MappingValue(mapNode *yaml.Node, key string) *yaml.Node {
-	return mappingValue(mapNode, key, 0)
-}
-
-// mappingValue is MappingValue with the recursion depth that merge keys need,
-// since a merged mapping may itself merge from another.
-func mappingValue(mapNode *yaml.Node, key string, depth int) *yaml.Node {
-	node := ResolveAlias(mapNode)
-	if node == nil || node.Kind != yaml.MappingNode || depth >= aliasDepthLimit {
+	if mapNode == nil || mapNode.Kind != yaml.MappingNode {
 		return nil
 	}
-	var merges []*yaml.Node
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		k := node.Content[i]
-		if k.Kind != yaml.ScalarNode {
-			continue
-		}
-		if k.Value == key {
-			return ResolveAlias(node.Content[i+1])
-		}
-		if isMergeKey(k) {
-			merges = append(merges, node.Content[i+1])
-		}
-	}
-	for _, merge := range merges {
-		merged := ResolveAlias(merge)
-		if merged == nil {
-			continue
-		}
-		if merged.Kind == yaml.SequenceNode {
-			for _, item := range merged.Content {
-				if value := mappingValue(item, key, depth+1); value != nil {
-					return value
-				}
-			}
-			continue
-		}
-		if value := mappingValue(merged, key, depth+1); value != nil {
-			return value
+	for i := 0; i+1 < len(mapNode.Content); i += 2 {
+		k := mapNode.Content[i]
+		if k.Kind == yaml.ScalarNode && k.Value == key {
+			return mapNode.Content[i+1]
 		}
 	}
 	return nil
@@ -545,4 +495,76 @@ func mappingValue(mapNode *yaml.Node, key string, depth int) *yaml.Node {
 // pulls another mapping's entries into this one.
 func isMergeKey(key *yaml.Node) bool {
 	return key.Tag == "!!merge" || key.Value == "<<"
+}
+
+// Messages for the YAML constructs a policy bundle does not accept. Both name
+// the alternative, since the author is trying to avoid repeating themselves and
+// deserves to be told how.
+const (
+	anchorNotSupported = "policy bundles do not support YAML anchors and aliases; " +
+		"share rules with a separate --policy file or reuse expressions with vars:"
+	mergeKeyNotSupported = "policy bundles do not support YAML merge keys; " +
+		"share rules with a separate --policy file or reuse expressions with vars:"
+)
+
+// anchorIssues reports every YAML anchor, alias, and merge key in a bundle.
+//
+// Supporting them is closed for now rather than closed forever: nothing stops
+// Deputy from resolving them, and this can be revisited if a real need appears.
+// Two reasons to say no today. A policy bundle is a security control whose job
+// is to state plainly what it blocks, and an aliased policy means the text a
+// reviewer reads is not the policy that runs, while merge-key precedence adds a
+// rule the reviewer has to know before they can tell what a policy does. And
+// every YAML feature the format allows has to be implemented identically by
+// every reader of a bundle, of which there are already several walking nodes
+// directly; that divergence is what let an aliased bundle load fine and lint as
+// broken. The sharing these constructs offer is already served by repeatable
+// --policy files across bundles and by vars: within one.
+func anchorIssues(node *yaml.Node) []Issue {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.AliasNode {
+		// Do not follow the alias: its target is reported where it is defined.
+		return []Issue{issueAt(node, IssueError, "yaml-anchor", anchorNotSupported)}
+	}
+	var issues []Issue
+	if node.Anchor != "" {
+		issues = append(issues, issueAt(node, IssueError, "yaml-anchor", anchorNotSupported))
+	}
+	for i := 0; i < len(node.Content); i++ {
+		child := node.Content[i]
+		// A mapping's content alternates key, value. A merge key names the
+		// construct, so report it and skip the alias it merges from, which would
+		// otherwise say the same thing twice.
+		if node.Kind == yaml.MappingNode && i%2 == 0 && isMergeKey(child) {
+			issues = append(issues, issueAt(child, IssueError, "yaml-merge-key", mergeKeyNotSupported))
+			i++
+			continue
+		}
+		issues = append(issues, anchorIssues(child)...)
+	}
+	return issues
+}
+
+// bundleAnchorError reports the first anchor, alias, or merge key in data as an
+// error naming the file and line, for callers that load a bundle rather than
+// validate it. It returns nil for a document that is not a policy bundle, and
+// for one that uses none of those constructs, which is every bundle Deputy
+// ships. The check keys off the presence of a policies key rather than a
+// well-formed policies list, so a bundle whose list is itself an alias is
+// refused instead of quietly resolved by the decoder.
+func bundleAnchorError(data []byte, path string) error {
+	root := &yaml.Node{}
+	if err := yaml.Unmarshal(data, root); err != nil || len(root.Content) == 0 {
+		return nil
+	}
+	if MappingValue(root.Content[0], "policies") == nil {
+		return nil
+	}
+	issues := anchorIssues(root)
+	if len(issues) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s:%d: %s", path, issues[0].Line, issues[0].Message)
 }

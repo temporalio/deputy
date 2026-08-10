@@ -72,6 +72,8 @@ policy that lints clean is a policy the editor considers clean:
 - duplicate policy names
 - rules missing `when` or `action`, and `deny`/`warn` rules with no `reason`
 - invalid `mode`, malformed `vars`, and conditions that do not compile
+- YAML anchors, aliases, and merge keys, which bundles do not support (see
+  [policy-spec](../reference/policy-spec.md#yaml-anchors-are-not-supported))
 
 ```
 deputy policy lint <policy.yaml> [policy2.yaml ...]
