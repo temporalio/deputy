@@ -172,6 +172,21 @@ policies:
 			wantText:  []string{`invalid mode "enfroce"`, `invalid action "dney"`},
 		},
 		{
+			name: "a typed field error does not hide located defects",
+			bundle: `
+policies:
+  - name: typed-error
+    mode: enfroce
+    rules:
+      - when: "true"
+        action: dney
+        reason: "x"
+        status: "four-oh-three"
+`,
+			wantCodes: []string{"invalid-mode", "invalid-action", "bundle-error"},
+			wantText:  []string{`invalid mode "enfroce"`, `invalid action "dney"`, "cannot unmarshal"},
+		},
+		{
 			name: "duplicate var names",
 			bundle: `
 policies:
@@ -241,6 +256,57 @@ policies:
 				if !strings.Contains(rendered.String(), want) {
 					t.Fatalf("expected output to mention %q, got:\n%s", want, rendered.String())
 				}
+			}
+		})
+	}
+}
+
+// TestLooksLikeStructuredBundle pins the shape probe callers use to decide
+// whether a file is an authored policy. It must say yes for a policy that does
+// not decode, so validation still runs and reports the offending field, and no
+// for a compiled bundle, whose JSON also carries a "policies" array.
+func TestLooksLikeStructuredBundle(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want bool
+	}{
+		{
+			name: "authored bundle",
+			data: "policies:\n  - name: p\n    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n",
+			want: true,
+		},
+		{
+			name: "authored bundle with a mistyped field",
+			data: "policies:\n  - name: p\n    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n        status: \"four-oh-three\"\n",
+			want: true,
+		},
+		{
+			name: "authored bundle with a malformed vars block",
+			data: "policies:\n  - name: p\n    vars: [1, 2]\n    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n",
+			want: true,
+		},
+		{
+			name: "compiled bundle",
+			data: `{"schemaVersion":"policy.deputy.sh/v1alpha1","policies":[{"name":"c","source":"[]"}]}`,
+		},
+		{
+			name: "raw CEL",
+			data: `pkg.name == "left-pad" ? [{"action": "deny"}] : []`,
+		},
+		{
+			name: "empty policies list",
+			data: "policies: []\n",
+		},
+		{
+			name: "not YAML at all",
+			data: "policies: [\n  - name: broken\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := LooksLikeStructuredBundle([]byte(tc.data)); got != tc.want {
+				t.Fatalf("LooksLikeStructuredBundle = %v, want %v", got, tc.want)
 			}
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	yaml "gopkg.in/yaml.v3"
@@ -108,16 +109,35 @@ type ValidateOptions struct {
 	CheckWhen func(RuleWhen) []Issue
 }
 
+// LooksLikeStructuredBundle reports whether data has the shape of an authored
+// policy bundle: a mapping carrying a non-empty "policies" list. It deliberately
+// does not require the bundle to decode into Deputy's types, so a policy with a
+// mistyped field is still recognized as a policy and can be reported with
+// located, specific errors instead of being dismissed as an unknown format.
+// Compiled bundles are ruled out first: their JSON has a "policies" array too.
+func LooksLikeStructuredBundle(data []byte) bool {
+	if IsCompiledBundle(data) {
+		return false
+	}
+	root := &yaml.Node{}
+	if err := yaml.Unmarshal(data, root); err != nil || len(root.Content) == 0 {
+		return false
+	}
+	policies := MappingValue(root.Content[0], "policies")
+	return policies != nil && policies.Kind == yaml.SequenceNode && len(policies.Content) > 0
+}
+
 // ValidateBundle reports every structural problem in a structured policy bundle:
 // unknown entrypoints, commands and actions, duplicate policy names, malformed
 // rules, and conditions that do not compile. It is the one implementation behind
 // both `deputy policy lint` and the editor's diagnostics, so a policy that lints
 // clean is a policy the editor considers clean.
 //
-// It returns an error only when the text is not YAML at all; every other problem
-// comes back as an Issue so callers can report them all at once. Loading the
-// bundle is the last resort check, reported only when nothing more precise was
-// found, because a load failure repeats what the located issues already say.
+// It returns an error only when the text is not YAML at all, or is a compiled
+// bundle rather than an authored one; every other problem comes back as an Issue
+// so callers can report them all at once. A bundle that does not decode into
+// Deputy's types is still validated: the node walk reports what it can locate
+// and the decode failure is added on top.
 func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	if IsCompiledBundle([]byte(text)) {
 		return nil, errors.New("compiled policy bundle: validate the authored policies it was built from")
@@ -151,12 +171,19 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	}
 	// Load the whole bundle as a backstop for shapes the node walk does not model,
 	// such as a rule field of the wrong type. The loader stops at its first
-	// failure and cannot point at a line, so its message is dropped when a located
-	// issue already reports the same thing.
+	// failure, so its message is dropped when a located issue already reports the
+	// same thing, and is anchored on the line it names when it names one.
 	source := cmp.Or(opts.Source, "policy")
 	if _, err := ParseStructuredSources([]byte(text), source); err != nil {
 		if message, duplicate := loaderMessage(err, source, issues); !duplicate {
-			issues = append(issues, Issue{RuleIndex: NoRule, Severity: IssueWarning, Code: "bundle-error", Message: message})
+			issues = append(issues, Issue{
+				RuleIndex: NoRule,
+				Line:      lineFromYAMLError(message),
+				Column:    1,
+				Severity:  IssueWarning,
+				Code:      "bundle-error",
+				Message:   message,
+			})
 		}
 	}
 	return issues, nil
@@ -386,6 +413,26 @@ func loaderMessage(err error, source string, located []Issue) (string, bool) {
 		}
 	}
 	return message, false
+}
+
+// lineFromYAMLError returns the 1-based line a YAML decode error names, or zero
+// when it names none. The decoder reports type mismatches as "line N: cannot
+// unmarshal ...", which is the only position information available for a field
+// the node walk does not model.
+func lineFromYAMLError(message string) int {
+	_, after, ok := strings.Cut(message, "line ")
+	if !ok {
+		return 0
+	}
+	digits := after
+	if idx := strings.IndexFunc(after, func(r rune) bool { return r < '0' || r > '9' }); idx >= 0 {
+		digits = after[:idx]
+	}
+	line, err := strconv.Atoi(digits)
+	if err != nil || line < 1 {
+		return 0
+	}
+	return line
 }
 
 // issueAt builds an issue anchored at a YAML node.

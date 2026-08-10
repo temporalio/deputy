@@ -377,8 +377,11 @@ func lintStructuredBundle(path string, extraVars []string, out io.Writer) (handl
 	if err != nil {
 		return false, 0, fmt.Errorf("read %q: %w", path, err)
 	}
-	if _, parsed, err := policy.TryParseStructuredBundleBytes(data); err != nil || !parsed {
-		return false, 0, err
+	// Gate on the bundle's shape, not on whether it decodes: a policy with a
+	// mistyped field must reach validation and be told which field is wrong,
+	// rather than falling through to the generic unrecognized-format error.
+	if !policy.LooksLikeStructuredBundle(data) {
+		return false, 0, nil
 	}
 	issues, err := policy.ValidateBundle(string(data), policy.ValidateOptions{
 		Source:    path,
@@ -416,12 +419,13 @@ func lintStructuredBundle(path string, extraVars []string, out io.Writer) (handl
 }
 
 // formatLintIssue renders one issue as a file-anchored line an editor or a human
-// can jump to. Bundle-wide issues already carry the path in their message, so it
-// is not repeated.
+// can jump to. Issues that come from loading the bundle name the file in their
+// own message, so that prefix is dropped rather than printed twice.
 func formatLintIssue(path string, issue policy.Issue) string {
-	text := issue.String()
+	text := strings.Replace(issue.String(), path+"/", "", 1)
+	text = strings.Replace(text, path+": ", "", 1)
 	if issue.Line <= 0 {
-		return fmt.Sprintf("%s: %s", labelPath(path), strings.Replace(text, path+"/", "", 1))
+		return fmt.Sprintf("%s: %s", labelPath(path), text)
 	}
 	return fmt.Sprintf("%s:%s", labelPath(path), text)
 }

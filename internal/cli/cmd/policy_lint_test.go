@@ -105,6 +105,24 @@ func TestPolicyLintValidatesBeyondCEL(t *testing.T) {
 			},
 		},
 		{
+			name: "a mistyped field still yields located errors",
+			bundle: `policies:
+  - name: typed-error
+    mode: enfroce
+    rules:
+      - when: "true"
+        action: dney
+        reason: "x"
+        status: "four-oh-three"
+`,
+			wantFail: true,
+			wantText: []string{
+				`policy "typed-error": invalid mode "enfroce"`,
+				`policy "typed-error" rule[0]: invalid action "dney"`,
+				"line 8: cannot unmarshal",
+			},
+		},
+		{
 			name: "a missing when does not hide a bad action",
 			bundle: `policies:
   - name: both-defects

@@ -143,13 +143,19 @@ type structuredRule struct {
 
 // tryParseStructuredBundle attempts to parse a byte slice as a structured YAML bundle.
 // It returns the generated CEL sources if successful, or a boolean indicating
-// whether the input looked like a bundle but failed validation.
+// whether the input looked like a bundle but failed validation. A file that has
+// the shape of an authored bundle but does not decode reports the decode error
+// rather than being dismissed as an unknown format, since the author wrote a
+// policy and deserves to be told which field is wrong.
 func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) {
 	if IsCompiledBundle(data) {
 		return nil, false, nil
 	}
 	var bundle structuredBundle
 	if err := yaml.Unmarshal(data, &bundle); err != nil {
+		if LooksLikeStructuredBundle(data) {
+			return nil, false, fmt.Errorf("%s: %w", path, err)
+		}
 		return nil, false, nil
 	}
 	if len(bundle.Policies) == 0 {
