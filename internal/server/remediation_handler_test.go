@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -490,21 +492,39 @@ func TestExecutePlanEmptyPlanExpiredTimeout(t *testing.T) {
 	}
 }
 
-// TestExecutePlanMidCommandTimeoutCode pins error code fidelity for
-// timeouts that expire while a command is running: exec.CommandContext kills
-// the process and reports an exit error (signal: killed) that does not wrap
-// the context sentinel, so the failure path must consult the context to
-// report CodeDeadlineExceeded instead of CodeInternal. Uses a real sleeping
-// `go run` command so the kill path is exercised end to end.
-func TestExecutePlanMidCommandTimeoutCode(t *testing.T) {
+// TestExecutePlanMidCommandTimeout pins two properties of a timeout that
+// expires while a command is running. First, error code fidelity: the killed
+// process reports an exit error (signal: killed) that does not wrap the
+// context sentinel, so the failure path must consult the context to report
+// CodeDeadlineExceeded. Second, and more important, the timeout must bound
+// the whole process tree: `go run` spawns a compiled child, and killing only
+// the direct child leaves that grandchild writing to the workspace long after
+// the deadline. The grandchild records its survival in a marker file, so the
+// test fails if anything outlives the deadline.
+func TestExecutePlanMidCommandTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process group termination is implemented for unix platforms")
+	}
+
 	dir := t.TempDir()
+	marker := filepath.Join(dir, "survived.txt")
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module sleeper\n\ngo 1.21\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile go.mod failed: %v", err)
 	}
-	// Keep the sleep short: `go run` is the process that gets killed, and its
-	// compiled child holds the output pipes until it exits on its own, so the
-	// sleep bounds how long CombinedOutput blocks after the kill.
-	main := "package main\n\nimport \"time\"\n\nfunc main() { time.Sleep(5 * time.Second) }\n"
+	// The grandchild sleeps past the deadline and then records that it was
+	// still alive. A correctly bounded run kills it before the write.
+	main := fmt.Sprintf(`package main
+
+import (
+	"os"
+	"time"
+)
+
+func main() {
+	time.Sleep(%d * time.Millisecond)
+	os.WriteFile(%q, []byte("descendant outlived the deadline"), 0o644)
+}
+`, 3000, marker)
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(main), 0o644); err != nil {
 		t.Fatalf("WriteFile main.go failed: %v", err)
 	}
@@ -530,6 +550,14 @@ func TestExecutePlanMidCommandTimeoutCode(t *testing.T) {
 	}
 	if got := connect.CodeOf(err); got != connect.CodeDeadlineExceeded {
 		t.Fatalf("ExecutePlan error = %v (code %v), want CodeDeadlineExceeded", err, got)
+	}
+
+	// Outlast the grandchild's sleep, then confirm it never got to write.
+	time.Sleep(3 * time.Second)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatalf("descendant process survived the timeout and wrote %s", marker)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checking marker file: %v", err)
 	}
 }
 

@@ -647,6 +647,12 @@ func executionProgress(done, total int) int32 {
 	return int32(done * 100 / total)
 }
 
+// commandWaitDelay bounds how long a cancelled command may keep the RPC
+// waiting on its output pipes after its process group has been killed. It is
+// a backstop for a descendant that escaped the group, not the primary
+// mechanism, so it is short.
+const commandWaitDelay = 5 * time.Second
+
 // resolveWorkDir resolves and validates the working directory.
 func resolveWorkDir(dir string) (string, error) {
 	absPath, err := filepath.Abs(dir)
@@ -720,6 +726,17 @@ func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) 
 	}
 	execCmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	execCmd.Dir = execDir
+
+	// Bound the whole process tree by the context, not just the direct child:
+	// remediation commands routinely fork (a package manager driving a
+	// compiler), and a surviving descendant would keep modifying the
+	// workspace after the caller's timeout expired.
+	configureProcessGroup(execCmd)
+	execCmd.Cancel = func() error { return terminateProcessGroup(execCmd) }
+	// Backstop for a descendant that somehow escapes the group kill and holds
+	// the output pipes open: stop waiting on its I/O shortly after the kill
+	// rather than blocking the RPC for the descendant's full lifetime.
+	execCmd.WaitDelay = commandWaitDelay
 
 	output, err := execCmd.CombinedOutput()
 	if err != nil {
