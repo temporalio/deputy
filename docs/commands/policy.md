@@ -78,12 +78,19 @@ policy that lints clean is a policy the editor considers clean:
 - YAML anchors, aliases, and merge keys, which bundles do not support (see
   [policy-spec](../reference/policy-spec.md#yaml-anchors-are-not-supported))
 - YAML that does not parse, reported with the offending line rather than as an
-  unrecognized file, for any document that writes a top-level `policies` key
+  unrecognized file, for any document that writes a top-level `policies` key,
+  bare or quoted (`policies:`, `"policies":`, `'policies':`)
 
-Every policy is checked, not just the first: a defect in one policy suppresses
-only that policy's expanded CEL, so a bundle reports all of its mistakes in one
-run. An optional field written as an explicit null (`mode:`, `mode: null`,
-`mode: ~`) is read as unset, exactly as loading the bundle reads it.
+Every policy is checked, not just the first, and one run reports every
+independent defect so a file is fixed once instead of a lint at a time. Each
+policy is walked and expanded on its own, so nothing about one policy withholds
+another policy's diagnostics: a field only the decoder refuses, such as a rule
+`status` written as a string, and an anchor written anywhere in the document
+are both reported alongside the rest of the bundle. What a defect does suppress
+is that one policy's expanded CEL, whose failure would only restate it.
+
+An optional field written as an explicit null (`mode:`, `mode: null`, `mode:
+~`) is read as unset, exactly as loading the bundle reads it.
 
 ```
 deputy policy lint <policy.yaml> [policy2.yaml ...]
