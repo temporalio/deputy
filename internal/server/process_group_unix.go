@@ -10,10 +10,17 @@ import (
 )
 
 // processTreeTerminationSupported reports whether cancelling a command on
-// this platform terminates every process it spawned, not just the direct
+// this platform terminates the processes it spawned, not just the direct
 // child. Unix gets this from process groups (see configureProcessGroup),
 // which is what makes an execution timeout a real upper bound on how long
 // plan steps can mutate the workspace.
+//
+// The guarantee covers every descendant that remains in the command's process
+// group, which is every descendant a package manager normally produces. It is
+// not absolute: a descendant that leaves the group on purpose, by calling
+// setsid or otherwise changing its process group, is no longer reachable by
+// the group kill and survives it. Tracking those is a separate problem
+// (cgroups, a subreaper, or a job-style container) and is not attempted here.
 const processTreeTerminationSupported = true
 
 // configureProcessGroup puts the command in its own process group so that

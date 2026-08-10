@@ -5,7 +5,7 @@ package server
 import "os/exec"
 
 // processTreeTerminationSupported reports whether cancelling a command on
-// this platform terminates every process it spawned. It is false outside
+// this platform terminates the processes it spawned. It is false outside
 // unix: process groups are a unix concept, and the Windows equivalent (a job
 // object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, created suspended and
 // assigned before the main thread resumes) cannot be built on os/exec, which
