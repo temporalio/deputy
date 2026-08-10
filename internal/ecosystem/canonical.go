@@ -174,9 +174,18 @@ func canonicalIn(registry *Registry, raw string) (token string, known bool) {
 	if eco := Parse(normalized); eco != Unknown {
 		return string(eco), true
 	}
-	// Ecosystems registered at runtime, for example by an extractor plugin that
-	// inventories an ecosystem Deputy has no built-in support for, resolve from
-	// the registry itself so they are as nameable as the built-in ones.
+	// Anything in the registry resolves from the registry, so an ecosystem
+	// added there is as nameable as a built-in one without a second table.
+	//
+	// Nothing in production adds one yet: an extractor plugin's ecosystem is
+	// stored in the inventory plugin registry and never reaches this one, so a
+	// plugin that inventories "custom-ecosystem" can scan packages while a
+	// policy naming that ecosystem still fails to load. Wiring the two together
+	// is not a one-liner, because [Registry.Register] overwrites an existing
+	// registration and the only caller of the inventory registry is an RPC
+	// handler, which would let a remote registration shadow a built-in
+	// ecosystem's upstream URL. Tracked in
+	// https://github.com/temporalio/deputy/issues/185.
 	if reg := registry.Get(Ecosystem(normalized)); reg != nil {
 		return string(reg.Ecosystem), true
 	}
