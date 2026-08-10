@@ -546,6 +546,114 @@ node = "20.11.1"
 `,
 		},
 		{
+			// mise tool keys can carry option syntax containing an assignment,
+			// so the key/value split must respect quoting.
+			name: "option-bearing quoted key",
+			input: `[tools]
+"ubi:cli/cli[exe=gh]" = "1.0.0"
+`,
+			tool: "ubi:cli/cli[exe=gh]", currents: []string{"1.0.0"}, version: "1.1.0",
+			want: `[tools]
+"ubi:cli/cli[exe=gh]" = "1.1.0"
+`,
+		},
+		{
+			name: "option-bearing quoted key in an array",
+			input: `[tools]
+"ubi:cli/cli[exe=gh]" = ["1.0.0", "1.2.0"]
+`,
+			tool: "ubi:cli/cli[exe=gh]", currents: []string{"1.0.0"}, version: "1.1.0",
+			want: `[tools]
+"ubi:cli/cli[exe=gh]" = ["1.1.0", "1.2.0"]
+`,
+		},
+		{
+			// A vulnerable version nested inside an element's version array
+			// must select that element, not be treated as unmatchable while
+			// another element's match reports the whole tool fixed.
+			name: "vulnerable version nested in a multi-entry array",
+			input: `[tools]
+go = [{ version = ["1.22.12", "1.23.8"] }, { version = "1.21.0" }]
+`,
+			tool: "go", currents: []string{"1.22.12", "1.21.0"}, version: "1.24.3",
+			want: `[tools]
+go = [{ version = ["1.24.3", "1.23.8"] }, { version = "1.24.3" }]
+`,
+		},
+		{
+			name: "only the nested vulnerable version matches",
+			input: `[tools]
+go = [{ version = ["1.22.12", "1.23.8"] }, { version = "1.21.0" }]
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = [{ version = ["1.24.3", "1.23.8"] }, { version = "1.21.0" }]
+`,
+		},
+		{
+			name: "no nested version matches fails closed",
+			input: `[tools]
+go = [{ version = ["1.22.12", "1.23.8"] }, { version = "1.21.0" }]
+`,
+			tool: "go", currents: []string{"1.19.0"}, version: "1.24.3",
+			want: `[tools]
+go = [{ version = ["1.22.12", "1.23.8"] }, { version = "1.21.0" }]
+`,
+			wantErr: true,
+		},
+		{
+			// mise accepts a quoted version key; the scanner must read keys
+			// with TOML quoting rules, not just the bare spelling.
+			name: "quoted version key",
+			input: `[tools]
+go = { "version" = "1.22.12" }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = { "version" = "1.24.3" }
+`,
+		},
+		{
+			name: "quoted version key beside options",
+			input: `[tools]
+go = { 'version' = "1.22.12", postinstall = "go version" }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = { 'version' = "1.24.3", postinstall = "go version" }
+`,
+		},
+		{
+			// The root inline table may span lines; the walker must gather the
+			// balanced table before trying to rewrite it.
+			name: "multiline root tools table",
+			input: `tools = {
+  go = "1.22.12",
+  node = "20.11.1"
+}
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `tools = {
+  go = "1.24.3",
+  node = "20.11.1"
+}
+`,
+		},
+		{
+			name: "multiline root tools table with nested table",
+			input: `tools = {
+  go = { version = "1.22.12", postinstall = "go version" },
+  node = "20.11.1"
+}
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `tools = {
+  go = { version = "1.24.3", postinstall = "go version" },
+  node = "20.11.1"
+}
+`,
+		},
+		{
 			name: "undeclared tool fails",
 			input: `[tools]
 node = "20.11.1"

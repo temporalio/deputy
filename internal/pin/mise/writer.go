@@ -155,8 +155,8 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 		if (!inRoot && !inTools && toolTable == "") || trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		eq := strings.IndexByte(line, '=')
-		if eq < 0 {
+		eq, ok := tomlAssignmentIndex(line)
+		if !ok {
 			continue
 		}
 		segs := mise.SplitKeyPath(strings.TrimSpace(line[:eq]))
@@ -194,25 +194,12 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 			}
 		}
 
-		if inlineTools {
-			value := line[eq+1:]
-			newValue := value
-			for name, pinned := range want {
-				if nv, changed := replaceInlineToolValue(newValue, name, pinned, replace); changed {
-					newValue = nv
-					applied[name] = true
-				}
-			}
-			if newValue != value {
-				lines[i] = line[:eq+1] + newValue
-				modified = true
-			}
-			continue
-		}
-
-		// Gather the full logical value: a TOML array may span multiple
-		// lines, and treating only the first line as the value corrupts the
-		// file (a bare `[` looks like a scalar to the fallback path).
+		// Gather the full logical value before rewriting anything: an array or
+		// an inline table may span several lines, and treating only the first
+		// line as the value corrupts the file (a bare `[` looks like a scalar
+		// to the fallback path) or misses the fix entirely. Gathering for
+		// every in-scope key also means continuation lines are skipped below
+		// rather than being reparsed as declarations of their own.
 		value := line[eq+1:]
 		end := i
 		for !tomlDelimitersBalanced(value) && end+1 < len(lines) {
@@ -220,22 +207,38 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 			value += "\n" + lines[end]
 		}
 		if !tomlDelimitersBalanced(value) {
-			// Unterminated array: malformed TOML, leave the file untouched.
+			// Unterminated array or table: malformed TOML, leave it alone.
 			break
 		}
 
-		pinned, ok := want[toolKey]
-		if toolKey != "" && ok {
-			newValue, changed := replace(value, pinned)
-			if changed {
-				// The replacement only rewrites version tokens, so the line
-				// count is preserved; splice the new lines back in place.
-				repl := strings.Split(line[:eq+1]+newValue, "\n")
-				if len(repl) == end-i+1 {
-					copy(lines[i:end+1], repl)
-					applied[toolKey] = true
-					modified = true
+		newValue := value
+		var rewrote []string
+		switch {
+		case inlineTools:
+			for name, pinned := range want {
+				if nv, changed := replaceInlineToolValue(newValue, name, pinned, replace); changed {
+					newValue = nv
+					rewrote = append(rewrote, name)
 				}
+			}
+		case toolKey != "":
+			if pinned, ok := want[toolKey]; ok {
+				if nv, changed := replace(value, pinned); changed {
+					newValue = nv
+					rewrote = append(rewrote, toolKey)
+				}
+			}
+		}
+		if newValue != value {
+			// The replacement only rewrites version tokens, so the line count
+			// is preserved; splice the new lines back in place.
+			repl := strings.Split(line[:eq+1]+newValue, "\n")
+			if len(repl) == end-i+1 {
+				copy(lines[i:end+1], repl)
+				for _, name := range rewrote {
+					applied[name] = true
+				}
+				modified = true
 			}
 		}
 		i = end
@@ -300,7 +303,7 @@ func replaceVersionInValueTargeting(value string, currents []string, pinned stri
 
 	// Inline table: replace only the version field, which may itself be an
 	// array of versions (recursion handles that element-wise).
-	if strings.Contains(valuePart, "{") {
+	if isInlineTable(valuePart) {
 		start, end, ok := inlineTableVersionSpan(valuePart)
 		if !ok {
 			return value, false
@@ -324,11 +327,12 @@ func replaceVersionInValueTargeting(value string, currents []string, pinned stri
 
 // replaceArrayElements rewrites the matching elements of a TOML array value,
 // splicing replacements in by offset so element order, layout, and comments
-// survive. Elements may be scalars or inline tables; an inline-table element
-// has only its version field rewritten so tool options are preserved. A
+// survive. Elements may be scalars, inline tables, or nested arrays; a
+// structured element is rewritten by recursion, so an inline table keeps its
+// tool options and a nested version array is edited element-wise in turn. A
 // one-element array is unambiguous and is replaced without consulting
-// currents; otherwise only elements whose declared version matches one of
-// currents are touched.
+// currents; otherwise an element is touched only when one of the versions it
+// declares, at any nesting depth, is a known vulnerable version.
 func replaceArrayElements(value string, spans [][2]int, currents []string, pinned string) (string, bool) {
 	quoted := `"` + pinned + `"`
 	unambiguous := len(spans) == 1
@@ -339,22 +343,18 @@ func replaceArrayElements(value string, spans [][2]int, currents []string, pinne
 	changed := false
 	for _, span := range spans {
 		elem := value[span[0]:span[1]]
+		if !unambiguous && !slices.ContainsFunc(elementVersions(elem), func(v string) bool {
+			return slices.Contains(currents, v)
+		}) {
+			continue
+		}
 		repl := quoted
-		switch {
-		case isInlineTable(elem):
-			if !unambiguous {
-				version, ok := elementVersion(elem)
-				if !ok || !slices.Contains(currents, version) {
-					continue
-				}
-			}
+		if _, isArray := arrayElementSpans(elem); isArray || isInlineTable(elem) {
 			sub, ok := replaceVersionInValueTargeting(elem, currents, pinned)
 			if !ok {
 				continue
 			}
 			repl = sub
-		case !unambiguous && !slices.Contains(currents, unquoteKey(elem)):
-			continue
 		}
 		b.WriteString(value[last:span[0]])
 		b.WriteString(repl)
@@ -369,25 +369,34 @@ func replaceArrayElements(value string, spans [][2]int, currents []string, pinne
 	return newValue, newValue != value
 }
 
-// elementVersion returns the version an array element declares, for matching
-// against known vulnerable versions: the token itself for a scalar element, or
-// the version field for an inline-table element. ok is false when the element
-// declares no single comparable version (no version field, or a nested array
-// of versions), in which case the caller must not treat it as a match.
-func elementVersion(elem string) (string, bool) {
-	if !isInlineTable(elem) {
-		return unquoteKey(elem), true
+// elementVersions returns every version an array element declares, flattening
+// nesting: a scalar yields itself, an inline table yields the versions of its
+// version field, and an array (including a version field that is itself an
+// array) yields the versions of all its elements. Matching on the whole set is
+// what lets a vulnerable version buried in a nested array select its element
+// for rewriting; treating such an element as unmatchable would silently leave
+// it in place while the command reported success. It returns nil when the
+// element declares no version at all, which never matches.
+func elementVersions(elem string) []string {
+	if spans, ok := arrayElementSpans(elem); ok {
+		var out []string
+		for _, span := range spans {
+			out = append(out, elementVersions(elem[span[0]:span[1]])...)
+		}
+		return out
 	}
 	valuePart, _ := splitTomlComment(elem)
-	start, end, ok := inlineTableVersionSpan(valuePart)
-	if !ok {
-		return "", false
+	if isInlineTable(valuePart) {
+		start, end, ok := inlineTableVersionSpan(valuePart)
+		if !ok {
+			return nil
+		}
+		return elementVersions(valuePart[start:end])
 	}
-	inner := strings.TrimSpace(valuePart[start:end])
-	if strings.HasPrefix(inner, "[") {
-		return "", false
+	if v := strings.TrimSpace(valuePart); v != "" {
+		return []string{unquoteKey(v)}
 	}
-	return unquoteKey(inner), true
+	return nil
 }
 
 // isInlineTable reports whether a TOML value token is an inline table.
@@ -469,66 +478,122 @@ func tomlDelimitersBalanced(s string) bool {
 // its value token; nested values it does not understand are skipped, leaving
 // the caller to fail closed.
 func replaceInlineToolValue(s, tool, pinned string, replace func(value, pinned string) (string, bool)) (string, bool) {
-	depth := 0
-	i := 0
+	out, changed := s, false
+	inlineTableFields(s, func(name string, vstart, vend int) bool {
+		if name != tool {
+			return true
+		}
+		if sub, ok := replace(s[vstart:vend], pinned); ok {
+			out, changed = s[:vstart]+sub+s[vend:], true
+		}
+		return false
+	})
+	return out, changed
+}
+
+// inlineTableFields walks the top-level fields of a TOML inline table, calling
+// visit with each field's key (unquoted) and the [start, end) offsets of its
+// value; visit returns false to stop. Nested tables and arrays are consumed as
+// whole values, so visit only ever sees the table's own fields, and keys are
+// read with TOML quoting rules so a quoted spelling such as `"version"` is
+// recognized exactly like the bare one. Whitespace includes newlines because
+// mise accepts inline tables written across several lines.
+func inlineTableFields(s string, visit func(name string, vstart, vend int) bool) {
+	i := skipTomlSpaces(s, 0)
+	if i >= len(s) || s[i] != '{' {
+		return
+	}
+	i++
 	for i < len(s) {
 		switch c := s[i]; {
-		case c == ' ' || c == '\t' || c == ',':
-			i++
-		case c == '{':
-			depth++
-			i++
-		case c == '}':
-			depth--
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',':
 			i++
 		case c == '#':
-			return s, false
+			for i < len(s) && s[i] != '\n' {
+				i++
+			}
+		case c == '}':
+			return
 		default:
-			// A token: either a key (followed by `=`) or a bare value.
-			var name string
-			end := i
-			if c == '"' || c == '\'' {
-				end = tomlValueEnd(s, i)
-				if end <= i+1 || s[end-1] != c {
-					return s, false
-				}
-				name = s[i+1 : end-1]
-			} else {
-				for end < len(s) && isTomlKeyPathChar(s[end]) {
-					end++
-				}
-				name = s[i:end]
+			name, nameEnd, ok := tomlKeyToken(s, i)
+			if !ok {
+				return
 			}
-			if end == i {
-				// Not a key-like token; skip a whole value.
-				if end = tomlValueSpan(s, i); end <= i {
-					return s, false
-				}
-				i = end
-				continue
-			}
-			j := skipTomlSpaces(s, end)
+			j := skipTomlSpaces(s, nameEnd)
 			if j >= len(s) || s[j] != '=' {
-				// A bare value token (e.g. an array element); move past it.
-				i = end
-				continue
+				return
 			}
 			vstart := skipTomlSpaces(s, j+1)
 			vend := tomlValueSpan(s, vstart)
 			if vend <= vstart {
-				return s, false
+				return
 			}
-			if depth == 1 && name == tool {
-				newSub, changed := replace(s[vstart:vend], pinned)
-				if !changed {
-					return s, false
-				}
-				return s[:vstart] + newSub + s[vend:], true
+			if !visit(name, vstart, vend) {
+				return
 			}
 			i = vend
 		}
 	}
-	return s, false
+}
+
+// tomlAssignmentIndex returns the index of the `=` separating a TOML key from
+// its value on a single line. Quoted keys are skipped over, because mise tool
+// keys carry option syntax that embeds an assignment
+// (`"ubi:cli/cli[exe=gh]" = "1.0.0"`); splitting on the first `=` would cut the
+// key in half and make the declaration unrewritable. ok is false when the line
+// carries no top-level assignment.
+func tomlAssignmentIndex(line string) (int, bool) {
+	inSingle, inDouble, escaped := false, false, false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case escaped:
+			escaped = false
+		case inDouble && c == '\\':
+			escaped = true
+		case !inDouble && c == '\'':
+			inSingle = !inSingle
+		case !inSingle && c == '"':
+			inDouble = !inDouble
+		case inSingle || inDouble:
+		case c == '#':
+			return 0, false
+		case c == '=':
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// tomlKeyToken reads the key token starting at i, returning its unquoted name
+// and the offset just past it. Bare keys run to the first character that
+// cannot appear in a key path (so a dotted key is returned whole); quoted keys
+// are returned without their quotes. ok is false when no key token starts at i
+// or a quoted key is unterminated.
+func tomlKeyToken(s string, i int) (name string, end int, ok bool) {
+	if i >= len(s) {
+		return "", 0, false
+	}
+	if q := s[i]; q == '"' || q == '\'' {
+		for j := i + 1; j < len(s); j++ {
+			if q == '"' && s[j] == '\\' {
+				j++
+				continue
+			}
+			if s[j] == q {
+				return s[i+1 : j], j + 1, true
+			}
+		}
+		return "", 0, false
+	}
+	start := i
+	for i < len(s) && isTomlKeyPathChar(s[i]) {
+		i++
+	}
+	if i == start {
+		return "", 0, false
+	}
+	return s[start:i], i, true
 }
 
 // tomlValueSpan returns the end offset of the TOML value starting at i,
@@ -574,48 +639,22 @@ func tomlValueSpan(s string, i int) int {
 }
 
 // inlineTableVersionSpan locates the value of the top-level `version` key in
-// an inline table, returning its [start, end) offsets. The span covers whole
-// arrays and nested tables (not just the text up to the next comma), so an
-// array-valued version field is returned intact for element-wise rewriting
-// rather than being truncated into corrupt TOML.
-//
-// Only a version key at the table's own depth counts. A nested table may carry
-// its own version key (`{ opts = { version = "meta" }, version = "1.22.12" }`),
-// and mise reads the outer one as the tool's version, so matching the inner key
-// would rewrite unrelated metadata and leave the vulnerable version in place.
+// an inline table, returning its [start, end) offsets. Only a key at the
+// table's own depth counts: a nested table may carry its own version key
+// (`{ opts = { version = "meta" }, version = "1.22.12" }`) and mise reads the
+// outer one, so matching the inner key would rewrite unrelated metadata and
+// leave the vulnerable version in place. The span covers whole arrays and
+// tables, so an array-valued version field is returned intact for element-wise
+// rewriting rather than truncated into corrupt TOML.
 func inlineTableVersionSpan(s string) (start, end int, ok bool) {
-	depth := 0
-	inSingle := false
-	inDouble := false
-	escaped := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case escaped:
-			escaped = false
-		case inDouble && c == '\\':
-			escaped = true
-		case !inDouble && c == '\'':
-			inSingle = !inSingle
-		case !inSingle && c == '"':
-			inDouble = !inDouble
-		case inSingle || inDouble:
-		case c == '{':
-			depth++
-		case c == '}':
-			depth--
-		case depth == 1 && hasBareKeyAt(s, i, "version"):
-			j := i + len("version")
-			j = skipTomlSpaces(s, j)
-			if j >= len(s) || s[j] != '=' {
-				continue
-			}
-			j = skipTomlSpaces(s, j+1)
-			end := tomlValueSpan(s, j)
-			return j, end, end > j
+	inlineTableFields(s, func(name string, vstart, vend int) bool {
+		if name != "version" {
+			return true
 		}
-	}
-	return 0, 0, false
+		start, end, ok = vstart, vend, true
+		return false
+	})
+	return start, end, ok
 }
 
 func hasBareKeyAt(s string, i int, key string) bool {
