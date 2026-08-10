@@ -112,6 +112,16 @@ func BuildBundle(paths []string) (*Bundle, error) {
 	}, nil
 }
 
+// IsCompiledBundle reports whether data is a bundle produced by
+// `deputy policy bundle`. JSON is valid YAML, and a compiled bundle also has a
+// non-empty "policies" array, so callers that probe for a structured bundle must
+// rule this shape out first: its entries carry compiled CEL under "source"
+// rather than the rules an authored policy has.
+func IsCompiledBundle(data []byte) bool {
+	_, ok := tryParseBundle(data)
+	return ok
+}
+
 func tryParseBundle(data []byte) (*Bundle, bool) {
 	var b Bundle
 	if err := json.Unmarshal(data, &b); err != nil {

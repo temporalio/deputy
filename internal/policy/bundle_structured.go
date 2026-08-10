@@ -145,6 +145,9 @@ type structuredRule struct {
 // It returns the generated CEL sources if successful, or a boolean indicating
 // whether the input looked like a bundle but failed validation.
 func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) {
+	if IsCompiledBundle(data) {
+		return nil, false, nil
+	}
 	var bundle structuredBundle
 	if err := yaml.Unmarshal(data, &bundle); err != nil {
 		return nil, false, nil
@@ -180,8 +183,14 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 	return sources, true, nil
 }
 
-// TryParseStructuredBundleBytes parses data into a structuredBundle and returns it plus a parsed flag.
+// TryParseStructuredBundleBytes parses data into a structuredBundle and returns
+// it plus a parsed flag. A bundle already compiled by `deputy policy bundle` is
+// reported as not parsed, because its policies hold compiled CEL rather than
+// authored rules and callers must handle it as a compiled bundle instead.
 func TryParseStructuredBundleBytes(data []byte) (*structuredBundle, bool, error) {
+	if IsCompiledBundle(data) {
+		return nil, false, nil
+	}
 	var bundle structuredBundle
 	if err := yaml.Unmarshal(data, &bundle); err != nil {
 		return nil, false, nil

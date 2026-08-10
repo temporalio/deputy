@@ -181,6 +181,30 @@ policies:
 	}
 }
 
+// TestValidateBundleRejectsCompiledBundle pins that a bundle compiled by
+// `deputy policy bundle` is not mistaken for an authored one. Its JSON parses as
+// YAML and has a "policies" array, so without the check every entry would be
+// reported as a policy missing its rules.
+func TestValidateBundleRejectsCompiledBundle(t *testing.T) {
+	compiled := `{
+  "schemaVersion": "policy.deputy.sh/v1alpha1",
+  "generated": "2026-01-01T00:00:00Z",
+  "policies": [
+    {"name": "compiled", "source": "[] + ((true) ? [{\"action\":\"deny\"}] : [])"}
+  ]
+}`
+	issues, err := ValidateBundle(compiled, ValidateOptions{})
+	if err == nil {
+		t.Fatalf("expected compiled bundle to be rejected, got issues %v", issues)
+	}
+	if !strings.Contains(err.Error(), "compiled policy bundle") {
+		t.Fatalf("error %q should name the compiled bundle shape", err)
+	}
+	if _, parsed, _ := TryParseStructuredBundleBytes([]byte(compiled)); parsed {
+		t.Fatal("compiled bundle must not be reported as a structured bundle")
+	}
+}
+
 // TestValidateBundleRejectsNonYAML pins that unparseable input is an error rather
 // than a silently clean bundle.
 func TestValidateBundleRejectsNonYAML(t *testing.T) {

@@ -123,6 +123,51 @@ func TestPolicyLintValidatesBeyondCEL(t *testing.T) {
 	}
 }
 
+// TestPolicyLintAcceptsCompiledBundle pins the round trip documented in the
+// policy framework reference: what `deputy policy bundle` writes must lint
+// clean. A compiled bundle is JSON, and JSON is valid YAML with a "policies"
+// array, so the structured probe has to tell the two shapes apart.
+func TestPolicyLintAcceptsCompiledBundle(t *testing.T) {
+	dir := t.TempDir()
+	authored := filepath.Join(dir, "authored.yaml")
+	if err := os.WriteFile(authored, []byte(`policies:
+  - name: block-left-pad
+    entrypoints: ["scan_vulnerability"]
+    vars:
+      blocked: '["left-pad"]'
+    rules:
+      - when: "pkg.name in blocked"
+        action: deny
+        reason: "blocked package"
+`), 0o600); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+	compiled := filepath.Join(dir, "compiled.json")
+
+	bundleRoot := &cobra.Command{Use: "deputy"}
+	bundleRoot.AddCommand(newPolicyBundleCommand())
+	var bundleOut bytes.Buffer
+	bundleRoot.SetOut(&bundleOut)
+	bundleRoot.SetErr(&bundleOut)
+	bundleRoot.SetArgs([]string{"bundle", "--output", compiled, authored})
+	if err := bundleRoot.Execute(); err != nil {
+		t.Fatalf("policy bundle: %v\n%s", err, bundleOut.String())
+	}
+
+	lintRoot := &cobra.Command{Use: "deputy"}
+	lintRoot.AddCommand(newPolicyLintCommand())
+	var lintOut bytes.Buffer
+	lintRoot.SetOut(&lintOut)
+	lintRoot.SetErr(&lintOut)
+	lintRoot.SetArgs([]string{"lint", compiled})
+	if err := lintRoot.Execute(); err != nil {
+		t.Fatalf("lint of compiled bundle failed: %v\n%s", err, lintOut.String())
+	}
+	if !strings.Contains(lintOut.String(), "OK") {
+		t.Fatalf("expected compiled bundle to lint OK, got:\n%s", lintOut.String())
+	}
+}
+
 // TestPolicyLintAcceptsDeclaredVars pins that --var keeps caller-declared names
 // from being reported as unbound.
 func TestPolicyLintAcceptsDeclaredVars(t *testing.T) {

@@ -2,6 +2,7 @@ package policy
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -119,6 +120,9 @@ type ValidateOptions struct {
 // bundle is the last resort check, reported only when nothing more precise was
 // found, because a load failure repeats what the located issues already say.
 func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
+	if IsCompiledBundle([]byte(text)) {
+		return nil, errors.New("compiled policy bundle: validate the authored policies it was built from")
+	}
 	root := &yaml.Node{}
 	if err := yaml.Unmarshal([]byte(text), root); err != nil {
 		return nil, fmt.Errorf("parse policy YAML: %w", err)
