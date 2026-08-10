@@ -274,6 +274,128 @@ func TestCanonicalizeIdentityFields(t *testing.T) {
 	}
 }
 
+// TestCanonicalizeLeavesCallerDataAlone pins that canonicalization stays on
+// schema-defined ecosystem paths. Caller-supplied data that happens to use the
+// key "ecosystem" is somebody's value, not an ecosystem, and an authorization
+// rule comparing it exactly must still match.
+func TestCanonicalizeLeavesCallerDataAlone(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload map[string]any
+		want    map[string]any
+	}{
+		{
+			name: "jwt claim survives",
+			payload: map[string]any{
+				"jwt": map[string]any{"sub": "svc", "ecosystem": "Customer_Success"},
+				"pkg": map[string]any{"ecosystem": "Go"},
+			},
+			want: map[string]any{
+				"jwt": map[string]any{"sub": "svc", "ecosystem": "Customer_Success"},
+				"pkg": map[string]any{"ecosystem": "go"},
+			},
+		},
+		{
+			name: "jwt custom claim survives",
+			payload: map[string]any{
+				"jwt": map[string]any{"custom_claims": map[string]any{"ecosystem": "Customer_Success"}},
+			},
+			want: map[string]any{
+				"jwt": map[string]any{"custom_claims": map[string]any{"ecosystem": "Customer_Success"}},
+			},
+		},
+		{
+			name: "container labels survive",
+			payload: map[string]any{
+				"image_info": map[string]any{"labels": map[string]any{"ecosystem": "Customer_Success"}},
+			},
+			want: map[string]any{
+				"image_info": map[string]any{"labels": map[string]any{"ecosystem": "Customer_Success"}},
+			},
+		},
+		{
+			name:    "environment is left alone",
+			payload: map[string]any{"env": map[string]any{"command": "scan", "ecosystem": "Customer_Success"}},
+			want:    map[string]any{"env": map[string]any{"command": "scan", "ecosystem": "Customer_Success"}},
+		},
+		{
+			name:    "untyped report payloads still canonicalize",
+			payload: map[string]any{"report": map[string]any{"packages": []any{map[string]any{"ecosystem": "Go"}}}},
+			want:    map[string]any{"report": map[string]any{"packages": []any{map[string]any{"ecosystem": "go"}}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			canonicalizeEcosystemPayload(tt.payload)
+			if !reflect.DeepEqual(tt.payload, tt.want) {
+				t.Errorf("canonicalizeEcosystemPayload() = %#v, want %#v", tt.payload, tt.want)
+			}
+		})
+	}
+}
+
+// TestVariableCarriesEcosystem pins the schema gate that keeps the walk off
+// caller-controlled variables, derived from proto descriptors rather than a
+// hand-written list.
+func TestVariableCarriesEcosystem(t *testing.T) {
+	tests := []struct {
+		variable string
+		want     bool
+	}{
+		{variable: "pkg", want: true},
+		{variable: "packages", want: true},
+		{variable: "vulnerability", want: true},
+		{variable: "node", want: true},
+		{variable: "jwt", want: false},
+		{variable: "env", want: false},
+		{variable: "report", want: true},   // untyped payload, walked
+		{variable: "request", want: true},  // untyped payload, walked
+		{variable: "made_up", want: true},  // unknown variable, walked
+		{variable: "licenses", want: true}, // untyped list, walked
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.variable, func(t *testing.T) {
+			if got := variableCarriesEcosystem(tt.variable); got != tt.want {
+				t.Errorf("variableCarriesEcosystem(%q) = %t, want %t", tt.variable, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestJWTClaimRuleStillMatches drives the flatten-then-canonicalize order the
+// engine uses and pins that an exact-match authorization rule on a JWT claim
+// keeps firing.
+func TestJWTClaimRuleStillMatches(t *testing.T) {
+	sources, err := ParseStructuredSources([]byte(`policies:
+  - name: jwt-claim-gate
+    rules:
+      - action: deny
+        when: jwt.ecosystem == "Customer_Success"
+        reason: claim not allowed
+`), "jwt.yaml")
+	if err != nil {
+		t.Fatalf("ParseStructuredSources: %v", err)
+	}
+
+	payload := map[string]any{
+		"jwt": map[string]any{
+			"sub":           "svc",
+			"custom_claims": map[string]any{"ecosystem": "Customer_Success"},
+		},
+	}
+	flattenJWTCustomClaims(payload)
+
+	actions, err := EvaluateMap(t.Context(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateMap: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Type != ActionDeny {
+		t.Fatalf("jwt claim rule did not fire: actions=%v, jwt=%v", actions, payload["jwt"])
+	}
+}
+
 // TestStructuredBundleRejectsUnknownEcosystem pins the load-time contract: an
 // ecosystems: value Deputy does not know is an error naming the offending value
 // and the valid set, and a known one is rewritten to its canonical token in
