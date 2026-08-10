@@ -895,6 +895,15 @@ func resolveWorkDir(dir string) (string, error) {
 // targeted. Execution and dry run both resolve through here so a preview can
 // never report a step as runnable that execution would refuse, and so both
 // report the refusal identically.
+//
+// A contained directory that does not exist is refused too. exec.Cmd fails on
+// the chdir before it starts the process, and it blames the executable it could
+// not run rather than the directory it could not enter, so a plan naming
+// services/api/go.mod in a repository without services/api would otherwise be
+// previewed as runnable and then fail for a reason that names neither the step
+// nor the mistake. The work directory itself is not restated here: the caller
+// resolves it through resolveWorkDir, which already requires an existing
+// directory.
 func stepExecDir(workDir string, step *remediationv1.Step) (string, error) {
 	manifestPath := step.GetManifestPath()
 	if manifestPath == "" {
@@ -908,6 +917,13 @@ func stepExecDir(workDir string, step *remediationv1.Step) (string, error) {
 	rel, err := filepath.Rel(workDir, candidate)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("manifest path %q escapes the work directory", manifestPath)
+	}
+	info, err := os.Stat(candidate)
+	if err != nil {
+		return "", fmt.Errorf("manifest path %q names a directory that does not exist: %w", manifestPath, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("manifest path %q does not name a directory", manifestPath)
 	}
 	return candidate, nil
 }

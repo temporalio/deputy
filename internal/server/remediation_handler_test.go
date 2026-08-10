@@ -137,13 +137,22 @@ func newRemediationTestClient(t *testing.T, h *RemediationHandler) remediationv1
 
 // executePlanForTest runs ExecutePlan with the given options against a
 // two-step plan (plus any extra steps) and returns the streamed events and
-// the terminal error.
-func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.ExecutionOptions, extraSteps ...*remediationv1.Step) ([]*remediationv1.ExecutionEvent, error) {
+// the terminal error. dirs are created under the target path first, for plans
+// whose steps carry a manifest path: a step's execution directory has to exist
+// the way it would in the repository the plan was generated from.
+func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.ExecutionOptions, dirs []string, extraSteps ...*remediationv1.Step) ([]*remediationv1.ExecutionEvent, error) {
 	t.Helper()
 
 	handler := NewRemediationHandler(WithRemediationLocalMode())
 	handler.execStep = rec.run
 	client := newRemediationTestClient(t, handler)
+
+	targetPath := t.TempDir()
+	for _, dir := range dirs {
+		if err := os.MkdirAll(filepath.Join(targetPath, dir), 0o755); err != nil {
+			t.Fatalf("MkdirAll %q: %v", dir, err)
+		}
+	}
 
 	steps := []*remediationv1.Step{
 		{Id: "step-1", Title: "bump widget", Command: "go get example.com/widget@v1.5.0", Manager: "go", Executable: true},
@@ -156,7 +165,7 @@ func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.
 
 	stream, err := client.ExecutePlan(t.Context(), connect.NewRequest(&remediationv1.ExecutePlanRequest{
 		Source:     &remediationv1.ExecutePlanRequest_Plan{Plan: plan},
-		TargetPath: t.TempDir(),
+		TargetPath: targetPath,
 		Options:    options,
 	}))
 	if err != nil {
@@ -177,6 +186,7 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 		name           string
 		options        *remediationv1.ExecutionOptions
 		extraSteps     []*remediationv1.Step
+		dirs           []string     // directories to create under the target path before the run
 		failSteps      []string     // step IDs the recorder reports as failed
 		wantCode       connect.Code // zero means the stream must succeed
 		wantExecuted   []string
@@ -375,11 +385,27 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			wantFinalPhase: remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
 		},
 		{
+			name:    "dry run rejects a manifest path whose directory does not exist",
+			options: &remediationv1.ExecutionOptions{DryRun: true},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "tidy a subproject", Command: "go mod tidy", Manager: "go", Executable: true, ManifestPath: "services/api/go.mod"},
+			},
+			wantExecuted: nil,
+			wantMessages: []string{
+				"[dry run] Step 3/3 would be rejected: go mod tidy",
+				`manifest path "services/api/go.mod" names a directory that does not exist`,
+				"Dry run complete: 2 steps would execute, 1 would be rejected, nothing was changed",
+			},
+			wantMissing:    []string{"[dry run] Step 3/3 would execute"},
+			wantFinalPhase: remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
+		},
+		{
 			name:    "dry run accepts a manifest path inside the work directory",
 			options: &remediationv1.ExecutionOptions{DryRun: true},
 			extraSteps: []*remediationv1.Step{
 				{Id: "step-3", Title: "tidy nested", Command: "go mod tidy", Manager: "go", Executable: true, ManifestPath: "services/api/go.mod"},
 			},
+			dirs:         []string{"services/api"},
 			wantExecuted: nil,
 			wantMessages: []string{
 				"[dry run] Step 3/3 would execute: go mod tidy",
@@ -516,7 +542,7 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := &stepRecorder{failSteps: tt.failSteps}
-			events, err := executePlanForTest(t, rec, tt.options, tt.extraSteps...)
+			events, err := executePlanForTest(t, rec, tt.options, tt.dirs, tt.extraSteps...)
 
 			if got := rec.executedSteps(); !slices.Equal(got, tt.wantExecuted) {
 				t.Fatalf("executed steps = %v, want %v", got, tt.wantExecuted)
@@ -563,7 +589,7 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 // field at zero.
 func TestExecutePlanReportsProgress(t *testing.T) {
 	rec := &stepRecorder{}
-	events, err := executePlanForTest(t, rec, nil)
+	events, err := executePlanForTest(t, rec, nil, nil)
 	if err != nil {
 		t.Fatalf("ExecutePlan failed: %v", err)
 	}
@@ -603,7 +629,7 @@ func TestExecutePlanTimeout(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := &stepRecorder{}
-			if _, err := executePlanForTest(t, rec, tt.options); err != nil {
+			if _, err := executePlanForTest(t, rec, tt.options, nil); err != nil {
 				t.Fatalf("ExecutePlan failed: %v", err)
 			}
 			if rec.hadDeadline != tt.wantDeadline {
@@ -868,6 +894,10 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 		// elsewhere both paths refuse earlier, for the same reason as each
 		// other but not the one under test.
 		needsProcessTree bool
+		// dirs are created under the work directory before the row runs, for
+		// rows whose step must get past the check that its execution
+		// directory exists to reach the check under test.
+		dirs []string
 	}{
 		{
 			name:       "manifest path escaping the work directory",
@@ -884,6 +914,17 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			step:             &remediationv1.Step{Id: "step-1", Title: "wrong manager", Command: "npm install left-pad", Manager: "go", Executable: true, ManifestPath: "services/api/package.json"},
 			wantReason:       `executable "npm" not allowed for manager "go"`,
 			needsProcessTree: true,
+			dirs:             []string{"services/api"},
+		},
+		{
+			name:       "manifest path naming a directory that does not exist",
+			step:       &remediationv1.Step{Id: "step-1", Title: "tidy a subproject", Command: "go mod tidy", Manager: "go", Executable: true, ManifestPath: "services/api/go.mod"},
+			wantReason: `manifest path "services/api/go.mod" names a directory that does not exist`,
+		},
+		{
+			name:       "manifest path whose directory is a regular file",
+			step:       &remediationv1.Step{Id: "step-1", Title: "tidy a file", Command: "go mod tidy", Manager: "go", Executable: true, ManifestPath: "notadir/go.mod"},
+			wantReason: `manifest path "notadir/go.mod" does not name a directory`,
 		},
 		{
 			name:       "deputy command target escaping the work directory",
@@ -903,6 +944,14 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 				t.Skip("this platform refuses external commands before the check under test")
 			}
 			workDir := t.TempDir()
+			for _, dir := range tt.dirs {
+				if err := os.MkdirAll(filepath.Join(workDir, dir), 0o755); err != nil {
+					t.Fatalf("MkdirAll %q: %v", dir, err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(workDir, "notadir"), []byte("not a directory"), 0o644); err != nil {
+				t.Fatalf("WriteFile notadir: %v", err)
+			}
 
 			message, outcome, rejectErr := dryRunStep(1, 1, workDir, tt.step, processTreeTerminationSupported)
 			if outcome != dryRunWouldReject {
