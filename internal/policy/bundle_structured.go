@@ -214,7 +214,8 @@ func ParseStructuredSources(data []byte, virtualPath string) ([]Source, error) {
 
 // metadata validates what the policy declares about itself and returns it in
 // canonical form: entrypoints must be known, commands must be known and are
-// normalized and deduplicated, and the mode must be one Deputy can apply.
+// normalized and deduplicated, ecosystems are canonicalized to one spelling,
+// and the mode must be one Deputy can apply.
 //
 // The result travels to the engine as typed data on [Source], so nothing about
 // a policy's identity or scoping is encoded into, or recovered from, its CEL
@@ -223,7 +224,6 @@ func (p structuredPolicy) metadata() (Metadata, error) {
 	meta := Metadata{
 		Name:        p.Name,
 		Description: p.Description,
-		Ecosystems:  slices.Clone(p.Ecosystems),
 	}
 	for _, ep := range p.Entrypoints {
 		if !IsAllowedEntrypoint(ep) {
@@ -243,6 +243,11 @@ func (p structuredPolicy) metadata() (Metadata, error) {
 		seenCommands[normalized] = struct{}{}
 		meta.Commands = append(meta.Commands, normalized)
 	}
+	normalizedEcosystems, err := validateEcosystems(p.Ecosystems)
+	if err != nil {
+		return Metadata{}, err
+	}
+	meta.Ecosystems = normalizedEcosystems
 	if p.Mode != "" {
 		mode := normalizeMode(Mode(p.Mode))
 		if mode == "" || !mode.IsValid() {
@@ -260,10 +265,18 @@ func (p structuredPolicy) toCELSource() (string, error) {
 	if len(p.Rules) == 0 {
 		return "", fmt.Errorf("policy must contain at least one rule")
 	}
+	// Scope guards are generated from canonical tokens, because the payload a
+	// rule is evaluated against has already been canonicalized (see
+	// [canonicalizeEcosystemPayload]); an authored display spelling would
+	// compile into a guard that never matches.
+	ecosystems, err := validateEcosystems(p.Ecosystems)
+	if err != nil {
+		return "", err
+	}
 	var builder strings.Builder
 	builder.WriteString("[]")
 	for _, rule := range p.Rules {
-		expr, err := rule.toRuleExpr(p.Ecosystems)
+		expr, err := rule.toRuleExpr(ecosystems)
 		if err != nil {
 			return "", err
 		}

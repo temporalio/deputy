@@ -175,6 +175,9 @@ func Evaluate(ctx context.Context, source string, input map[string]any) (any, er
 	// Convert any proto messages in the input map to native maps for CEL evaluation.
 	// This allows tests to pass proto objects directly in the input map.
 	input = convertProtosInMap(input)
+	// Rewrite ecosystem values to their canonical tokens so expressions compare
+	// against one spelling regardless of the scanner's display casing.
+	canonicalizeEcosystemPayload(input)
 	// Inject constants for cleaner policy authoring
 	seedConstants(input)
 	env, err := envForInput(input)

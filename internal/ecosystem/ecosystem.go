@@ -4,8 +4,6 @@ import (
 	"strings"
 
 	pb "deps.dev/api/v3"
-
-	"github.com/temporalio/deputy/internal/policy"
 )
 
 // Ecosystem represents a supported package ecosystem.
@@ -159,12 +157,6 @@ func (e Ecosystem) NormalizeName(name string) string {
 // IsSupported returns true if this is a known, supported ecosystem.
 func (e Ecosystem) IsSupported() bool {
 	return e != Unknown && e != ""
-}
-
-// ProxyEntrypoint returns the CEL policy entrypoint for proxy requests
-// to this ecosystem (e.g., EntrypointGoArtifactRequest, EntrypointNpmArtifactRequest).
-func (e Ecosystem) ProxyEntrypoint() policy.Entrypoint {
-	return policy.Entrypoint(string(e) + "_artifact_request")
 }
 
 // All returns all supported ecosystems.

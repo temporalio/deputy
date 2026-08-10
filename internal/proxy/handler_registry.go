@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 // PathParseResult holds the parsed components from an ecosystem-specific URL path.
@@ -124,7 +125,7 @@ func (h *genericHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Filename:   parsed.Filename,
 	}
 
-	entrypoint := h.config.Ecosystem.ProxyEntrypoint()
+	entrypoint := policy.ProxyEntrypoint(string(h.config.Ecosystem))
 	input := h.buildPolicyInput(r.Context(), info, entrypoint)
 	h.serve(w, r, entrypoint, info, input)
 }
