@@ -165,8 +165,10 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
   pins in one array; a multi-version declaration with no matching version
   fails with an error instead of guessing. All declaration forms mise accepts
   are handled: `[tools]` entries, `[tools.<name>]` tables, dotted keys
-  (`tools.go = "..."`), inline tables, arrays of inline tables, and version
-  arrays nested in an inline table (tool options survive throughout).
+  (`tools.go = "..."`), inline tables (single-line or multiline, including a
+  quoted `"version"` key), arrays of inline tables, version arrays nested in
+  an inline table, the root `tools = { ... }` table, and option-bearing keys
+  such as `"ubi:cli/cli[exe=gh]"` (tool options survive throughout).
 - The config's lockfile is kept honest: entries pinning the replaced versions
   are removed (their checksums describe the old artifact, so updating them in
   place would lie), which stops scans from re-reporting the old locked
