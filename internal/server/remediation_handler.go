@@ -573,6 +573,8 @@ func stepFailureCode(ctx context.Context, err error) connect.Code {
 		return connect.CodeDeadlineExceeded
 	case errors.Is(err, context.Canceled):
 		return connect.CodeCanceled
+	case errors.Is(err, errProcessTreeUnbounded):
+		return connect.CodeUnimplemented
 	default:
 		return connect.CodeInternal
 	}
@@ -647,6 +649,12 @@ func executionProgress(done, total int) int32 {
 	return int32(done * 100 / total)
 }
 
+// errProcessTreeUnbounded marks a refusal to spawn an external command on a
+// platform where cancellation cannot terminate the command's descendants.
+// It is a capability gap in the build, not a runtime fault, so it maps to
+// CodeUnimplemented.
+var errProcessTreeUnbounded = errors.New("this platform cannot terminate a command's child processes, so an execution timeout could not bound them")
+
 // commandWaitDelay bounds how long a cancelled command may keep the RPC
 // waiting on its output pipes after its process group has been killed. It is
 // a backstop for a descendant that escaped the group, not the primary
@@ -713,6 +721,15 @@ func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) 
 			}
 			execDir = candidate
 		}
+	}
+
+	// Fail closed where the timeout cannot bound the process tree. Running
+	// anyway would mean descendants keep mutating the workspace after the
+	// deadline, so refuse instead of offering a silently weaker guarantee on
+	// one platform. Deputy-internal commands are handled above and stay
+	// available, since they never spawn a process.
+	if !processTreeTerminationSupported {
+		return "", fmt.Errorf("refusing to run %q: %w", cmd, errProcessTreeUnbounded)
 	}
 
 	// Execute shell command

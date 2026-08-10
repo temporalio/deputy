@@ -492,6 +492,50 @@ func TestExecutePlanEmptyPlanExpiredTimeout(t *testing.T) {
 	}
 }
 
+// TestStepFailureCode pins the mapping from step failure causes to connect
+// codes, including the platform refusal: a platform that cannot bound a
+// command's descendants must report Unimplemented, not a generic internal
+// error, so a client can tell "this build will not do that" from "this run
+// broke".
+func TestStepFailureCode(t *testing.T) {
+	tests := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want connect.Code
+	}{
+		{name: "generic failure", ctx: context.Background(), err: errors.New("boom"), want: connect.CodeInternal},
+		{name: "wrapped deadline", ctx: context.Background(), err: fmt.Errorf("step: %w", context.DeadlineExceeded), want: connect.CodeDeadlineExceeded},
+		{name: "wrapped cancellation", ctx: context.Background(), err: fmt.Errorf("step: %w", context.Canceled), want: connect.CodeCanceled},
+		{
+			name: "unbounded process tree is unimplemented",
+			ctx:  context.Background(),
+			err:  fmt.Errorf("step: %w", errProcessTreeUnbounded),
+			want: connect.CodeUnimplemented,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stepFailureCode(tt.ctx, tt.err); got != tt.want {
+				t.Fatalf("stepFailureCode = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestProcessTreeTerminationSupported pins the platform contract this build
+// relies on: on unix, cancelling a command terminates its whole process
+// group, which is what makes the execution timeout a real upper bound.
+func TestProcessTreeTerminationSupported(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows refuses external command execution instead")
+	}
+	if !processTreeTerminationSupported {
+		t.Fatal("unix builds must support process tree termination")
+	}
+}
+
 // TestExecutePlanMidCommandTimeout pins two properties of a timeout that
 // expires while a command is running. First, error code fidelity: the killed
 // process reports an exit error (signal: killed) that does not wrap the

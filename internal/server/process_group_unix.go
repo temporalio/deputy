@@ -9,6 +9,13 @@ import (
 	"syscall"
 )
 
+// processTreeTerminationSupported reports whether cancelling a command on
+// this platform terminates every process it spawned, not just the direct
+// child. Unix gets this from process groups (see configureProcessGroup),
+// which is what makes an execution timeout a real upper bound on how long
+// plan steps can mutate the workspace.
+const processTreeTerminationSupported = true
+
 // configureProcessGroup puts the command in its own process group so that
 // cancellation can reach the whole tree it spawns. Without this, a command
 // that forks (a package manager invoking a compiler or a download helper)
