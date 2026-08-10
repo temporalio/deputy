@@ -184,6 +184,22 @@ func TestNormalizeName(t *testing.T) {
 		{PyPI, "  Django  ", "django"},
 		{NPM, "React", "React"},
 		{Go, "github.com/Foo/Bar", "github.com/Foo/Bar"},
+		// PEP 503: runs of "-", "_", and "." are one separator, so every
+		// spelling of a distribution collapses onto the same name.
+		{PyPI, "Flask_SQLAlchemy", "flask-sqlalchemy"},
+		{PyPI, "flask.sqlalchemy", "flask-sqlalchemy"},
+		{PyPI, "Flask-SQLAlchemy", "flask-sqlalchemy"},
+		{PyPI, "zope..interface", "zope-interface"},
+		{PyPI, "ruamel_-.yaml", "ruamel-yaml"},
+		// crates.io treats "-" and "_" as the same character in a crate name.
+		{Cargo, "serde-json", "serde_json"},
+		{Cargo, "serde_json", "serde_json"},
+		{Cargo, "Serde-JSON", "serde_json"},
+		// Ecosystems with case-sensitive, separator-significant names keep
+		// every character.
+		{NPM, "@types/Node", "@types/Node"},
+		{Maven, "com.example:My_Artifact", "com.example:My_Artifact"},
+		{Unknown, "Some.Thing", "Some.Thing"},
 	}
 
 	for _, tt := range tests {

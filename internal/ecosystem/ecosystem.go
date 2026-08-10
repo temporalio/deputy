@@ -141,17 +141,61 @@ func (e Ecosystem) NormalizeVersion(version string) string {
 	return v
 }
 
-// NormalizeName applies ecosystem-specific name normalization.
-// For PyPI, names are lowercased.
+// NormalizeName folds a package name into the single spelling this ecosystem
+// considers one package, so two records of the same dependency compare equal no
+// matter which manifest, registry, or advisory they came from. It is the one
+// implementation of that rule: the comparison pipeline and the policy boundary
+// both call it, which is what keeps an exact-match policy from missing a
+// package that inventory already treats as the same one.
+//
+// Ecosystems whose names are case-sensitive and separator-significant (npm, Go,
+// Maven, and everything Deputy has no rule for) get the name back unchanged
+// apart from surrounding whitespace, because folding there would merge distinct
+// packages.
 func (e Ecosystem) NormalizeName(name string) string {
 	n := strings.TrimSpace(name)
 	if n == "" {
 		return ""
 	}
-	if e == PyPI {
-		return strings.ToLower(n)
+	switch e {
+	case PyPI:
+		return normalizePyPIName(n)
+	case Cargo:
+		return normalizeCargoName(n)
+	default:
+		return n
 	}
-	return n
+}
+
+// normalizePyPIName applies PEP 503: a distribution name is lowercase, and any
+// run of "-", "_", or "." is a single "-". That is the form PyPI itself
+// compares and the form OSV indexes, so "Flask_SQLAlchemy", "flask.sqlalchemy",
+// and "Flask-SQLAlchemy" all collapse to "flask-sqlalchemy".
+func normalizePyPIName(name string) string {
+	lowered := strings.ToLower(name)
+	var out strings.Builder
+	out.Grow(len(lowered))
+	inSeparator := false
+	for _, r := range lowered {
+		if r == '-' || r == '_' || r == '.' {
+			if !inSeparator {
+				out.WriteByte('-')
+				inSeparator = true
+			}
+			continue
+		}
+		out.WriteRune(r)
+		inSeparator = false
+	}
+	return out.String()
+}
+
+// normalizeCargoName folds a crate name the way crates.io does: names are
+// case-insensitive and "-" and "_" are interchangeable, so a crate cannot be
+// registered under both spellings. Deputy normalizes to the underscore form
+// because that is how a crate is named in Rust source.
+func normalizeCargoName(name string) string {
+	return strings.ReplaceAll(strings.ToLower(name), "-", "_")
 }
 
 // IsSupported returns true if this is a known, supported ecosystem.
