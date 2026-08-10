@@ -17,20 +17,50 @@ func IsDeputyInternalCommand(cmd string) bool {
 	return strings.HasPrefix(cmd, "deputy:")
 }
 
+// deputyCommandArity is the minimum token count each deputy-internal command
+// requires, including the command word itself. It is the single source of
+// truth for which opcodes exist and how many arguments they take, shared by
+// validation and application so a dry run cannot approve a command the apply
+// path would reject.
+var deputyCommandArity = map[string]int{
+	"deputy:action:update":     4, // deputy:action:update <file> <owner/repo> <new-version>
+	"deputy:action:pin":        5, // deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
+	"deputy:dockerfile:update": 4, // deputy:dockerfile:update <file> <image> <new-version>
+}
+
+// ValidateDeputyCommand checks that a deputy-internal command parses, names a
+// known opcode, and carries enough arguments, returning the parsed tokens.
+// It touches nothing on disk, so callers can use it to predict whether
+// ApplyDeputyCommand would accept the command (a dry run) without applying
+// it. Checks that require the filesystem, such as path containment and
+// whether the target file matches, necessarily remain in the apply path.
+func ValidateDeputyCommand(cmd string) ([]string, error) {
+	parts, err := ParseCommandArgs(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("invalid command: %w", err)
+	}
+
+	want, known := deputyCommandArity[parts[0]]
+	if !known {
+		return nil, fmt.Errorf("unknown deputy command: %s", parts[0])
+	}
+	if len(parts) < want {
+		return nil, fmt.Errorf("invalid %s command: expected %d parts, got %d", parts[0], want, len(parts))
+	}
+	return parts, nil
+}
+
 // ApplyDeputyCommand executes a deputy-internal command.
 // Returns an error if the command is not recognized or fails.
 func ApplyDeputyCommand(repoDir, cmd string) error {
-	parts, err := ParseCommandArgs(cmd)
+	parts, err := ValidateDeputyCommand(cmd)
 	if err != nil {
-		return fmt.Errorf("invalid command: %w", err)
+		return err
 	}
 
 	switch parts[0] {
 	case "deputy:action:update":
 		// Format: deputy:action:update <file> <owner/repo> <new-version>
-		if len(parts) < 4 {
-			return fmt.Errorf("invalid action update command: expected 4 parts, got %d", len(parts))
-		}
 		file, err := safeJoinPath(repoDir, parts[1])
 		if err != nil {
 			return fmt.Errorf("invalid file path: %w", err)
@@ -41,9 +71,6 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 
 	case "deputy:action:pin":
 		// Format: deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
-		if len(parts) < 5 {
-			return fmt.Errorf("invalid action pin command: expected 5 parts, got %d", len(parts))
-		}
 		file, err := safeJoinPath(repoDir, parts[1])
 		if err != nil {
 			return fmt.Errorf("invalid file path: %w", err)
@@ -55,9 +82,6 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 
 	case "deputy:dockerfile:update":
 		// Format: deputy:dockerfile:update <file> <image> <new-version>
-		if len(parts) < 4 {
-			return fmt.Errorf("invalid dockerfile update command: expected 4 parts, got %d", len(parts))
-		}
 		file, err := safeJoinPath(repoDir, parts[1])
 		if err != nil {
 			return fmt.Errorf("invalid file path: %w", err)
@@ -67,6 +91,8 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 		return applyDockerfileUpdate(file, image, newVersion)
 
 	default:
+		// Unreachable: ValidateDeputyCommand rejects unknown opcodes, and
+		// this switch must stay exhaustive over deputyCommandArity.
 		return fmt.Errorf("unknown deputy command: %s", parts[0])
 	}
 }

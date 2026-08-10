@@ -3,6 +3,7 @@ package remediation
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -685,6 +686,92 @@ COPY . /usr/share/nginx/html
 				if string(got) != wantContent {
 					t.Errorf("file %s content mismatch\ngot:\n%s\nwant:\n%s", filename, string(got), wantContent)
 				}
+			}
+		})
+	}
+}
+
+// TestValidateDeputyCommand pins the non-mutating validation that dry runs
+// rely on to predict whether ApplyDeputyCommand would accept a command:
+// opcode and arity are checked without touching the filesystem.
+func TestValidateDeputyCommand(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     string
+		wantErr string // substring; empty means the command must validate
+	}{
+		{
+			name: "action update with all arguments",
+			cmd:  "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+		},
+		{
+			name: "action pin with all arguments",
+			cmd:  "deputy:action:pin .github/workflows/ci.yml actions/checkout abc123 v4",
+		},
+		{
+			name: "dockerfile update with all arguments",
+			cmd:  "deputy:dockerfile:update Dockerfile golang 1.24",
+		},
+		{
+			name:    "unknown opcode",
+			cmd:     "deputy:unknown foo",
+			wantErr: "unknown deputy command: deputy:unknown",
+		},
+		{
+			name:    "action update missing arguments",
+			cmd:     "deputy:action:update file.yml",
+			wantErr: "expected 4 parts, got 2",
+		},
+		{
+			name:    "action pin missing tag",
+			cmd:     "deputy:action:pin file.yml actions/checkout abc123",
+			wantErr: "expected 5 parts, got 4",
+		},
+		{
+			name:    "unterminated quote",
+			cmd:     `deputy:action:update "unclosed`,
+			wantErr: "invalid command",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parts, err := ValidateDeputyCommand(tt.cmd)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateDeputyCommand(%q) = %v, want success", tt.cmd, err)
+				}
+				if len(parts) == 0 {
+					t.Fatal("ValidateDeputyCommand returned no parts on success")
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateDeputyCommand(%q) succeeded, want error containing %q", tt.cmd, tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want it to contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestApplyDeputyCommandRejectsWhatValidationRejects pins that the apply path
+// shares the validator, so a dry run's prediction cannot drift from what
+// applying actually does.
+func TestApplyDeputyCommandRejectsWhatValidationRejects(t *testing.T) {
+	invalid := []string{
+		"deputy:unknown foo",
+		"deputy:action:update file.yml",
+		"deputy:action:pin file.yml actions/checkout abc123",
+	}
+	for _, cmd := range invalid {
+		t.Run(cmd, func(t *testing.T) {
+			if _, err := ValidateDeputyCommand(cmd); err == nil {
+				t.Fatalf("ValidateDeputyCommand(%q) unexpectedly succeeded", cmd)
+			}
+			if err := ApplyDeputyCommand(t.TempDir(), cmd); err == nil {
+				t.Fatalf("ApplyDeputyCommand(%q) unexpectedly succeeded", cmd)
 			}
 		})
 	}
