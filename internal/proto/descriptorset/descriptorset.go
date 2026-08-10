@@ -19,7 +19,9 @@ import (
 	"sync"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
@@ -35,6 +37,51 @@ var parse = sync.OnceValues(func() (*descriptorpb.FileDescriptorSet, error) {
 	}
 	return &fds, nil
 })
+
+// resolved holds the embedded set as protoreflect descriptors. The set is built
+// with --exclude-imports, so references to well-known types cannot be resolved
+// and become placeholders; that is fine for structural queries over Deputy's
+// own messages and is why unresolvable references are allowed.
+var resolved = sync.OnceValues(func() (*protoregistry.Files, error) {
+	fds, err := parse()
+	if err != nil {
+		return nil, err
+	}
+	files, err := (protodesc.FileOptions{AllowUnresolvable: true}).NewFiles(fds)
+	if err != nil {
+		return nil, fmt.Errorf("resolve embedded descriptor set: %w", err)
+	}
+	return files, nil
+})
+
+// RangeMessages calls fn for every message declared in Deputy's protos,
+// including nested messages but not the synthetic map-entry messages. It stops
+// early when fn returns false. Callers get the complete schema, not just the
+// parts linked into the current binary, so schema-derived checks cannot go
+// blind on a package nobody imported.
+func RangeMessages(fn func(protoreflect.MessageDescriptor) bool) error {
+	files, err := resolved()
+	if err != nil {
+		return err
+	}
+	var walk func(protoreflect.MessageDescriptors) bool
+	walk = func(msgs protoreflect.MessageDescriptors) bool {
+		for i := range msgs.Len() {
+			md := msgs.Get(i)
+			if md.IsMapEntry() {
+				continue
+			}
+			if !fn(md) || !walk(md.Messages()) {
+				return false
+			}
+		}
+		return true
+	}
+	files.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
+		return walk(fd.Messages())
+	})
+	return nil
+}
 
 // comment index keyed by the element's proto full name (messages, fields,
 // enums, enum values), holding the cleaned leading comment.

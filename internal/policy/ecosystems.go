@@ -263,12 +263,20 @@ func nestedPackageEcosystem(m map[string]any) (eco ecosystem.Ecosystem, ok bool)
 
 // packageNameKeys are the payload fields that hold a package name and so get
 // the ecosystem's name normalization (PyPI names are case-insensitive, for
-// example, so they are lowercased).
-var packageNameKeys = []string{"name", "old_name"}
+// example, so they are lowercased). Deputy's schemas spell the same identity
+// several ways: a package or change calls it "name", a proxy request calls it
+// "package" or "module", a container vulnerability change calls it
+// "package_name". A policy that reads one alias must not see a different string
+// than a policy that reads another, so all of them are normalized.
+// TestIdentityKeysCoverSchema derives the field list from the proto descriptors
+// and fails when a message grows an unclassified one.
+var packageNameKeys = []string{"name", "old_name", "package", "module", "package_name"}
 
 // packageVersionKeys are the payload fields that hold a single version string
 // and so get the ecosystem's version normalization (Go versions gain the "v"
-// prefix, so a policy can write "^v1\\." and match the diff path too).
+// prefix, so a policy can write "^v1\\." and match the diff path too). The
+// repeated form, "fixed_versions", is normalized element by element in
+// [normalizeIdentityFields].
 var packageVersionKeys = []string{"version", "base_version", "target_version", "fixed_version"}
 
 // normalizeIdentityFields applies the ecosystem's own name and version

@@ -3,8 +3,12 @@ package policy
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/temporalio/deputy/internal/proto/descriptorset"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 func TestNormalizeEcosystem(t *testing.T) {
@@ -271,6 +275,25 @@ func TestCanonicalizeIdentityFields(t *testing.T) {
 			}},
 		},
 		{
+			name:    "proxy request package name is normalized",
+			payload: map[string]any{"request": map[string]any{"ecosystem": "PyPI", "package": "Flask-SQLAlchemy", "version": "3.1.1"}},
+			want:    map[string]any{"request": map[string]any{"ecosystem": "pypi", "package": "flask-sqlalchemy", "version": "3.1.1"}},
+		},
+		{
+			name:    "proxy request module is normalized",
+			payload: map[string]any{"request": map[string]any{"ecosystem": "Go", "module": "example.com/M", "version": "1.0.0"}},
+			want:    map[string]any{"request": map[string]any{"ecosystem": "go", "module": "example.com/M", "version": "v1.0.0"}},
+		},
+		{
+			name: "container vulnerability change package name is normalized",
+			payload: map[string]any{"vulnerability_change": map[string]any{
+				"id": "CVE-1", "ecosystem": "PyPI", "package_name": "Flask-SQLAlchemy", "base_version": "3.1.1",
+			}},
+			want: map[string]any{"vulnerability_change": map[string]any{
+				"id": "CVE-1", "ecosystem": "pypi", "package_name": "flask-sqlalchemy", "base_version": "3.1.1",
+			}},
+		},
+		{
 			name:    "docker tags are left alone",
 			payload: map[string]any{"pkg": map[string]any{"ecosystem": "docker", "name": "alpine", "version": "3.19"}},
 			want:    map[string]any{"pkg": map[string]any{"ecosystem": "docker", "name": "alpine", "version": "3.19"}},
@@ -363,6 +386,30 @@ func TestCanonicalizeLeavesCallerDataAlone(t *testing.T) {
 				"version":    "v1.0.0",
 				"provenance": map[string]any{"version": "1.0.0", "ecosystem": "Customer_Success"},
 			}},
+		},
+		{
+			name: "jwt claims named like a package identity survive",
+			payload: map[string]any{
+				"jwt": map[string]any{"ecosystem": "PyPI", "package": "Flask-SQLAlchemy", "version": "1.0.0"},
+			},
+			want: map[string]any{
+				"jwt": map[string]any{"ecosystem": "PyPI", "package": "Flask-SQLAlchemy", "version": "1.0.0"},
+			},
+		},
+		{
+			name: "image labels named like a package identity survive",
+			payload: map[string]any{
+				"image_info": map[string]any{
+					"ecosystem": "PyPI",
+					"labels":    map[string]any{"package": "Flask-SQLAlchemy", "module": "Example.COM/M"},
+				},
+			},
+			want: map[string]any{
+				"image_info": map[string]any{
+					"ecosystem": "pypi",
+					"labels":    map[string]any{"package": "Flask-SQLAlchemy", "module": "Example.COM/M"},
+				},
+			},
 		},
 		{
 			name:    "environment is left alone",
@@ -568,5 +615,79 @@ func TestScalibrEcosystemGuardMatchesScannerSpelling(t *testing.T) {
 	}
 	if len(actions) != 1 || actions[0].Type != ActionDeny {
 		t.Fatalf(`ecosystems: ["haskell"] did not match a "Hackage" package: actions=%v`, actions)
+	}
+}
+
+// notPackageIdentity records, with a reason, the string fields that sit on a
+// message declaring an ecosystem but are not part of a package's identity.
+// TestIdentityKeysCoverSchema requires every such field to be listed here or in
+// one of the identity key sets, so a schema that grows a new spelling of "the
+// package name" fails the build instead of silently reaching policies
+// unnormalized, which is how request.package and package_name were missed.
+var notPackageIdentity = map[string]string{
+	"ecosystem":     "the ecosystem itself, canonicalized before the identity fields",
+	"purl":          "a complete package URL, not a bare name or version",
+	"id":            "an advisory identifier",
+	"aliases":       "advisory identifiers",
+	"artifact":      "an advisory coverage subject, not a resolved package",
+	"change_kind":   "an enum rendered as a string",
+	"change_type":   "an enum rendered as a string",
+	"description":   "prose",
+	"display_name":  "an extractor's human-readable name",
+	"file_patterns": "extractor file globs",
+	"import_status": "an enum rendered as a string",
+	"licenses":      "SPDX expressions",
+	"locations":     "manifest paths",
+	"operation":     "the proxy operation being requested",
+	"published":     "a timestamp",
+	"severity":      "a severity label",
+	"severity_type": "a severity scoring system",
+	"sources":       "advisory source names",
+	"summary":       "prose",
+	"target":        "what was scanned, not a package",
+}
+
+// TestIdentityKeysCoverSchema derives the check from the proto descriptors:
+// every string field on a message that declares an ecosystem must be classified
+// as a package name, a package version, or explicitly not part of a package
+// identity. The descriptor set covers all of Deputy's protos, not just the ones
+// linked into this test binary, so a new field cannot hide in an unimported
+// package.
+func TestIdentityKeysCoverSchema(t *testing.T) {
+	versionKeys := append(slices.Clone(packageVersionKeys), "fixed_versions")
+
+	err := descriptorset.RangeMessages(func(md protoreflect.MessageDescriptor) bool {
+		fields := md.Fields()
+		declaresEcosystem := false
+		for i := range fields.Len() {
+			f := fields.Get(i)
+			if string(f.Name()) == "ecosystem" && f.Kind() == protoreflect.StringKind && !f.IsList() {
+				declaresEcosystem = true
+				break
+			}
+		}
+		if !declaresEcosystem {
+			return true
+		}
+		t.Run(string(md.FullName()), func(t *testing.T) {
+			for i := range fields.Len() {
+				f := fields.Get(i)
+				if f.Kind() != protoreflect.StringKind || f.IsMap() {
+					continue
+				}
+				name := string(f.Name())
+				if slices.Contains(packageNameKeys, name) || slices.Contains(versionKeys, name) {
+					continue
+				}
+				if _, known := notPackageIdentity[name]; known {
+					continue
+				}
+				t.Errorf("%s.%s is a string field on a message that declares an ecosystem but is not classified: add it to packageNameKeys or packageVersionKeys if it holds a package identity, or to notPackageIdentity with the reason it does not", md.FullName(), name)
+			}
+		})
+		return true
+	})
+	if err != nil {
+		t.Fatalf("RangeMessages: %v", err)
 	}
 }
