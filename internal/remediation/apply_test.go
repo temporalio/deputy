@@ -672,6 +672,152 @@ checksum = "sha256:node"
 	}
 }
 
+// TestApplyMiseUpdateLockKeyPrecision pins which lock entries a fix may
+// touch. A config can declare a backend-qualified tool and its short name as
+// separate tools with independent lock entries, so fixing one must not prune
+// the other's integrity metadata. The backend-stripped name is only a
+// fallback, used when the lock has no entry under the exact configured key and
+// the config does not declare that short name itself.
+func TestApplyMiseUpdateLockKeyPrecision(t *testing.T) {
+	t.Parallel()
+
+	const npmNodeEntry = `[[tools."npm:node"]]
+version = "20.11.0"
+backend = "npm:node"
+
+[tools."npm:node"."platforms.linux-x64"]
+checksum = "sha256:npmnode"
+`
+	const coreNodeEntry = `[[tools.node]]
+version = "20.11.0"
+backend = "core:node"
+
+[tools.node.platforms.linux-x64]
+checksum = "sha256:corenode"
+`
+
+	tests := []struct {
+		name     string
+		config   string
+		lock     string
+		cmd      string
+		wantGone []string
+		wantKept []string
+	}{
+		{
+			// Both spellings declared and locked: only the edited one is pruned.
+			name: "separate declarations keep their own lock entries",
+			config: `[tools]
+"npm:node" = "20.11.0"
+node = "20.11.0"
+`,
+			lock:     npmNodeEntry + "\n" + coreNodeEntry,
+			cmd:      `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			wantGone: []string{"sha256:npmnode"},
+			wantKept: []string{"sha256:corenode"},
+		},
+		{
+			// Only the qualified tool is declared and the lock keys it by the
+			// short name: the fallback applies, so the stale entry is pruned.
+			name: "short-name fallback when exact key absent",
+			config: `[tools]
+"npm:node" = "20.11.0"
+`,
+			lock:     coreNodeEntry,
+			cmd:      `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			wantGone: []string{"sha256:corenode"},
+		},
+		{
+			// The exact key is locked, so no fallback: an unrelated short-name
+			// entry is left alone even though the config does not declare it.
+			name: "no fallback when exact key is locked",
+			config: `[tools]
+"npm:node" = "20.11.0"
+`,
+			lock:     npmNodeEntry + "\n" + coreNodeEntry,
+			cmd:      `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			wantGone: []string{"sha256:npmnode"},
+			wantKept: []string{"sha256:corenode"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for name, content := range map[string]string{"mise.toml": tt.config, "mise.lock": tt.lock} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := ApplyDeputyCommand(dir, tt.cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+			lock, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, marker := range tt.wantGone {
+				if strings.Contains(string(lock), marker) {
+					t.Errorf("expected %q to be pruned:\n%s", marker, lock)
+				}
+			}
+			for _, marker := range tt.wantKept {
+				if !strings.Contains(string(lock), marker) {
+					t.Errorf("expected %q to survive:\n%s", marker, lock)
+				}
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdateRetryAfterLockFailure pins recovery from a partial
+// apply. The config is written before the lockfile is pruned, so a lockfile
+// failure leaves the config edited and the lock stale; re-running the same
+// command must recognize the config edit as already applied and finish the
+// pruning rather than failing with "could not rewrite".
+func TestApplyMiseUpdateRetryAfterLockFailure(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "mise.toml")
+	lockPath := filepath.Join(dir, "mise.lock")
+	if err := os.WriteFile(configPath, []byte("[tools]\ngo = \"1.22.12\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lockPath, []byte("[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	const cmd = "deputy:mise:update mise.toml go 1.24.3 1.22.12"
+	if err := ApplyDeputyCommand(dir, cmd); err == nil {
+		t.Fatal("expected the read-only lockfile to fail the apply")
+	}
+	config, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(config), "1.24.3") {
+		t.Fatalf("config should already carry the fix:\n%s", config)
+	}
+
+	// The operator fixes whatever blocked the lockfile write and retries.
+	if err := os.Chmod(lockPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyDeputyCommand(dir, cmd); err != nil {
+		t.Fatalf("retry after partial failure: %v", err)
+	}
+	lock, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(lock), "1.22.12") {
+		t.Errorf("retry did not prune the stale lock entry:\n%s", lock)
+	}
+}
+
 func TestApplyDeputyCommand(t *testing.T) {
 	tests := []struct {
 		name    string

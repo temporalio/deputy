@@ -17,9 +17,6 @@ import (
 // whitespace/comment, so the token can be replaced while preserving layout.
 var scalarValueRe = regexp.MustCompile(`^(\s*)("[^"]*"|'[^']*'|[^\s#]+)(\s*(?:#.*)?)$`)
 
-// singleArrayValueRe matches an array value with exactly one version token.
-var singleArrayValueRe = regexp.MustCompile(`^(\s*\[\s*)("[^"]*"|'[^']*'|[^\s,\]]+)(\s*\]\s*(?:#.*)?)$`)
-
 // rewriteMiseVersions rewrites tool version values in a mise.toml [tools] table
 // to the pinned exact versions, preserving comments, key quoting, and unrelated
 // content. Only entries in the [tools] table are touched.
@@ -48,6 +45,13 @@ func rewriteMiseVersions(root *os.Root, relPath string, updates []pin.Update) er
 // naming the tool) rather than rewriting the wrong declaration.
 // currentVersions may be empty when unknown, which still rewrites scalar and
 // single-version declarations.
+//
+// The rewrite is idempotent: a config that already declares newVersion and
+// none of currentVersions is reported as successfully rewritten rather than as
+// an unapplied update. Callers do more than edit the config (remediation also
+// prunes the sibling lockfile), and without this a failure in that later work
+// would be unrecoverable: the config edit is already committed, so a retry
+// would report "no tool entry applied" and stop before redoing the rest.
 func RewriteToolVersion(root *os.Root, relPath, tool string, currentVersions []string, newVersion string) error {
 	if err := validateMiseUpdate(pin.Update{Name: tool, PinnedValue: newVersion}); err != nil {
 		return err
@@ -55,7 +59,55 @@ func RewriteToolVersion(root *os.Root, relPath, tool string, currentVersions []s
 	replace := func(value, pinned string) (string, bool) {
 		return replaceVersionInValueTargeting(value, currentVersions, pinned)
 	}
-	return rewriteToolsTable(root, relPath, map[string]string{tool: newVersion}, replace)
+	err := rewriteToolsTable(root, relPath, map[string]string{tool: newVersion}, replace)
+	if err == nil {
+		return nil
+	}
+	if alreadyAtVersion(root, relPath, tool, currentVersions, newVersion) {
+		return nil
+	}
+	return err
+}
+
+// alreadyAtVersion reports whether the config already declares tool at
+// newVersion with none of currentVersions left, meaning an earlier run applied
+// this exact edit. It parses the config the same way mise does, so every
+// declaration form is recognized, and answers false on any read or parse
+// failure so an unclear state is never mistaken for success.
+func alreadyAtVersion(root *os.Root, relPath, tool string, currentVersions []string, newVersion string) bool {
+	data, err := fs.ReadFile(root.FS(), relPath)
+	if err != nil {
+		return false
+	}
+	cfg, err := mise.Parse(relPath, data)
+	if err != nil {
+		return false
+	}
+	for _, spec := range cfg.Tools {
+		if spec.Key != tool {
+			continue
+		}
+		if !slices.Contains(spec.Versions, newVersion) {
+			return false
+		}
+		if len(currentVersions) == 0 {
+			// With no known vulnerable versions, only a lone declaration of
+			// the new version is provably complete; any other version left
+			// beside it may still be the vulnerable one.
+			return len(spec.Versions) == 1
+		}
+		// Defensive: a vulnerable version left beside the new one means the
+		// edit is incomplete. The rewriter would have replaced such an element,
+		// so this guards against a partially written config rather than a
+		// state the happy path can produce.
+		for _, current := range currentVersions {
+			if slices.Contains(spec.Versions, current) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // rewriteToolsTable walks a mise.toml-family config and applies replace to the
@@ -209,41 +261,56 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 }
 
 // replaceVersionInValue replaces the version in a [tools] value (the text after
-// `=`) with a quoted pinned version. It handles scalar string/bare values and
-// inline tables with a version field. Returns the new value text and whether a
-// change was made.
+// `=`) with a quoted pinned version, for pinning: scalar values, inline tables,
+// and single-version arrays are rewritten, while multi-version declarations are
+// left for a manual pin. That is exactly replaceVersionInValueTargeting with no
+// known vulnerable versions, so it delegates rather than duplicating the TOML
+// value handling.
 func replaceVersionInValue(value, pinned string) (string, bool) {
-	quoted := `"` + pinned + `"`
+	return replaceVersionInValueTargeting(value, nil, pinned)
+}
 
-	// Inline table: replace only the version field.
-	if strings.Contains(value, "{") {
-		valuePart, comment := splitTomlComment(value)
-		start, end, ok := inlineTableVersionValue(valuePart)
+// replaceVersionInValueTargeting rewrites the version(s) in a [tools] value
+// (the text after `=`), preserving everything else about the declaration.
+//
+// It understands every value shape mise accepts, at any nesting depth: a
+// scalar, an array of versions, an inline table with a version field, an array
+// of inline tables, and an inline table whose version field is itself an
+// array. Arrays are handled element-wise so a multi-version declaration never
+// reaches the scalar path, which would replace the opening bracket and corrupt
+// the file.
+//
+// Ambiguity decides whether currents are consulted: a single declared version
+// (a scalar, or a one-element array) is unambiguous and is always replaced,
+// which matters because a config often declares a fuzzy version ("20") while
+// the finding reports the resolved one ("20.11.0"). With several declared
+// versions only the elements equal to one of currents are replaced, so the
+// other pinned versions survive and an unmatched declaration changes nothing,
+// letting the caller fail closed instead of guessing. The value may span
+// multiple lines; only version tokens are rewritten, so line structure and
+// comments survive.
+func replaceVersionInValueTargeting(value string, currents []string, pinned string) (string, bool) {
+	// Arrays first: element-wise, so an array value can never fall through to
+	// the inline-table or scalar paths.
+	if spans, ok := arrayElementSpans(value); ok {
+		return replaceArrayElements(value, spans, currents, pinned)
+	}
+
+	valuePart, comment := splitTomlComment(value)
+
+	// Inline table: replace only the version field, which may itself be an
+	// array of versions (recursion handles that element-wise).
+	if strings.Contains(valuePart, "{") {
+		start, end, ok := inlineTableVersionSpan(valuePart)
 		if !ok {
 			return value, false
 		}
-		var b strings.Builder
-		b.Grow(len(valuePart) + len(comment) + len(pinned) + 2)
-		b.WriteString(valuePart[:start])
-		b.WriteString(quoted)
-		b.WriteString(valuePart[end:])
-		b.WriteString(comment)
-		newValue := b.String()
+		sub, changed := replaceVersionInValueTargeting(valuePart[start:end], currents, pinned)
+		if !changed {
+			return value, false
+		}
+		newValue := valuePart[:start] + sub + valuePart[end:] + comment
 		return newValue, newValue != value
-	}
-
-	// Single-version array. Multi-version arrays do not match and are left for
-	// a manual pin.
-	if m := singleArrayValueRe.FindStringSubmatch(value); m != nil {
-		newValue := m[1] + quoted + m[3]
-		return newValue, newValue != value
-	}
-
-	// An array we could not rewrite as a single version (multi-version or
-	// exotic layout): never fall through to the scalar path, which would
-	// replace the opening bracket and corrupt the file.
-	if valuePart, _ := splitTomlComment(value); strings.HasPrefix(strings.TrimSpace(valuePart), "[") {
-		return value, false
 	}
 
 	// Scalar value (possibly with trailing comment).
@@ -251,69 +318,81 @@ func replaceVersionInValue(value, pinned string) (string, bool) {
 	if m == nil {
 		return value, false
 	}
-	newValue := m[1] + quoted + m[3]
+	newValue := m[1] + `"` + pinned + `"` + m[3]
 	return newValue, newValue != value
 }
 
-// replaceVersionInValueTargeting is replaceVersionInValue extended with
-// element-wise array handling for remediation: in a multi-version array it
-// replaces every element equal to one of the current (vulnerable) versions,
-// preserving the other pinned versions (the pin path skips such arrays
-// entirely). Scalars, inline tables, and single-version arrays keep
-// replaceVersionInValue semantics. The value may span multiple lines; only
-// version tokens are rewritten, so line structure and comments survive.
-func replaceVersionInValueTargeting(value string, currents []string, pinned string) (string, bool) {
-	spans, ok := arrayElementSpans(value)
-	if !ok {
-		return replaceVersionInValue(value, pinned)
-	}
+// replaceArrayElements rewrites the matching elements of a TOML array value,
+// splicing replacements in by offset so element order, layout, and comments
+// survive. Elements may be scalars or inline tables; an inline-table element
+// has only its version field rewritten so tool options are preserved. A
+// one-element array is unambiguous and is replaced without consulting
+// currents; otherwise only elements whose declared version matches one of
+// currents are touched.
+func replaceArrayElements(value string, spans [][2]int, currents []string, pinned string) (string, bool) {
 	quoted := `"` + pinned + `"`
-
-	// A single-version array is unambiguous: replace it like a scalar.
-	// Multiple versions: replace exactly the elements matching a known
-	// vulnerable version; with no match nothing changes so the caller fails
-	// closed instead of guessing.
-	targets := spans
-	if len(spans) > 1 {
-		targets = targets[:0:0]
-		for _, span := range spans {
-			if slices.Contains(currents, unquoteKey(value[span[0]:span[1]])) {
-				targets = append(targets, span)
-			}
-		}
-	}
-	if len(targets) == 0 {
-		return value, false
-	}
+	unambiguous := len(spans) == 1
 
 	var b strings.Builder
-	b.Grow(len(value) + len(targets)*(len(quoted)+2))
+	b.Grow(len(value) + len(spans)*(len(quoted)+2))
 	last := 0
-	replaced := false
-	for _, span := range targets {
+	changed := false
+	for _, span := range spans {
 		elem := value[span[0]:span[1]]
 		repl := quoted
-		if strings.HasPrefix(elem, "{") {
-			// An inline-table element ({ version = "...", ... }): replace only
-			// its version field so tool options survive; when that fails the
-			// element stays untouched and the caller fails closed.
-			nv, changed := replaceVersionInValue(elem, pinned)
-			if !changed {
+		switch {
+		case isInlineTable(elem):
+			if !unambiguous {
+				version, ok := elementVersion(elem)
+				if !ok || !slices.Contains(currents, version) {
+					continue
+				}
+			}
+			sub, ok := replaceVersionInValueTargeting(elem, currents, pinned)
+			if !ok {
 				continue
 			}
-			repl = nv
+			repl = sub
+		case !unambiguous && !slices.Contains(currents, unquoteKey(elem)):
+			continue
 		}
 		b.WriteString(value[last:span[0]])
 		b.WriteString(repl)
 		last = span[1]
-		replaced = true
+		changed = true
 	}
-	if !replaced {
+	if !changed {
 		return value, false
 	}
 	b.WriteString(value[last:])
 	newValue := b.String()
 	return newValue, newValue != value
+}
+
+// elementVersion returns the version an array element declares, for matching
+// against known vulnerable versions: the token itself for a scalar element, or
+// the version field for an inline-table element. ok is false when the element
+// declares no single comparable version (no version field, or a nested array
+// of versions), in which case the caller must not treat it as a match.
+func elementVersion(elem string) (string, bool) {
+	if !isInlineTable(elem) {
+		return unquoteKey(elem), true
+	}
+	valuePart, _ := splitTomlComment(elem)
+	start, end, ok := inlineTableVersionSpan(valuePart)
+	if !ok {
+		return "", false
+	}
+	inner := strings.TrimSpace(valuePart[start:end])
+	if strings.HasPrefix(inner, "[") {
+		return "", false
+	}
+	return unquoteKey(inner), true
+}
+
+// isInlineTable reports whether a TOML value token is an inline table.
+func isInlineTable(s string) bool {
+	return strings.HasPrefix(strings.TrimSpace(s), "{")
 }
 
 // arrayElementSpans returns the [start, end) offsets of each element token in
@@ -491,7 +570,12 @@ func tomlValueSpan(s string, i int) int {
 	return len(s)
 }
 
-func inlineTableVersionValue(s string) (start, end int, ok bool) {
+// inlineTableVersionSpan locates the value of the top-level `version` key in
+// an inline table, returning its [start, end) offsets. The span covers whole
+// arrays and nested tables (not just the text up to the next comma), so an
+// array-valued version field is returned intact for element-wise rewriting
+// rather than being truncated into corrupt TOML.
+func inlineTableVersionSpan(s string) (start, end int, ok bool) {
 	inSingle := false
 	inDouble := false
 	escaped := false
@@ -513,7 +597,7 @@ func inlineTableVersionValue(s string) (start, end int, ok bool) {
 				continue
 			}
 			j = skipTomlSpaces(s, j+1)
-			end := tomlValueEnd(s, j)
+			end := tomlValueSpan(s, j)
 			return j, end, end > j
 		}
 	}

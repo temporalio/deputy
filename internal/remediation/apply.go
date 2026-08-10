@@ -365,6 +365,40 @@ func applyMiseUpdate(repoDir, filePath, tool string, currentVersions []string, n
 	return nil
 }
 
+// miseLockKeys returns the mise.lock table keys to prune for the tool that was
+// just edited. It is deliberately narrow: only the configured key is pruned,
+// because a config can declare both a backend-qualified tool and its short
+// name as separate tools (`"npm:node"` and `node`) whose lock entries are
+// independent, and pruning both would discard integrity metadata for a
+// declaration that was never edited. The backend-stripped name is used only as
+// an unambiguous fallback: the lock has no entry under the exact key, and the
+// config does not declare that short name as a tool of its own.
+func miseLockKeys(root *os.Root, configRelPath string, lockData []byte, tool string) []string {
+	_, name := mise.SplitBackend(tool)
+	if name == "" || name == tool {
+		return []string{tool}
+	}
+	if mise.HasLockedTool(lockData, tool) || configDeclaresMiseTool(root, configRelPath, name) {
+		return []string{tool}
+	}
+	return []string{tool, name}
+}
+
+// configDeclaresMiseTool reports whether the config at relPath declares key as
+// a tool in its own right. An unreadable or unparsable config is reported as
+// declaring the tool, so an ambiguous case never widens lock pruning.
+func configDeclaresMiseTool(root *os.Root, relPath, key string) bool {
+	data, err := fs.ReadFile(root.FS(), relPath)
+	if err != nil {
+		return true
+	}
+	cfg, err := mise.Parse(relPath, data)
+	if err != nil {
+		return true
+	}
+	return slices.ContainsFunc(cfg.Tools, func(t mise.ToolSpec) bool { return t.Key == key })
+}
+
 // pruneStaleMiseLock removes lock entries for the replaced versions from the
 // config's sibling mise.lock, when one exists. Without this the fix looks
 // applied but keeps scanning vulnerable: the extractor substitutes the locked
@@ -386,10 +420,7 @@ func pruneStaleMiseLock(root *os.Root, configRelPath, tool string, currentVersio
 		return fmt.Errorf("reading %s: %w", lockRel, err)
 	}
 
-	keys := []string{tool}
-	if _, name := mise.SplitBackend(tool); name != "" && name != tool {
-		keys = append(keys, name)
-	}
+	keys := miseLockKeys(root, configRelPath, data, tool)
 	stale := func(version string) bool {
 		if len(currentVersions) > 0 {
 			return slices.Contains(currentVersions, version)

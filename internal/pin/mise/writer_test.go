@@ -181,6 +181,11 @@ func TestReplaceVersionInValue(t *testing.T) {
 		{"inline table trailing comment", ` { version = "14" } # version = "old"`, "14.1.1", ` { version = "14.1.1" } # version = "old"`, true},
 		{"inline table version text in string", ` { postinstall = "echo version = old", version = "14" }`, "14.1.1", ` { postinstall = "echo version = old", version = "14.1.1" }`, true},
 		{"inline table dotted key", ` { runtime.version = "old", version = "14" }`, "14.1.1", ` { runtime.version = "old", version = "14.1.1" }`, true},
+		// A version array nested in an inline table follows the same rule as a
+		// bare array on the pin path: a single version is pinned, several are
+		// left for a manual pin, and neither may produce invalid TOML.
+		{"inline table single-version array", ` { version = ["14"] }`, "14.1.1", ` { version = ["14.1.1"] }`, true},
+		{"inline table multi-version array", ` { version = ["14", "15"] }`, "14.1.1", ` { version = ["14", "15"] }`, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -405,6 +410,73 @@ go = [{ version = "1.24.3", postinstall = "go version" }]
 `,
 		},
 		{
+			// Matching an inline-table element means comparing its version
+			// field, not the whole table text.
+			name: "multi-element array of inline tables",
+			input: `[tools]
+go = [{ version = "1.22.12" }, { version = "1.23.8" }]
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = [{ version = "1.24.3" }, { version = "1.23.8" }]
+`,
+		},
+		{
+			name: "multi-element array of inline tables unmatched fails closed",
+			input: `[tools]
+go = [{ version = "1.22.12" }, { version = "1.23.8" }]
+`,
+			tool: "go", currents: []string{"1.21.0"}, version: "1.24.3",
+			want: `[tools]
+go = [{ version = "1.22.12" }, { version = "1.23.8" }]
+`,
+			wantErr: true,
+		},
+		{
+			// A version array nested in an inline table must be edited
+			// element-wise; truncating it at the first comma produced invalid
+			// TOML like { version = "4.17.22", "4.17.21"] }.
+			name: "version array nested in inline table",
+			input: `[tools]
+"npm:lodash" = { version = ["4.17.20", "4.17.21"] }
+`,
+			tool: "npm:lodash", currents: []string{"4.17.20"}, version: "4.17.22",
+			want: `[tools]
+"npm:lodash" = { version = ["4.17.22", "4.17.21"] }
+`,
+		},
+		{
+			name: "version array nested in inline table with options",
+			input: `[tools]
+"npm:lodash" = { version = ["4.17.20", "4.17.21"], postinstall = "echo hi" }
+`,
+			tool: "npm:lodash", currents: []string{"4.17.21"}, version: "4.17.22",
+			want: `[tools]
+"npm:lodash" = { version = ["4.17.20", "4.17.22"], postinstall = "echo hi" }
+`,
+		},
+		{
+			name: "single-version array nested in inline table",
+			input: `[tools]
+"npm:lodash" = { version = ["4.17.20"] }
+`,
+			tool: "npm:lodash", currents: nil, version: "4.17.22",
+			want: `[tools]
+"npm:lodash" = { version = ["4.17.22"] }
+`,
+		},
+		{
+			name: "version array nested in inline table unmatched fails closed",
+			input: `[tools]
+"npm:lodash" = { version = ["4.17.20", "4.17.21"] }
+`,
+			tool: "npm:lodash", currents: []string{"3.0.0"}, version: "4.17.22",
+			want: `[tools]
+"npm:lodash" = { version = ["4.17.20", "4.17.21"] }
+`,
+			wantErr: true,
+		},
+		{
 			name: "undeclared tool fails",
 			input: `[tools]
 node = "20.11.1"
@@ -453,6 +525,98 @@ go = "1.22.12"
 			}
 			if string(got) != tt.want {
 				t.Errorf("rewrite mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRewriteToolVersionIdempotent pins the retry contract: re-applying an
+// edit that a previous run already made is success, not an "unapplied update"
+// error, so a caller whose later work failed (lockfile pruning) can retry and
+// finish. A config that is not actually at the new version still errors.
+func TestRewriteToolVersionIdempotent(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		tool     string
+		currents []string
+		version  string
+		wantErr  bool
+	}{
+		{
+			name: "scalar already at new version",
+			input: `[tools]
+go = "1.24.3"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+		},
+		{
+			name: "array element already replaced",
+			input: `[tools]
+go = ["1.24.3", "1.23.8"]
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+		},
+		{
+			name: "inline table already at new version",
+			input: `[tools]
+go = { version = "1.24.3" }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+		},
+		{
+			// With no known vulnerable versions, a second declared version may
+			// still be the vulnerable one, so this is not provably applied.
+			name: "unknown currents with several declared versions",
+			input: `[tools]
+go = ["1.24.3", "1.22.12"]
+`,
+			tool: "go", currents: nil, version: "1.24.3",
+			wantErr: true,
+		},
+		{
+			name: "unmatched multi-version array",
+			input: `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			tool: "go", currents: []string{"1.21.0"}, version: "1.24.3",
+			wantErr: true,
+		},
+		{
+			name: "tool not declared",
+			input: `[tools]
+node = "20.11.1"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "mise.toml"), []byte(tt.input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			err = RewriteToolVersion(root, "mise.toml", tt.tool, tt.currents, tt.version)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected rewrite error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("rewrite: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tt.input {
+				t.Errorf("config changed on a no-op rewrite:\n--- got ---\n%s\n--- want ---\n%s", got, tt.input)
 			}
 		})
 	}

@@ -165,13 +165,17 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
   pins in one array; a multi-version declaration with no matching version
   fails with an error instead of guessing. All declaration forms mise accepts
   are handled: `[tools]` entries, `[tools.<name>]` tables, dotted keys
-  (`tools.go = "..."`), inline tables, and arrays of inline tables (tool
-  options survive).
+  (`tools.go = "..."`), inline tables, arrays of inline tables, and version
+  arrays nested in an inline table (tool options survive throughout).
 - A sibling `mise.lock` is kept honest: entries pinning the replaced versions
   are removed (their checksums describe the old artifact, so updating them in
   place would lie), which stops scans from re-reporting the old locked
-  version. After applying, run `mise install` to install the updated tool and
-  re-lock it.
+  version. Only the edited tool's own lock key is pruned, so a config that
+  declares both `"npm:node"` and `node` keeps the untouched declaration's
+  integrity metadata. After applying, run `mise install` to install the
+  updated tool and re-lock it.
+- Applying is idempotent, so a run interrupted between the config edit and the
+  lockfile prune can simply be re-run to finish.
 
 ## Hardening
 
