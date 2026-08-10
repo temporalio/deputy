@@ -8,28 +8,33 @@ import (
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/purlx"
 )
 
-// ecosystemFromPURLType returns an OSV ecosystem name for PURL types that
+// ecosystemFromPURLType returns the ecosystem display name for PURL types that
 // OSV-SCALIBR doesn't handle (returns empty string). This fills gaps for
 // ecosystems like GitHub Actions that Deputy supports but SCALIBR doesn't.
+// The names come from the ecosystem registry rather than literals here, so the
+// spelling this emits is the one every other surface resolves.
 func ecosystemFromPURLType(purlType string) string {
+	var eco ecosystem.Ecosystem
 	switch purlType {
 	case purlx.TypeGitHubActions:
-		return "GitHub Actions"
+		eco = ecosystem.GitHubActions
 	case purlx.TypeMise:
-		return "mise"
+		eco = ecosystem.Mise
 	case purlx.TypeAsdf:
-		return "asdf"
+		eco = ecosystem.Asdf
 	case "docker":
 		// Dockerfile base images; matches the coverage report's vocabulary.
-		return "docker"
+		eco = ecosystem.Docker
 	case "oci":
-		return "oci"
+		eco = ecosystem.OCI
 	default:
 		return ""
 	}
+	return ecosystem.Display(eco)
 }
 
 // ExtractorPackageIsDirect reports whether pkg should be treated as a direct

@@ -21,27 +21,63 @@ const (
 	OCI Ecosystem = "oci"
 )
 
-// extraCanonicalAliases maps aliases for the ecosystems that have a canonical
-// token but no [Registration], so [Parse] cannot resolve them. Keys are already
-// normalized by [normalizeToken].
-var extraCanonicalAliases = map[string]Ecosystem{
-	"github-actions": GitHubActions,
-	"githubactions":  GitHubActions,
-	"github-action":  GitHubActions,
-	"githubaction":   GitHubActions,
-	"github":         GitHubActions,
-	"actions":        GitHubActions,
-	"gha":            GitHubActions,
-	"docker":         Docker,
-	"dockerfile":     Docker,
-	"containerfile":  Docker,
-	"container":      Docker,
-	"oci":            OCI,
+// extraCanonicalEcosystems describes the ecosystems that have a canonical token
+// but no capability [Registration]. Deputy identifies packages in all three but
+// resolves their capabilities elsewhere (a Deputy extractor plugin for
+// Dockerfiles and workflows, a proxy handler for OCI), so they are not in the
+// registry. Keeping their token, display name, and aliases here means no
+// surface has to spell them out for itself.
+var extraCanonicalEcosystems = []Registration{
+	{
+		Ecosystem:   Docker,
+		DisplayName: "docker",
+		Description: "Dockerfile base images",
+		Aliases:     []string{"dockerfile", "containerfile", "container"},
+	},
+	{
+		Ecosystem:   GitHubActions,
+		DisplayName: "GitHub Actions",
+		Description: "Workflow action references (.github/workflows)",
+		Aliases:     []string{"githubactions", "github-action", "githubaction", "github", "actions", "gha"},
+	},
+	{
+		Ecosystem:   OCI,
+		DisplayName: "oci",
+		Description: "OCI registry artifacts served through the proxy",
+		Aliases:     []string{},
+	},
 }
 
-// extraCanonicalEcosystems lists the canonical tokens that have no
-// [Registration], in the order they extend the registry's own tokens.
-var extraCanonicalEcosystems = []Ecosystem{Docker, GitHubActions, OCI}
+// extraCanonicalAliases indexes [extraCanonicalEcosystems] by every spelling
+// that resolves to it, including its own token and display name. Keys are
+// normalized by [normalizeToken].
+var extraCanonicalAliases = func() map[string]Ecosystem {
+	out := make(map[string]Ecosystem)
+	for _, reg := range extraCanonicalEcosystems {
+		out[normalizeToken(string(reg.Ecosystem))] = reg.Ecosystem
+		out[normalizeToken(reg.DisplayName)] = reg.Ecosystem
+		for _, alias := range reg.Aliases {
+			out[normalizeToken(alias)] = reg.Ecosystem
+		}
+	}
+	return out
+}()
+
+// Display returns the human-readable name for an ecosystem: the registry's
+// DisplayName, or the display name of a token that has no [Registration]. It is
+// the only source of those strings, so a surface that renders an ecosystem
+// never has to hardcode one. Unknown ecosystems render as their own token.
+func Display(eco Ecosystem) string {
+	if reg := Default().Get(eco); reg != nil && reg.DisplayName != "" {
+		return reg.DisplayName
+	}
+	for _, reg := range extraCanonicalEcosystems {
+		if reg.Ecosystem == eco {
+			return reg.DisplayName
+		}
+	}
+	return string(eco)
+}
 
 // Canonical resolves raw into the single spelling of an ecosystem that Deputy
 // compares against: a lowercase, hyphenated token such as "go", "npm", "pypi",
@@ -100,8 +136,8 @@ func CanonicalEcosystems() []string {
 	for _, eco := range registered {
 		out = append(out, string(eco))
 	}
-	for _, eco := range extraCanonicalEcosystems {
-		out = append(out, string(eco))
+	for _, reg := range extraCanonicalEcosystems {
+		out = append(out, string(reg.Ecosystem))
 	}
 	slices.Sort(out)
 	return slices.Compact(out)
