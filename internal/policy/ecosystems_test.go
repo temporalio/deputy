@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	"github.com/temporalio/deputy/internal/proto/descriptorset"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -145,14 +146,27 @@ func TestCanonicalizeEcosystemPayload(t *testing.T) {
 			want:    map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"go": 2.0, "github-actions": 1.0}}},
 		},
 		{
+			// Counts reach the payload as int64 (protojson emits the declared
+			// int32 as a JSON number, convertJSONNumbers makes it int64), so a
+			// merged count has to stay an int64 or the policy sees a double.
 			name:    "stats count map merges colliding spellings",
-			payload: map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"Go": 2.0, "go": 3.0}}},
-			want:    map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"go": 5.0}}},
+			payload: map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"Go": int64(2), "go": int64(3)}}},
+			want:    map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"go": int64(5)}}},
+		},
+		{
+			name:    "float counts stay floats",
+			payload: map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"Go": 2.5, "go": 3.0}}},
+			want:    map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"go": 5.5}}},
 		},
 		{
 			name:    "json numbers merge",
 			payload: map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"Go": json.Number("2"), "golang": json.Number("1")}}},
-			want:    map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"go": 3.0}}},
+			want:    map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"go": int64(3)}}},
+		},
+		{
+			name:    "fractional json numbers merge as floats",
+			payload: map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"Go": json.Number("2.5"), "golang": json.Number("1")}}},
+			want:    map[string]any{"stats": map[string]any{"ecosystems": map[string]any{"go": 3.5}}},
 		},
 		{
 			name:    "non-string ecosystem left alone",
@@ -491,6 +505,70 @@ func TestJWTClaimRuleStillMatches(t *testing.T) {
 	}
 	if len(actions) != 1 || actions[0].Type != ActionDeny {
 		t.Fatalf("jwt claim rule did not fire: actions=%v, jwt=%v", actions, payload["jwt"])
+	}
+}
+
+// TestEcosystemCountsStayIntegersInCEL pins the numeric type a policy sees for
+// a graph stats count, which deputy.policy.v1.GraphStats declares as
+// map<string, int32>. Merging a display spelling into its canonical one must
+// not turn the count into a double: the bug only surfaces when aliases actually
+// collide, so a stats map without a collision keeps working while an otherwise
+// identical one with a collision breaks integer arithmetic. Both the CEL-level
+// type and an int-only expression are asserted, since a double count still
+// compares equal to the right number.
+func TestEcosystemCountsStayIntegersInCEL(t *testing.T) {
+	tests := []struct {
+		name      string
+		counts    map[string]int32
+		wantCount int64
+	}{
+		{
+			name:      "no alias collision",
+			counts:    map[string]int32{"Go": 2, "npm": 1},
+			wantCount: 2,
+		},
+		{
+			name:      "display and canonical spelling collide",
+			counts:    map[string]int32{"Go": 2, "go": 3},
+			wantCount: 5,
+		},
+		{
+			name:      "alias and display spelling collide",
+			counts:    map[string]int32{"Go": 2, "golang": 4},
+			wantCount: 6,
+		},
+		{
+			name:      "three spellings collide",
+			counts:    map[string]int32{"Go": 1, "go": 2, "golang": 4},
+			wantCount: 7,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stats, err := ProtoToMap(&policyv1.GraphStats{Ecosystems: tt.counts})
+			if err != nil {
+				t.Fatalf("ProtoToMap: %v", err)
+			}
+
+			isInt, err := Evaluate(t.Context(), `type(stats.ecosystems["go"]) == int`, map[string]any{"stats": stats})
+			if err != nil {
+				t.Fatalf("evaluate type check: %v", err)
+			}
+			if isInt != true {
+				t.Errorf(`type(stats.ecosystems["go"]) is not int (counts=%v)`, tt.counts)
+			}
+
+			// Integer arithmetic has no double/int overload, so a count that
+			// silently became a double fails to evaluate at all.
+			sum, err := Evaluate(t.Context(), `stats.ecosystems["go"] + 1`, map[string]any{"stats": stats})
+			if err != nil {
+				t.Fatalf(`evaluate stats.ecosystems["go"] + 1 (counts=%v): %v`, tt.counts, err)
+			}
+			if sum != tt.wantCount+1 {
+				t.Errorf(`stats.ecosystems["go"] + 1 = %#v, want %#v`, sum, tt.wantCount+1)
+			}
+		})
 	}
 }
 

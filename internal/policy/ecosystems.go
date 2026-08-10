@@ -372,15 +372,55 @@ func canonicalizeEcosystemCollection(value any) any {
 }
 
 // addNumeric adds two payload numbers, reporting false when either side is not
-// numeric. Payload counts arrive as float64 or json.Number depending on whether
-// [convertJSONNumbers] has run, so both are handled.
+// numeric. Payload counts arrive as int64, float64, or json.Number depending on
+// the source schema and on whether [convertJSONNumbers] has run, so all are
+// handled.
+//
+// The sum keeps the numeric type of its inputs. Count maps are declared
+// map<string, int32> (deputy.policy.v1.GraphStats, deputy.sbom.v1), so CEL sees
+// an int for every key that needed no merge; widening a merged key to a double
+// would make "stats.ecosystems[eco] + 1" fail with a missing double/int
+// overload, and only for the ecosystems whose spellings happened to collide.
+// Summing as float64 only when an input is already fractional keeps the
+// opposite error, narrowing a genuine double to an int, off the table too.
 func addNumeric(a, b any) (any, bool) {
+	if ai, aok := integralValue(a); aok {
+		if bi, bok := integralValue(b); bok {
+			return ai + bi, true
+		}
+	}
 	af, aok := numericValue(a)
 	bf, bok := numericValue(b)
 	if !aok || !bok {
 		return nil, false
 	}
 	return af + bf, true
+}
+
+// integralValue converts a payload number to int64, reporting false for values
+// that are not numeric and for ones that carry a fractional part or are already
+// a floating-point value. A float64 is deliberately not integral even when it
+// holds a whole number: it reached the payload as a double and has to stay one.
+//
+// The int64 sum in [addNumeric] cannot overflow for the payloads this serves,
+// whose counts are declared int32.
+func integralValue(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int:
+		return int64(n), true
+	case int32:
+		return int64(n), true
+	case int64:
+		return n, true
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return i, true
+	default:
+		return 0, false
+	}
 }
 
 // numericValue converts a payload number to float64, reporting false for
