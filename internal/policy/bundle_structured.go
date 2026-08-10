@@ -232,6 +232,11 @@ func (p structuredPolicy) toCELSource() (string, error) {
 		normalizedCommands = append(normalizedCommands, normalized)
 	}
 	p.Commands = normalizedCommands
+	normalizedEcosystems, err := validateEcosystems(p.Ecosystems)
+	if err != nil {
+		return "", err
+	}
+	p.Ecosystems = normalizedEcosystems
 	if p.Mode != "" {
 		mode := strings.ToLower(strings.TrimSpace(p.Mode))
 		if mode != "advisory" && mode != "enforce" {
