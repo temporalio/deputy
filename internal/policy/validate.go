@@ -175,19 +175,28 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	if doc.Kind != yaml.MappingNode {
 		return append(issues, issueAt(doc, IssueError, "root-not-mapping", "root must be a mapping")), nil
 	}
-	// Anchors are rejected before anything else reads the document, so the rest
+	// Anchors are reported before anything else reads the document, so the rest
 	// of validation, and every other reader of a bundle, sees only plain nodes.
-	// The check comes before the policies lookup because a root merge key can
-	// supply the whole list, which would otherwise read as a missing key.
-	if anchors := anchorIssues(root); len(anchors) > 0 {
-		return append(issues, anchors...), nil
-	}
+	// The scan comes before the policies lookup because a root merge key can
+	// supply the whole list, which would otherwise read as a missing key. It does
+	// not stop the walk: a refused anchor must not hide an unrelated typo and
+	// cost the author a second lint run.
+	anchors := anchorIssues(root)
+	issues = append(issues, anchors...)
 	policiesNode := MappingValue(doc, "policies")
 	if policiesNode == nil {
-		return append(issues, issueAt(doc, IssueError, "missing-policies", "missing required 'policies' list")), nil
+		if len(anchors) == 0 {
+			issues = append(issues, issueAt(doc, IssueError, "missing-policies", "missing required 'policies' list"))
+		}
+		return issues, nil
 	}
 	if policiesNode.Kind != yaml.SequenceNode {
-		return append(issues, issueAt(policiesNode, IssueError, "policies-not-list", "'policies' must be a list")), nil
+		// An aliased list is a list once resolved, so saying it is not one would
+		// describe the alias rather than the mistake.
+		if len(anchors) == 0 {
+			issues = append(issues, issueAt(policiesNode, IssueError, "policies-not-list", "'policies' must be a list"))
+		}
+		return issues, nil
 	}
 	// An empty list is reported here rather than left to the loader backstop, so
 	// the diagnostic names the line the author has to fill in.
@@ -196,11 +205,23 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	}
 	seenNames := map[string]struct{}{}
 	for _, item := range policiesNode.Content {
+		// Skip a policy that carries an anchor, an alias, or a merge key anywhere
+		// beneath it: it is already reported, and every further message the walk
+		// could produce would describe the alias node rather than the policy the
+		// author meant. Plain policies alongside it are still checked.
+		if len(anchorIssues(item)) > 0 {
+			continue
+		}
 		if item.Kind != yaml.MappingNode {
 			issues = append(issues, issueAt(item, IssueError, "policy-not-mapping", "policy must be a mapping"))
 			continue
 		}
 		issues = append(issues, validatePolicyNode(item, seenNames, opts)...)
+	}
+	// The loader stops at the first anchor it finds, so it has nothing to add to
+	// what the scan above already located.
+	if len(anchors) > 0 {
+		return issues, nil
 	}
 	// Load the whole bundle as a backstop for shapes the node walk does not model,
 	// such as a rule field of the wrong type. The loader stops at its first
@@ -504,8 +525,9 @@ func DeclaredVarNames(policyNode *yaml.Node) []string {
 
 // MappingValue returns the value node for a key inside a YAML mapping node, or
 // nil when the node is not a mapping or the key is absent. It reads only what
-// the document says: anchors, aliases, and merge keys are rejected before the
-// walk runs (see anchorIssues), so no reader has to resolve them.
+// the document says: anchors, aliases, and merge keys are rejected (see
+// anchorIssues) and the nodes carrying them are skipped, so no reader has to
+// resolve them.
 func MappingValue(mapNode *yaml.Node, key string) *yaml.Node {
 	if mapNode == nil || mapNode.Kind != yaml.MappingNode {
 		return nil

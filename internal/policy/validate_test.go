@@ -10,10 +10,11 @@ import (
 // linter and the editor rely on, including the ones a CEL-only check misses.
 func TestValidateBundle(t *testing.T) {
 	cases := []struct {
-		name      string
-		bundle    string
-		wantCodes []string
-		wantText  []string
+		name         string
+		bundle       string
+		wantCodes    []string
+		unwantedCode string
+		wantText     []string
 	}{
 		{
 			name: "valid policy has no issues",
@@ -285,6 +286,38 @@ policies:
 			wantCodes: []string{"yaml-anchor"},
 		},
 		{
+			name: "an anchor does not hide an unrelated defect",
+			bundle: `
+unused: &unused
+  reason: "shared"
+
+policies:
+  - name: plain
+    mode: adivsory
+    rules:
+      - when: "true"
+        action: dney
+        reason: "r"
+`,
+			wantCodes: []string{"yaml-anchor", "invalid-action", "invalid-mode"},
+		},
+		{
+			name: "an aliased policy is reported only as an alias",
+			bundle: `
+base: &base
+  name: aliased
+  rules:
+    - when: "true"
+      action: dney
+      reason: "r"
+
+policies:
+  - *base
+`,
+			wantCodes:    []string{"yaml-anchor"},
+			unwantedCode: "policy-not-mapping",
+		},
+		{
 			name:      "a policies mapping is reported by shape",
 			bundle:    "policies: {}\n",
 			wantCodes: []string{"policies-not-list"},
@@ -322,6 +355,9 @@ policies:
 				if !slices.Contains(codes, want) {
 					t.Fatalf("expected issue code %q, got %v:\n%s", want, codes, rendered.String())
 				}
+			}
+			if tc.unwantedCode != "" && slices.Contains(codes, tc.unwantedCode) {
+				t.Fatalf("issue code %q should not be reported, got %v:\n%s", tc.unwantedCode, codes, rendered.String())
 			}
 			for _, want := range tc.wantText {
 				if !strings.Contains(rendered.String(), want) {
