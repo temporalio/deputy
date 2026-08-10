@@ -242,9 +242,9 @@ func (p structuredPolicy) toCELSource() (string, error) {
 	}
 	p.Commands = normalizedCommands
 	if p.Mode != "" {
-		mode := strings.ToLower(strings.TrimSpace(p.Mode))
-		if mode != "advisory" && mode != "enforce" {
-			return "", fmt.Errorf("invalid mode %q (expected advisory|enforce)", p.Mode)
+		mode, err := ValidateMode(p.Mode)
+		if err != nil {
+			return "", err
 		}
 		p.Mode = mode
 	}

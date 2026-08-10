@@ -88,6 +88,23 @@ func TestPolicyLintValidatesBeyondCEL(t *testing.T) {
 			wantText: []string{`policy "unbound" rule[0]`, "undeclared reference"},
 		},
 		{
+			name: "unrelated defects are all reported in one run",
+			bundle: `policies:
+  - name: two-defects
+    mode: enfroce
+    rules:
+      - when: "true"
+        action: dney
+        reason: "x"
+`,
+			wantFail: true,
+			wantText: []string{
+				`policy "two-defects": invalid mode "enfroce"`,
+				`policy "two-defects" rule[0]: invalid action "dney"`,
+				"2 policy problem(s) found",
+			},
+		},
+		{
 			name: "duplicate policy names fail",
 			bundle: `policies:
   - name: same
@@ -114,9 +131,15 @@ func TestPolicyLintValidatesBeyondCEL(t *testing.T) {
 			if !tc.wantFail && err != nil {
 				t.Fatalf("lint failed unexpectedly: %v\n%s", err, out)
 			}
+			// The per-issue lines go to stdout and the summary comes back as the
+			// command error, so both are what the user sees.
+			reported := out
+			if err != nil {
+				reported += err.Error()
+			}
 			for _, want := range tc.wantText {
-				if !strings.Contains(out, want) {
-					t.Fatalf("output missing %q:\n%s", want, out)
+				if !strings.Contains(reported, want) {
+					t.Fatalf("output missing %q:\n%s", want, reported)
 				}
 			}
 		})

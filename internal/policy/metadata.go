@@ -1,6 +1,46 @@
 package policy
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
+
+// Mode constants are the execution modes a policy may declare.
+const (
+	// ModeEnforce lets deny actions deny. It is the default when mode is unset.
+	ModeEnforce = "enforce"
+
+	// ModeAdvisory downgrades the policy's deny actions to warnings.
+	ModeAdvisory = "advisory"
+)
+
+// Modes returns the execution modes a policy may declare, in the order used by
+// error messages. The slice is freshly allocated so callers cannot mutate the
+// vocabulary.
+func Modes() []string {
+	return []string{ModeAdvisory, ModeEnforce}
+}
+
+// NormalizeMode folds an authored mode into its canonical form by trimming and
+// lowercasing, matching the case-insensitive comparison the engine does when it
+// decides whether to downgrade denials.
+func NormalizeMode(mode string) string {
+	return strings.ToLower(strings.TrimSpace(mode))
+}
+
+// ValidateMode returns the canonical form of an authored mode, or an error
+// naming the offending value and the valid vocabulary. An unrecognized mode is
+// rejected rather than treated as enforce, because "advsiory" silently
+// enforcing is the opposite of what the author asked for.
+func ValidateMode(mode string) (string, error) {
+	normalized := NormalizeMode(mode)
+	switch normalized {
+	case ModeAdvisory, ModeEnforce:
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("invalid mode %q (expected %s)", mode, strings.Join(Modes(), "|"))
+	}
+}
 
 type policyMetadata struct {
 	Name        string   // Name is the policy name extracted from metadata.

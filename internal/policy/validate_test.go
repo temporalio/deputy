@@ -132,7 +132,7 @@ policies:
 			wantCodes: []string{"missing-reason"},
 		},
 		{
-			name: "invalid mode is reported by the loader",
+			name: "invalid mode",
 			bundle: `
 policies:
   - name: bad-mode
@@ -142,8 +142,61 @@ policies:
         action: deny
         reason: "x"
 `,
+			wantCodes: []string{"invalid-mode"},
+			wantText:  []string{`4:11: error: policy "bad-mode": invalid mode "enfroce" (expected advisory|enforce)`},
+		},
+		{
+			name: "two unrelated defects are reported in one pass",
+			bundle: `
+policies:
+  - name: two-defects
+    mode: enfroce
+    rules:
+      - when: "true"
+        action: dney
+        reason: "x"
+`,
+			wantCodes: []string{"invalid-mode", "invalid-action"},
+			wantText:  []string{`invalid mode "enfroce"`, `invalid action "dney"`},
+		},
+		{
+			name: "duplicate var names",
+			bundle: `
+policies:
+  - name: dup-vars
+    vars:
+      blocked: '["a"]'
+      blocked: '["b"]'
+    rules:
+      - when: "true"
+        action: deny
+        reason: "x"
+`,
+			wantCodes: []string{"duplicate-var"},
+			wantText:  []string{`duplicate var name "blocked"`},
+		},
+		{
+			name: "empty rules list",
+			bundle: `
+policies:
+  - name: no-rules
+    rules: []
+`,
+			wantCodes: []string{"empty-rules"},
+			wantText:  []string{"policy must contain at least one rule"},
+		},
+		{
+			name: "loader backstop covers shapes the walk does not model",
+			bundle: `
+policies:
+  - name: bad-status
+    rules:
+      - when: "true"
+        action: deny
+        reason: "x"
+        status: "four-oh-three"
+`,
 			wantCodes: []string{"bundle-error"},
-			wantText:  []string{`invalid mode "enfroce"`},
 		},
 		{
 			name:      "missing policies list",
@@ -176,6 +229,74 @@ policies:
 				if !strings.Contains(rendered.String(), want) {
 					t.Fatalf("expected output to mention %q, got:\n%s", want, rendered.String())
 				}
+			}
+		})
+	}
+}
+
+// TestValidateBundleReportsEachDefectOnce pins that the loader backstop does not
+// restate a defect the node walk already located, so a single mistake produces a
+// single issue.
+func TestValidateBundleReportsEachDefectOnce(t *testing.T) {
+	cases := []struct {
+		name   string
+		bundle string
+	}{
+		{
+			name: "unknown action",
+			bundle: `
+policies:
+  - name: once
+    rules:
+      - when: "true"
+        action: dney
+        reason: "x"
+`,
+		},
+		{
+			name: "unknown entrypoint",
+			bundle: `
+policies:
+  - name: once
+    entrypoints: ["scan_vulnerabilities"]
+    rules:
+      - when: "true"
+        action: deny
+        reason: "x"
+`,
+		},
+		{
+			name: "invalid mode",
+			bundle: `
+policies:
+  - name: once
+    mode: enfroce
+    rules:
+      - when: "true"
+        action: deny
+        reason: "x"
+`,
+		},
+		{
+			name: "empty rules",
+			bundle: `
+policies:
+  - name: once
+    rules: []
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			if len(issues) != 1 {
+				t.Fatalf("expected exactly one issue, got %d: %v", len(issues), issues)
+			}
+			if issues[0].Code == "bundle-error" {
+				t.Fatalf("expected a located issue, got the loader backstop: %v", issues[0])
 			}
 		})
 	}

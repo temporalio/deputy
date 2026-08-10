@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	yaml "gopkg.in/yaml.v3"
@@ -150,15 +149,15 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 		}
 		issues = append(issues, validatePolicyNode(item, seenNames, opts)...)
 	}
-	// Load the whole bundle so problems the node walk does not model (mode, vars,
-	// empty rule lists) are still reported, but only when nothing located said it
-	// first: the loader stops at the first failure and cannot point at a line.
-	if slices.ContainsFunc(issues, func(i Issue) bool { return i.Severity != IssueHint }) {
-		return issues, nil
-	}
+	// Load the whole bundle as a backstop for shapes the node walk does not model,
+	// such as a rule field of the wrong type. The loader stops at its first
+	// failure and cannot point at a line, so its message is dropped when a located
+	// issue already reports the same thing.
 	source := cmp.Or(opts.Source, "policy")
 	if _, err := ParseStructuredSources([]byte(text), source); err != nil {
-		issues = append(issues, Issue{RuleIndex: NoRule, Severity: IssueWarning, Code: "bundle-error", Message: err.Error()})
+		if message, duplicate := loaderMessage(err, source, issues); !duplicate {
+			issues = append(issues, Issue{RuleIndex: NoRule, Severity: IssueWarning, Code: "bundle-error", Message: message})
+		}
 	}
 	return issues, nil
 }
@@ -181,6 +180,8 @@ func validatePolicyNode(item *yaml.Node, seenNames map[string]struct{}, opts Val
 	}
 	issues = append(issues, validateListEnum(item, "entrypoints", IsAllowedEntrypoint)...)
 	issues = append(issues, validateListEnum(item, "commands", IsAllowedCommand)...)
+	issues = append(issues, validateMode(item)...)
+	issues = append(issues, validateVars(item)...)
 
 	declaredVars := DeclaredVarNames(item)
 	issues = append(issues, validateRules(item, name, append(declaredVars, opts.ExtraVars...), opts.CheckWhen)...)
@@ -188,6 +189,56 @@ func validatePolicyNode(item *yaml.Node, seenNames map[string]struct{}, opts Val
 		if issues[i].Policy == "" {
 			issues[i].Policy = name
 		}
+	}
+	return issues
+}
+
+// validateMode checks a policy's execution mode against the known vocabulary and
+// anchors the report on the mode node, so it is reported in the same pass as
+// every other defect rather than only once the loader gets that far.
+func validateMode(item *yaml.Node) []Issue {
+	node := MappingValue(item, "mode")
+	if node == nil {
+		return nil
+	}
+	if node.Kind != yaml.ScalarNode {
+		return []Issue{issueAt(node, IssueError, "mode-not-string", "'mode' must be a string")}
+	}
+	if strings.TrimSpace(node.Value) == "" {
+		return nil
+	}
+	if _, err := ValidateMode(node.Value); err != nil {
+		issue := issueAt(node, IssueError, "invalid-mode", err.Error())
+		issue.Length = len(node.Value)
+		return []Issue{issue}
+	}
+	return nil
+}
+
+// validateVars checks the vars mapping: it must be a mapping, and every variable
+// needs a unique non-empty name, since duplicates silently shadow each other
+// when the policy is expanded.
+func validateVars(item *yaml.Node) []Issue {
+	node := MappingValue(item, "vars")
+	if node == nil {
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return []Issue{issueAt(node, IssueError, "vars-not-mapping", "'vars' must be a mapping")}
+	}
+	var issues []Issue
+	seen := map[string]struct{}{}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		name := strings.TrimSpace(key.Value)
+		if key.Kind != yaml.ScalarNode || name == "" {
+			issues = append(issues, issueAt(key, IssueError, "empty-var-name", "vars must have non-empty names"))
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			issues = append(issues, issueAt(key, IssueError, "duplicate-var", fmt.Sprintf("duplicate var name %q", name)))
+		}
+		seen[name] = struct{}{}
 	}
 	return issues
 }
@@ -227,6 +278,9 @@ func validateRules(item *yaml.Node, policyName string, declaredVars []string, ch
 	}
 	if rulesNode.Kind != yaml.SequenceNode {
 		return []Issue{issueAt(rulesNode, IssueError, "rules-not-list", "'rules' must be a list")}
+	}
+	if len(rulesNode.Content) == 0 {
+		return []Issue{issueAt(rulesNode, IssueError, "empty-rules", "policy must contain at least one rule")}
 	}
 	var issues []Issue
 	for idx, rule := range rulesNode.Content {
@@ -296,6 +350,39 @@ func checkRuleWhen(checkWhen func(RuleWhen) []Issue, when RuleWhen) []Issue {
 		}}
 	}
 	return nil
+}
+
+// loaderMessage prepares the loader's failure for reporting and says whether a
+// located issue already covers it. The loader prefixes its message with the
+// source and policy ("bundle.yaml/name: rule[0]: ..."), so comparison strips
+// that prefix and then treats the remainder as a duplicate when it and a located
+// message contain one another: the two describe the same defect in slightly
+// different words. Anything else is a shape the node walk does not model and is
+// reported as is.
+func loaderMessage(err error, source string, located []Issue) (string, bool) {
+	message := err.Error()
+	detail := strings.TrimPrefix(message, source+"/")
+	if _, rest, ok := strings.Cut(detail, ": "); ok {
+		detail = rest
+	}
+	if rest, ok := strings.CutPrefix(detail, "rule["); ok {
+		if _, tail, found := strings.Cut(rest, "]: "); found {
+			detail = tail
+		}
+	}
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return message, false
+	}
+	for _, issue := range located {
+		if issue.Severity == IssueHint {
+			continue
+		}
+		if strings.Contains(issue.Message, detail) || strings.Contains(detail, issue.Message) {
+			return message, true
+		}
+	}
+	return message, false
 }
 
 // issueAt builds an issue anchored at a YAML node.
