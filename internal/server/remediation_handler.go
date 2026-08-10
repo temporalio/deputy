@@ -283,7 +283,9 @@ func (h *RemediationHandler) ExecutePlan(
 	// StopOnError promises "halts execution if any step fails"
 	// (deputy.remediation.v1.ExecutionOptions); when unset, execution
 	// continues past failed steps and reports them through per-step FAILED
-	// events and the terminal phase.
+	// events and the terminal phase. A dry run reports a predicted rejection
+	// as that same failure, so it halts on one too: a preview that walked past
+	// a refusal would describe an ordering the run it simulates cannot take.
 	stopOnError := opts.GetStopOnError()
 	// VerboseOutput promises "includes full command output instead of
 	// summaries"; when unset, completion events carry a one-line summary.
@@ -434,7 +436,7 @@ func (h *RemediationHandler) ExecutePlan(
 		// commands count toward the would-execute total; manual and
 		// commandless steps are described but never run.
 		if dryRun {
-			message, outcome := dryRunStep(i+1, len(steps), absWorkDir, step, processTreeTerminationSupported)
+			message, outcome, rejectErr := dryRunStep(i+1, len(steps), absWorkDir, step, processTreeTerminationSupported)
 			phase := remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING
 			switch outcome {
 			case dryRunWouldRun:
@@ -457,6 +459,14 @@ func (h *RemediationHandler) ExecutePlan(
 				Timestamp: timestamppb.Now(),
 			}); err != nil {
 				return err
+			}
+			// stop_on_error halts on failure, and a predicted rejection is
+			// reported as a failure. Previewing the rest of the plan after one
+			// would describe an ordering the real run this simulates would
+			// never take.
+			if outcome == dryRunWouldReject && stopOnError {
+				return connect.NewError(stepFailureCode(ctx, rejectErr),
+					fmt.Errorf("dry run stopped: step %s would be rejected: %w", stepID, rejectErr))
 			}
 			continue
 		}
@@ -789,34 +799,45 @@ const (
 // Deputy-internal commands are validated only for parseability: they are
 // applied in process rather than executed, so ExecArgs does not apply to
 // them, and their argument-level checks live in the apply path.
-func dryRunStep(position, total int, workDir string, step *remediationv1.Step, treeTerminationSupported bool) (string, dryRunOutcome) {
+//
+// A predicted refusal is returned as an error as well as a message, so callers
+// can treat it the way they treat a real step failure (connect code mapping,
+// stop_on_error) instead of parsing prose. The error is nil for every other
+// outcome.
+func dryRunStep(position, total int, workDir string, step *remediationv1.Step, treeTerminationSupported bool) (string, dryRunOutcome, error) {
 	cmd := step.GetCommand()
+	// reject renders the refusal message and hands back its cause, keeping the
+	// message shape identical across every check below.
+	reject := func(err error) (string, dryRunOutcome, error) {
+		return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, err), dryRunWouldReject, err
+	}
+
 	switch {
 	case cmd == "":
-		return fmt.Sprintf("[dry run] Step %d/%d has no command: %s", position, total, step.GetTitle()), dryRunNotRunnable
+		return fmt.Sprintf("[dry run] Step %d/%d has no command: %s", position, total, step.GetTitle()), dryRunNotRunnable, nil
 	case !step.GetExecutable():
-		return fmt.Sprintf("[dry run] Step %d/%d is manual: %s", position, total, cmd), dryRunNotRunnable
+		return fmt.Sprintf("[dry run] Step %d/%d is manual: %s", position, total, cmd), dryRunNotRunnable, nil
 	}
 
 	if remediation.IsDeputyInternalCommand(cmd) {
 		if _, err := remediation.ValidateDeputyCommand(cmd); err != nil {
-			return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, err), dryRunWouldReject
+			return reject(err)
 		}
-		return fmt.Sprintf("[dry run] Step %d/%d would apply: %s", position, total, cmd), dryRunWouldRun
+		return fmt.Sprintf("[dry run] Step %d/%d would apply: %s", position, total, cmd), dryRunWouldRun, nil
 	}
 
 	// Predict the containment refusal, in the order executeStep applies it:
 	// before the platform check and before the executable allowlist, so a
 	// preview blames the same check a real run would.
 	if _, err := stepExecDir(workDir, step); err != nil {
-		return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, err), dryRunWouldReject
+		return reject(err)
 	}
 
 	// Predict the platform refusal: where cancellation cannot bound a
 	// command's descendants, executeStep refuses every external command, so
 	// reporting one as runnable would promise work this build will not do.
 	if !treeTerminationSupported {
-		return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, errProcessTreeUnbounded), dryRunWouldReject
+		return reject(errProcessTreeUnbounded)
 	}
 
 	if _, err := remediation.ExecArgs(remediation.Command{
@@ -824,10 +845,10 @@ func dryRunStep(position, total int, workDir string, step *remediationv1.Step, t
 		Command:    cmd,
 		Executable: step.GetExecutable(),
 	}); err != nil {
-		return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, err), dryRunWouldReject
+		return reject(err)
 	}
 
-	return fmt.Sprintf("[dry run] Step %d/%d would execute: %s", position, total, cmd), dryRunWouldRun
+	return fmt.Sprintf("[dry run] Step %d/%d would execute: %s", position, total, cmd), dryRunWouldRun, nil
 }
 
 // executionProgress converts a completed-step count into the 0-100 completion

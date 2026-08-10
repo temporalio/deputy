@@ -739,12 +739,113 @@ func TestDryRunStepPlatformRefusal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg, got := dryRunStep(1, 1, t.TempDir(), tt.step, tt.treeBounded)
+			msg, got, rejectErr := dryRunStep(1, 1, t.TempDir(), tt.step, tt.treeBounded)
 			if got != tt.want {
 				t.Fatalf("outcome = %v, want %v (message %q)", got, tt.want, msg)
 			}
 			if !strings.Contains(msg, tt.wantMessage) {
 				t.Fatalf("message %q does not contain %q", msg, tt.wantMessage)
+			}
+			// A predicted rejection must carry its cause so callers can map it
+			// to a code and honor stop_on_error; anything else must not.
+			if (rejectErr != nil) != (tt.want == dryRunWouldReject) {
+				t.Fatalf("rejection error = %v, want non-nil %t", rejectErr, tt.want == dryRunWouldReject)
+			}
+		})
+	}
+}
+
+// TestExecutePlanStopOnErrorDryRunParity pins that stop_on_error means the
+// same thing in a dry run as in a real run. A dry run already represents a
+// predicted refusal as EXECUTION_PHASE_FAILED, both per step and terminally,
+// so continuing past one while the caller asked to halt on failure would
+// preview an ordering no real run would take. Both modes drive the same plan,
+// whose steps are refused before anything runs, so execution is exercised
+// without spawning a process.
+func TestExecutePlanStopOnErrorDryRunParity(t *testing.T) {
+	modes := []struct {
+		name   string
+		dryRun bool
+	}{
+		{name: "dry run", dryRun: true},
+		{name: "execution", dryRun: false},
+	}
+
+	tests := []struct {
+		name        string
+		stopOnError bool
+		wantCode    connect.Code // zero means the stream must succeed
+		wantStepIDs []string     // steps that must report an outcome, in order
+	}{
+		{
+			name:        "stop_on_error halts at the first rejection",
+			stopOnError: true,
+			wantCode:    connect.CodeInternal,
+			wantStepIDs: []string{"step-1"},
+		},
+		{
+			name:        "without stop_on_error every step is still reported",
+			stopOnError: false,
+			wantStepIDs: []string{"step-1", "step-2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, mode := range modes {
+				t.Run(mode.name, func(t *testing.T) {
+					handler := NewRemediationHandler(WithRemediationLocalMode())
+					client := newRemediationTestClient(t, handler)
+					plan := &remediationv1.Plan{
+						Id: "plan-escape",
+						Steps: []*remediationv1.Step{
+							{Id: "step-1", Title: "tidy elsewhere", Command: "go mod tidy", Manager: "go", Executable: true, ManifestPath: "../outside/go.mod"},
+							{Id: "step-2", Title: "verify elsewhere", Command: "go mod verify", Manager: "go", Executable: true, ManifestPath: "../outside/go.mod"},
+						},
+					}
+
+					stream, err := client.ExecutePlan(t.Context(), connect.NewRequest(&remediationv1.ExecutePlanRequest{
+						Source:     &remediationv1.ExecutePlanRequest_Plan{Plan: plan},
+						TargetPath: t.TempDir(),
+						Options:    &remediationv1.ExecutionOptions{DryRun: mode.dryRun, StopOnError: tt.stopOnError},
+					}))
+					if err != nil {
+						t.Fatalf("ExecutePlan failed to start: %v", err)
+					}
+					var events []*remediationv1.ExecutionEvent
+					var rejected, messages []string
+					for stream.Receive() {
+						ev := stream.Msg()
+						events = append(events, ev)
+						messages = append(messages, ev.GetMessage())
+						// A refusal is reported as a per-step FAILED event in
+						// both modes, which is the outcome to compare.
+						if ev.GetStepId() != "" && ev.GetPhase() == remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED {
+							rejected = append(rejected, ev.GetStepId())
+						}
+					}
+					err = stream.Err()
+
+					if !slices.Equal(rejected, tt.wantStepIDs) {
+						t.Errorf("steps reported as refused = %v, want %v (messages %v)", rejected, tt.wantStepIDs, messages)
+					}
+					all := strings.Join(messages, "\n")
+					if !strings.Contains(all, `manifest path "../outside/go.mod" escapes the work directory`) {
+						t.Errorf("events do not report the containment refusal:\n%s", all)
+					}
+					if tt.wantCode != 0 {
+						if got := connect.CodeOf(err); got != tt.wantCode {
+							t.Fatalf("ExecutePlan error = %v (code %v), want code %v", err, got, tt.wantCode)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatalf("ExecutePlan failed: %v", err)
+					}
+					if got := events[len(events)-1].GetPhase(); got != remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED {
+						t.Errorf("final phase = %v, want EXECUTION_PHASE_FAILED", got)
+					}
+				})
 			}
 		})
 	}
@@ -793,9 +894,12 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			}
 			workDir := t.TempDir()
 
-			message, outcome := dryRunStep(1, 1, workDir, tt.step, processTreeTerminationSupported)
+			message, outcome, rejectErr := dryRunStep(1, 1, workDir, tt.step, processTreeTerminationSupported)
 			if outcome != dryRunWouldReject {
 				t.Fatalf("dry run outcome = %v, want dryRunWouldReject (message %q)", outcome, message)
+			}
+			if rejectErr == nil {
+				t.Fatalf("dry run reported a rejection without a cause (message %q)", message)
 			}
 
 			output, execErr := executeStep(t.Context(), workDir, tt.step)
@@ -804,6 +908,10 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			}
 			if !strings.Contains(message, execErr.Error()) {
 				t.Fatalf("dry run message %q does not report the execution error %q", message, execErr)
+			}
+			if stepFailureCode(t.Context(), rejectErr) != stepFailureCode(t.Context(), execErr) {
+				t.Fatalf("dry run code %v disagrees with execution code %v",
+					stepFailureCode(t.Context(), rejectErr), stepFailureCode(t.Context(), execErr))
 			}
 			if !strings.Contains(message, tt.wantReason) {
 				t.Fatalf("dry run message %q does not contain %q", message, tt.wantReason)
