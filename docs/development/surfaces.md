@@ -40,9 +40,13 @@ This is the one surface that genuinely is not a projection. It has three parts, 
 
 The standard library needs an admission test, because every addition is surface area a human or a model must learn, and unused surface actively misleads:
 
-> A helper earns its place only if it expresses something the language cannot. If it merely abbreviates something the language already says clearly, it is surface area, not a feature.
+> A helper earns its place if it expresses something the language cannot, or if it centralizes a decision that a policy author would otherwise get silently wrong. Abbreviating something the language already says clearly is surface area, not a feature.
 
-`imageRef()` earns it: resolving an implicit `docker.io`, telling a registry port from a tag, and splitting a digest is parsing, and CEL's string operations cannot do it correctly. `isCritical()` does not: it abbreviates `== severity.critical`, and no shipped policy uses it.
+The first clause is narrower than it sounds, which is worth stating because the obvious phrasing of this rule admits almost nothing. The environment enables `ext.Strings`, `ext.Lists`, `ext.Math`, and `ext.Encoders`, so `split`, `indexOf`, `substring`, and `join` are all available, and most parsing is expressible if you are willing to write it out. `levenshtein()` is the honest example of the first clause: CEL has bounded comprehensions but no recursion, so an edit distance cannot be written in it at all.
+
+`imageRef()` earns its place under the second clause. Resolving an implicit `docker.io` and telling a registry port from a tag is expressible with string operations, but a hand-rolled version that splits on `:` treats `localhost:5000/app` as a tag, and the resulting rule does not match and does not error. In a security control, a wrong answer that looks like a clean pass is the failure mode worth spending surface area to prevent.
+
+`isCritical()` earns nothing: it abbreviates `== severity.critical`, and no shipped policy uses it.
 
 `age()` is the case worth naming, because it looks like it earns its place and does not. It is `now() - timestamp(x)` with one overload missing, so `age(image.metadata.created)` fails at evaluation where the expression it abbreviates succeeds (#179). An abbreviation narrower than the thing it abbreviates is worse than no helper, because it looks like the safe choice.
 
@@ -54,9 +58,19 @@ The package-manager proxies.
 
 Deputy does not design the npm registry protocol, the Go module proxy protocol, or the OCI distribution spec. It conforms to them. These are adapters with conformance tests, not design surfaces.
 
-They carry one thing that *is* ours: the extension band. The `X-Deputy-*` response headers are how a client, a CI job, or an agent learns why an artifact was refused. That is a domain object projected onto HTTP, and it should be derived and validated like any other projection rather than assembled from string literals.
+They carry one thing that *is* ours: the extension band, the `X-Deputy-*` response headers. These are domain objects projected onto HTTP, and they should be derived and validated like any other projection rather than assembled from string literals.
 
-**Rule:** conform to the foreign contract, and treat the extension band as a projection of the domain.
+The prefix is not one contract though, and treating it as one is how a derived replacement would conflate them. There are at least three families, from independent sources:
+
+| family | source | when |
+| --- | --- | --- |
+| policy decision and package coordinates | `internal/proxy/policy.go`, `oci.go` | on a refusal |
+| authentication errors | `internal/proxy/auth_middleware.go` | on an auth failure |
+| digest pinning audit | `internal/proxy/oci_toctou.go` | including on success |
+
+The third is the one that breaks the simple reading: `X-Deputy-Pinned-Digest` and `X-Deputy-Digest-Pinning` describe what the proxy did, not why it said no. `internal/cli/cmd/proxy_exec.go` is a consumer and parses the first family back.
+
+**Rule:** conform to the foreign contract, and treat each extension family as a projection of its own domain message. One message per family, not one for the prefix.
 
 ## Why this matters, empirically
 
@@ -82,9 +96,13 @@ On `main` there is no such test. [`internal/policy/bindings_test.go`](../../inte
 
 A first version is in review, comparing each profile against the names the CEL environment declares. It catches the variables no entrypoint can use, `licenses` among them, but it cannot be the whole contract. The environment is one flat list shared by every entrypoint and every variable in it is `DynType`, so a name it declares may still be unbound at the entrypoint advertising it.
 
-The payload is the real root. Most entrypoints already carry a typed proto: the five proxy entrypoints through `buildPolicyInput`, and the service entrypoints through `buildPolicyPayload` in [`internal/server/server.go`](../../internal/server/server.go), which returns a `proto.Message`. Those profiles can be checked against a descriptor directly, and should be.
+The payload is the real root, and it is worth being exact about how many roots there are. `BindingProfiles` declares 37 entrypoints. Eleven of them carry a typed proto: the five proxy entrypoints through `buildPolicyInput`, and the six service entrypoints through `buildPolicyPayload` in [`internal/server/server.go`](../../internal/server/server.go), which returns a `proto.Message`. Those profiles can be checked against a descriptor directly, and should be.
 
-The remaining ones are CLI paths that hand-assemble a map at the call site, `runDiffPolicies` among them. A typed input exists in proto for several of these and is still the contract, so the check there is two-part: the profile against the descriptor, and a separate test that the assembled map actually supplies what the descriptor declares. Exempting them would preserve exactly the drift this section is about. The rule is that such a guard belongs at every derivation root, not only this one.
+The other twenty-six reach the engine through `EvaluateAllMap` with a map assembled at the call site. That is not only the CLI. `internal/cli/cmd/policy_runtime.go` is one caller and `internal/sandbox/manager.go` is another, so `sandbox_execution` is map-backed and has nothing to do with the CLI. Calling this a small remainder understates it: it is most of the surface.
+
+For those, a typed input often exists in proto and is still the contract, so the guard is two-part: the profile against the descriptor, and a test that the assembled map actually supplies what the descriptor declares. Where no typed input exists, defining one is the work.
+
+Two further caveats for anyone auditing this. Entrypoints are named by string literal in several call sites, so grepping for the `Entrypoint*` constants understates which profiles are live and will mislead you. And at least two declared profiles, `sandbox_command` and `sandbox_network`, appear to have no evaluator at all, which is its own kind of drift: a profile advertising variables for something that never runs. Establishing which of the 37 are live is a prerequisite for the guard, not a detail of it.
 
 ## Identity
 
@@ -128,5 +146,6 @@ If a capability has to be typed into more than one place, that is the signal som
 ## Choosing a mechanism
 
 - **Runtime protoreflect and the embedded descriptor set** for anything needing proto comments at runtime: MCP descriptions, LSP hovers, generated docs. Note that `protoc-gen-go` strips `SourceCodeInfo`, which is why [`descriptorset.binpb`](../../internal/proto/descriptorset) exists.
-- **A custom protoc plugin** when the output is code that does not exist yet and the mapping is mechanical. Per-entrypoint CEL environment declarations are the strongest candidate: generating them from binding profiles plus descriptors turns unbound variables into compile errors.
+- **A Go generator that imports the registry and reads the descriptor set** when the output joins proto data with something only Go knows. Per-entrypoint CEL environment declarations are the strongest candidate: generating them from binding profiles plus descriptors turns unbound variables into compile errors. It has to be a Go generator rather than a protoc plugin, because a plugin receives only descriptors and options, and `BindingProfiles` is a Go map in [`internal/policy/bindings.go`](../../internal/policy/bindings.go). A protoc plugin would have to parse repository Go source to see it, which keeps the second source of truth rather than removing it. `internal/docsgen` already works this way and is the precedent to copy.
+- **A custom protoc plugin** only once the metadata it needs lives in proto. Moving entrypoint bindings into proto options would make one possible here, and would be the cleaner end state, but that is a prerequisite rather than a detail.
 - **Neither** for the ergonomic layer. Generate the contract, hand-write the affordance, and let a drift test hold the edge.
