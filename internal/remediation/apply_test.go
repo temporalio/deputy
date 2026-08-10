@@ -1723,6 +1723,57 @@ func TestReplaceFileAtomically(t *testing.T) {
 	}
 }
 
+// TestReplaceFileAtomicallyPreservesMode pins that publishing a replacement
+// keeps the target's permissions. The temporary is created with the umask
+// applied, so a group-writable lockfile in a shared workspace would come back
+// read-only for the group and the next `mise lock` there would fail. The mode
+// has to be set on the temporary rather than merely requested at creation.
+func TestReplaceFileAtomicallyPreservesMode(t *testing.T) {
+	t.Parallel()
+
+	for _, perm := range []os.FileMode{0o600, 0o644, 0o664, 0o666} {
+		t.Run(perm.String(), func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			lock := filepath.Join(dir, "mise.lock")
+			if err := os.WriteFile(lock, []byte("[[tools.go]]\nversion = \"1.22.12\"\n"), perm); err != nil {
+				t.Fatal(err)
+			}
+			// os.WriteFile is subject to the umask, which is the very thing
+			// under test, so chmod the fixture to the exact mode and confirm
+			// it took before asserting on what replacement does to it.
+			if err := os.Chmod(lock, perm); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.Stat(lock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before.Mode().Perm() != perm {
+				t.Skipf("umask reduced the fixture to %v, cannot test %v", before.Mode().Perm(), perm)
+			}
+
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			if err := replaceFileAtomically(root, "mise.lock", []byte("[[tools.go]]\n"), perm); err != nil {
+				t.Fatalf("replaceFileAtomically: %v", err)
+			}
+			after, err := os.Stat(lock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := after.Mode().Perm(); got != perm {
+				t.Errorf("mode after replacement = %v, want %v", got, perm)
+			}
+		})
+	}
+}
+
 // TestReplaceFileAtomicallyConcurrent pins that two applies pruning the same
 // lockfile cannot corrupt each other. With a shared temporary name one call
 // unlinks the other's open file, refills the name, and has the refill renamed

@@ -557,6 +557,13 @@ func resolveLinkTarget(root *os.Root, relPath string) (string, error) {
 // directory as relPath so a later rename stays on one filesystem. O_EXCL is
 // what makes the name exclusively ours; a name already taken is retried rather
 // than cleared, so a concurrent apply's in-flight temporary is never unlinked.
+//
+// The creation mode is only a request: the process umask reduces it, so a
+// temporary asked for as 0664 is really 0644 under the usual 0022. Renaming
+// that over a group-writable lockfile would quietly narrow the file, and in a
+// shared workspace the next writer loses access it had. The mode is therefore
+// set explicitly on the open file, which the umask does not touch, before any
+// content reaches it.
 func createUniqueTemp(root *os.Root, relPath string, perm os.FileMode) (*os.File, string, error) {
 	dir := path.Dir(relPath)
 	base := "." + path.Base(relPath) + ".deputy-"
@@ -564,6 +571,11 @@ func createUniqueTemp(root *os.Root, relPath string, perm os.FileMode) (*os.File
 		tmpRel := path.Join(dir, base+rand.Text())
 		f, err := root.OpenFile(tmpRel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 		if err == nil {
+			if err := f.Chmod(perm); err != nil {
+				_ = f.Close()
+				_ = root.Remove(tmpRel)
+				return nil, "", fmt.Errorf("setting mode on %s: %w", tmpRel, err)
+			}
 			return f, tmpRel, nil
 		}
 		if !errors.Is(err, fs.ErrExist) {
