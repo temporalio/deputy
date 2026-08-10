@@ -19,6 +19,18 @@ const (
 
 	// OCI identifies OCI registry artifacts served through the proxy.
 	OCI Ecosystem = "oci"
+
+	// Hackage identifies Haskell packages. OSV-SCALIBR inventories them from
+	// cabal and stack files and reports them as "Hackage".
+	Hackage Ecosystem = "hackage"
+
+	// CRAN identifies R packages. OSV-SCALIBR inventories them from renv and
+	// reports them as "CRAN".
+	CRAN Ecosystem = "cran"
+
+	// ConanCenter identifies C and C++ packages. OSV-SCALIBR inventories them
+	// from conan files and reports them as "ConanCenter".
+	ConanCenter Ecosystem = "conancenter"
 )
 
 // extraCanonicalEcosystems describes the ecosystems that have a canonical token
@@ -45,6 +57,24 @@ var extraCanonicalEcosystems = []Registration{
 		DisplayName: "oci",
 		Description: "OCI registry artifacts served through the proxy",
 		Aliases:     []string{},
+	},
+	{
+		Ecosystem:   Hackage,
+		DisplayName: "Hackage",
+		Description: "Haskell packages, inventoried through OSV-SCALIBR (cabal, stack)",
+		Aliases:     []string{"haskell", "cabal", "stack"},
+	},
+	{
+		Ecosystem:   CRAN,
+		DisplayName: "CRAN",
+		Description: "R packages, inventoried through OSV-SCALIBR (renv)",
+		Aliases:     []string{"r", "renv"},
+	},
+	{
+		Ecosystem:   ConanCenter,
+		DisplayName: "ConanCenter",
+		Description: "C/C++ packages, inventoried through OSV-SCALIBR (conan)",
+		Aliases:     []string{"cpp", "c++", "conan"},
 	},
 }
 
@@ -84,15 +114,22 @@ func Display(eco Ecosystem) string {
 // or "github-actions". It is the contract every policy sees; display forms
 // ("Go", "PyPI", "GitHub Actions") exist only for rendering.
 //
-// known reports whether raw resolved to an ecosystem Deputy recognizes, either
-// through the capability [Registry] (via [Parse] and its aliases) or through the
-// registry-less tokens above. When known is false the returned token is still
+// known reports whether raw resolved to an ecosystem Deputy recognizes: one
+// [Parse] knows, one of the registry-less tokens above, or one registered into
+// the runtime [Registry], so an ecosystem contributed at runtime is understood
+// everywhere without a second table. When known is false the returned token is still
 // normalized (lowercased, whitespace and underscores folded to hyphens) so that
 // unrecognized values such as OS package ecosystems ("Alpine:v3.19" ->
 // "alpine:v3.19") still compare consistently instead of leaking scanner casing.
 // Callers that must preserve the scanner's original spelling should check known
 // and fall back to raw.
 func Canonical(raw string) (token string, known bool) {
+	return canonicalIn(Default(), raw)
+}
+
+// canonicalIn resolves raw against a specific registry. [Canonical] uses the
+// default one; tests use their own so a registration cannot leak between them.
+func canonicalIn(registry *Registry, raw string) (token string, known bool) {
 	// Parse sees the raw string first: some of its aliases carry separators of
 	// their own ("cargo (crates.io)") that normalizeToken would fold away.
 	if eco := Parse(raw); eco != Unknown {
@@ -107,6 +144,15 @@ func Canonical(raw string) (token string, known bool) {
 	}
 	if eco := Parse(normalized); eco != Unknown {
 		return string(eco), true
+	}
+	// Ecosystems registered at runtime, for example by an extractor plugin that
+	// inventories an ecosystem Deputy has no built-in support for, resolve from
+	// the registry itself so they are as nameable as the built-in ones.
+	if reg := registry.Get(Ecosystem(normalized)); reg != nil {
+		return string(reg.Ecosystem), true
+	}
+	if reg := registry.Lookup(normalized); reg != nil {
+		return string(reg.Ecosystem), true
 	}
 	return normalized, false
 }

@@ -790,7 +790,31 @@ Finding represents a scan-time occurrence of an advisory in a dependency.
 
 Every ecosystem value in a policy input is canonicalized before evaluation, so a policy sees exactly one spelling no matter which scanner produced the data: a lowercase, hyphenated token. Inventory, graph resolution, and OSV report display names (`Go`, `PyPI`, `crates.io`, `GitHub Actions`); those are for rendering only and never reach a policy.
 
-Canonical tokens: `asdf`, `cargo`, `cocoapods`, `docker`, `github-actions`, `go`, `hex`, `maven`, `mise`, `npm`, `nuget`, `oci`, `packagist`, `pub`, `pypi`, `rubygems`. The proxy entrypoints use `go`, `npm`, `pypi`, `rubygems`, and `oci`.
+The proxy entrypoints use `go`, `npm`, `pypi`, `rubygems`, and `oci`. The full vocabulary comes from the ecosystem registry:
+
+<!-- BEGIN GENERATED: canonical-ecosystems -->
+| Canonical token | Display name |
+| --- | --- |
+| `asdf` | asdf |
+| `cargo` | Cargo |
+| `cocoapods` | CocoaPods |
+| `conancenter` | ConanCenter |
+| `cran` | CRAN |
+| `docker` | docker |
+| `github-actions` | GitHub Actions |
+| `go` | Go |
+| `hackage` | Hackage |
+| `hex` | Hex |
+| `maven` | Maven |
+| `mise` | mise |
+| `npm` | npm |
+| `nuget` | NuGet |
+| `oci` | oci |
+| `packagist` | Packagist |
+| `pub` | Pub |
+| `pypi` | PyPI |
+| `rubygems` | RubyGems |
+<!-- END GENERATED: canonical-ecosystems -->
 
 Write `pkg.ecosystem == "go"`, not `pkg.ecosystem == "Go"`, and drop any `lowerAscii()` workaround. Ecosystems Deputy does not recognize (OS package ecosystems such as `Alpine:v3.19`) are lowercased rather than remapped, so they stay comparable without losing their release suffix.
 

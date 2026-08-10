@@ -84,3 +84,71 @@ func TestCanonicalEcosystems(t *testing.T) {
 		}
 	}
 }
+
+// TestCanonicalCoversScalibrEcosystems pins that the ecosystems Deputy
+// inventories through OSV-SCALIBR but has no capability registration for are
+// nameable. Their scanner spellings ("Hackage", "CRAN", "ConanCenter") and the
+// language names Deputy's own --ecosystems filter accepts must land on the same
+// token, so a policy scoped to one of them matches the packages it produces.
+func TestCanonicalCoversScalibrEcosystems(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "hackage scanner name", raw: "Hackage", want: "hackage"},
+		{name: "haskell filter name", raw: "haskell", want: "hackage"},
+		{name: "cabal", raw: "cabal", want: "hackage"},
+		{name: "cran scanner name", raw: "CRAN", want: "cran"},
+		{name: "r filter name", raw: "r", want: "cran"},
+		{name: "renv", raw: "renv", want: "cran"},
+		{name: "conancenter scanner name", raw: "ConanCenter", want: "conancenter"},
+		{name: "cpp filter name", raw: "cpp", want: "conancenter"},
+		{name: "conan", raw: "conan", want: "conancenter"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, known := Canonical(tt.raw)
+			if !known || got != tt.want {
+				t.Errorf("Canonical(%q) = (%q, %t), want (%q, true)", tt.raw, got, known, tt.want)
+			}
+		})
+	}
+}
+
+// TestCanonicalResolvesRuntimeRegistrations pins that an ecosystem registered
+// at runtime, which is how an extractor plugin contributes one, is recognized
+// by the resolver rather than treated as an unknown value. Policies can then
+// scope to plugin-produced packages the same way they scope to built-in ones.
+func TestCanonicalResolvesRuntimeRegistrations(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(Registration{
+		Ecosystem:   Ecosystem("acme-artifacts"),
+		DisplayName: "acme-artifacts",
+		Description: "Ecosystem contributed by an extractor plugin",
+		Aliases:     []string{"acme"},
+	})
+
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "token", raw: "acme-artifacts", want: "acme-artifacts"},
+		{name: "display casing", raw: "Acme-Artifacts", want: "acme-artifacts"},
+		{name: "alias", raw: "acme", want: "acme-artifacts"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, known := canonicalIn(reg, tt.raw)
+			if !known || got != tt.want {
+				t.Errorf("canonicalIn(registry, %q) = (%q, %t), want (%q, true)", tt.raw, got, known, tt.want)
+			}
+			if _, knownGlobally := Canonical(tt.raw); knownGlobally {
+				t.Errorf("Canonical(%q) resolved without the plugin registration", tt.raw)
+			}
+		})
+	}
+}
