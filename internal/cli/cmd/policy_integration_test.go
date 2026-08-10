@@ -94,37 +94,47 @@ func TestPolicyIntegration_NewDependencyReview_Deny(t *testing.T) {
 	}
 }
 
+// TestPolicyIntegration_PypiPrefixAllowlist runs the shipped allowlist over the
+// payload the proxy actually builds: buildPolicyInput synthesizes pkg from the
+// request and always sets pkg.ecosystem, which is what makes the name reach the
+// policy in canonical PEP 503 form. Every spelling PyPI accepts for an approved
+// distribution must therefore be allowed.
 func TestPolicyIntegration_PypiPrefixAllowlist(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "pypi-prefix-allowlist.yaml"))
-	// Policy expects pkg.name to be synthesized from request.package
-	denyPayload := map[string]any{
-		"request": map[string]any{
-			"ecosystem": "pypi",
-			"package":   "randompkg",
-		},
-		"pkg": map[string]any{
-			"name": "randompkg",
-		},
-	}
-	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, denyPayload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{}); err == nil {
-		t.Fatalf("expected denial error for unapproved pypi package")
+
+	tests := []struct {
+		name     string
+		pkgName  string
+		wantDeny bool
+	}{
+		{name: "unapproved prefix", pkgName: "randompkg", wantDeny: true},
+		{name: "approved prefix underscore spelling", pkgName: "acme_toolkit"},
+		{name: "approved prefix hyphen spelling", pkgName: "acme-toolkit"},
+		{name: "approved prefix dot spelling", pkgName: "acme.toolkit"},
 	}
 
-	allowPayload := map[string]any{
-		"request": map[string]any{
-			"ecosystem": "pypi",
-			"package":   "acme_toolkit",
-		},
-		"pkg": map[string]any{
-			"name": "acme_toolkit",
-		},
-	}
-	if actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, allowPayload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{}); err != nil {
-		t.Fatalf("unexpected error for approved pypi package: %v", err)
-	} else if len(actions) != 0 {
-		// The policy's only rule is the prefix deny; an approved prefix must
-		// produce zero actions.
-		t.Fatalf("expected no actions for approved prefix, got %+v", actions)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := map[string]any{
+				"request": &policyv1.ProxyRequest{Ecosystem: "pypi", Package: tt.pkgName},
+				"pkg":     &dependencyv1.Package{Name: tt.pkgName, Ecosystem: "pypi"},
+			}
+			actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{})
+			if tt.wantDeny {
+				if err == nil {
+					t.Fatalf("expected denial for %q, got actions %+v", tt.pkgName, actions)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for approved package %q: %v", tt.pkgName, err)
+			}
+			for _, a := range actions {
+				if a.Type == "deny" {
+					t.Fatalf("did not expect deny for %q: %+v", tt.pkgName, actions)
+				}
+			}
+		})
 	}
 }
 
