@@ -15,6 +15,7 @@ package mise
 import (
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -318,8 +319,90 @@ func IsConcreteVersion(v string) bool {
 	if strings.ContainsAny(v, "^~*<>= ") || strings.Contains(v, "..") {
 		return false
 	}
-	if strings.HasPrefix(v, "prefix:") || strings.HasPrefix(v, "ref:") || strings.HasPrefix(v, "sub-") {
+	if hasAnyPrefix(v, selectorWrapperPrefixes) || hasAnyPrefix(v, unversionedPrefixes) {
 		return false
 	}
 	return concreteVersionRe.MatchString(v)
+}
+
+// selectorWrapperPrefixes are the mise request prefixes that wrap another
+// version request rather than naming a release themselves: "prefix:20" asks
+// for the newest release under 20 and "sub-1:20.11" for one release below
+// 20.11, so a wrapped request constrains resolution exactly as much as the
+// request it wraps.
+var selectorWrapperPrefixes = []string{"prefix:", "sub-"}
+
+// unversionedPrefixes are the mise request prefixes that point at something
+// that is not a release at all: a git ref or a local checkout. A declaration
+// using one names no version, so its text says nothing about which release
+// gets installed.
+var unversionedPrefixes = []string{"ref:", "path:", "file:"}
+
+// hasAnyPrefix reports whether s starts with any of prefixes. It keeps the
+// mise request grammar in the tables above rather than spelled out at each
+// call site, so a new prefix reaches every classifier at once.
+func hasAnyPrefix(s string, prefixes []string) bool {
+	return slices.ContainsFunc(prefixes, func(p string) bool { return strings.HasPrefix(s, p) })
+}
+
+// DeclaredVersion reduces a declared mise version request to the version it
+// constrains, looking through the wrappers mise resolves at install time
+// ("prefix:20" and "sub-1:20" both constrain resolution to the 20 line). ok is
+// false when the request names no version at all: a channel or alias
+// ("latest", "lts", "system"), a git ref or checkout ("ref:main",
+// "path:/opt/go"), or an empty token. Such a request may resolve to any
+// release, so its text rules nothing out; one that does carry a version can
+// only resolve to that version or, when it is partial, to a release beneath
+// it.
+//
+// This is the discriminator remediation needs before overwriting a
+// declaration a stale plan no longer describes. "Starts with a digit" is not
+// it: mise's Java versions are vendor-prefixed exact releases
+// ("temurin-21.0.6+7"), and reading those as floating selectors lets an old
+// plan replace a newer toolchain with an older one.
+func DeclaredVersion(request string) (version string, ok bool) {
+	s := strings.TrimSpace(request)
+	for {
+		base, wrapped := trimSelectorWrapper(s)
+		if !wrapped {
+			break
+		}
+		s = strings.TrimSpace(base)
+	}
+	if _, floating := fuzzyChannels[strings.ToLower(s)]; floating {
+		return "", false
+	}
+	if hasAnyPrefix(s, unversionedPrefixes) {
+		return "", false
+	}
+	// No digit anywhere means no version number to pin the request down: an
+	// alias such as "lts" or a codename mise resolves against the registry.
+	if !strings.ContainsAny(s, "0123456789") {
+		return "", false
+	}
+	return s, true
+}
+
+// trimSelectorWrapper strips one leading mise selector wrapper from a version
+// request and returns the request it wraps, so "prefix:20" yields "20" and
+// "sub-1:lts" yields "lts". ok is false when no wrapper is present or the
+// wrapper has nothing to wrap, in which case the request is classified as
+// written.
+func trimSelectorWrapper(s string) (base string, ok bool) {
+	for _, prefix := range selectorWrapperPrefixes {
+		if !strings.HasPrefix(s, prefix) {
+			continue
+		}
+		rest := s[len(prefix):]
+		if prefix == "sub-" {
+			// "sub-<n>:<base>": the count belongs to the wrapper, not to the
+			// request being wrapped.
+			_, rest, _ = strings.Cut(rest, ":")
+		}
+		if rest == "" {
+			return "", false
+		}
+		return rest, true
+	}
+	return "", false
 }

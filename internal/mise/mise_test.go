@@ -168,7 +168,11 @@ func TestIsConcreteVersion(t *testing.T) {
 	// Concrete: a real resolved version (>= major.minor), including partial-but-
 	// final forms like protobuf "33.1" that IsExactVersion rejects.
 	concrete := []string{"22.5.0", "33.1", "3.12.13", "v1.2", "temurin-21.0.5+11.0.LTS", "2025.1.1"}
-	notConcrete := []string{"", "20", "latest", "lts", "system", "^1.2.3", ">=1.0", "ref:abc", "prefix:20", "node"}
+	notConcrete := []string{
+		"", "20", "latest", "lts", "system", "^1.2.3", ">=1.0", "ref:abc", "prefix:20", "node",
+		// A checkout is not a release, however version-shaped its path.
+		"path:/opt/go-1.24.3", "file:../go-1.24.3",
+	}
 	for _, v := range concrete {
 		if !IsConcreteVersion(v) {
 			t.Errorf("IsConcreteVersion(%q) = false, want true", v)
@@ -498,5 +502,48 @@ func TestParseToolVersions(t *testing.T) {
 	}
 	if byKey["npm:prettier"].Backend != "npm" {
 		t.Errorf("npm:prettier backend = %q", byKey["npm:prettier"].Backend)
+	}
+}
+
+// TestDeclaredVersion pins the reading of mise's request grammar that decides
+// whether a declaration's text rules out a given release. Requests mise
+// resolves at install time carry no version; everything else does, including
+// the vendor-prefixed exact releases mise publishes for Java, which begin with
+// a letter and are still exact.
+func TestDeclaredVersion(t *testing.T) {
+	tests := []struct {
+		request string
+		want    string
+		wantOK  bool
+	}{
+		{"1.24.3", "1.24.3", true},
+		{"20", "20", true},
+		{"20.11", "20.11", true},
+		{"v1.24.3", "v1.24.3", true},
+		{"temurin-21.0.6+7", "temurin-21.0.6+7", true},
+		{"temurin-21", "temurin-21", true},
+		{"  1.24.3  ", "1.24.3", true},
+		{"prefix:20", "20", true},
+		{"sub-1:20.11", "20.11", true},
+		{"latest", "", false},
+		{"lts", "", false},
+		{"stable", "", false},
+		{"system", "", false},
+		{"", "", false},
+		{"sub-2:lts", "", false},
+		{"prefix:latest", "", false},
+		{"ref:main", "", false},
+		{"ref:v1.2.3", "", false},
+		{"path:/opt/go-1.24.3", "", false},
+		{"file:../toolchains/go", "", false},
+		{"gallium", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.request, func(t *testing.T) {
+			got, ok := DeclaredVersion(tt.request)
+			if got != tt.want || ok != tt.wantOK {
+				t.Errorf("DeclaredVersion(%q) = (%q, %v), want (%q, %v)", tt.request, got, ok, tt.want, tt.wantOK)
+			}
+		})
 	}
 }

@@ -197,6 +197,58 @@ func TestReplaceVersionInValue(t *testing.T) {
 	}
 }
 
+// TestSelectorTargetsCurrent pins both directions of the staleness gate that
+// decides whether a sole declaration may be overwritten. Every request mise
+// resolves at install time must stay rewritable, or a fix that would land is
+// refused; every request that names a version the plan does not describe must
+// be refused, or a stale plan rolls the toolchain backwards. Vendor-prefixed
+// releases are the case the "starts with a digit" reading got wrong: they are
+// exact versions that begin with a letter.
+func TestSelectorTargetsCurrent(t *testing.T) {
+	tests := []struct {
+		name     string
+		declared string
+		currents []string
+		want     bool
+	}{
+		// Rewritable: the declaration could still be resolving to a current
+		// version.
+		{"exact current version", "20.11.0", []string{"20.11.0"}, true},
+		{"major selector", "20", []string{"20.11.0"}, true},
+		{"minor selector", "20.11", []string{"20.11.0"}, true},
+		{"v-prefixed current", "v20.11.0", []string{"20.11.0"}, true},
+		{"lts channel", "lts", []string{"20.11.0"}, true},
+		{"latest channel", "latest", []string{"20.11.0"}, true},
+		{"stable channel", "stable", []string{"20.11.0"}, true},
+		{"subtracted channel", "sub-2:lts", []string{"20.11.0"}, true},
+		{"subtracted selector on the current line", "sub-1:20", []string{"20.11.0"}, true},
+		{"explicit prefix selector", "prefix:20", []string{"20.11.0"}, true},
+		{"git ref", "ref:main", []string{"20.11.0"}, true},
+		{"registry alias", "gallium", []string{"20.11.0"}, true},
+		{"vendor-prefixed current version", "temurin-21.0.6+7", []string{"temurin-21.0.6+7"}, true},
+		{"vendor-prefixed major selector", "temurin-21", []string{"temurin-21.0.6+7"}, true},
+		{"no known currents", "temurin-22.0.2+9", nil, true},
+
+		// Refused: the declaration names a version the plan does not describe,
+		// so the config has moved on and rewriting it is a downgrade.
+		{"stale exact version", "1.25.1", []string{"1.22.12"}, false},
+		{"selector for another line", "22.1", []string{"20.11.0"}, false},
+		{"major selector for another line", "22", []string{"20.11.0"}, false},
+		{"stale vendor-prefixed version", "temurin-22.0.2+9", []string{"temurin-21.0.6+7"}, false},
+		{"stale vendor-prefixed major selector", "temurin-22", []string{"temurin-21.0.6+7"}, false},
+		{"another vendor at the same version", "zulu-21.0.6+7", []string{"temurin-21.0.6+7"}, false},
+		{"explicit prefix for another line", "prefix:22", []string{"20.11.0"}, false},
+		{"subtracted selector on another line", "sub-1:22", []string{"20.11.0"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := selectorTargetsCurrent(tt.declared, tt.currents); got != tt.want {
+				t.Errorf("selectorTargetsCurrent(%q, %v) = %v, want %v", tt.declared, tt.currents, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRewriteToolVersion(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -331,6 +383,40 @@ go = { version = "1.25.1" }
 go = { version = "1.25.1" }
 `,
 			wantErr: true,
+		},
+		{
+			// mise's Java versions are vendor-prefixed exact releases, so a
+			// declaration that begins with a letter is not automatically a
+			// selector. A config already ahead of the plan must survive.
+			name: "stale vendor-prefixed exact scalar fails closed",
+			input: `[tools]
+java = "temurin-22.0.2+9"
+`,
+			tool: "java", currents: []string{"temurin-21.0.6+7"}, version: "temurin-21.0.7+6",
+			want: `[tools]
+java = "temurin-22.0.2+9"
+`,
+			wantErr: true,
+		},
+		{
+			name: "vendor-prefixed exact scalar rewritten",
+			input: `[tools]
+java = "temurin-21.0.6+7"
+`,
+			tool: "java", currents: []string{"temurin-21.0.6+7"}, version: "temurin-21.0.7+6",
+			want: `[tools]
+java = "temurin-21.0.7+6"
+`,
+		},
+		{
+			name: "vendor-prefixed major selector rewritten",
+			input: `[tools]
+java = "temurin-21"
+`,
+			tool: "java", currents: []string{"temurin-21.0.6+7"}, version: "temurin-21.0.7+6",
+			want: `[tools]
+java = "temurin-21.0.7+6"
+`,
 		},
 		{
 			name: "partial major selector rewritten",

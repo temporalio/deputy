@@ -339,22 +339,31 @@ func replaceVersionInValueTargeting(value string, currents []string, pinned stri
 //
 // Replacement is allowed when the declaration names a current version, when it
 // is a partial selector that a current version satisfies ("20" or "20.11" for
-// 20.11.0), or when it is not version-shaped at all ("lts", "latest",
-// "ref:main", "prefix:20"), since mise resolves those at install time and they
+// 20.11.0, "prefix:20" likewise), or when it names no version at all ("lts",
+// "latest", "ref:main"), since mise resolves those at install time and they
 // may well be resolving to the vulnerable version today. With no known current
 // versions there is nothing to contradict, so the rewrite proceeds; that is
 // the pinning path, which targets whatever is declared.
+//
+// Which of those a declaration is comes from [mise.DeclaredVersion], the same
+// reading of mise's request grammar the rest of the package uses. Deciding it
+// here on the token's first character would misread a vendor-prefixed exact
+// release ("temurin-21.0.6+7") as a floating selector and let a stale plan
+// downgrade an already-updated toolchain.
 func selectorTargetsCurrent(declared string, currents []string) bool {
 	if len(currents) == 0 {
 		return true
 	}
-	declared = strings.TrimSpace(declared)
+	version, constrained := mise.DeclaredVersion(declared)
+	if !constrained {
+		return true
+	}
 	for _, current := range currents {
-		if versionSelectorMatches(declared, current) {
+		if versionSelectorMatches(version, current) {
 			return true
 		}
 	}
-	return !looksLikeVersion(declared)
+	return false
 }
 
 // versionSelectorMatches reports whether declared names version exactly or is
@@ -370,14 +379,6 @@ func versionSelectorMatches(declared, version string) bool {
 	return len(version) > len(declared) &&
 		strings.HasPrefix(version, declared) &&
 		version[len(declared)] == '.'
-}
-
-// looksLikeVersion reports whether a declared token is version-shaped, meaning
-// it starts with a digit (optionally behind a "v"). Tokens that are not are
-// mise selectors resolved at install time rather than literal versions.
-func looksLikeVersion(s string) bool {
-	s = trimVersionPrefix(s)
-	return s != "" && s[0] >= '0' && s[0] <= '9'
 }
 
 // trimVersionPrefix drops a leading "v" or "V" from a version token when a
