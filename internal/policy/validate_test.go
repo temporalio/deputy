@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -992,8 +993,18 @@ func TestLooksLikeStructuredBundle(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "not YAML at all",
+			name: "a bundle whose YAML does not parse",
 			data: "policies: [\n  - name: broken\n",
+			want: true,
+		},
+		{
+			name: "a bundle whose YAML does not parse below the policies key",
+			data: "policies:\n  - name: broken\n    rules: [\n",
+			want: true,
+		},
+		{
+			name: "raw CEL that does not parse as YAML",
+			data: "// policy: legacy\npkg.name == \"left-pad\"\n  ? [{\"action\": \"deny\"}]\n  : []\n",
 		},
 	}
 	for _, tc := range cases {
@@ -1234,5 +1245,20 @@ policies:
 				}
 			}
 		})
+	}
+}
+
+// TestBundleKeyMatchesStructTag pins the shape probe's key to the field the
+// decoder actually reads. The probe recognizes an authored bundle by that key,
+// including in the raw text of a document YAML cannot parse, so a rename of the
+// struct tag alone would leave every bundle unrecognized.
+func TestBundleKeyMatchesStructTag(t *testing.T) {
+	field, ok := reflect.TypeFor[structuredBundle]().FieldByName("Policies")
+	if !ok {
+		t.Fatal("structuredBundle has no Policies field")
+	}
+	tag, _, _ := strings.Cut(field.Tag.Get("yaml"), ",")
+	if tag != bundlePoliciesKey {
+		t.Fatalf("bundlePoliciesKey = %q but the yaml tag is %q", bundlePoliciesKey, tag)
 	}
 }

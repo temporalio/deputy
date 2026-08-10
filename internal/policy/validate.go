@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -122,18 +123,64 @@ type ValidateOptions struct {
 // decoder finds one anyway, which a top-level merge key does. Without that
 // fallback a bundle could inherit its whole policy list from an anchor and slip
 // past the checks that key off this probe, the anchor refusal among them.
+//
+// A document that does not parse as YAML has no nodes to probe, so the raw text
+// is checked for the key instead. A syntax error is the mistake an author is
+// most likely to make and the one they most need pointed at a line, and without
+// this the file falls through to the unknown-format fallback while the editor,
+// which validates the text directly, names the line.
 func LooksLikeStructuredBundle(data []byte) bool {
 	if IsCompiledBundle(data) {
 		return false
 	}
 	root := &yaml.Node{}
-	if err := yaml.Unmarshal(data, root); err != nil || len(root.Content) == 0 {
+	if err := yaml.Unmarshal(data, root); err != nil {
+		return writesBundleKey(data)
+	}
+	if len(root.Content) == 0 {
 		return false
 	}
-	if MappingValue(root.Content[0], "policies") != nil {
+	// Key presence, not the value: `policies:` with nothing after it is a bundle
+	// missing its list, which has to be reported as such rather than dismissed.
+	if hasMappingKey(root.Content[0], bundlePoliciesKey) {
 		return true
 	}
 	return decodesWithPolicies(data)
+}
+
+// bundlePoliciesKey is the mapping key that marks a document as an authored
+// policy bundle. bundleKeyMatchesStructTag pins it to the field the decoder
+// reads, so the probe and the loader cannot drift apart.
+const bundlePoliciesKey = "policies"
+
+// unparsedBundleKey matches the bundle's policies key written at the top level
+// of a document, in raw text. It is deliberately a last resort: YAML that parses
+// is always probed by walking its nodes, and this runs only for a document the
+// parser rejected outright, where no structure is available to walk.
+var unparsedBundleKey = regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(bundlePoliciesKey) + `[ \t]*:`)
+
+// writesBundleKey reports whether raw text writes the bundle's policies key at
+// the top level, which is how a document the YAML parser rejected is still
+// recognized as an authored bundle with a syntax error in it.
+func writesBundleKey(data []byte) bool {
+	return unparsedBundleKey.Match(data)
+}
+
+// hasMappingKey reports whether a YAML mapping node carries a key, whatever its
+// value. MappingValue answers a different question, "what is this field set to",
+// and reads an explicit null as unset; a probe asking whether the document is a
+// bundle at all needs the key itself.
+func hasMappingKey(mapNode *yaml.Node, key string) bool {
+	if mapNode == nil || mapNode.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(mapNode.Content); i += 2 {
+		k := mapNode.Content[i]
+		if k.Kind == yaml.ScalarNode && k.Value == key {
+			return true
+		}
+	}
+	return false
 }
 
 // decodesWithPolicies reports whether data decodes into a bundle carrying at
@@ -184,7 +231,7 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	// cost the author a second lint run.
 	anchors := anchorIssues(root)
 	issues = append(issues, anchors...)
-	policiesNode := MappingValue(doc, "policies")
+	policiesNode := MappingValue(doc, bundlePoliciesKey)
 	if policiesNode == nil {
 		if len(anchors) == 0 {
 			issues = append(issues, issueAt(doc, IssueError, "missing-policies", "missing required 'policies' list"))

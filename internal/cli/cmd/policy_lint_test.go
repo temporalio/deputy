@@ -324,3 +324,50 @@ func TestPolicyLintAcceptsDeclaredVars(t *testing.T) {
 		t.Fatalf("expected OK, got:\n%s", out)
 	}
 }
+
+// TestPolicyLintReportsYAMLSyntaxErrors pins that a bundle whose YAML does not
+// parse is reported as the syntax error it is, naming the offending line, rather
+// than dismissed as an unrecognized format. The editor validates the same
+// document directly and has always named the line, so anything else leaves the
+// CLI and the editor disagreeing about a file the author plainly wrote as a
+// policy.
+func TestPolicyLintReportsYAMLSyntaxErrors(t *testing.T) {
+	cases := []struct {
+		name     string
+		bundle   string
+		wantText []string
+	}{
+		{
+			name:     "an unterminated rules list",
+			bundle:   "policies:\n  - name: broken\n    rules: [\n",
+			wantText: []string{"line 3"},
+		},
+		{
+			name:     "an unterminated policies list",
+			bundle:   "policies: [\n  - name: broken\n",
+			wantText: []string{"line 1"},
+		},
+		{
+			name:     "a value the parser cannot read",
+			bundle:   "policies:\n  - name: broken\n     rules: []\n",
+			wantText: []string{"line 3"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := runPolicyLint(t, tc.bundle)
+			if err == nil {
+				t.Fatalf("expected lint to fail, got:\n%s", out)
+			}
+			combined := out + err.Error()
+			if strings.Contains(combined, "unrecognized policy format") {
+				t.Fatalf("expected a YAML syntax error, got the unknown-format fallback:\n%s", combined)
+			}
+			for _, want := range tc.wantText {
+				if !strings.Contains(combined, want) {
+					t.Fatalf("expected %q in output, got:\n%s", want, combined)
+				}
+			}
+		})
+	}
+}
