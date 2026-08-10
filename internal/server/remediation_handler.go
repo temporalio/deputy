@@ -420,6 +420,24 @@ func (h *RemediationHandler) ExecutePlan(
 			continue
 		}
 
+		// Steps that cannot be run (manual guidance, or no command at all)
+		// are skipped, never executed. Their status is reported here rather
+		// than inferred from execution output, so a plan can never report a
+		// manual step as completed work.
+		if reason, runnable := stepSkipReason(step); !runnable {
+			skipped++
+			if err := stream.Send(&remediationv1.ExecutionEvent{
+				Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
+				StepId:    stepID,
+				Message:   fmt.Sprintf("Skipped step %d/%d (%s): %s", i+1, len(steps), reason, stepLabel(step)),
+				Progress:  executionProgress(i+1, len(steps)),
+				Timestamp: timestamppb.Now(),
+			}); err != nil {
+				return err
+			}
+			continue
+		}
+
 		// Send step starting event
 		if err := stream.Send(&remediationv1.ExecutionEvent{
 			Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
@@ -581,6 +599,22 @@ func rejectUnsupportedApprovalMode(mode remediationv1.ApprovalMode) error {
 	}
 }
 
+// stepSkipReason reports whether a step can actually be run, and if not, the
+// short reason to surface to the client. Plans legitimately carry steps that
+// describe work a human must do (module migrations) or that carry no command
+// at all; running is not possible for either, and reporting them as executed
+// would tell a client a vulnerability was remediated when nothing happened.
+func stepSkipReason(step *remediationv1.Step) (reason string, runnable bool) {
+	switch {
+	case step.GetCommand() == "":
+		return "no command", false
+	case !step.GetExecutable():
+		return "manual step", false
+	default:
+		return "", true
+	}
+}
+
 // stepLabel identifies a step in human-readable event messages, preferring
 // the concrete command over the title so summaries still say what ran.
 func stepLabel(step *remediationv1.Step) string {
@@ -643,7 +677,10 @@ func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) 
 		return "", nil // Nothing to execute
 	}
 
-	// Skip non-executable steps
+	// Non-executable steps are not runnable work. ExecutePlan classifies and
+	// reports them before reaching here (see stepSkipReason), so this guard
+	// only protects direct callers; it must never be treated as success by a
+	// caller counting executed steps.
 	if !step.GetExecutable() {
 		return fmt.Sprintf("Skipped (manual step): %s", cmd), nil
 	}

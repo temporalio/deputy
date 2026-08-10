@@ -264,6 +264,45 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			},
 		},
 		{
+			name:    "manual step is reported skipped not completed",
+			options: nil,
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "migrate to the maintained module", Command: "replace example.com/old with example.com/new", Executable: false},
+			},
+			wantExecuted: []string{"step-1", "step-2"},
+			wantMessages: []string{
+				"Skipped step 3/3 (manual step): replace example.com/old with example.com/new",
+				"Successfully executed 2 steps (1 skipped)",
+			},
+			wantMissing: []string{"Completed step 3/3"},
+		},
+		{
+			name:    "manual step is reported skipped in verbose mode too",
+			options: &remediationv1.ExecutionOptions{VerboseOutput: true},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "migrate to the maintained module", Command: "replace example.com/old with example.com/new", Executable: false},
+			},
+			wantExecuted: []string{"step-1", "step-2"},
+			wantMessages: []string{
+				"Skipped step 3/3 (manual step): replace example.com/old with example.com/new",
+				"Successfully executed 2 steps (1 skipped)",
+			},
+			wantMissing: []string{"Completed step 3/3"},
+		},
+		{
+			name:    "commandless step is reported skipped",
+			options: nil,
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "nothing to do", Executable: true},
+			},
+			wantExecuted: []string{"step-1", "step-2"},
+			wantMessages: []string{
+				"Skipped step 3/3 (no command): nothing to do",
+				"Successfully executed 2 steps (1 skipped)",
+			},
+			wantMissing: []string{"Completed step 3/3"},
+		},
+		{
 			name:         "stop_on_error true halts at the first failure",
 			options:      &remediationv1.ExecutionOptions{StopOnError: true},
 			failSteps:    []string{"step-1"},
