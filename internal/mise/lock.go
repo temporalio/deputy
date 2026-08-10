@@ -183,26 +183,53 @@ func (lf *Lockfile) Sole(name string) *LockedTool {
 	return &lf.Tools[name][0]
 }
 
+// NameClaims counts, for every name a lockfile entry could be keyed by, how
+// many of a config's declarations could own an entry under it. Each
+// declaration claims its literal key and, when a backend prefix makes them
+// differ, its backend-stripped name: a legacy `[[tools.foo]]` entry is as
+// plausibly "npm:foo"'s as it is "ubi:foo"'s or a bare foo's.
+//
+// A count above one means no single declaration owns the name. That is the one
+// definition of ownership shared by both readers of a lockfile: [Lockfile.Lookup]
+// refuses to enrich from a contested entry, and remediation refuses to prune
+// one. Deriving both from this count keeps them from drifting, which they did
+// when enrichment tracked literal keys while pruning tracked stripped names,
+// leaving an entry that pruning preserved as ambiguous free to be borrowed by
+// enrichment on the next scan.
+func NameClaims(tools []ToolSpec) map[string]int {
+	claims := make(map[string]int, len(tools)*2)
+	for _, tool := range tools {
+		claims[tool.Key]++
+		if tool.Name != "" && tool.Name != tool.Key {
+			claims[tool.Name]++
+		}
+	}
+	return claims
+}
+
 // Lookup finds the locked entry that best matches a parsed tool spec at a
 // requested version. It prefers an exact version match (by the tool's short name
 // then its raw key), and otherwise falls back to the sole locked entry under
 // either name, which covers a fuzzy declared version that won't equal any
 // locked version string. Returns nil when nothing matches.
 //
-// claimedKeys lists the tool keys the surrounding config declares, so a lock
-// entry keyed by a tool's short name is not borrowed when a different
-// declaration owns that name. A config can declare both "npm:node" and node as
-// independent tools with independent lock entries; without this, the
-// backend-qualified spec matches on its stripped name and is enriched with the
-// other tool's version, which after a fix reports the freshly updated tool at
-// the old vulnerable version. Pass nil when no config context is available.
-func (lf *Lockfile) Lookup(spec ToolSpec, version string, claimedKeys map[string]bool) *LockedTool {
+// claims comes from [NameClaims] over the surrounding config, so a lock entry
+// keyed by a tool's short name is not borrowed when another declaration could
+// own that name. A config can declare both "npm:node" and node, or both
+// "npm:foo" and "ubi:foo", as independent tools with independent lock entries;
+// without this, a backend-qualified spec matches on its stripped name and is
+// enriched with another tool's version, which after a fix reports the freshly
+// updated tool at the old vulnerable version. Pass nil when no config context
+// is available.
+func (lf *Lockfile) Lookup(spec ToolSpec, version string, claims map[string]int) *LockedTool {
 	if lf == nil {
 		return nil
 	}
-	// A name owned by another declaration is not this spec's to match.
+	// A spec always owns its literal key. Any other name is only this spec's
+	// to match when no second declaration claims it, since the spec itself
+	// accounts for one claim.
 	usable := func(name string) bool {
-		return name == spec.Key || !claimedKeys[name]
+		return name == spec.Key || claims[name] <= 1
 	}
 	for _, name := range [...]string{spec.Name, spec.Key} {
 		if usable(name) {

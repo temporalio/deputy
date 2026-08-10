@@ -77,12 +77,9 @@ func (Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (inve
 		slog.WarnContext(ctx, "mise lockfile load error", "path", mise.LockfilePath(input.Path), "error", err)
 	}
 
-	// Tool keys the config declares, so lock lookup does not lend one
-	// declaration's entry to another whose short name happens to collide.
-	claimedKeys := make(map[string]bool, len(cfg.Tools))
-	for _, tool := range cfg.Tools {
-		claimedKeys[tool.Key] = true
-	}
+	// Which names the config's declarations claim, so lock lookup does not
+	// lend one declaration's entry to another whose short name collides.
+	claims := mise.NameClaims(cfg.Tools)
 
 	var pkgs []*extractor.Package
 	for _, tool := range cfg.Tools {
@@ -91,7 +88,7 @@ func (Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (inve
 				continue
 			}
 			md := mise.MetadataFor(tool, version, cfg.Format)
-			enrichFromLock(md, lock, tool, version, claimedKeys)
+			enrichFromLock(md, lock, tool, version, claims)
 			pkgVersion := version
 			if md.LockedVersion != "" {
 				pkgVersion = md.LockedVersion
@@ -112,11 +109,11 @@ func (Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (inve
 }
 
 // enrichFromLock fills the locked version and per-platform checksums on md from
-// a sibling lockfile entry, when one matches. claimedKeys carries the config's
-// own tool keys so an entry belonging to a separately declared tool is not
-// borrowed for this one.
-func enrichFromLock(md *mise.Metadata, lock *mise.Lockfile, tool mise.ToolSpec, version string, claimedKeys map[string]bool) {
-	lt := lock.Lookup(tool, version, claimedKeys)
+// a sibling lockfile entry, when one matches. claims carries how many of the
+// config's declarations could own each name, so an entry another declaration
+// might own is not borrowed for this one.
+func enrichFromLock(md *mise.Metadata, lock *mise.Lockfile, tool mise.ToolSpec, version string, claims map[string]int) {
+	lt := lock.Lookup(tool, version, claims)
 	if lt == nil {
 		return
 	}

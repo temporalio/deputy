@@ -201,35 +201,64 @@ backend = "npm:prettier"
 }
 
 // TestExtractDoesNotBorrowAnotherToolsLockEntry pins that a backend-qualified
-// tool is not enriched from a lock entry belonging to a separately declared
-// tool of the same short name. Sharing the entry made a fixed "npm:node"
-// declaration report the untouched core node version, so an applied fix still
-// looked vulnerable.
+// tool is not enriched from a lock entry a different declaration could own.
+// Sharing the entry made a fixed "npm:node" declaration report the untouched
+// core node version, so an applied fix still looked vulnerable. Ownership is
+// decided on the backend-stripped name, so two qualified declarations that
+// strip to the same name are as contested as a bare declaration of it: neither
+// may borrow the entry, which is also the case where lock pruning deliberately
+// leaves the ambiguous entry in place.
 func TestExtractDoesNotBorrowAnotherToolsLockEntry(t *testing.T) {
-	fsys := fstest.MapFS{
-		"mise.toml": {Data: []byte("[tools]\n\"npm:node\" = \"20.12.0\"\nnode = \"20.11.0\"\n")},
-		"mise.lock": {Data: []byte(`[[tools.node]]
-version = "20.11.0"
-backend = "core:node"
-`)},
-	}
-	f, err := fsys.Open("mise.toml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	inv, err := New().Extract(t.Context(), &filesystem.ScanInput{Path: "mise.toml", Reader: f, FS: fsys})
-	if err != nil {
-		t.Fatalf("Extract: %v", err)
+	tests := []struct {
+		name   string
+		config string
+		lock   string
+		want   map[string]string
+	}{
+		{
+			name:   "qualified and bare declaration",
+			config: "[tools]\n\"npm:node\" = \"20.12.0\"\nnode = \"20.11.0\"\n",
+			lock:   "[[tools.node]]\nversion = \"20.11.0\"\nbackend = \"core:node\"\n",
+			want:   map[string]string{"npm:node": "20.12.0", "node": "20.11.0"},
+		},
+		{
+			name:   "two qualified declarations of one short name",
+			config: "[tools]\n\"npm:foo\" = \"1.2.3\"\n\"ubi:foo\" = \"4.5.6\"\n",
+			lock:   "[[tools.foo]]\nversion = \"0.9.0\"\nbackend = \"npm:foo\"\n",
+			want:   map[string]string{"npm:foo": "1.2.3", "ubi:foo": "4.5.6"},
+		},
+		{
+			name:   "sole qualified declaration still matches the short name",
+			config: "[tools]\n\"npm:foo\" = \"1.2.3\"\n",
+			lock:   "[[tools.foo]]\nversion = \"0.9.0\"\nbackend = \"npm:foo\"\n",
+			want:   map[string]string{"npm:foo": "0.9.0"},
+		},
 	}
 
-	got := map[string]string{}
-	for _, pkg := range inv.Packages {
-		got[pkg.Name] = pkg.Version
-	}
-	if got["npm:node"] != "20.12.0" {
-		t.Errorf("npm:node version = %q, want 20.12.0 (its own declaration)", got["npm:node"])
-	}
-	if got["node"] != "20.11.0" {
-		t.Errorf("node version = %q, want 20.11.0 (its own lock entry)", got["node"])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fsys := fstest.MapFS{
+				"mise.toml": {Data: []byte(tt.config)},
+				"mise.lock": {Data: []byte(tt.lock)},
+			}
+			f, err := fsys.Open("mise.toml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv, err := New().Extract(t.Context(), &filesystem.ScanInput{Path: "mise.toml", Reader: f, FS: fsys})
+			if err != nil {
+				t.Fatalf("Extract: %v", err)
+			}
+
+			got := map[string]string{}
+			for _, pkg := range inv.Packages {
+				got[pkg.Name] = pkg.Version
+			}
+			for name, want := range tt.want {
+				if got[name] != want {
+					t.Errorf("%s version = %q, want %q", name, got[name], want)
+				}
+			}
+		})
 	}
 }

@@ -295,6 +295,52 @@ func TestLockfileLookup(t *testing.T) {
 // name is not borrowed when the config declares that name as a separate tool.
 // Sharing it lets a backend-qualified tool inherit the other tool's version,
 // which after a fix reports the freshly updated tool at the old version.
+func TestNameClaims(t *testing.T) {
+	tests := []struct {
+		name  string
+		tools []ToolSpec
+		want  map[string]int
+	}{
+		{
+			name:  "a bare declaration claims one name",
+			tools: []ToolSpec{{Key: "node", Name: "node"}},
+			want:  map[string]int{"node": 1},
+		},
+		{
+			name:  "a qualified declaration claims its key and its short name",
+			tools: []ToolSpec{{Key: "npm:node", Name: "node"}},
+			want:  map[string]int{"npm:node": 1, "node": 1},
+		},
+		{
+			name:  "a bare and a qualified declaration contest the short name",
+			tools: []ToolSpec{{Key: "npm:node", Name: "node"}, {Key: "node", Name: "node"}},
+			want:  map[string]int{"npm:node": 1, "node": 2},
+		},
+		{
+			name:  "two qualified declarations contest the short name",
+			tools: []ToolSpec{{Key: "npm:foo", Name: "foo"}, {Key: "ubi:foo", Name: "foo"}},
+			want:  map[string]int{"npm:foo": 1, "ubi:foo": 1, "foo": 2},
+		},
+		{
+			name:  "options do not create a second claimant",
+			tools: []ToolSpec{{Key: "ubi:cli/cli[exe=gh]", Name: "cli/cli"}},
+			want:  map[string]int{"ubi:cli/cli[exe=gh]": 1, "cli/cli": 1},
+		},
+		{
+			name:  "no declarations claim nothing",
+			tools: nil,
+			want:  map[string]int{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NameClaims(tt.tools); !maps.Equal(got, tt.want) {
+				t.Errorf("NameClaims = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLockfileLookupClaimedKeys(t *testing.T) {
 	const lock = `[[tools.node]]
 version = "20.11.0"
@@ -305,38 +351,51 @@ backend = "core:node"
 		t.Fatal(err)
 	}
 	qualified := ToolSpec{Name: "node", Key: "npm:node"}
+	sole := NameClaims([]ToolSpec{qualified})
+	bare := ToolSpec{Name: "node", Key: "node"}
+	contestedByBare := NameClaims([]ToolSpec{qualified, bare})
+	contestedByQualified := NameClaims([]ToolSpec{qualified, {Name: "node", Key: "ubi:node"}})
 
 	tests := []struct {
 		name        string
 		spec        ToolSpec
 		version     string
-		claimed     map[string]bool
+		claims      map[string]int
 		wantVersion string // "" => expect no match
 	}{
 		{
 			name: "short name free to match", spec: qualified, version: "20.12.0",
-			claimed: map[string]bool{"npm:node": true}, wantVersion: "20.11.0",
+			claims: sole, wantVersion: "20.11.0",
 		},
 		{
-			name: "short name claimed by another declaration", spec: qualified, version: "20.12.0",
-			claimed: map[string]bool{"npm:node": true, "node": true}, wantVersion: "",
+			name: "short name claimed by a bare declaration", spec: qualified, version: "20.12.0",
+			claims: contestedByBare, wantVersion: "",
+		},
+		{
+			name: "short name claimed by another qualified declaration", spec: qualified, version: "20.12.0",
+			claims: contestedByQualified, wantVersion: "",
+		},
+		{
+			name: "the other qualified declaration is refused too",
+			spec: ToolSpec{Name: "node", Key: "ubi:node"}, version: "20.12.0",
+			claims: contestedByQualified, wantVersion: "",
 		},
 		{
 			name: "exact version match also refused when claimed", spec: qualified, version: "20.11.0",
-			claimed: map[string]bool{"npm:node": true, "node": true}, wantVersion: "",
+			claims: contestedByBare, wantVersion: "",
 		},
 		{
-			name: "a tool always matches its own key", spec: ToolSpec{Name: "node", Key: "node"}, version: "20.11.0",
-			claimed: map[string]bool{"npm:node": true, "node": true}, wantVersion: "20.11.0",
+			name: "a tool always matches its own key", spec: bare, version: "20.11.0",
+			claims: contestedByBare, wantVersion: "20.11.0",
 		},
 		{
 			name: "no config context keeps the fallback", spec: qualified, version: "20.12.0",
-			claimed: nil, wantVersion: "20.11.0",
+			claims: nil, wantVersion: "20.11.0",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lt := lf.Lookup(tt.spec, tt.version, tt.claimed)
+			lt := lf.Lookup(tt.spec, tt.version, tt.claims)
 			switch {
 			case tt.wantVersion == "":
 				if lt != nil {

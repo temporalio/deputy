@@ -403,22 +403,20 @@ func miseLockKeys(root *os.Root, configRelPath string, lockData []byte, tool str
 	if name == "" || name == tool {
 		return []string{tool}
 	}
-	if mise.HasLockedTool(lockData, tool) || shortNameContested(root, configRelPath, tool, name) {
+	if mise.HasLockedTool(lockData, tool) || shortNameContested(root, configRelPath, name) {
 		return []string{tool}
 	}
 	return []string{tool, name}
 }
 
-// shortNameContested reports whether any declaration in the config other than
-// tool could be the owner of a legacy lock entry keyed by the short name.
-// Ownership is decided on the backend-stripped name rather than a literal
-// match, because every qualified declaration that strips to the same name is
-// an equally plausible claimant: with both "npm:foo" and "ubi:foo" declared,
-// no bare "foo" key appears in the config, yet a [[tools.foo]] lock entry
-// could belong to either, and pruning it while fixing one would discard the
-// other's checksums. An unreadable or unparsable config counts as contested,
-// so an ambiguous case never widens lock pruning.
-func shortNameContested(root *os.Root, relPath, tool, name string) bool {
+// shortNameContested reports whether more than one declaration in the config
+// could be the owner of a legacy lock entry keyed by the short name. It asks
+// mise.NameClaims, the same count that decides whether inventory may enrich
+// from such an entry, so pruning and enrichment cannot disagree about who owns
+// a name: an entry left in place here because it is ambiguous must also be
+// refused there. An unreadable or unparsable config counts as contested, so an
+// ambiguous case never widens lock pruning.
+func shortNameContested(root *os.Root, relPath, name string) bool {
 	data, err := fs.ReadFile(root.FS(), relPath)
 	if err != nil {
 		return true
@@ -427,9 +425,7 @@ func shortNameContested(root *os.Root, relPath, tool, name string) bool {
 	if err != nil {
 		return true
 	}
-	return slices.ContainsFunc(cfg.Tools, func(t mise.ToolSpec) bool {
-		return t.Key != tool && t.Name == name
-	})
+	return mise.NameClaims(cfg.Tools)[name] > 1
 }
 
 // pruneStaleMiseLock removes lock entries for the replaced versions from the
