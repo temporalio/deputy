@@ -1405,6 +1405,7 @@ func lookupGoProxyLicense(ctx context.Context, modulePath, version string) []str
 	if err != nil {
 		return nil
 	}
+	req.Header.Set("User-Agent", "deputy-license-scan")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil
@@ -1456,6 +1457,9 @@ func lookupCratesLicense(ctx context.Context, name, version string) []string {
 		if err != nil {
 			continue
 		}
+		// crates.io returns 403 for requests without a User-Agent, including
+		// Go's default, which made every lookup silently return nothing.
+		req.Header.Set("User-Agent", "deputy-license-scan")
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			continue
@@ -1504,6 +1508,7 @@ func lookupPackagistP2(ctx context.Context, name, version string) []string {
 	if err != nil {
 		return nil
 	}
+	req.Header.Set("User-Agent", "deputy-license-scan")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil
@@ -1565,6 +1570,7 @@ func lookupPackagistLegacy(ctx context.Context, name, version string) []string {
 	if err != nil {
 		return nil
 	}
+	req.Header.Set("User-Agent", "deputy-license-scan")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil
