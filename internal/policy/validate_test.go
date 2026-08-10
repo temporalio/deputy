@@ -315,6 +315,213 @@ policies:
 	}
 }
 
+// TestAnchorsRejectedAtEveryPosition pins that an anchor is refused wherever it
+// can appear, by both readers, with the same message. An alias is a node kind,
+// so it can stand in for a policy, a rule, a list item, a var value, or any
+// scalar, and a reader that resolves it at one position and rejects it at
+// another is the divergence this restriction removes: before the format refused
+// them, `rules: [*rule]` loaded fine and linted as "rule must be a mapping".
+func TestAnchorsRejectedAtEveryPosition(t *testing.T) {
+	cases := []struct {
+		name     string
+		bundle   string
+		wantCode string
+	}{
+		{
+			name: "a policy item",
+			bundle: `
+base: &base
+  name: aliased
+  rules:
+    - when: "true"
+      action: deny
+      reason: "r"
+
+policies:
+  - *base
+`,
+			wantCode: "yaml-anchor",
+		},
+		{
+			name: "an individual rule item",
+			bundle: `
+sharedRule: &rule
+  when: "true"
+  action: deny
+  reason: "r"
+
+policies:
+  - name: alias-rule-item
+    rules: [*rule]
+`,
+			wantCode: "yaml-anchor",
+		},
+		{
+			name: "the rules list itself",
+			bundle: `
+sharedRules: &rules
+  - when: "true"
+    action: deny
+    reason: "r"
+
+policies:
+  - name: alias-rules-list
+    rules: *rules
+`,
+			wantCode: "yaml-anchor",
+		},
+		{
+			name: "a vars value",
+			bundle: `
+blockedList: &blocked '["left-pad"]'
+
+policies:
+  - name: alias-var-value
+    vars:
+      blocked: *blocked
+    rules:
+      - when: "pkg.name in blocked"
+        action: deny
+        reason: "r"
+`,
+			wantCode: "yaml-anchor",
+		},
+		{
+			name: "the vars mapping itself",
+			bundle: `
+sharedVars: &vars
+  blocked: '["left-pad"]'
+
+policies:
+  - name: alias-vars-mapping
+    vars: *vars
+    rules:
+      - when: "pkg.name in blocked"
+        action: deny
+        reason: "r"
+`,
+			wantCode: "yaml-anchor",
+		},
+		{
+			name: "a nested sequence item",
+			bundle: `
+eco: &eco "npm"
+
+policies:
+  - name: alias-nested-seq
+    ecosystems: [*eco]
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+			wantCode: "yaml-anchor",
+		},
+		{
+			name: "a scalar field",
+			bundle: `
+policyName: &name "aliased-name"
+
+policies:
+  - name: *name
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+			wantCode: "yaml-anchor",
+		},
+		{
+			name:     "the policies list itself",
+			bundle:   "policies: &loop\n  - *loop\n",
+			wantCode: "yaml-anchor",
+		},
+		{
+			name: "an anchor that is never referenced",
+			bundle: `
+unused: &unused
+  name: never-referenced
+
+policies:
+  - name: plain
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+			wantCode: "yaml-anchor",
+		},
+		{
+			name: "a merge key on a policy",
+			bundle: `
+defaults: &defaults
+  rules:
+    - when: "true"
+      action: deny
+      reason: "r"
+
+policies:
+  - <<: *defaults
+    name: merged-policy
+`,
+			wantCode: "yaml-merge-key",
+		},
+		{
+			name: "a merge key inside a rule",
+			bundle: `
+ruleDefaults: &ruleDefaults
+  action: deny
+  reason: "r"
+
+policies:
+  - name: merged-rule
+    rules:
+      - <<: *ruleDefaults
+        when: "true"
+`,
+			wantCode: "yaml-merge-key",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{Source: "bundle.yaml"})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			var codes []string
+			for _, issue := range issues {
+				codes = append(codes, issue.Code)
+			}
+			if !slices.Contains(codes, tc.wantCode) {
+				t.Fatalf("expected issue code %q, got %v: %v", tc.wantCode, codes, issues)
+			}
+			for _, issue := range issues {
+				if issue.Line <= 0 {
+					t.Fatalf("issue %v should name the line the construct is on", issue)
+				}
+			}
+
+			// The loader has to refuse the same document, or a bundle that lints
+			// as broken would still compile.
+			_, loadErr := ParseStructuredSources([]byte(tc.bundle), "bundle.yaml")
+			if loadErr == nil {
+				t.Fatal("expected the loader to reject the bundle too")
+			}
+			if !strings.Contains(loadErr.Error(), "policy bundles do not support YAML") {
+				t.Fatalf("loader error %q should refuse the construct by name", loadErr)
+			}
+			for _, want := range []string{"--policy file", "vars:"} {
+				if !strings.Contains(loadErr.Error(), want) {
+					t.Fatalf("loader error %q should point at %q", loadErr, want)
+				}
+				if !strings.Contains(issues[0].Message, want) {
+					t.Fatalf("issue message %q should point at %q", issues[0].Message, want)
+				}
+			}
+		})
+	}
+}
+
 // TestValidateBundleAgreesWithLoader pins the equivalence the two paths must
 // keep: a bundle the loader compiles has to validate clean, and one the loader
 // rejects has to be reported. Validation walks YAML nodes while the loader
