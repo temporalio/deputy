@@ -181,12 +181,18 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
   place would lie), which stops scans from re-reporting the old locked
   version. Lock discovery follows mise's own naming rather than swapping the
   manifest's suffix, so a leading dot is dropped (`.mise.toml` locks as
-  `mise.lock`, not `.mise.lock`), a `config.toml` inside a `mise` directory
-  locks as `mise.lock` in that directory, and `conf.d` drop-ins share the
+  `mise.lock`, not `.mise.lock`), a config inside a `mise` or `.mise`
+  directory is named for the directory while keeping any environment segment
+  (`.config/mise/config.toml` locks as `.config/mise/mise.lock`, and
+  `.config/mise/config.production.toml` as
+  `.config/mise/mise.production.lock`), and `conf.d` drop-ins share the
   enclosing `mise` directory's lockfile. Only the edited tool's own lock key
   is pruned, so a config that declares both `"npm:node"` and `node` keeps the
-  untouched declaration's integrity metadata. After applying, run
-  `mise install` to install the updated tool and re-lock it.
+  untouched declaration's integrity metadata. A legacy entry keyed by a bare
+  short name that more than one declaration could own (`"npm:foo"` and
+  `"ubi:foo"` with a `[[tools.foo]]` entry) is left alone, and inventory will
+  not read it either. After applying, run `mise install` to install the
+  updated tool and re-lock it.
 - Applying is idempotent, so a run interrupted between the config edit and the
   lockfile prune can simply be re-run to finish.
 
