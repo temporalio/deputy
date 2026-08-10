@@ -240,7 +240,45 @@ func convertProtoValue(v any) any {
 		}
 		return out
 	}
-	return v
+	return convertProtoContainer(v)
+}
+
+// protoMessageType is the interface every generated message satisfies, used to
+// recognize typed containers of protos by reflection.
+var protoMessageType = reflect.TypeFor[proto.Message]()
+
+// convertProtoContainer converts a typed container of proto messages, such as
+// the []*diffv1.ContainerPackageChange and map[string]*vulnerabilityv1.Advisory
+// values CLI commands put in a payload, into the generic []any and
+// map[string]any shapes the rest of the pipeline understands. Without this a
+// typed slice stays opaque: CEL cannot adapt its elements ("unknown type") and
+// the canonicalization walk cannot descend into them. Values that are not
+// containers of protos are returned unchanged, so scalar slices such as
+// []string and []byte keep their type.
+func convertProtoContainer(v any) any {
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		if !rv.Type().Elem().Implements(protoMessageType) {
+			return v
+		}
+		out := make([]any, rv.Len())
+		for i := range out {
+			out[i] = convertProtoValue(rv.Index(i).Interface())
+		}
+		return out
+	case reflect.Map:
+		if rv.Type().Key().Kind() != reflect.String || !rv.Type().Elem().Implements(protoMessageType) {
+			return v
+		}
+		out := make(map[string]any, rv.Len())
+		for iter := rv.MapRange(); iter.Next(); {
+			out[iter.Key().String()] = convertProtoValue(iter.Value().Interface())
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // Compile verifies that the CEL source parses and type-checks using the
