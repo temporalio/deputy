@@ -784,7 +784,7 @@ func dryRunStep(position, total int, step *remediationv1.Step) (string, dryRunOu
 	}
 
 	if remediation.IsDeputyInternalCommand(cmd) {
-		if _, err := remediation.ParseCommandArgs(cmd); err != nil {
+		if _, err := remediation.ValidateDeputyCommand(cmd); err != nil {
 			return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, err), dryRunWouldReject
 		}
 		return fmt.Sprintf("[dry run] Step %d/%d would apply: %s", position, total, cmd), dryRunWouldRun
