@@ -16,6 +16,7 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/policy"
 	"github.com/temporalio/deputy/internal/proto/descriptorset"
 )
@@ -27,9 +28,30 @@ import (
 //	<!-- END GENERATED: policy-entrypoints -->
 const PolicyEntrypointsSection = "policy-entrypoints"
 
+// CanonicalEcosystemsSection names the generated canonical ecosystem table.
+// The markers on disk look like:
+//
+//	<!-- BEGIN GENERATED: canonical-ecosystems -->
+//	<!-- END GENERATED: canonical-ecosystems -->
+const CanonicalEcosystemsSection = "canonical-ecosystems"
+
 // PolicyInputsDocPath is the documentation file that carries the generated
 // policy entrypoint reference, relative to the repository root.
 const PolicyInputsDocPath = "docs/reference/policy-inputs.md"
+
+// CanonicalEcosystemsMarkdown renders the ecosystem vocabulary policies compare
+// against: every canonical token with the display name Deputy renders for it.
+// Both come from the ecosystem registry, so adding an ecosystem updates the
+// docs instead of leaving a hand-copied list to drift.
+func CanonicalEcosystemsMarkdown() string {
+	var b strings.Builder
+	b.WriteString("| Canonical token | Display name |\n")
+	b.WriteString("| --- | --- |\n")
+	for _, token := range ecosystem.CanonicalEcosystems() {
+		b.WriteString(fmt.Sprintf("| `%s` | %s |\n", token, tableCell(ecosystem.Display(ecosystem.Ecosystem(token)))))
+	}
+	return b.String()
+}
 
 // PolicyEntrypointsMarkdown renders the policy entrypoint reference: every
 // entrypoint's variables from the binding-profile registry, and the

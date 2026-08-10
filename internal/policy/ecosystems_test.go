@@ -465,3 +465,57 @@ func TestStructuredBundleEcosystemValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateEcosystemsAcceptsScalibrEcosystems pins that a policy can scope
+// itself to the ecosystems Deputy inventories through OSV-SCALIBR. Rejecting
+// them would make the ecosystems: key unusable for Haskell, R, and C++ scans
+// that the --ecosystems filter already supports.
+func TestValidateEcosystemsAcceptsScalibrEcosystems(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{name: "scanner spellings", in: []string{"Hackage", "CRAN", "ConanCenter"}, want: []string{"hackage", "cran", "conancenter"}},
+		{name: "filter spellings", in: []string{"haskell", "r", "cpp"}, want: []string{"hackage", "cran", "conancenter"}},
+		{name: "tool spellings", in: []string{"cabal", "renv", "conan"}, want: []string{"hackage", "cran", "conancenter"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := validateEcosystems(tt.in)
+			if err != nil {
+				t.Fatalf("validateEcosystems(%v): %v", tt.in, err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("validateEcosystems(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestScalibrEcosystemGuardMatchesScannerSpelling closes the loop for those
+// ecosystems: the guard a bundle generates from ecosystems: ["haskell"] has to
+// match a package whose scanner-reported ecosystem is "Hackage".
+func TestScalibrEcosystemGuardMatchesScannerSpelling(t *testing.T) {
+	sources, err := ParseStructuredSources([]byte(`policies:
+  - name: haskell-scoped
+    ecosystems: ["haskell"]
+    rules:
+      - action: deny
+        when: pkg.name != ""
+        reason: matched
+`), "haskell.yaml")
+	if err != nil {
+		t.Fatalf("ParseStructuredSources: %v", err)
+	}
+
+	payload := map[string]any{"pkg": map[string]any{"name": "aeson", "ecosystem": "Hackage", "version": "2.2.1"}}
+	actions, err := EvaluateMap(t.Context(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateMap: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Type != ActionDeny {
+		t.Fatalf(`ecosystems: ["haskell"] did not match a "Hackage" package: actions=%v`, actions)
+	}
+}

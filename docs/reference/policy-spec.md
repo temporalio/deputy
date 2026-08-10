@@ -97,7 +97,7 @@ Canonical entrypoints (snake_case):
 - String vars are CEL expressions; non-string values are treated as literals. Rules must include `action` and `when`.
 - `mode`, if set, must be `enforce` or `advisory`.
 - `ecosystems`, if set, must name known ecosystems. Values are case- and alias-insensitive (`Go`, `golang`, and `go` are all accepted) and are normalized to the canonical token; an unknown value is a load error naming the valid set.
-- Canonical ecosystem tokens: `asdf`, `cargo`, `cocoapods`, `docker`, `github-actions`, `go`, `hex`, `maven`, `mise`, `npm`, `nuget`, `oci`, `packagist`, `pub`, `pypi`, `rubygems`. Policies always see these tokens, never display names such as `Go`, `PyPI`, or `GitHub Actions`.
+- Policies always see canonical ecosystem tokens, never display names such as `Go`, `PyPI`, or `GitHub Actions`. The token table is generated from the ecosystem registry in [policy inputs](policy-inputs.md#canonical-ecosystems).
 
 ## Examples
 
