@@ -434,7 +434,7 @@ func (h *RemediationHandler) ExecutePlan(
 		// commands count toward the would-execute total; manual and
 		// commandless steps are described but never run.
 		if dryRun {
-			message, outcome := dryRunStep(i+1, len(steps), step)
+			message, outcome := dryRunStep(i+1, len(steps), step, processTreeTerminationSupported)
 			phase := remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING
 			switch outcome {
 			case dryRunWouldRun:
@@ -774,7 +774,7 @@ const (
 // Deputy-internal commands are validated only for parseability: they are
 // applied in process rather than executed, so ExecArgs does not apply to
 // them, and their argument-level checks live in the apply path.
-func dryRunStep(position, total int, step *remediationv1.Step) (string, dryRunOutcome) {
+func dryRunStep(position, total int, step *remediationv1.Step, treeTerminationSupported bool) (string, dryRunOutcome) {
 	cmd := step.GetCommand()
 	switch {
 	case cmd == "":
@@ -788,6 +788,13 @@ func dryRunStep(position, total int, step *remediationv1.Step) (string, dryRunOu
 			return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, err), dryRunWouldReject
 		}
 		return fmt.Sprintf("[dry run] Step %d/%d would apply: %s", position, total, cmd), dryRunWouldRun
+	}
+
+	// Predict the platform refusal: where cancellation cannot bound a
+	// command's descendants, executeStep refuses every external command, so
+	// reporting one as runnable would promise work this build will not do.
+	if !treeTerminationSupported {
+		return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, errProcessTreeUnbounded), dryRunWouldReject
 	}
 
 	if _, err := remediation.ExecArgs(remediation.Command{

@@ -333,6 +333,52 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			wantFinalPhase: remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
 		},
 		{
+			name:    "dry run rejects an unknown deputy opcode",
+			options: &remediationv1.ExecutionOptions{DryRun: true},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "bogus", Command: "deputy:unknown foo", Executable: true},
+			},
+			wantExecuted: nil,
+			wantMessages: []string{
+				"[dry run] Step 3/3 would be rejected: deputy:unknown foo",
+				"unknown deputy command: deputy:unknown",
+				"Dry run complete: 2 steps would execute, 1 would be rejected, nothing was changed",
+			},
+			wantFinalPhase: remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
+		},
+		{
+			name:    "dry run rejects a deputy command with too few arguments",
+			options: &remediationv1.ExecutionOptions{DryRun: true},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "truncated", Command: "deputy:action:update file.yml", Executable: true},
+			},
+			wantExecuted: nil,
+			wantMessages: []string{
+				"[dry run] Step 3/3 would be rejected: deputy:action:update file.yml",
+				"expected 4 parts, got 2",
+			},
+			wantFinalPhase: remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
+		},
+		{
+			name:    "duplicate step ids are rejected",
+			options: nil,
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-1", Title: "collides", Command: "go mod tidy", Manager: "go", Executable: true},
+			},
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			name:    "synthesized id colliding with an explicit id is rejected",
+			options: nil,
+			extraSteps: []*remediationv1.Step{
+				// This step has no ID, so it is addressed as step-3, which
+				// the next step already claims explicitly.
+				{Title: "unnamed", Command: "go mod verify", Manager: "go", Executable: true},
+				{Id: "step-3", Title: "explicit", Command: "go mod tidy", Manager: "go", Executable: true},
+			},
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
 			name:    "dry run accepts a well formed deputy internal step",
 			options: &remediationv1.ExecutionOptions{DryRun: true},
 			extraSteps: []*remediationv1.Step{
@@ -619,6 +665,59 @@ func TestStepFailureCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := stepFailureCode(tt.ctx, tt.err); got != tt.want {
 				t.Fatalf("stepFailureCode = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDryRunStepPlatformRefusal pins that preflight predicts the platform
+// refusal: on a build where cancellation cannot bound a command's
+// descendants, executeStep refuses every external command, so a dry run must
+// report those steps as rejected rather than as work that would happen. The
+// capability is a parameter so both platform branches are exercised here
+// regardless of the host running the test.
+func TestDryRunStepPlatformRefusal(t *testing.T) {
+	external := &remediationv1.Step{Id: "step-1", Title: "bump", Command: "go get example.com/widget@v1.5.0", Manager: "go", Executable: true}
+	internal := &remediationv1.Step{Id: "step-2", Title: "pin", Command: "deputy:action:pin .github/workflows/ci.yml actions/checkout abc123 v4", Executable: true}
+
+	tests := []struct {
+		name        string
+		step        *remediationv1.Step
+		treeBounded bool
+		want        dryRunOutcome
+		wantMessage string
+	}{
+		{
+			name:        "external command runs where descendants can be bounded",
+			step:        external,
+			treeBounded: true,
+			want:        dryRunWouldRun,
+			wantMessage: "would execute",
+		},
+		{
+			name:        "external command is rejected where they cannot",
+			step:        external,
+			treeBounded: false,
+			want:        dryRunWouldReject,
+			wantMessage: "cannot terminate a command's child processes",
+		},
+		{
+			name:        "deputy internal command runs on either platform",
+			step:        internal,
+			treeBounded: false,
+			want:        dryRunWouldRun,
+			wantMessage: "would apply",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, got := dryRunStep(1, 1, tt.step, tt.treeBounded)
+			if got != tt.want {
+				t.Fatalf("outcome = %v, want %v (message %q)", got, tt.want, msg)
+			}
+			if !strings.Contains(msg, tt.wantMessage) {
+				t.Fatalf("message %q does not contain %q", msg, tt.wantMessage)
 			}
 		})
 	}
