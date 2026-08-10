@@ -230,6 +230,100 @@ policies:
 			bundle:    "rules: []\n",
 			wantCodes: []string{"missing-policies"},
 		},
+		{
+			name: "a policy written as an alias is validated",
+			bundle: `
+base: &base
+  name: aliased
+  entrypoints: ["scan_vulnerability"]
+  rules:
+    - when: "true"
+      action: deny
+      reason: "aliased policy"
+
+policies:
+  - *base
+`,
+		},
+		{
+			name: "merge keys supply inherited fields",
+			bundle: `
+defaults: &defaults
+  entrypoints: ["scan_vulnerability"]
+  rules:
+    - when: "true"
+      action: deny
+      reason: "inherited rule"
+
+policies:
+  - <<: *defaults
+    name: inherits-rules
+`,
+		},
+		{
+			name: "a direct key overrides the one it merges in",
+			bundle: `
+defaults: &defaults
+  mode: enfroce
+  rules:
+    - when: "true"
+      action: deny
+      reason: "r"
+
+policies:
+  - <<: *defaults
+    name: overrides-mode
+    mode: advisory
+`,
+		},
+		{
+			name: "a defect inside an anchor is still reported",
+			bundle: `
+base: &base
+  name: aliased
+  rules:
+    - when: "true"
+      action: dney
+      reason: "bad action inside an anchor"
+
+policies:
+  - *base
+`,
+			wantCodes: []string{"invalid-action"},
+			wantText:  []string{`invalid action "dney"`},
+		},
+		{
+			name: "a defect inherited through a merge key is still reported",
+			bundle: `
+defaults: &defaults
+  mode: enfroce
+  rules:
+    - when: "true"
+      action: deny
+      reason: "r"
+
+policies:
+  - <<: *defaults
+    name: inherits-bad-mode
+`,
+			wantCodes: []string{"invalid-mode"},
+			wantText:  []string{`invalid mode "enfroce"`},
+		},
+		{
+			name: "an alias to something that is not a policy is rejected",
+			bundle: `
+base: &base "just a string"
+
+policies:
+  - *base
+`,
+			wantCodes: []string{"policy-not-mapping"},
+		},
+		{
+			name:      "a self-referential anchor terminates",
+			bundle:    "policies: &loop\n  - *loop\n",
+			wantCodes: []string{"policy-not-mapping"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -256,6 +350,113 @@ policies:
 				if !strings.Contains(rendered.String(), want) {
 					t.Fatalf("expected output to mention %q, got:\n%s", want, rendered.String())
 				}
+			}
+		})
+	}
+}
+
+// TestValidateBundleAgreesWithLoader pins the equivalence the two paths must
+// keep: a bundle the loader compiles has to validate clean, and one the loader
+// rejects has to be reported. Validation walks YAML nodes while the loader
+// decodes into Go types, so anything the decoder resolves for free, aliases and
+// merge keys among them, has to be resolved by the walk as well.
+func TestValidateBundleAgreesWithLoader(t *testing.T) {
+	cases := []struct {
+		name   string
+		bundle string
+	}{
+		{
+			name: "plain policy",
+			bundle: `
+policies:
+  - name: plain
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "policy written as an alias",
+			bundle: `
+base: &base
+  name: aliased
+  rules:
+    - when: "true"
+      action: deny
+      reason: "r"
+
+policies:
+  - *base
+`,
+		},
+		{
+			name: "fields inherited through a merge key",
+			bundle: `
+defaults: &defaults
+  rules:
+    - when: "true"
+      action: deny
+      reason: "r"
+
+policies:
+  - <<: *defaults
+    name: inherits
+`,
+		},
+		{
+			name: "rules supplied by an alias",
+			bundle: `
+sharedRules: &sharedRules
+  - when: "true"
+    action: warn
+    reason: "r"
+
+policies:
+  - name: alias-rules
+    rules: *sharedRules
+`,
+		},
+		{
+			name: "unknown action inside an anchor",
+			bundle: `
+base: &base
+  name: aliased
+  rules:
+    - when: "true"
+      action: dney
+      reason: "r"
+
+policies:
+  - *base
+`,
+		},
+		{
+			name: "invalid mode inherited through a merge key",
+			bundle: `
+defaults: &defaults
+  mode: enfroce
+  rules:
+    - when: "true"
+      action: deny
+      reason: "r"
+
+policies:
+  - <<: *defaults
+    name: inherits-bad-mode
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, loadErr := ParseStructuredSources([]byte(tc.bundle), "bundle.yaml")
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{Source: "bundle.yaml"})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			reported := slices.ContainsFunc(issues, func(i Issue) bool { return i.Severity != IssueHint })
+			if reported != (loadErr != nil) {
+				t.Fatalf("validation reported=%v but loader error=%v; issues=%v", reported, loadErr, issues)
 			}
 		})
 	}

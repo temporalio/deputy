@@ -162,9 +162,13 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 		return append(issues, issueAt(policiesNode, IssueError, "policies-not-list", "'policies' must be a list")), nil
 	}
 	seenNames := map[string]struct{}{}
-	for _, item := range policiesNode.Content {
-		if item.Kind != yaml.MappingNode {
-			issues = append(issues, issueAt(item, IssueError, "policy-not-mapping", "policy must be a mapping"))
+	for _, entry := range policiesNode.Content {
+		// A policy may be written as an alias to an anchor defined elsewhere in
+		// the document. Report against the alias, which is where the author can
+		// see the problem, but validate what it points at.
+		item := ResolveAlias(entry)
+		if item == nil || item.Kind != yaml.MappingNode {
+			issues = append(issues, issueAt(entry, IssueError, "policy-not-mapping", "policy must be a mapping"))
 			continue
 		}
 		issues = append(issues, validatePolicyNode(item, seenNames, opts)...)
@@ -462,24 +466,83 @@ func DeclaredVarNames(policyNode *yaml.Node) []string {
 	}
 	for i := 0; i+1 < len(varsNode.Content); i += 2 {
 		k := varsNode.Content[i]
-		if k.Kind == yaml.ScalarNode && strings.TrimSpace(k.Value) != "" {
+		if k.Kind == yaml.ScalarNode && !isMergeKey(k) && strings.TrimSpace(k.Value) != "" {
 			names = append(names, k.Value)
 		}
 	}
 	return names
 }
 
+// aliasDepthLimit bounds how far alias and merge-key resolution will follow
+// references. YAML anchors can be nested, but a document deep enough to exceed
+// this is either generated or malicious, and refusing to follow it keeps
+// validation from looping on a self-referential anchor.
+const aliasDepthLimit = 32
+
+// ResolveAlias follows a YAML alias to the node its anchor defines, so callers
+// can treat `- *policy` exactly as the typed decoder does. A node that is not an
+// alias is returned unchanged.
+func ResolveAlias(node *yaml.Node) *yaml.Node {
+	for depth := 0; node != nil && node.Kind == yaml.AliasNode; depth++ {
+		if depth >= aliasDepthLimit {
+			return nil
+		}
+		node = node.Alias
+	}
+	return node
+}
+
 // MappingValue returns the value node for a key inside a YAML mapping node, or
-// nil when the node is not a mapping or the key is absent.
+// nil when the node is not a mapping or the key is absent. Aliases are followed
+// on both the mapping and the value, and merge keys are searched after the
+// mapping's own keys, matching how the decoder resolves inherited fields: a key
+// written directly on a policy overrides one it merges in.
 func MappingValue(mapNode *yaml.Node, key string) *yaml.Node {
-	if mapNode == nil || mapNode.Kind != yaml.MappingNode {
+	return mappingValue(mapNode, key, 0)
+}
+
+// mappingValue is MappingValue with the recursion depth that merge keys need,
+// since a merged mapping may itself merge from another.
+func mappingValue(mapNode *yaml.Node, key string, depth int) *yaml.Node {
+	node := ResolveAlias(mapNode)
+	if node == nil || node.Kind != yaml.MappingNode || depth >= aliasDepthLimit {
 		return nil
 	}
-	for i := 0; i+1 < len(mapNode.Content); i += 2 {
-		k := mapNode.Content[i]
-		if k.Kind == yaml.ScalarNode && k.Value == key {
-			return mapNode.Content[i+1]
+	var merges []*yaml.Node
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		k := node.Content[i]
+		if k.Kind != yaml.ScalarNode {
+			continue
+		}
+		if k.Value == key {
+			return ResolveAlias(node.Content[i+1])
+		}
+		if isMergeKey(k) {
+			merges = append(merges, node.Content[i+1])
+		}
+	}
+	for _, merge := range merges {
+		merged := ResolveAlias(merge)
+		if merged == nil {
+			continue
+		}
+		if merged.Kind == yaml.SequenceNode {
+			for _, item := range merged.Content {
+				if value := mappingValue(item, key, depth+1); value != nil {
+					return value
+				}
+			}
+			continue
+		}
+		if value := mappingValue(merged, key, depth+1); value != nil {
+			return value
 		}
 	}
 	return nil
+}
+
+// isMergeKey reports whether a mapping key is YAML's merge key, the "<<" that
+// pulls another mapping's entries into this one.
+func isMergeKey(key *yaml.Node) bool {
+	return key.Tag == "!!merge" || key.Value == "<<"
 }
