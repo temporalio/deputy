@@ -360,6 +360,33 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			wantFinalPhase: remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
 		},
 		{
+			name:    "dry run rejects a manifest path that escapes the work directory",
+			options: &remediationv1.ExecutionOptions{DryRun: true},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "tidy elsewhere", Command: "go mod tidy", Manager: "go", Executable: true, ManifestPath: "../outside/go.mod"},
+			},
+			wantExecuted: nil,
+			wantMessages: []string{
+				"[dry run] Step 3/3 would be rejected: go mod tidy",
+				`manifest path "../outside/go.mod" escapes the work directory`,
+				"Dry run complete: 2 steps would execute, 1 would be rejected, nothing was changed",
+			},
+			wantMissing:    []string{"[dry run] Step 3/3 would execute"},
+			wantFinalPhase: remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
+		},
+		{
+			name:    "dry run accepts a manifest path inside the work directory",
+			options: &remediationv1.ExecutionOptions{DryRun: true},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "tidy nested", Command: "go mod tidy", Manager: "go", Executable: true, ManifestPath: "services/api/go.mod"},
+			},
+			wantExecuted: nil,
+			wantMessages: []string{
+				"[dry run] Step 3/3 would execute: go mod tidy",
+				"Dry run complete: 3 steps would execute, nothing was changed",
+			},
+		},
+		{
 			name:    "duplicate step ids are rejected",
 			options: nil,
 			extraSteps: []*remediationv1.Step{
@@ -712,12 +739,77 @@ func TestDryRunStepPlatformRefusal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg, got := dryRunStep(1, 1, tt.step, tt.treeBounded)
+			msg, got := dryRunStep(1, 1, t.TempDir(), tt.step, tt.treeBounded)
 			if got != tt.want {
 				t.Fatalf("outcome = %v, want %v (message %q)", got, tt.want, msg)
 			}
 			if !strings.Contains(msg, tt.wantMessage) {
 				t.Fatalf("message %q does not contain %q", msg, tt.wantMessage)
+			}
+		})
+	}
+}
+
+// TestDryRunMatchesExecutionRejection pins that preflight and execution refuse
+// the same step for the same reason, with the same precedence. A dry run whose
+// verdict disagrees with the run it predicts is worse than no dry run: it
+// reports a step as runnable that execution refuses, or blames a different
+// check than the one that would actually fire.
+func TestDryRunMatchesExecutionRejection(t *testing.T) {
+	tests := []struct {
+		name string
+		step *remediationv1.Step
+		// wantReason is the substring both paths must report. It is left
+		// empty for rows whose refusal is platform dependent.
+		wantReason string
+		// needsProcessTree marks rows that only reach their check on a
+		// platform where cancellation can bound a command's descendants;
+		// elsewhere both paths refuse earlier, for the same reason as each
+		// other but not the one under test.
+		needsProcessTree bool
+	}{
+		{
+			name:       "manifest path escaping the work directory",
+			step:       &remediationv1.Step{Id: "step-1", Title: "tidy elsewhere", Command: "go mod tidy", Manager: "go", Executable: true, ManifestPath: "../outside/go.mod"},
+			wantReason: `manifest path "../outside/go.mod" escapes the work directory`,
+		},
+		{
+			name:       "containment is checked before the executable allowlist",
+			step:       &remediationv1.Step{Id: "step-1", Title: "wrong manager elsewhere", Command: "npm install left-pad", Manager: "go", Executable: true, ManifestPath: "../outside/package.json"},
+			wantReason: `manifest path "../outside/package.json" escapes the work directory`,
+		},
+		{
+			name:             "contained manifest path falls through to the executable allowlist",
+			step:             &remediationv1.Step{Id: "step-1", Title: "wrong manager", Command: "npm install left-pad", Manager: "go", Executable: true, ManifestPath: "services/api/package.json"},
+			wantReason:       `executable "npm" not allowed for manager "go"`,
+			needsProcessTree: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.needsProcessTree && !processTreeTerminationSupported {
+				t.Skip("this platform refuses external commands before the check under test")
+			}
+			workDir := t.TempDir()
+
+			message, outcome := dryRunStep(1, 1, workDir, tt.step, processTreeTerminationSupported)
+			if outcome != dryRunWouldReject {
+				t.Fatalf("dry run outcome = %v, want dryRunWouldReject (message %q)", outcome, message)
+			}
+
+			output, execErr := executeStep(t.Context(), workDir, tt.step)
+			if execErr == nil {
+				t.Fatalf("executeStep accepted the step, output %q", output)
+			}
+			if !strings.Contains(message, execErr.Error()) {
+				t.Fatalf("dry run message %q does not report the execution error %q", message, execErr)
+			}
+			if !strings.Contains(message, tt.wantReason) {
+				t.Fatalf("dry run message %q does not contain %q", message, tt.wantReason)
+			}
+			if !strings.Contains(execErr.Error(), tt.wantReason) {
+				t.Fatalf("execution error %q does not contain %q", execErr, tt.wantReason)
 			}
 		})
 	}

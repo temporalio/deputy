@@ -434,7 +434,7 @@ func (h *RemediationHandler) ExecutePlan(
 		// commands count toward the would-execute total; manual and
 		// commandless steps are described but never run.
 		if dryRun {
-			message, outcome := dryRunStep(i+1, len(steps), step, processTreeTerminationSupported)
+			message, outcome := dryRunStep(i+1, len(steps), absWorkDir, step, processTreeTerminationSupported)
 			phase := remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING
 			switch outcome {
 			case dryRunWouldRun:
@@ -779,15 +779,17 @@ const (
 
 // dryRunStep predicts what a real run would do with a step and describes it,
 // without executing or mutating anything. Prediction is the entire point of a
-// dry run, so it performs the same non-mutating validation the real path does
-// (command parsing and the manager executable allowlist, via
-// remediation.ExecArgs). Without that, a step whose manager and command
-// disagree would be reported as runnable and then fail for real.
+// dry run, so it performs the same non-mutating validation the real path does,
+// in the same order: manifest path containment against workDir (stepExecDir),
+// the platform refusal, then command parsing and the manager executable
+// allowlist (remediation.ExecArgs). Without that, a step whose manifest path
+// escapes the work directory, or whose manager and command disagree, would be
+// reported as runnable and then fail for real.
 //
 // Deputy-internal commands are validated only for parseability: they are
 // applied in process rather than executed, so ExecArgs does not apply to
 // them, and their argument-level checks live in the apply path.
-func dryRunStep(position, total int, step *remediationv1.Step, treeTerminationSupported bool) (string, dryRunOutcome) {
+func dryRunStep(position, total int, workDir string, step *remediationv1.Step, treeTerminationSupported bool) (string, dryRunOutcome) {
 	cmd := step.GetCommand()
 	switch {
 	case cmd == "":
@@ -801,6 +803,13 @@ func dryRunStep(position, total int, step *remediationv1.Step, treeTerminationSu
 			return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, err), dryRunWouldReject
 		}
 		return fmt.Sprintf("[dry run] Step %d/%d would apply: %s", position, total, cmd), dryRunWouldRun
+	}
+
+	// Predict the containment refusal, in the order executeStep applies it:
+	// before the platform check and before the executable allowlist, so a
+	// preview blames the same check a real run would.
+	if _, err := stepExecDir(workDir, step); err != nil {
+		return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, err), dryRunWouldReject
 	}
 
 	// Predict the platform refusal: where cancellation cannot bound a
@@ -858,6 +867,29 @@ func resolveWorkDir(dir string) (string, error) {
 	return absPath, nil
 }
 
+// stepExecDir resolves the directory a step's command runs in and confines it
+// to the work directory. A step's manifest path is plan data, so a crafted ../
+// path must not steer command execution outside the workspace the caller
+// targeted. Execution and dry run both resolve through here so a preview can
+// never report a step as runnable that execution would refuse, and so both
+// report the refusal identically.
+func stepExecDir(workDir string, step *remediationv1.Step) (string, error) {
+	manifestPath := step.GetManifestPath()
+	if manifestPath == "" {
+		return workDir, nil
+	}
+	relDir := filepath.Dir(manifestPath)
+	if relDir == "." || relDir == "" {
+		return workDir, nil
+	}
+	candidate := filepath.Join(workDir, relDir)
+	rel, err := filepath.Rel(workDir, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("manifest path %q escapes the work directory", manifestPath)
+	}
+	return candidate, nil
+}
+
 // executeStep runs a single remediation step and returns output.
 func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) (string, error) {
 	// Both execution paths must respect cancellation: exec.CommandContext
@@ -888,20 +920,10 @@ func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) 
 		return fmt.Sprintf("Applied: %s", cmd), nil
 	}
 
-	// Determine execution directory. The manifest path is plan data, so
-	// confine the resolved directory to the work directory: a crafted
-	// ../ path must not steer command execution outside it.
-	execDir := workDir
-	if manifestPath := step.GetManifestPath(); manifestPath != "" {
-		relDir := filepath.Dir(manifestPath)
-		if relDir != "." && relDir != "" {
-			candidate := filepath.Join(workDir, relDir)
-			rel, err := filepath.Rel(workDir, candidate)
-			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				return "", fmt.Errorf("manifest path %q escapes the work directory", manifestPath)
-			}
-			execDir = candidate
-		}
+	// Determine execution directory, confined to the work directory.
+	execDir, err := stepExecDir(workDir, step)
+	if err != nil {
+		return "", err
 	}
 
 	// Fail closed where the timeout cannot bound the process tree. Running
