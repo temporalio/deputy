@@ -117,6 +117,11 @@ type Result struct {
 	Origin string
 	// Packages is the raw list of packages discovered by the inventory scanner.
 	Packages []*extractor.Package
+	// Direct marks which of Packages are direct dependencies, keyed the way
+	// [protoconv.ExtractorPackageIsDirect] expects (module roots for Go, PURL
+	// strings otherwise). It is nil when the target carries no manifest to
+	// derive directness from, such as a container image.
+	Direct map[string]bool
 }
 
 // Generate builds an SBOM document for repoPath (local) or a remote reference.
@@ -284,6 +289,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	result.Origin = origin
 	result.Document = doc
 	result.Packages = pkgs
+	result.Direct = directDeps
 	targetKind := targets.KindGit
 	if nonGit {
 		targetKind = targets.KindDir
