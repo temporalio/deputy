@@ -2,6 +2,7 @@ package remediation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -87,7 +88,38 @@ func resolveDeputyCommand(repoDir, cmd string) ([]string, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid file path: %w", err)
 	}
+	if err := requireRegularFile(file); err != nil {
+		return nil, "", err
+	}
 	return parts, file, nil
+}
+
+// requireRegularFile refuses a deputy-internal command whose target exists but
+// is not a regular file.
+//
+// Every opcode reads its target whole and writes it back, and neither operation
+// is interruptible once it has begun: opening a FIFO that has no writer blocks
+// until one appears, and a context cannot cancel a read already blocked in the
+// kernel. A plan naming a FIFO would therefore hold its step, and the RPC
+// serving it, past the execution timeout no matter how carefully the apply path
+// checks its deadline. Refusing up front is what keeps that timeout meaningful.
+//
+// Workflow files, action manifests, and Dockerfiles are regular files, so this
+// rejects nothing a real plan asks for. A target that does not exist is left
+// alone: the opcode reports it with the path it tried to read, which says more
+// than a generic refusal would.
+func requireRegularFile(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("checking %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", path)
+	}
+	return nil
 }
 
 // ApplyDeputyCommand executes a deputy-internal command.
@@ -425,8 +457,9 @@ func applyDockerfileUpdate(ctx context.Context, filePath, image, newVersion stri
 // write: RewriteWorkflow backs [pin.Strategy].Rewrite, whose signature is
 // shared by every pin strategy, so it takes no context and threading one
 // through would change that interface for every strategy. This opcode's window
-// between the check and the write is therefore wider than the other two, and
-// is the single read and single write of one already-resolved file.
+// between the check and the write is therefore wider than the other two. It
+// stays bounded because the rewrite reads and writes one already-resolved
+// regular file, which resolveDeputyCommand has already required.
 func applyActionPin(ctx context.Context, repoDir, filePath, actionRef, sha, tag string) error {
 	if err := ensureLive(ctx, "rewriting", filePath); err != nil {
 		return err

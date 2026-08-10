@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -969,6 +970,83 @@ func TestApplyDeputyCommandHonorsContext(t *testing.T) {
 					t.Fatalf("edit not applied, positive control is vacuous: want %q in:\n%s", tt.wantApplied, got)
 				}
 			})
+		})
+	}
+}
+
+// TestDeputyCommandRefusesIrregularTarget pins that a deputy-internal command
+// refuses a target that is not a regular file, and that preflight refuses it on
+// the same terms so a dry run cannot preview a step execution would reject.
+//
+// The refusal has to happen before the read. A FIFO with no writer blocks the
+// opening read indefinitely, and no context can interrupt a read already
+// blocked in the kernel, so a plan naming one would hold its step past any
+// execution timeout. The test enforces that with its own deadline: it fails
+// rather than hangs if the guard regresses.
+func TestDeputyCommandRefusesIrregularTarget(t *testing.T) {
+	commands := []struct {
+		name string
+		file string
+		cmd  string
+	}{
+		{
+			name: "action update",
+			file: ".github/workflows/ci.yml",
+			cmd:  "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+		},
+		{
+			name: "action pin",
+			file: ".github/workflows/ci.yml",
+			cmd:  "deputy:action:pin .github/workflows/ci.yml actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4.2.2",
+		},
+		{
+			name: "dockerfile update",
+			file: "Dockerfile",
+			cmd:  "deputy:dockerfile:update Dockerfile alpine 3.19",
+		},
+	}
+
+	for _, tc := range commands {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, tc.file)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatalf("MkdirAll failed: %v", err)
+			}
+			if err := syscall.Mkfifo(target, 0o644); err != nil {
+				t.Skipf("mkfifo unsupported: %v", err)
+			}
+
+			// Run both paths off the test goroutine so a regression shows up
+			// as a failure instead of hanging the package until its timeout.
+			type result struct {
+				preflight error
+				apply     error
+			}
+			done := make(chan result, 1)
+			go func() {
+				var got result
+				got.preflight = PreflightDeputyCommand(dir, tc.cmd)
+				got.apply = ApplyDeputyCommand(context.Background(), dir, tc.cmd)
+				done <- got
+			}()
+
+			select {
+			case got := <-done:
+				if got.preflight == nil {
+					t.Errorf("PreflightDeputyCommand(%q) accepted a FIFO target", tc.cmd)
+				}
+				if got.apply == nil {
+					t.Errorf("ApplyDeputyCommand(%q) accepted a FIFO target", tc.cmd)
+				}
+				if got.preflight != nil && got.apply != nil && got.preflight.Error() != got.apply.Error() {
+					t.Errorf("dry run and execution refused differently:\npreflight: %v\napply:     %v", got.preflight, got.apply)
+				}
+			case <-time.After(10 * time.Second):
+				// The goroutine stays blocked on the FIFO; the test binary
+				// exits and takes it with it.
+				t.Fatalf("blocked reading a FIFO target: the execution timeout cannot bound this step")
+			}
 		})
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1384,5 +1385,57 @@ func TestListAgentsCapabilities(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestExecuteStepBoundsInProcessEdits pins that the execution timeout bounds a
+// deputy-internal step for its whole duration, not just at its start.
+//
+// executeStep's entry check only covers a deadline that expired before the step
+// began. A step that starts inside the timeout runs an in-process file edit,
+// and if that edit can block, the RPC blocks with it: the caller is promised a
+// whole-execution maximum and gets none. A FIFO with no writer is the sharpest
+// case, since the opening read never returns on its own.
+func TestExecuteStepBoundsInProcessEdits(t *testing.T) {
+	const timeout = time.Second
+
+	dir := t.TempDir()
+	wfDir := filepath.Join(dir, ".github", "workflows")
+	if err := os.MkdirAll(wfDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(wfDir, "ci.yml"), 0o644); err != nil {
+		t.Skipf("mkfifo unsupported: %v", err)
+	}
+
+	step := &remediationv1.Step{
+		Id:         "step-1",
+		Title:      "update checkout action",
+		Command:    "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+		Executable: true,
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		_, err := executeStep(ctx, dir, step)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("executeStep succeeded on a FIFO target, want a refusal")
+		}
+		if elapsed := time.Since(start); elapsed > timeout {
+			t.Errorf("executeStep took %v, longer than the %v timeout", elapsed, timeout)
+		}
+	case <-time.After(10 * time.Second):
+		// The goroutine is blocked in the kernel on the FIFO open and cannot
+		// be reclaimed; the test binary exits and takes it with it.
+		t.Fatalf("executeStep still running %v after start, timeout was %v", time.Since(start), timeout)
 	}
 }
