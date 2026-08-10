@@ -116,6 +116,11 @@ type ValidateOptions struct {
 // still recognized as a policy and can be reported with located, specific errors
 // instead of being dismissed as an unknown format. Compiled bundles are ruled
 // out first: their JSON has a "policies" array too.
+//
+// A document whose "policies" key is not written directly still counts when the
+// decoder finds one anyway, which a top-level merge key does. Without that
+// fallback a bundle could inherit its whole policy list from an anchor and slip
+// past the checks that key off this probe, the anchor refusal among them.
 func LooksLikeStructuredBundle(data []byte) bool {
 	if IsCompiledBundle(data) {
 		return false
@@ -124,7 +129,23 @@ func LooksLikeStructuredBundle(data []byte) bool {
 	if err := yaml.Unmarshal(data, root); err != nil || len(root.Content) == 0 {
 		return false
 	}
-	return MappingValue(root.Content[0], "policies") != nil
+	if MappingValue(root.Content[0], "policies") != nil {
+		return true
+	}
+	return decodesWithPolicies(data)
+}
+
+// decodesWithPolicies reports whether data decodes into a bundle carrying at
+// least one policy. It is how the shape probe sees a policies key the node walk
+// cannot: the decoder resolves the aliases and merge keys the walk refuses to
+// follow, so this answers "would a reader that resolves them find policies here"
+// without any reader having to act on the resolved value.
+func decodesWithPolicies(data []byte) bool {
+	var bundle structuredBundle
+	if err := yaml.Unmarshal(data, &bundle); err != nil {
+		return false
+	}
+	return len(bundle.Policies) > 0
 }
 
 // ValidateBundle reports every structural problem in a structured policy bundle:
@@ -154,14 +175,16 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	if doc.Kind != yaml.MappingNode {
 		return append(issues, issueAt(doc, IssueError, "root-not-mapping", "root must be a mapping")), nil
 	}
+	// Anchors are rejected before anything else reads the document, so the rest
+	// of validation, and every other reader of a bundle, sees only plain nodes.
+	// The check comes before the policies lookup because a root merge key can
+	// supply the whole list, which would otherwise read as a missing key.
+	if anchors := anchorIssues(root); len(anchors) > 0 {
+		return append(issues, anchors...), nil
+	}
 	policiesNode := MappingValue(doc, "policies")
 	if policiesNode == nil {
 		return append(issues, issueAt(doc, IssueError, "missing-policies", "missing required 'policies' list")), nil
-	}
-	// Anchors are rejected before anything else reads the document, so the rest
-	// of validation, and every other reader of a bundle, sees only plain nodes.
-	if anchors := anchorIssues(root); len(anchors) > 0 {
-		return append(issues, anchors...), nil
 	}
 	if policiesNode.Kind != yaml.SequenceNode {
 		return append(issues, issueAt(policiesNode, IssueError, "policies-not-list", "'policies' must be a list")), nil
@@ -556,15 +579,16 @@ func anchorIssues(node *yaml.Node) []Issue {
 // error naming the file and line, for callers that load a bundle rather than
 // validate it. It returns nil for a document that is not a policy bundle, and
 // for one that uses none of those constructs, which is every bundle Deputy
-// ships. The check keys off the presence of a policies key rather than a
-// well-formed policies list, so a bundle whose list is itself an alias is
-// refused instead of quietly resolved by the decoder.
+// ships. It gates on the same shape probe the linter uses rather than on a
+// well-formed policies list, so a bundle whose list is itself an alias, or whose
+// policies key arrives through a root merge key, is refused instead of quietly
+// resolved by the decoder.
 func bundleAnchorError(data []byte, path string) error {
-	root := &yaml.Node{}
-	if err := yaml.Unmarshal(data, root); err != nil || len(root.Content) == 0 {
+	if !LooksLikeStructuredBundle(data) {
 		return nil
 	}
-	if MappingValue(root.Content[0], "policies") == nil {
+	root := &yaml.Node{}
+	if err := yaml.Unmarshal(data, root); err != nil || len(root.Content) == 0 {
 		return nil
 	}
 	issues := anchorIssues(root)

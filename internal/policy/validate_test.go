@@ -498,6 +498,21 @@ policies:
 `,
 			wantCode: "yaml-merge-key",
 		},
+		{
+			name: "the policies key itself supplied by a root merge key",
+			bundle: `
+defaults: &defaults
+  policies:
+    - name: inherited
+      rules:
+        - when: "true"
+          action: deny
+          reason: "r"
+
+<<: *defaults
+`,
+			wantCode: "yaml-merge-key",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -643,6 +658,20 @@ policies:
       - when: "true"
         action: dney
         reason: "r"
+`,
+		},
+		{
+			name: "a policies list supplied by a root merge key",
+			bundle: `
+defaults: &defaults
+  policies:
+    - name: inherited
+      rules:
+        - when: "true"
+          action: deny
+          reason: "r"
+
+<<: *defaults
 `,
 		},
 		{
