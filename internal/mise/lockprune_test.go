@@ -116,6 +116,105 @@ backend = "core:node"
 	}
 }
 
+// TestPruneLockedVersionsKeepsTrailingTrivia pins that comments and blank
+// lines between a pruned entry and the next one stay with the entry they
+// introduce. Deleting them would silently drop annotations belonging to a
+// surviving entry, which the function promises to preserve byte-for-byte.
+func TestPruneLockedVersionsKeepsTrailingTrivia(t *testing.T) {
+	tests := []struct {
+		name     string
+		lock     string
+		want     string
+		toolKeys []string
+		stale    string
+	}{
+		{
+			name: "comment above the next entry survives",
+			lock: `[[tools.go]]
+version = "1.22.12"
+backend = "core:go"
+
+# node is pinned by the platform team, do not bump
+[[tools.node]]
+version = "20.11.0"
+`,
+			want: `# node is pinned by the platform team, do not bump
+[[tools.node]]
+version = "20.11.0"
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+		},
+		{
+			name: "comment survives when the pruned entry is in the middle",
+			lock: `[[tools.node]]
+version = "20.11.0"
+
+[[tools.go]]
+version = "1.22.12"
+
+# ripgrep is vendored, keep this entry
+[[tools.ripgrep]]
+version = "14.1.1"
+`,
+			want: `[[tools.node]]
+version = "20.11.0"
+
+# ripgrep is vendored, keep this entry
+[[tools.ripgrep]]
+version = "14.1.1"
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+		},
+		{
+			name: "header comment of the pruned entry goes with it",
+			lock: `# go is stale
+[[tools.go]]
+version = "1.22.12"
+
+[[tools.node]]
+version = "20.11.0"
+`,
+			// The comment above the pruned entry introduces it, so it is not
+			// trailing trivia of a previous block and stays put.
+			want: `# go is stale
+[[tools.node]]
+version = "20.11.0"
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+		},
+		{
+			name: "trailing entry at end of file",
+			lock: `[[tools.node]]
+version = "20.11.0"
+
+[[tools.go]]
+version = "1.22.12"
+`,
+			want: `[[tools.node]]
+version = "20.11.0"
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, changed := PruneLockedVersions([]byte(tt.lock), tt.toolKeys, func(v string) bool {
+				return v == tt.stale
+			})
+			if !changed {
+				t.Fatal("expected the stale entry to be pruned")
+			}
+			if string(got) != tt.want {
+				t.Errorf("prune mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+			if _, err := ParseLock("mise.lock", got); err != nil {
+				t.Errorf("pruned lockfile no longer parses: %v", err)
+			}
+		})
+	}
+}
+
 func TestHasLockedTool(t *testing.T) {
 	const lock = `[[tools."npm:node"]]
 version = "20.11.0"

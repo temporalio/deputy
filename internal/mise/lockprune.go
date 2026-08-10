@@ -69,14 +69,27 @@ func PruneLockedVersions(content []byte, toolKeys []string, stale func(version s
 			continue
 		}
 
-		// Drop the entry. Swallow one trailing blank line so the surrounding
-		// blocks do not end up separated by doubled blanks.
-		changed = true
-		if end < len(lines) && strings.TrimSpace(lines[end]) == "" &&
-			len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
-			end++
+		// Blank lines and comments trailing the entry introduce whatever comes
+		// next, so they are not the entry's to delete: an annotation sitting
+		// above the following [[tools...]] header documents that entry.
+		drop := end
+		for drop > i+1 {
+			prev := strings.TrimSpace(lines[drop-1])
+			if prev == "" || strings.HasPrefix(prev, "#") {
+				drop--
+				continue
+			}
+			break
 		}
-		i = end - 1
+		// The blank line separating this entry from what follows belonged to
+		// it, so take one with the entry; any remaining trivia introduces the
+		// next entry and is handed back.
+		if drop < end && strings.TrimSpace(lines[drop]) == "" {
+			drop++
+		}
+
+		changed = true
+		i = drop - 1
 	}
 
 	if !changed {
