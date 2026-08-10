@@ -70,10 +70,22 @@ func TestLockfilePath(t *testing.T) {
 		"./mise.toml":           "mise.lock",
 		"/abs/path/.mise.toml":  "/abs/path/mise.lock",
 		"a\\b\\.mise.toml":      "a/b/mise.lock",
-		// A config.toml inside a mise directory is named for the directory.
-		".config/mise/config.toml":   ".config/mise/mise.lock",
-		"mise/config.toml":           "mise/mise.lock",
-		"a/.config/mise/config.toml": "a/.config/mise/mise.lock",
+		// A config.toml inside a mise directory is named for the directory,
+		// carrying over any env/local segments from the config's basename.
+		".config/mise/config.toml":                  ".config/mise/mise.lock",
+		"mise/config.toml":                          "mise/mise.lock",
+		"a/.config/mise/config.toml":                "a/.config/mise/mise.lock",
+		".mise/config.toml":                         ".mise/mise.lock",
+		"a/.mise/config.toml":                       "a/.mise/mise.lock",
+		".config/mise/config.production.toml":       ".config/mise/mise.production.lock",
+		".mise/config.production.toml":              ".mise/mise.production.lock",
+		"mise/config.production.toml":               "mise/mise.production.lock",
+		".config/mise/config.local.toml":            ".config/mise/mise.local.lock",
+		".mise/config.local.toml":                   ".mise/mise.local.lock",
+		".config/mise/config.production.local.toml": ".config/mise/mise.production.local.lock",
+		// A basename that merely starts with "config" is not the directory's
+		// config file, so it keeps its own name.
+		".config/mise/configuration.toml": ".config/mise/configuration.lock",
 		// conf.d drop-ins share the enclosing mise directory's lockfile.
 		".config/mise/conf.d/tools.toml": ".config/mise/mise.lock",
 		"mise/conf.d/10-tools.toml":      "mise/mise.lock",

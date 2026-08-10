@@ -612,6 +612,9 @@ func TestApplyMiseUpdatePrunesLockForLayouts(t *testing.T) {
 		{name: "hidden manifest", configPath: ".mise.toml", lockPath: "mise.lock"},
 		{name: "environment manifest", configPath: "mise.production.toml", lockPath: "mise.production.lock"},
 		{name: "nested config", configPath: ".config/mise/config.toml", lockPath: ".config/mise/mise.lock"},
+		{name: "dotted nested config", configPath: ".mise/config.toml", lockPath: ".mise/mise.lock"},
+		{name: "nested environment config", configPath: ".config/mise/config.production.toml", lockPath: ".config/mise/mise.production.lock"},
+		{name: "dotted nested environment config", configPath: ".mise/config.staging.toml", lockPath: ".mise/mise.staging.lock"},
 		{name: "conf.d drop-in", configPath: ".config/mise/conf.d/tools.toml", lockPath: ".config/mise/mise.lock"},
 	}
 

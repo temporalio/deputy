@@ -132,6 +132,20 @@ func IsLocalConfig(p string) bool {
 		strings.HasSuffix(base, ".local.toml")
 }
 
+// miseDirName is the canonical name of a mise config directory, and the stem
+// mise gives the lockfile it keeps there. The directory may be written with a
+// leading dot (".mise"), but the lockfile inside it never is.
+const miseDirName = "mise"
+
+// isMiseConfigDir reports whether dir is one of mise's config directories, the
+// "mise" or ".mise" holding a config.toml or a conf.d. The dotted and undotted
+// spellings are the same directory to mise, so both must map to the same
+// lockfile name.
+func isMiseConfigDir(dir string) bool {
+	base := path.Base(dir)
+	return base == miseDirName || base == "."+miseDirName
+}
+
 // LockfilePath returns the lockfile mise associates with a TOML config file.
 // For .tool-versions or non-TOML configs it returns an empty string, since mise
 // only locks .toml configs.
@@ -140,18 +154,22 @@ func IsLocalConfig(p string) bool {
 // against mise 2026.7.3 (`mise lock --dry-run` reports its target, and
 // resolution honors only that file):
 //
-//	mise.toml                      -> mise.lock
-//	.mise.toml                     -> mise.lock            (not .mise.lock)
-//	mise.production.toml           -> mise.production.lock
-//	.mise.local.toml               -> mise.local.lock
-//	.config/mise.toml              -> .config/mise.lock
-//	.config/mise/config.toml       -> .config/mise/mise.lock
-//	.config/mise/conf.d/tools.toml -> .config/mise/mise.lock
+//	mise.toml                           -> mise.lock
+//	.mise.toml                          -> mise.lock       (not .mise.lock)
+//	mise.production.toml                -> mise.production.lock
+//	.mise.local.toml                    -> mise.local.lock
+//	.config/mise.toml                   -> .config/mise.lock
+//	.config/mise/config.toml            -> .config/mise/mise.lock
+//	.mise/config.toml                   -> .mise/mise.lock
+//	.config/mise/config.production.toml -> .config/mise/mise.production.lock
+//	.mise/config.local.toml             -> .mise/mise.local.lock
+//	.config/mise/conf.d/tools.toml      -> .config/mise/mise.lock
 //
-// So: a leading dot is dropped from the config's basename, a config.toml
-// inside a mise directory is named for that directory, and conf.d drop-ins
-// share the lockfile of the mise directory they belong to. Getting this wrong
-// is not cosmetic: pointing at .mise.lock reads and writes a file mise ignores
+// So: a leading dot is dropped from the config's basename; inside a mise
+// directory the config's "config" stem is renamed to "mise" while any
+// env/local segments carry over; and conf.d drop-ins share the lockfile of the
+// mise directory they belong to. Getting this wrong is not cosmetic: pointing
+// at .mise.lock or .mise/config.lock reads and writes a file mise ignores
 // entirely, leaving the real lock stale.
 func LockfilePath(configPath string) string {
 	cp := strings.ReplaceAll(configPath, "\\", "/")
@@ -163,13 +181,13 @@ func LockfilePath(configPath string) string {
 
 	// conf.d drop-ins are merged into the enclosing mise directory, which owns
 	// the lockfile for all of them.
-	if path.Base(dir) == "conf.d" && path.Base(path.Dir(dir)) == "mise" {
+	if path.Base(dir) == "conf.d" && isMiseConfigDir(path.Dir(dir)) {
 		return path.Join(path.Dir(dir), "mise.lock")
 	}
-	// <...>/mise/config.toml is the directory's config; its lock is named for
-	// the directory, not the file.
-	if base == "config.toml" && path.Base(dir) == "mise" {
-		return path.Join(dir, "mise.lock")
+	// <...>/mise/config[.env][.local].toml is the directory's config; its lock
+	// is named for the directory, keeping the basename's trailing segments.
+	if rest, ok := strings.CutPrefix(base, "config"); ok && strings.HasPrefix(rest, ".") && isMiseConfigDir(dir) {
+		return path.Join(dir, miseDirName+strings.TrimSuffix(rest, ".toml")+".lock")
 	}
 	// Otherwise the lock sits beside the config under the config's own name
 	// with any leading dot dropped.
