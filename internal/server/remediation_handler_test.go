@@ -305,6 +305,46 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			wantMissing: []string{"Completed step 3/3"},
 		},
 		{
+			name:    "dry run rejects a step the real run would refuse",
+			options: &remediationv1.ExecutionOptions{DryRun: true},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "wrong manager", Command: "npm install left-pad", Manager: "go", Executable: true},
+			},
+			wantExecuted: nil,
+			wantMessages: []string{
+				`[dry run] Step 3/3 would be rejected: npm install left-pad`,
+				`executable "npm" not allowed for manager "go"`,
+				"Dry run complete: 2 steps would execute, 1 would be rejected, nothing was changed",
+			},
+			wantFinalPhase: remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
+		},
+		{
+			name:    "dry run skips dependents of a rejected step",
+			options: &remediationv1.ExecutionOptions{DryRun: true},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "wrong manager", Command: "npm install left-pad", Manager: "go", Executable: true},
+				{Id: "step-4", Title: "tidy after", Command: "go mod tidy", Manager: "go", Executable: true, DependsOn: []string{"step-3"}},
+			},
+			wantExecuted: nil,
+			wantMessages: []string{
+				"[dry run] Step 3/4 would be rejected",
+				"Skipped step 4/4 (unmet dependency step-3): go mod tidy",
+			},
+			wantFinalPhase: remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
+		},
+		{
+			name:    "dry run accepts a well formed deputy internal step",
+			options: &remediationv1.ExecutionOptions{DryRun: true},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "pin action", Command: "deputy:action:pin .github/workflows/ci.yml actions/checkout abc123 v4", Executable: true},
+			},
+			wantExecuted: nil,
+			wantMessages: []string{
+				"[dry run] Step 3/3 would apply: deputy:action:pin",
+				"Dry run complete: 3 steps would execute, nothing was changed",
+			},
+		},
+		{
 			name:    "dependent step is skipped when its prerequisite is skipped",
 			options: &remediationv1.ExecutionOptions{SkipStepIds: []string{"step-1"}},
 			extraSteps: []*remediationv1.Step{

@@ -376,6 +376,7 @@ func (h *RemediationHandler) ExecutePlan(
 	skipped := 0
 	failed := 0
 	wouldExecute := 0
+	wouldReject := 0
 	// satisfied holds the steps that actually succeeded, which is what a
 	// dependent step's prerequisites are checked against. A skipped or failed
 	// step never lands here, so its dependents are skipped in turn.
@@ -433,17 +434,25 @@ func (h *RemediationHandler) ExecutePlan(
 		// commands count toward the would-execute total; manual and
 		// commandless steps are described but never run.
 		if dryRun {
-			if step.GetCommand() != "" && step.GetExecutable() {
+			message, outcome := dryRunStep(i+1, len(steps), step)
+			phase := remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING
+			switch outcome {
+			case dryRunWouldRun:
 				wouldExecute++
 				// A step that would run counts as satisfied for the steps
 				// that depend on it, so the simulation predicts the same
 				// ordering a real run would take.
 				satisfied[stepID] = struct{}{}
+			case dryRunWouldReject:
+				// A step a real run would refuse is a prediction of failure,
+				// so report it as one and leave its dependents unsatisfied.
+				wouldReject++
+				phase = remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED
 			}
 			if err := stream.Send(&remediationv1.ExecutionEvent{
-				Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
+				Phase:     phase,
 				StepId:    stepID,
-				Message:   dryRunStepMessage(i+1, len(steps), step),
+				Message:   message,
 				Progress:  executionProgress(i+1, len(steps)),
 				Timestamp: timestamppb.Now(),
 			}); err != nil {
@@ -536,6 +545,39 @@ func (h *RemediationHandler) ExecutePlan(
 			fmt.Errorf("plan execution stopped before completion: %w", err))
 	}
 
+	// A dry run reports what it predicted. Predicted rejections make the run
+	// a failed prediction, not a clean one: reporting COMPLETED would tell a
+	// client the plan is safe to apply when part of it would be refused.
+	if dryRun {
+		dryMsg := fmt.Sprintf("Dry run complete: %d steps would execute", wouldExecute)
+		if wouldReject > 0 {
+			dryMsg = fmt.Sprintf("%s, %d would be rejected", dryMsg, wouldReject)
+		}
+		dryMsg += ", nothing was changed"
+		if skipped > 0 {
+			dryMsg = fmt.Sprintf("%s (%d skipped)", dryMsg, skipped)
+		}
+		dryPhase := remediationv1.ExecutionPhase_EXECUTION_PHASE_COMPLETED
+		if wouldReject > 0 {
+			dryPhase = remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED
+		}
+		if err := stream.Send(&remediationv1.ExecutionEvent{
+			Phase:     dryPhase,
+			Message:   dryMsg,
+			Progress:  100,
+			Timestamp: timestamppb.Now(),
+		}); err != nil {
+			return err
+		}
+		logs.Info(ctx, "remediation plan dry run complete",
+			"plan_id", plan.GetId(),
+			"steps_would_execute", wouldExecute,
+			"steps_would_reject", wouldReject,
+			"steps_skipped", skipped,
+		)
+		return nil
+	}
+
 	// A run that continued past failures (stop_on_error unset) ends with a
 	// terminal FAILED phase carrying the honest counts: the plan ran to the
 	// end as requested but did not fully succeed. The stream itself returns
@@ -565,9 +607,6 @@ func (h *RemediationHandler) ExecutePlan(
 
 	// Send completion event
 	completionMsg := fmt.Sprintf("Successfully executed %d steps", executed)
-	if dryRun {
-		completionMsg = fmt.Sprintf("Dry run complete: %d steps would execute, nothing was changed", wouldExecute)
-	}
 	if skipped > 0 {
 		completionMsg = fmt.Sprintf("%s (%d skipped)", completionMsg, skipped)
 	}
@@ -584,7 +623,6 @@ func (h *RemediationHandler) ExecutePlan(
 		"plan_id", plan.GetId(),
 		"steps_executed", executed,
 		"steps_skipped", skipped,
-		"dry_run", dryRun,
 	)
 
 	return nil
@@ -710,18 +748,57 @@ func stepLabel(step *remediationv1.Step) string {
 	return step.GetTitle()
 }
 
-// dryRunStepMessage describes what a step would do without executing it, so a
-// dry-run stream carries the same information a real run's command execution
-// would surface.
-func dryRunStepMessage(position, total int, step *remediationv1.Step) string {
+// dryRunOutcome is what a dry run predicts for a single step.
+type dryRunOutcome int
+
+const (
+	// dryRunWouldRun means the step passed preflight and a real run would
+	// carry it out.
+	dryRunWouldRun dryRunOutcome = iota
+	// dryRunNotRunnable means the step is not executable work (manual
+	// guidance, or no command), so a real run would skip it.
+	dryRunNotRunnable
+	// dryRunWouldReject means a real run would refuse the step before
+	// executing anything, for example a command that is not permitted for
+	// its manager.
+	dryRunWouldReject
+)
+
+// dryRunStep predicts what a real run would do with a step and describes it,
+// without executing or mutating anything. Prediction is the entire point of a
+// dry run, so it performs the same non-mutating validation the real path does
+// (command parsing and the manager executable allowlist, via
+// remediation.ExecArgs). Without that, a step whose manager and command
+// disagree would be reported as runnable and then fail for real.
+//
+// Deputy-internal commands are validated only for parseability: they are
+// applied in process rather than executed, so ExecArgs does not apply to
+// them, and their argument-level checks live in the apply path.
+func dryRunStep(position, total int, step *remediationv1.Step) (string, dryRunOutcome) {
+	cmd := step.GetCommand()
 	switch {
-	case step.GetCommand() == "":
-		return fmt.Sprintf("[dry run] Step %d/%d has no command: %s", position, total, step.GetTitle())
+	case cmd == "":
+		return fmt.Sprintf("[dry run] Step %d/%d has no command: %s", position, total, step.GetTitle()), dryRunNotRunnable
 	case !step.GetExecutable():
-		return fmt.Sprintf("[dry run] Step %d/%d is manual: %s", position, total, step.GetCommand())
-	default:
-		return fmt.Sprintf("[dry run] Step %d/%d would execute: %s", position, total, step.GetCommand())
+		return fmt.Sprintf("[dry run] Step %d/%d is manual: %s", position, total, cmd), dryRunNotRunnable
 	}
+
+	if remediation.IsDeputyInternalCommand(cmd) {
+		if _, err := remediation.ParseCommandArgs(cmd); err != nil {
+			return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, err), dryRunWouldReject
+		}
+		return fmt.Sprintf("[dry run] Step %d/%d would apply: %s", position, total, cmd), dryRunWouldRun
+	}
+
+	if _, err := remediation.ExecArgs(remediation.Command{
+		Manager:    step.GetManager(),
+		Command:    cmd,
+		Executable: step.GetExecutable(),
+	}); err != nil {
+		return fmt.Sprintf("[dry run] Step %d/%d would be rejected: %s (%v)", position, total, cmd, err), dryRunWouldReject
+	}
+
+	return fmt.Sprintf("[dry run] Step %d/%d would execute: %s", position, total, cmd), dryRunWouldRun
 }
 
 // executionProgress converts a completed-step count into the 0-100 completion
