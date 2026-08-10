@@ -10,7 +10,7 @@ policies:
     rules:
       - action: deny
         when: |
-          vulnerabilities.orValue([]).exists(v,
+          vulnerabilities.exists(v,
             v.advisory.severity.level in [severity.critical, severity.high])
         reason: dependency has unresolved high-severity vulnerabilities
         remediation: Apply the vendor patch or upgrade to a remediated release

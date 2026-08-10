@@ -14,7 +14,7 @@ policies:
       - action: deny
         when: |
           jwt.anonymous &&
-          vulnerabilities.orValue([]).exists(v, v.advisory.severity.level == severity.critical)
+          vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
         reason: "Anonymous users cannot download packages with critical vulnerabilities"
         remediation: "Authenticate with a valid token to download this package"
 

@@ -26,7 +26,7 @@ policies:
     entrypoints: [diff_report]
     rules:
       - action: deny
-        when: vulnerabilities.orValue([]).exists(v, v.advisory.severity.level in [severity.critical, severity.high])
+        when: vulnerabilities.exists(v, v.advisory.severity.level in [severity.critical, severity.high])
         reason: New dependency introduces critical/high severity vulnerabilities
         remediation: Choose a version or package without known vulnerabilities
 

@@ -14,7 +14,7 @@ policies:
         - GHSA-jfh8-c2jp-5v3q
     rules:
       - action: deny
-        when: vulnerabilities.orValue([]).exists(v, v.advisory.?aliases.orValue([]).exists(a, a in log4shellAliases))
+        when: vulnerabilities.exists(v, v.advisory.?aliases.orValue([]).exists(a, a in log4shellAliases))
         reason: dependency still vulnerable to Log4Shell
         status: 451
         headers:

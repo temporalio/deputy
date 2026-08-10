@@ -2,7 +2,7 @@ policies:
   - name: dependency-count-guard
     description: Flag diffs that add or change too many dependencies at once
     vars:
-      changesList: 'changes.orValue([])'
+      changesList: 'changes'
       added: 'changesList.filter(c, c.?type.orValue("").lowerAscii() == "added")'
       total: 'size(changesList)'
       addedCount: 'size(added)'

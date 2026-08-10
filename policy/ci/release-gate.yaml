@@ -28,7 +28,7 @@ policies:
     entrypoints: [scan_report]
     rules:
       - action: deny
-        when: vulnerabilities.orValue([]).exists(v, v.advisory.severity.level in [severity.critical, severity.high])
+        when: vulnerabilities.exists(v, v.advisory.severity.level in [severity.critical, severity.high])
         reason: Cannot release with critical/high severity vulnerabilities
         remediation: Resolve all critical and high severity vulnerabilities before release
 
@@ -38,7 +38,7 @@ policies:
     entrypoints: [scan_report]
     rules:
       - action: deny
-        when: vulnerabilities.orValue([]).exists(v, v.package.direct && v.advisory.severity.level == severity.medium)
+        when: vulnerabilities.exists(v, v.package.direct && v.advisory.severity.level == severity.medium)
         reason: Direct dependency has medium severity vulnerability
         remediation: Update or replace the affected direct dependency
 
