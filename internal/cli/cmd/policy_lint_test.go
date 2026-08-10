@@ -105,6 +105,21 @@ func TestPolicyLintValidatesBeyondCEL(t *testing.T) {
 			},
 		},
 		{
+			name: "a missing when does not hide a bad action",
+			bundle: `policies:
+  - name: both-defects
+    rules:
+      - action: dney
+        reason: "no when and a bad action"
+`,
+			wantFail: true,
+			wantText: []string{
+				"rule missing 'when' expression",
+				`invalid action "dney"`,
+				"2 policy problem(s) found",
+			},
+		},
+		{
 			name: "duplicate policy names fail",
 			bundle: `policies:
   - name: same

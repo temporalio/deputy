@@ -100,14 +100,26 @@ policies:
 			wantText:  []string{"undeclared reference", `policy "unbound" rule[0]`},
 		},
 		{
-			name: "missing when and action",
+			name: "a missing when does not hide a missing action",
 			bundle: `
 policies:
   - name: empty-rule
     rules:
       - reason: "nothing here"
 `,
-			wantCodes: []string{"missing-when"},
+			wantCodes: []string{"missing-when", "missing-action"},
+		},
+		{
+			name: "a missing when does not hide a bad action",
+			bundle: `
+policies:
+  - name: both-defects
+    rules:
+      - action: dney
+        reason: "no when and a bad action"
+`,
+			wantCodes: []string{"missing-when", "invalid-action"},
+			wantText:  []string{"rule missing 'when' expression", `invalid action "dney"`},
 		},
 		{
 			name: "missing action",

@@ -288,20 +288,23 @@ func validateRules(item *yaml.Node, policyName string, declaredVars []string, ch
 			issues = append(issues, ruleIssue(idx, issueAt(rule, IssueError, "rule-not-mapping", "rule must be a mapping")))
 			continue
 		}
+		// A rule's condition and its action are independent fields, so a missing
+		// condition must not hide a bad action: only the compile step is skipped,
+		// since there is nothing to compile.
 		whenNode := MappingValue(rule, "when")
 		if whenNode == nil || whenNode.Kind != yaml.ScalarNode {
 			issues = append(issues, ruleIssue(idx, issueAt(rule, IssueError, "missing-when", "rule missing 'when' expression")))
-			continue
-		}
-		for _, issue := range checkRuleWhen(checkWhen, RuleWhen{
-			Policy:       policyName,
-			RuleIndex:    idx,
-			Expr:         whenNode.Value,
-			Line:         whenNode.Line,
-			Column:       whenNode.Column,
-			DeclaredVars: declaredVars,
-		}) {
-			issues = append(issues, ruleIssue(idx, issue))
+		} else {
+			for _, issue := range checkRuleWhen(checkWhen, RuleWhen{
+				Policy:       policyName,
+				RuleIndex:    idx,
+				Expr:         whenNode.Value,
+				Line:         whenNode.Line,
+				Column:       whenNode.Column,
+				DeclaredVars: declaredVars,
+			}) {
+				issues = append(issues, ruleIssue(idx, issue))
+			}
 		}
 		issues = append(issues, validateRuleAction(rule, idx)...)
 	}
