@@ -1039,3 +1039,93 @@ policies:
 		t.Fatalf("expected no issues with extra var declared, got %v", issues)
 	}
 }
+
+// TestValidateBundleChecksEveryHealthyPolicy pins that one broken policy does
+// not hide a defect in another. Generated-source failures are suppressed for the
+// policy the node walk already reported, because restating that failure in
+// expanded CEL the author never wrote obscures the real defect, but every other
+// policy in the bundle still has its generated CEL compiled. Without that the
+// author fixes one policy, reruns lint, and is handed the next one.
+func TestValidateBundleChecksEveryHealthyPolicy(t *testing.T) {
+	cases := []struct {
+		name         string
+		bundle       string
+		wantPolicies []string
+	}{
+		{
+			name: "a bad var behind a policy with a bad condition",
+			bundle: `
+policies:
+  - name: bad-condition
+    rules:
+      - when: "this is not cel"
+        action: deny
+        reason: "r"
+  - name: bad-var
+    vars:
+      threshold: '1 +'
+    rules:
+      - when: "true"
+        action: warn
+        reason: "r"
+`,
+			wantPolicies: []string{"bad-condition", "bad-var"},
+		},
+		{
+			name: "a bad var ahead of a policy with a bad condition",
+			bundle: `
+policies:
+  - name: bad-var-name
+    vars:
+      not-an-identifier: '1'
+    rules:
+      - when: "true"
+        action: warn
+        reason: "r"
+  - name: bad-condition
+    rules:
+      - when: "this is not cel"
+        action: deny
+        reason: "r"
+`,
+			wantPolicies: []string{"bad-var-name", "bad-condition"},
+		},
+		{
+			name: "two policies whose vars hold invalid CEL",
+			bundle: `
+policies:
+  - name: first-bad-var
+    vars:
+      threshold: '1 +'
+    rules:
+      - when: "true"
+        action: warn
+        reason: "r"
+  - name: second-bad-var
+    vars:
+      ceiling: '* 2'
+    rules:
+      - when: "true"
+        action: warn
+        reason: "r"
+`,
+			wantPolicies: []string{"first-bad-var", "second-bad-var"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{Source: "bundle.yaml"})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			for _, want := range tc.wantPolicies {
+				found := slices.ContainsFunc(issues, func(i Issue) bool {
+					return i.Policy == want && i.Severity == IssueError
+				})
+				if !found {
+					t.Fatalf("expected an error on policy %q, got %v", want, issues)
+				}
+			}
+		})
+	}
+}

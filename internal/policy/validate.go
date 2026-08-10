@@ -205,19 +205,29 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 		return append(issues, issueAt(policiesNode, IssueError, "empty-policies", "'policies' must contain at least one policy")), nil
 	}
 	seenNames := map[string]struct{}{}
-	for _, item := range policiesNode.Content {
+	// Policy positions the walk already reported an error for. Their generated
+	// CEL is expected to fail too, so it is not compiled again; every other
+	// policy still is.
+	reported := map[int]bool{}
+	for i, item := range policiesNode.Content {
 		// Skip a policy that carries an anchor, an alias, or a merge key anywhere
 		// beneath it: it is already reported, and every further message the walk
 		// could produce would describe the alias node rather than the policy the
 		// author meant. Plain policies alongside it are still checked.
 		if len(anchorIssues(item)) > 0 {
+			reported[i] = true
 			continue
 		}
 		if item.Kind != yaml.MappingNode {
 			issues = append(issues, issueAt(item, IssueError, "policy-not-mapping", "policy must be a mapping"))
+			reported[i] = true
 			continue
 		}
-		issues = append(issues, validatePolicyNode(item, seenNames, opts)...)
+		policyIssues := validatePolicyNode(item, seenNames, opts)
+		if slices.ContainsFunc(policyIssues, func(is Issue) bool { return is.Severity == IssueError }) {
+			reported[i] = true
+		}
+		issues = append(issues, policyIssues...)
 	}
 	// The loader stops at the first anchor it finds, so it has nothing to add to
 	// what the scan above already located.
@@ -243,7 +253,7 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 		}
 		return issues, nil
 	}
-	return append(issues, generatedSourceIssues(sources, policiesNode, opts.ExtraVars, issues)...), nil
+	return append(issues, generatedSourceIssues(sources, policiesNode, opts.ExtraVars, reported)...), nil
 }
 
 // generatedSourceIssues compiles the CEL each policy expands into, so a bundle
@@ -253,17 +263,20 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 // a comprehension, so a var whose value or name is not valid CEL breaks the
 // generated body alone and no per-rule check can see it.
 //
-// Nothing is reported once the walk has located an error, because the generated
-// body is then expected to fail too and restating that failure in expanded CEL
-// the author never wrote would only obscure the real defect. The loader returns
-// one source per policy in document order, which is how each failure is anchored
-// on the policy that produced it.
-func generatedSourceIssues(sources []Source, policiesNode *yaml.Node, extraVars []string, located []Issue) []Issue {
-	if slices.ContainsFunc(located, func(i Issue) bool { return i.Severity == IssueError }) {
-		return nil
-	}
+// A policy the walk already located an error in is skipped, because its
+// generated body is then expected to fail too and restating that failure in
+// expanded CEL the author never wrote would only obscure the real defect. The
+// skip is per policy rather than bundle-wide: one policy with a bad condition
+// must not hide an unrelated bad var in the next one and cost the author a
+// second lint run. The loader returns one source per policy in document order,
+// which is how reported positions and failures alike are matched to the policy
+// they belong to.
+func generatedSourceIssues(sources []Source, policiesNode *yaml.Node, extraVars []string, reported map[int]bool) []Issue {
 	var issues []Issue
 	for i, src := range sources {
+		if reported[i] {
+			continue
+		}
 		err := Compile(src.Body, extraVars)
 		if err == nil {
 			continue
