@@ -352,6 +352,16 @@ func TestPolicyLintReportsYAMLSyntaxErrors(t *testing.T) {
 			bundle:   "policies:\n  - name: broken\n     rules: []\n",
 			wantText: []string{"line 3"},
 		},
+		{
+			name:     "a double-quoted policies key above an unterminated rules list",
+			bundle:   "\"policies\":\n  - name: broken\n    rules: [\n",
+			wantText: []string{"line 3"},
+		},
+		{
+			name:     "a single-quoted policies key above an unterminated rules list",
+			bundle:   "'policies':\n  - name: broken\n    rules: [\n",
+			wantText: []string{"line 3"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

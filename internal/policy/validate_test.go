@@ -1003,6 +1003,24 @@ func TestLooksLikeStructuredBundle(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "a bundle whose double-quoted policies key precedes a syntax error",
+			data: "\"policies\":\n  - name: broken\n    rules: [\n",
+			want: true,
+		},
+		{
+			name: "a bundle whose single-quoted policies key precedes a syntax error",
+			data: "'policies':\n  - name: broken\n    rules: [\n",
+			want: true,
+		},
+		{
+			name: "a document whose unparsed key only starts with the bundle key",
+			data: "policiesx:\n  - name: broken\n    rules: [\n",
+		},
+		{
+			name: "a document that quotes a key the bundle does not have",
+			data: "\"rules\":\n  - when: [\n",
+		},
+		{
 			name: "raw CEL that does not parse as YAML",
 			data: "// policy: legacy\npkg.name == \"left-pad\"\n  ? [{\"action\": \"deny\"}]\n  : []\n",
 		},

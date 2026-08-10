@@ -157,7 +157,18 @@ const bundlePoliciesKey = "policies"
 // of a document, in raw text. It is deliberately a last resort: YAML that parses
 // is always probed by walking its nodes, and this runs only for a document the
 // parser rejected outright, where no structure is available to walk.
-var unparsedBundleKey = regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(bundlePoliciesKey) + `[ \t]*:`)
+var unparsedBundleKey = regexp.MustCompile(`(?m)^` + yamlKeyPattern(bundlePoliciesKey) + `[ \t]*:`)
+
+// yamlKeyPattern returns a regexp fragment matching a YAML mapping key in each
+// of the three ways a document can spell it: bare, single-quoted, and
+// double-quoted. All three name the same key, so raw text that recognized only
+// the bare form would dismiss a quoted bundle as an unknown format instead of
+// reporting the syntax error the author needs pointed at a line. The key is
+// escaped, so it is matched literally.
+func yamlKeyPattern(key string) string {
+	quoted := regexp.QuoteMeta(key)
+	return `(?:` + quoted + `|'` + quoted + `'|"` + quoted + `")`
+}
 
 // writesBundleKey reports whether raw text writes the bundle's policies key at
 // the top level, which is how a document the YAML parser rejected is still
