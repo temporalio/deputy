@@ -83,6 +83,14 @@ message AgentCapabilities {
 
   // Sandboxable indicates the agent can run in a container.
   bool sandboxable = 7;
+
+  // Approval workflows indicates the agent pauses for approval decisions:
+  // it emits approval-required events and applies the decisions delivered
+  // through the Approve RPC. Every plugin structurally has an Approve
+  // method, so only this field distinguishes real approval support from an
+  // acknowledgement that silently drops the decision. Agents that manage
+  // approvals internally, without surfacing them to the caller, report false.
+  bool approval_workflows = 8;
 }
 
 // ExecuteRequest contains parameters for agent execution.

@@ -760,26 +760,24 @@ func (f *fakeExecutorAgentHandler) ResumeIter(context.Context, *agentv1.ResumeRe
 	return func(func(*agentv1.ExecuteEvent, error) bool) {}
 }
 
-// fakeApprovalExecutorAgentHandler additionally declares working approval
-// delivery via agent.ApprovalSupporter.
-type fakeApprovalExecutorAgentHandler struct {
-	fakeExecutorAgentHandler
-}
-
-// SupportsApprovals declares real approval delivery for the fake.
-func (f *fakeApprovalExecutorAgentHandler) SupportsApprovals() bool { return true }
-
 // TestListAgentsCapabilities pins the capability mapping: execution
 // capabilities require local mode, the agentic flag, and in-process executor
 // support (what ExecuteWithAgent actually requires), and approval workflows
-// additionally require an explicit agent.ApprovalSupporter declaration, since
-// every handler structurally has an Approve method.
+// additionally require the agent to report approval support in its own
+// capabilities, which travels over every binding rather than only in-process.
 func TestListAgentsCapabilities(t *testing.T) {
 	agenticCaps := &agentv1.AgentCapabilities{
 		Streaming:         true,
 		ToolUse:           true,
 		Agentic:           true,
 		SessionResumption: true,
+	}
+	approvalCaps := &agentv1.AgentCapabilities{
+		Streaming:         true,
+		ToolUse:           true,
+		Agentic:           true,
+		SessionResumption: true,
+		ApprovalWorkflows: true,
 	}
 	tests := []struct {
 		name      string
@@ -801,8 +799,8 @@ func TestListAgentsCapabilities(t *testing.T) {
 			},
 		},
 		{
-			name:      "agentic executor declaring approval support",
-			handler:   &fakeApprovalExecutorAgentHandler{fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: agenticCaps}}},
+			name:      "agentic executor reporting approval support",
+			handler:   &fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: approvalCaps}},
 			localMode: true,
 			want: &remediationv1.AgentCapabilities{
 				Streaming:         true,
@@ -833,7 +831,7 @@ func TestListAgentsCapabilities(t *testing.T) {
 		},
 		{
 			name:      "remote mode advertises no execution capabilities",
-			handler:   &fakeApprovalExecutorAgentHandler{fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: agenticCaps}}},
+			handler:   &fakeExecutorAgentHandler{fakeAgentHandler{name: "fake", caps: approvalCaps}},
 			localMode: false,
 			want: &remediationv1.AgentCapabilities{
 				Streaming:         true,

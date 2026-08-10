@@ -989,7 +989,7 @@ func (h *RemediationHandler) ListAgents(
 		// running: local mode (remote servers refuse agent execution
 		// outright), the agentic flag, and in-process executor support.
 		executes := h.localMode && caps.GetAgentic() && agent.AsExecutor(entry.Handler) != nil
-		approvals := executes && agent.SupportsApprovals(entry.Handler)
+		approvals := executes && caps.GetApprovalWorkflows()
 
 		agents = append(agents, &remediationv1.AgentInfo{
 			Name:         info.GetName(),
@@ -1015,10 +1015,12 @@ func (h *RemediationHandler) ListAgents(
 // ExecuteWithAgent could actually run the agent (local mode, agentic flag,
 // in-process agent.Executor support), and drives code_execution and
 // file_modification because agentic means autonomous code execution.
-// approvals additionally requires an explicit agent.ApprovalSupporter
-// declaration: every plugin structurally has an Approve method, so only an
-// explicit declaration distinguishes real approval delivery from the
+// approvals additionally requires the agent to report approval_workflows in
+// its own capabilities: every plugin structurally has an Approve method, so
+// only that declaration distinguishes real approval delivery from the
 // Unimplemented stub that ExecuteWithAgent's handoff would silently drop.
+// It travels in the plugin's GetInfo response, so it reaches this handler
+// identically whether the agent is in-process, pluginrpc, or ConnectRPC.
 func remediationAgentCapabilities(caps *agentv1.AgentCapabilities, executes, approvals bool) *remediationv1.AgentCapabilities {
 	return &remediationv1.AgentCapabilities{
 		Streaming:         caps.GetStreaming(),
