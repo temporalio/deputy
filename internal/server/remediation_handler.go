@@ -312,6 +312,12 @@ func (h *RemediationHandler) ExecutePlan(
 		defer cancel()
 	}
 
+	// Dependency references are part of the plan's shape, so validate them
+	// up front rather than discovering an impossible ordering mid-run.
+	if err := validateStepDependencies(plan.GetSteps()); err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	targetPath := req.Msg.GetTargetPath()
 	if targetPath == "" {
 		targetPath = "."
@@ -370,6 +376,10 @@ func (h *RemediationHandler) ExecutePlan(
 	skipped := 0
 	failed := 0
 	wouldExecute := 0
+	// satisfied holds the steps that actually succeeded, which is what a
+	// dependent step's prerequisites are checked against. A skipped or failed
+	// step never lands here, so its dependents are skipped in turn.
+	satisfied := make(map[string]struct{}, len(steps))
 	for i, step := range steps {
 		// executeStep is the only branch that observes the context on its
 		// own; skip and dry-run steps would otherwise sail past an expired
@@ -379,9 +389,27 @@ func (h *RemediationHandler) ExecutePlan(
 				fmt.Errorf("plan execution stopped before step %d/%d: %w", i+1, len(steps), err))
 		}
 
-		stepID := step.GetId()
-		if stepID == "" {
-			stepID = fmt.Sprintf("step-%d", i+1)
+		stepID := effectiveStepID(step, i)
+
+		// A step whose prerequisites did not succeed must not run: applying
+		// a follow-up mutation without its setup is worse than not applying
+		// it. This precedes the skip list only in the sense that both are
+		// checked before execution; an explicitly skipped step is reported
+		// as such below.
+		if _, skip := skipSteps[stepID]; !skip {
+			if dep, unmet := unmetDependency(step, satisfied); unmet {
+				skipped++
+				if err := stream.Send(&remediationv1.ExecutionEvent{
+					Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
+					StepId:    stepID,
+					Message:   fmt.Sprintf("Skipped step %d/%d (unmet dependency %s): %s", i+1, len(steps), dep, stepLabel(step)),
+					Progress:  executionProgress(i+1, len(steps)),
+					Timestamp: timestamppb.Now(),
+				}); err != nil {
+					return err
+				}
+				continue
+			}
 		}
 
 		// Honor the skip list before anything about the step runs.
@@ -407,6 +435,10 @@ func (h *RemediationHandler) ExecutePlan(
 		if dryRun {
 			if step.GetCommand() != "" && step.GetExecutable() {
 				wouldExecute++
+				// A step that would run counts as satisfied for the steps
+				// that depend on it, so the simulation predicts the same
+				// ordering a real run would take.
+				satisfied[stepID] = struct{}{}
 			}
 			if err := stream.Send(&remediationv1.ExecutionEvent{
 				Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
@@ -478,6 +510,7 @@ func (h *RemediationHandler) ExecutePlan(
 			continue
 		}
 		executed++
+		satisfied[stepID] = struct{}{}
 
 		// Send step completed event: a one-line summary by default, with the
 		// full command output only when verbose_output is set.
@@ -599,6 +632,57 @@ func rejectUnsupportedApprovalMode(mode remediationv1.ApprovalMode) error {
 			remediationv1.ApprovalMode_APPROVAL_MODE_AUTO_APPROVE,
 		))
 	}
+}
+
+// effectiveStepID returns the ID a step is addressed by, falling back to its
+// position when the plan left the ID empty. Dependency references and the
+// skip list are matched against this value, so it must be derived the same
+// way everywhere.
+func effectiveStepID(step *remediationv1.Step, index int) string {
+	if id := step.GetId(); id != "" {
+		return id
+	}
+	return fmt.Sprintf("step-%d", index+1)
+}
+
+// validateStepDependencies rejects plans whose depends_on references cannot
+// be honored by in-order execution. Steps run in plan order, so a dependency
+// must name an earlier step: an unknown ID can never be satisfied, and a self
+// or forward reference asks for an ordering the plan itself contradicts.
+// Requiring earlier-only references also rules out dependency cycles, since a
+// cycle needs at least one backward edge.
+func validateStepDependencies(steps []*remediationv1.Step) error {
+	seen := make(map[string]struct{}, len(steps))
+	known := make(map[string]struct{}, len(steps))
+	for i, step := range steps {
+		known[effectiveStepID(step, i)] = struct{}{}
+	}
+
+	for i, step := range steps {
+		stepID := effectiveStepID(step, i)
+		for _, dep := range step.GetDependsOn() {
+			if _, ok := known[dep]; !ok {
+				return fmt.Errorf("step %q depends on unknown step %q", stepID, dep)
+			}
+			if _, ok := seen[dep]; !ok {
+				return fmt.Errorf("step %q depends on step %q, which does not run before it", stepID, dep)
+			}
+		}
+		seen[stepID] = struct{}{}
+	}
+	return nil
+}
+
+// unmetDependency returns the first prerequisite of a step that did not
+// succeed, so the step can be skipped rather than applying a follow-up
+// mutation whose setup never happened.
+func unmetDependency(step *remediationv1.Step, satisfied map[string]struct{}) (string, bool) {
+	for _, dep := range step.GetDependsOn() {
+		if _, ok := satisfied[dep]; !ok {
+			return dep, true
+		}
+	}
+	return "", false
 }
 
 // stepSkipReason reports whether a step can actually be run, and if not, the

@@ -305,6 +305,66 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			wantMissing: []string{"Completed step 3/3"},
 		},
 		{
+			name:    "dependent step is skipped when its prerequisite is skipped",
+			options: &remediationv1.ExecutionOptions{SkipStepIds: []string{"step-1"}},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "tidy after bump", Command: "go mod tidy", Manager: "go", Executable: true, DependsOn: []string{"step-1"}},
+			},
+			wantExecuted: []string{"step-2"},
+			wantMessages: []string{
+				"Skipped step 3/3 (unmet dependency step-1): go mod tidy",
+				"Successfully executed 1 steps (2 skipped)",
+			},
+		},
+		{
+			name:      "dependent step is skipped when its prerequisite failed",
+			options:   nil,
+			failSteps: []string{"step-1"},
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "tidy after bump", Command: "go mod tidy", Manager: "go", Executable: true, DependsOn: []string{"step-1"}},
+			},
+			wantExecuted: []string{"step-1", "step-2"},
+			wantMessages: []string{
+				"Skipped step 3/3 (unmet dependency step-1): go mod tidy",
+				"Executed 2 steps: 1 succeeded, 1 failed (1 skipped)",
+			},
+			wantFinalPhase: remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
+		},
+		{
+			name:    "dependent step runs when its prerequisite succeeded",
+			options: nil,
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "tidy after bump", Command: "go mod tidy", Manager: "go", Executable: true, DependsOn: []string{"step-1"}},
+			},
+			wantExecuted: []string{"step-1", "step-2", "step-3"},
+			wantMessages: []string{"Successfully executed 3 steps"},
+		},
+		{
+			name:    "unknown dependency is rejected",
+			options: nil,
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "tidy", Command: "go mod tidy", Manager: "go", Executable: true, DependsOn: []string{"nope"}},
+			},
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			name:    "forward dependency is rejected",
+			options: nil,
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "tidy", Command: "go mod tidy", Manager: "go", Executable: true, DependsOn: []string{"step-4"}},
+				{Id: "step-4", Title: "later", Command: "go mod verify", Manager: "go", Executable: true},
+			},
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			name:    "self dependency is rejected",
+			options: nil,
+			extraSteps: []*remediationv1.Step{
+				{Id: "step-3", Title: "tidy", Command: "go mod tidy", Manager: "go", Executable: true, DependsOn: []string{"step-3"}},
+			},
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
 			name:         "stop_on_error true halts at the first failure",
 			options:      &remediationv1.ExecutionOptions{StopOnError: true},
 			failSteps:    []string{"step-1"},
