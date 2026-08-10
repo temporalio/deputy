@@ -346,6 +346,52 @@ version = "1.24.3"
 `,
 		},
 		{
+			// Table headers are key paths, not text: mise's parser reads
+			// ["tools"] as the tools table, so the rewriter must too or it
+			// refuses a fix for a config inventory happily parsed.
+			name: "quoted tools table header",
+			input: `["tools"]
+go = "1.22.12"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `["tools"]
+go = "1.24.3"
+`,
+		},
+		{
+			name: "quoted tools segment in a subtable header",
+			input: `["tools".go]
+version = "1.22.12"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `["tools".go]
+version = "1.24.3"
+`,
+		},
+		{
+			name: "single-quoted tools subtable header",
+			input: `['tools'.'npm:cowsay']
+version = "1.5.0"
+`,
+			tool: "npm:cowsay", currents: []string{"1.5.0"}, version: "1.6.0",
+			want: `['tools'.'npm:cowsay']
+version = "1.6.0"
+`,
+		},
+		{
+			// A deeper path is not the tools table; touching it would rewrite
+			// an unrelated key.
+			name: "deeper quoted header is not the tools table",
+			input: `["tools".go.extra]
+version = "1.22.12"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `["tools".go.extra]
+version = "1.22.12"
+`,
+			wantErr: true,
+		},
+		{
 			// Forms mise's parser accepts beyond the [tools] table: root-level
 			// dotted keys, dotted version keys, and the root inline table.
 			name: "root dotted key",

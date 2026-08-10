@@ -145,10 +145,10 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 			// context ends at the first table header (TOML places all
 			// root-level keys before it).
 			inRoot = false
-			inTools = header == "tools"
+			inTools = len(header) == 1 && header[0] == "tools"
 			toolTable = ""
-			if key, ok := toolsSubtableKey(header); ok {
-				toolTable = key
+			if len(header) == 2 && header[0] == "tools" {
+				toolTable = header[1]
 			}
 			continue
 		}
@@ -787,14 +787,21 @@ func rewriteToolVersions(root *os.Root, relPath string, updates []pin.Update) er
 	return writeErr
 }
 
-func tomlHeader(line string) (string, bool) {
+// tomlHeader parses a TOML table header line into its key-path segments, with
+// quoting resolved the same way assignments are parsed: `["tools".go]` yields
+// ["tools", "go"], exactly as mise's own TOML parser reads it. Returning the
+// raw text instead would make quoted spellings of the tools table invisible to
+// the rewriter, which would then refuse a fix for a config it can parse. ok is
+// false for non-header lines and for array-of-tables headers, which a mise
+// config's [tools] table never uses.
+func tomlHeader(line string) ([]string, bool) {
 	line, _ = splitTomlComment(line)
 	line = strings.TrimSpace(line)
 	if !strings.HasPrefix(line, "[") || strings.HasPrefix(line, "[[") || !strings.HasSuffix(line, "]") {
-		return "", false
+		return nil, false
 	}
-	header := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
-	return header, header != ""
+	segs := mise.SplitKeyPath(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
+	return segs, len(segs) > 0
 }
 
 func splitTomlComment(s string) (before, comment string) {
@@ -816,18 +823,6 @@ func splitTomlComment(s string) (before, comment string) {
 		}
 	}
 	return s, ""
-}
-
-func toolsSubtableKey(header string) (string, bool) {
-	rest, ok := strings.CutPrefix(header, "tools.")
-	if !ok {
-		return "", false
-	}
-	rest = strings.TrimSpace(rest)
-	if rest == "" || strings.Contains(rest, ".") && !strings.HasPrefix(rest, "\"") && !strings.HasPrefix(rest, "'") {
-		return "", false
-	}
-	return unquoteKey(rest), true
 }
 
 // unquoteKey strips surrounding single or double quotes from a TOML key.
