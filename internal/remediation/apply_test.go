@@ -871,16 +871,24 @@ func TestApplyMiseUpdateRetryAfterLockFailure(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "mise.toml")
 	lockPath := filepath.Join(dir, "mise.lock")
+	const lockBody = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
 	if err := os.WriteFile(configPath, []byte("[tools]\ngo = \"1.22.12\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(lockPath, []byte("[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"), 0o444); err != nil {
+	if err := os.WriteFile(lockPath, []byte(lockBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A read-only directory blocks the lockfile replacement (its temporary
+	// sibling cannot be created) while still allowing the in-place config
+	// rewrite, which is exactly the partial-apply state to recover from.
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
 	const cmd = "deputy:mise:update mise.toml go 1.24.3 1.22.12"
 	if err := ApplyDeputyCommand(dir, cmd); err == nil {
-		t.Fatal("expected the read-only lockfile to fail the apply")
+		t.Fatal("expected the unwritable directory to fail the apply")
 	}
 	config, err := os.ReadFile(configPath)
 	if err != nil {
@@ -889,9 +897,15 @@ func TestApplyMiseUpdateRetryAfterLockFailure(t *testing.T) {
 	if !strings.Contains(string(config), "1.24.3") {
 		t.Fatalf("config should already carry the fix:\n%s", config)
 	}
+	// The failure must leave the lockfile exactly as it was, never truncated.
+	if got, err := os.ReadFile(lockPath); err != nil {
+		t.Fatal(err)
+	} else if string(got) != lockBody {
+		t.Errorf("failed apply damaged the lockfile:\n--- got ---\n%s\n--- want ---\n%s", got, lockBody)
+	}
 
 	// The operator fixes whatever blocked the lockfile write and retries.
-	if err := os.Chmod(lockPath, 0o644); err != nil {
+	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := ApplyDeputyCommand(dir, cmd); err != nil {
@@ -1205,6 +1219,89 @@ node = "20.11.1"
 				if string(got) != wantContent {
 					t.Errorf("file %s content mismatch\ngot:\n%s\nwant:\n%s", filename, string(got), wantContent)
 				}
+			}
+		})
+	}
+}
+
+// TestReplaceFileAtomically pins the durability contract for lockfile writes:
+// the file is either its old content or its new content, a failure leaves the
+// original intact rather than a truncated remnant, no temporary file is left
+// behind, and a stale temporary from an earlier interrupted run does not block
+// a later write.
+func TestReplaceFileAtomically(t *testing.T) {
+	t.Parallel()
+
+	const original = "[[tools.go]]\nversion = \"1.22.12\"\n"
+	const replacement = "[[tools.node]]\nversion = \"20.11.0\"\n"
+
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, dir string)
+		wantErr   bool
+		wantAfter string
+	}{
+		{
+			name:      "replaces content",
+			wantAfter: replacement,
+		},
+		{
+			name: "stale temporary does not block the write",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, ".mise.lock.deputy-tmp"), []byte("junk"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantAfter: replacement,
+		},
+		{
+			name: "unwritable directory leaves the original intact",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.Chmod(dir, 0o555); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+			},
+			wantErr:   true,
+			wantAfter: original,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "mise.lock"), []byte(original), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tt.setup != nil {
+				tt.setup(t, dir)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			err = replaceFileAtomically(root, "mise.lock", []byte(replacement), 0o644)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected an error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("replaceFileAtomically: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tt.wantAfter {
+				t.Errorf("content = %q, want %q", got, tt.wantAfter)
+			}
+			if _, err := os.Stat(filepath.Join(dir, ".mise.lock.deputy-tmp")); !os.IsNotExist(err) {
+				t.Errorf("temporary file left behind (stat err = %v)", err)
 			}
 		})
 	}

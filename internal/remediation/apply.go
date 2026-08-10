@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -436,18 +437,52 @@ func pruneStaleMiseLock(root *os.Root, configRelPath, tool string, currentVersio
 	if err != nil {
 		return fmt.Errorf("stat %s: %w", lockRel, err)
 	}
-	f, err := root.OpenFile(lockRel, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+	return replaceFileAtomically(root, lockRel, pruned, info.Mode().Perm())
+}
+
+// replaceFileAtomically writes content to relPath by filling a temporary
+// sibling and renaming it over the target, so the file is either its old
+// content or its new content and never a truncated mix. Truncating in place
+// would let a full disk or an interrupt leave a lockfile empty, silently
+// losing the integrity metadata of every unrelated tool, and a retry could not
+// recover because the pruner would read the damaged file and find nothing left
+// to prune. The temporary file is created in the same directory so the rename
+// stays on one filesystem, and is removed on any failure.
+func replaceFileAtomically(root *os.Root, relPath string, content []byte, perm os.FileMode) error {
+	dir := path.Dir(relPath)
+	tmpRel := path.Join(dir, "."+path.Base(relPath)+".deputy-tmp")
+	// A leftover temporary from an earlier interrupted run must not block us.
+	if err := root.Remove(tmpRel); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("clearing %s: %w", tmpRel, err)
+	}
+
+	f, err := root.OpenFile(tmpRel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 	if err != nil {
-		return fmt.Errorf("writing %s: %w", lockRel, err)
+		return fmt.Errorf("creating %s: %w", tmpRel, err)
 	}
-	_, writeErr := f.Write(pruned)
-	if closeErr := f.Close(); writeErr == nil {
-		writeErr = closeErr
-	}
+	writeErr := writeAndSync(f, content)
 	if writeErr != nil {
-		return fmt.Errorf("writing %s: %w", lockRel, writeErr)
+		_ = root.Remove(tmpRel)
+		return fmt.Errorf("writing %s: %w", tmpRel, writeErr)
+	}
+	if err := root.Rename(tmpRel, relPath); err != nil {
+		_ = root.Remove(tmpRel)
+		return fmt.Errorf("replacing %s: %w", relPath, err)
 	}
 	return nil
+}
+
+// writeAndSync writes content to f and flushes it to stable storage before
+// closing, so a rename cannot publish a file whose contents are still buffered.
+func writeAndSync(f *os.File, content []byte) error {
+	_, err := f.Write(content)
+	if err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 // applyActionPin rewrites a GitHub Action reference to a SHA-pinned format
