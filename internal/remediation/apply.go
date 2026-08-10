@@ -124,6 +124,25 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 	}
 }
 
+// resolveBaseDir returns the absolute, symlink-resolved form of a repository
+// directory. Every path a deputy-internal command produces or consumes is
+// expressed against this form, so that two spellings of one directory (the
+// caller's /var/folders/... and the real /private/var/folders/...) cannot be
+// mistaken for two different directories.
+//
+// A base that does not exist yet keeps its unresolved absolute form, since
+// there is nothing to resolve against; containment is still checked lexically.
+func resolveBaseDir(baseDir string) (string, error) {
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid base directory: %w", err)
+	}
+	if realBase, err := filepath.EvalSymlinks(absBase); err == nil {
+		absBase = realBase
+	}
+	return absBase, nil
+}
+
 // safeJoinPath joins a base directory with a relative path, ensuring the result
 // stays within the base directory. This prevents path traversal attacks.
 //
@@ -137,14 +156,9 @@ func safeJoinPath(baseDir, relPath string) (string, error) {
 	}
 
 	// Clean the base path
-	absBase, err := filepath.Abs(baseDir)
+	absBase, err := resolveBaseDir(baseDir)
 	if err != nil {
-		return "", fmt.Errorf("invalid base directory: %w", err)
-	}
-
-	// Resolve symlinks in base directory if it exists
-	if realBase, err := filepath.EvalSymlinks(absBase); err == nil {
-		absBase = realBase
+		return "", err
 	}
 
 	// Join and clean the result (lexical only, no symlink resolution yet)
@@ -363,14 +377,26 @@ func applyDockerfileUpdate(filePath, image, newVersion string) error {
 //
 // Delegates to githubactions.RewriteWorkflow for a single source of truth
 // on the rewrite logic. The filePath must be under repoDir.
+//
+// The root is opened on the resolved repoDir, not the caller's spelling of it.
+// filePath arrives symlink-resolved from resolveDeputyCommand, so relating it
+// to an unresolved repoDir yields a path that climbs out of the root and back
+// in ("../../../private/var/..."), which os.Root then refuses. That makes the
+// opcode fail on any checkout reached through a symlink, which on macOS is
+// every path under /tmp and /var.
 func applyActionPin(repoDir, filePath, actionRef, sha, tag string) error {
-	root, err := os.OpenRoot(repoDir)
+	base, err := resolveBaseDir(repoDir)
+	if err != nil {
+		return err
+	}
+
+	root, err := os.OpenRoot(base)
 	if err != nil {
 		return fmt.Errorf("opening repo root: %w", err)
 	}
 	defer root.Close()
 
-	relPath, err := filepath.Rel(repoDir, filePath)
+	relPath, err := filepath.Rel(base, filePath)
 	if err != nil {
 		return fmt.Errorf("computing relative path: %w", err)
 	}

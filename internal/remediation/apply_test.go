@@ -776,3 +776,78 @@ func TestApplyDeputyCommandRejectsWhatValidationRejects(t *testing.T) {
 		})
 	}
 }
+
+// TestApplyDeputyCommandThroughSymlinkedRepoDir pins that a deputy-internal
+// command works when the repository directory is reached through a symlink.
+// resolveDeputyCommand resolves the target path's symlinks, so any step that
+// relates that path back to the caller's unresolved repoDir computes a path
+// that leaves the repository and comes back in, which os.Root refuses. macOS
+// puts every temporary directory behind such a symlink (/var -> /private/var),
+// so this is the ordinary case there rather than an exotic one.
+func TestApplyDeputyCommandThroughSymlinkedRepoDir(t *testing.T) {
+	const (
+		workflow   = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
+		dockerfile = "FROM alpine:3.18\n"
+		sha        = "11bd71901bbe5b1630ceea73d27597364c9af683"
+	)
+	tests := []struct {
+		name        string
+		file        string
+		content     string
+		cmd         string
+		wantApplied string
+	}{
+		{
+			name:        "action update",
+			file:        ".github/workflows/ci.yml",
+			content:     workflow,
+			cmd:         "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+			wantApplied: "actions/checkout@v5",
+		},
+		{
+			name:        "action pin",
+			file:        ".github/workflows/ci.yml",
+			content:     workflow,
+			cmd:         "deputy:action:pin .github/workflows/ci.yml actions/checkout " + sha + " v4.2.2",
+			wantApplied: "actions/checkout@" + sha + " # v4.2.2",
+		},
+		{
+			name:        "dockerfile update",
+			file:        "Dockerfile",
+			content:     dockerfile,
+			cmd:         "deputy:dockerfile:update Dockerfile alpine 3.19",
+			wantApplied: "FROM alpine:3.19",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Build the repository under a real directory, then hand the
+			// command a symlink to it so repoDir and the resolved file path
+			// disagree in exactly the way a macOS temp directory makes them.
+			realDir := filepath.Join(t.TempDir(), "real")
+			target := filepath.Join(realDir, tt.file)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatalf("MkdirAll failed: %v", err)
+			}
+			if err := os.WriteFile(target, []byte(tt.content), 0o644); err != nil {
+				t.Fatalf("WriteFile failed: %v", err)
+			}
+			linkDir := filepath.Join(t.TempDir(), "link")
+			if err := os.Symlink(realDir, linkDir); err != nil {
+				t.Skipf("symlinks unsupported: %v", err)
+			}
+
+			if err := ApplyDeputyCommand(linkDir, tt.cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand() through symlinked repoDir failed: %v", err)
+			}
+			got, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatalf("ReadFile failed: %v", err)
+			}
+			if !strings.Contains(string(got), tt.wantApplied) {
+				t.Fatalf("edit not applied: want %q in:\n%s", tt.wantApplied, got)
+			}
+		})
+	}
+}
