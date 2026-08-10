@@ -63,7 +63,15 @@ $ deputy policy eval \
 
 ## `lint`
 
-Validate CEL policy syntax and type safety.
+Validate policy bundles: CEL syntax and type safety plus the surrounding
+structure. Lint runs the same checks the editor language server runs, so a
+policy that lints clean is a policy the editor considers clean:
+
+- `action` values outside `allow|deny|warn`
+- unknown `entrypoints` and `commands`
+- duplicate policy names
+- rules missing `when` or `action`, and `deny`/`warn` rules with no `reason`
+- invalid `mode`, malformed `vars`, and conditions that do not compile
 
 ```
 deputy policy lint <policy.yaml> [policy2.yaml ...]
@@ -81,6 +89,14 @@ deputy policy lint <policy.yaml> [policy2.yaml ...]
 $ deputy policy lint policies/*.yaml
 policies/deny-critical.yaml OK
 policies/require-license.yaml OK
+```
+
+Problems are reported one per line, anchored to the file, line, column, policy,
+and rule, and the command exits non-zero:
+
+```console
+$ deputy policy lint policies/typo.yaml
+policies/typo.yaml:5:17: error: policy "block-critical" rule[0]: invalid action "dney" (expected allow|deny|warn)
 ```
 
 The linter provides helpful diagnostics with caret pointers:

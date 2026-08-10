@@ -41,7 +41,7 @@ Deputy uses the Common Expression Language (CEL) to define security policies for
 
 SUBCOMMANDS:
 • eval:    Evaluate a policy against a JSON input
-• lint:    Check policy syntax and types
+• lint:    Check policy structure, syntax, and types
 • test:    Run unit tests for policies
 • bundle:  Package multiple policies into a single file
 • repl:    Interactive policy development shell
@@ -315,12 +315,13 @@ func newPolicyLintCommand() *cobra.Command {
 	var extraVars []string
 	cmd := &cobra.Command{
 		Use:           "lint <policy.yaml> [policy2.yaml ...]",
-		Short:         "Lint CEL policies for syntax/type issues",
+		Short:         "Lint policy bundles for structure, syntax, and type issues",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stdinUsed := false
+			failures := 0
 			for _, path := range args {
 				if path == "-" {
 					data, err := readPathOrStdinOnce(cmd.InOrStdin(), path, &stdinUsed)
@@ -334,12 +335,14 @@ func newPolicyLintCommand() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
 					continue
 				}
-				// Prefer structured lint for YAML bundles for clearer CEL errors.
-				ok, err := lintStructuredBundle(path, extraVars, cmd.OutOrStdout())
+				// Prefer structured lint for YAML bundles: it validates the whole
+				// bundle, not just the CEL, and reports clearer errors.
+				handled, problems, err := lintStructuredBundle(path, extraVars, cmd.OutOrStdout())
 				if err != nil {
 					return err
 				}
-				if ok {
+				if handled {
+					failures += problems
 					continue
 				}
 				sources, err := policy.LoadSources([]string{path})
@@ -354,6 +357,9 @@ func newPolicyLintCommand() *cobra.Command {
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
 			}
+			if failures > 0 {
+				return fmt.Errorf("%d policy problem(s) found", failures)
+			}
 			return nil
 		},
 	}
@@ -361,33 +367,63 @@ func newPolicyLintCommand() *cobra.Command {
 	return cmd
 }
 
-// lintStructuredBundle lints a YAML structured bundle with friendlier CEL errors.
-// Returns ok=true if the bundle was structured and handled here.
-func lintStructuredBundle(path string, extraVars []string, out io.Writer) (ok bool, err error) {
+// lintStructuredBundle validates a YAML structured bundle with the same checks
+// the editor runs, printing every issue it finds instead of stopping at the
+// first. It reports handled=false when the file is not a structured bundle so
+// the caller can fall back to compiling it as raw CEL, and returns the number of
+// issues serious enough to fail the run (hints are advice, not failures).
+func lintStructuredBundle(path string, extraVars []string, out io.Writer) (handled bool, problems int, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return false, err
+		return false, 0, fmt.Errorf("read %q: %w", path, err)
 	}
-	bundle, parsed, err := policy.TryParseStructuredBundleBytes(data)
-	if err != nil {
-		return true, err
+	if _, parsed, err := policy.TryParseStructuredBundleBytes(data); err != nil || !parsed {
+		return false, 0, err
 	}
-	if !parsed {
-		return false, nil
-	}
-	for pi, pol := range bundle.Policies {
-		declared := append(extraVars, pol.Vars.Names()...)
-		known := append(policy.DefaultVariableNames(), declared...)
-		for ri, rule := range pol.Rules {
-			if err := policy.Compile(rule.When, declared); err != nil {
-				pref := fmt.Sprintf("%s::%s rule[%d]", path, pol.Name, ri)
-				return true, fmt.Errorf("%s: %s", pref, formatCelCompileError(err, rule.When, known))
+	issues, err := policy.ValidateBundle(string(data), policy.ValidateOptions{
+		Source:    path,
+		ExtraVars: extraVars,
+		CheckWhen: func(when policy.RuleWhen) []policy.Issue {
+			compileErr := policy.Compile(when.Expr, when.DeclaredVars)
+			if compileErr == nil {
+				return nil
 			}
-		}
-		_ = pi
+			known := append(policy.DefaultVariableNames(), when.DeclaredVars...)
+			return []policy.Issue{{
+				Policy:    when.Policy,
+				RuleIndex: when.RuleIndex,
+				Line:      when.Line,
+				Column:    when.Column,
+				Severity:  policy.IssueError,
+				Code:      "cel-error",
+				Message:   formatCelCompileError(compileErr, when.Expr, known),
+			}}
+		},
+	})
+	if err != nil {
+		return true, 0, fmt.Errorf("lint %q: %w", path, err)
 	}
-	fmt.Fprintf(out, "%s OK\n", labelPath(path))
-	return true, nil
+	for _, issue := range issues {
+		if issue.Severity != policy.IssueHint {
+			problems++
+		}
+		fmt.Fprintf(out, "%s\n", formatLintIssue(path, issue))
+	}
+	if problems == 0 {
+		fmt.Fprintf(out, "%s OK\n", labelPath(path))
+	}
+	return true, problems, nil
+}
+
+// formatLintIssue renders one issue as a file-anchored line an editor or a human
+// can jump to. Bundle-wide issues already carry the path in their message, so it
+// is not repeated.
+func formatLintIssue(path string, issue policy.Issue) string {
+	text := issue.String()
+	if issue.Line <= 0 {
+		return fmt.Sprintf("%s: %s", labelPath(path), strings.Replace(text, path+"/", "", 1))
+	}
+	return fmt.Sprintf("%s:%s", labelPath(path), text)
 }
 
 // readPathOrStdin reads data from the given path or stdin if path is "-".
