@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -581,6 +582,8 @@ func customHelperFunctions() []cel.EnvOption {
 		// Works with proto Finding messages and map-based vulnerability objects.
 		//
 		// Severity order (highest to lowest): CRITICAL > HIGH > MEDIUM > LOW > UNSPECIFIED
+		// A level outside that vocabulary fails evaluation with an error instead of
+		// silently matching every finding.
 		//
 		// Example usage in CEL (both syntaxes supported):
 		//   severityAtLeast(vulnerability, "HIGH")       // global function syntax
@@ -723,41 +726,67 @@ func customHelperFunctions() []cel.EnvOption {
 	}
 }
 
-// severityAtLeastBinding is the CEL binding for severityAtLeast function.
+// Severity ranks order severity levels for comparison. Higher is more severe,
+// and the value of each constant is its index in severityLevelNames.
+const (
+	severityRankUnspecified = iota
+	severityRankLow
+	severityRankMedium
+	severityRankHigh
+	severityRankCritical
+)
+
+// severityLevelNames is the severity vocabulary, ordered least to most severe so
+// that a name's index is its rank. It doubles as the list quoted back to policy
+// authors when they pass a level Deputy does not know.
+var severityLevelNames = []string{"UNSPECIFIED", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
+
+// severityAtLeastBinding is the CEL binding for the severityAtLeast function.
+// The threshold is authored, not observed, so an unrecognized level is a
+// programming mistake in the policy: it returns a CEL error naming the valid
+// levels rather than ranking the typo below everything, which would have made
+// the comparison true for every finding.
 func severityAtLeastBinding(vulnVal, levelVal ref.Val) ref.Val {
-	threshold := strings.ToUpper(toString(levelVal))
-	actual := extractSeverityString(vulnVal)
-	return types.Bool(severityRank(actual) >= severityRank(threshold))
+	level := toString(levelVal)
+	threshold, ok := severityRank(level)
+	if !ok {
+		return types.NewErr("severityAtLeast: unknown severity level %q (expected %s)", level, strings.Join(severityLevelNames, "|"))
+	}
+	return types.Bool(findingSeverityRank(vulnVal) >= threshold)
 }
 
 // isCriticalBinding is the CEL binding for isCritical function.
 func isCriticalBinding(val ref.Val) ref.Val {
-	actual := extractSeverityString(val)
-	return types.Bool(severityRank(actual) == 4) // CRITICAL = 4
+	return types.Bool(findingSeverityRank(val) == severityRankCritical)
 }
 
 // isHighOrAboveBinding is the CEL binding for isHighOrAbove function.
 func isHighOrAboveBinding(val ref.Val) ref.Val {
-	actual := extractSeverityString(val)
-	rank := severityRank(actual)
-	return types.Bool(rank >= 3) // HIGH = 3, CRITICAL = 4
+	return types.Bool(findingSeverityRank(val) >= severityRankHigh)
 }
 
-// severityRank returns a numeric rank for severity ordering.
-// Higher rank = more severe. CRITICAL=4, HIGH=3, MEDIUM=2, LOW=1, UNSPECIFIED=0.
-func severityRank(s string) int {
-	switch strings.ToUpper(s) {
-	case "CRITICAL":
-		return 4
-	case "HIGH":
-		return 3
-	case "MEDIUM":
-		return 2
-	case "LOW":
-		return 1
-	default:
-		return 0
+// severityRank returns the ordered rank of a severity level name and whether the
+// name belongs to the known vocabulary. Matching ignores case and surrounding
+// whitespace. Callers must not collapse the false result into rank zero for
+// author-supplied levels: zero sorts below LOW, so an unknown level would
+// compare "at least" true for every finding.
+func severityRank(name string) (int, bool) {
+	idx := slices.Index(severityLevelNames, strings.ToUpper(strings.TrimSpace(name)))
+	if idx < 0 {
+		return severityRankUnspecified, false
 	}
+	return idx, true
+}
+
+// findingSeverityRank ranks the severity carried by a finding. Unlike an authored
+// threshold, observed data can legitimately be missing or carry a level Deputy
+// does not model, so it ranks as unspecified instead of failing evaluation.
+func findingSeverityRank(val ref.Val) int {
+	rank, ok := severityRank(extractSeverityString(val))
+	if !ok {
+		return severityRankUnspecified
+	}
+	return rank
 }
 
 // extractSeverityString extracts the severity level as a string from a proto Finding or map.
