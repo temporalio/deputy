@@ -42,7 +42,9 @@ The standard library needs an admission test, because every addition is surface 
 
 > A helper earns its place only if it expresses something the language cannot. If it merely abbreviates something the language already says clearly, it is surface area, not a feature.
 
-`age()` earns it (time arithmetic on a domain value). `isCritical()` does not (it abbreviates `== severity.critical`, and the corpus shows nobody uses it).
+`imageRef()` earns it: resolving an implicit `docker.io`, telling a registry port from a tag, and splitting a digest is parsing, and CEL's string operations cannot do it correctly. `isCritical()` does not: it abbreviates `== severity.critical`, and no shipped policy uses it.
+
+`age()` is the case worth naming, because it looks like it earns its place and does not. It is `now() - timestamp(x)` with one overload missing, so `age(image.metadata.created)` fails at evaluation where the expression it abbreviates succeeds (#179). An abbreviation narrower than the thing it abbreviates is worse than no helper, because it looks like the safe choice.
 
 **Rule:** design the bundle grammar deliberately (it is ours, and the spec is part of the change), derive the vocabulary, apply the admission test to the standard library, and declare that standard library in one machine-readable place so tooling derives from it too.
 
@@ -58,24 +60,29 @@ They carry one thing that *is* ours: the extension band. The `X-Deputy-*` respon
 
 ## Why this matters, empirically
 
-Auditing every surface produced a clean split. Derived surfaces were correct. Hand-maintained ones had drifted:
+Auditing every surface split it cleanly by direction, if not by outcome. Every derived surface was correct. Most hand-maintained ones had drifted:
 
 | Surface | Source | Outcome |
 | --- | --- | --- |
 | MCP tool schemas | descriptors | correct |
 | Policy entrypoint reference | descriptors, via `bindings.go` | see below |
-| Helper catalog | hand | documents helpers nothing registers |
+| Helper catalog | hand | correct, all 50 entries compile |
+| Entrypoint helper lists | hand, via `helpers.go` | advertises `hasFix()`, `inKEV()`, `epssScore()`, which nothing registers |
 | REPL schema | hand | offers a function registered nowhere |
 | LSP completions | hand | offers fields that exist on no message |
 | Config reference | hand | documents an entire section that does not exist |
 
-One nuance decides the whole design. The policy entrypoint reference **is** generated, and it was still publishing variables that crash the proxy, because the source it derived from was wrong.
+One nuance decides the whole design. The policy entrypoint reference **is** generated, and it was still publishing variables that crash the proxy, because the source it derived from was wrong. The same generated file also advertises three scan helpers, `hasFix()`, `inKEV()`, and `epssScore()`, that no CEL environment registers (#180). Generation was faithful in both cases. `helpersByCategory` in `internal/policy/helpers.go` is a hand list, and it was copied accurately.
 
 > Generation propagates correctness and incorrectness equally. Deriving from a wrong root is not better than copying by hand.
 
 So generation is necessary and not sufficient. The root needs a contract test: one that fails when a binding profile declares a variable the runtime cannot supply.
 
-On `main` there is no such test. [`internal/policy/bindings_test.go`](../../internal/policy/bindings_test.go) checks profile membership, descriptions, and a short list of expected variables, none of which reach the payload, which is why `go_artifact_request` still declares an optional `licenses` variable that `GoArtifactRequestPolicyInput` has no field for. A first version is in review, comparing each profile against the variables the CEL environment actually declares. The rule this section argues for is that such a guard belongs at every derivation root, not only this one.
+On `main` there is no such test. [`internal/policy/bindings_test.go`](../../internal/policy/bindings_test.go) checks profile membership, descriptions, and a short list of expected variables, none of which reach the payload, which is why `go_artifact_request` still declares an optional `licenses` variable that `GoArtifactRequestPolicyInput` has no field for.
+
+A first version is in review, comparing each profile against the names the CEL environment declares. It catches the variables no entrypoint can use, `licenses` among them, but it cannot be the whole contract. The environment is one flat list shared by every entrypoint and every variable in it is `DynType`, so a name it declares may still be unbound at the entrypoint advertising it.
+
+The payload is the real root, and it has two shapes. The five proxy entrypoints evaluate a typed `*PolicyInput` proto, so their profiles can be checked against a descriptor. Every other entrypoint is handed a map assembled at its call site, with no descriptor behind it at all. A profile variable is only as real as the payload that carries it, so a descriptor check is right for the first group and the wrong tool for the second. The rule this section argues for is that such a guard belongs at every derivation root, not only this one.
 
 ## Identity
 
@@ -87,12 +94,12 @@ It is not finished. `Registration` carries no normalization rules and no purl ty
 
 The failures were never missing machinery. `Ecosystem.NormalizeVersion` exists and five packages call it; the policy path did not, so a rule matching `^v1\.` never fired where versions arrived unprefixed. Correctness was opt-in per caller, and that drifts as callers multiply.
 
-**Rules to design toward** (the first and last hold today, the middle two describe where the registry is going):
+**Rules to design toward.** None of them holds everywhere today, and each names a specific gap:
 
-- Exactly one canonical form crosses a boundary, and the boundary normalizes rather than trusting its callers.
+- Exactly one canonical form crosses a boundary, and the boundary normalizes rather than trusting its callers. The policy boundary does not: `buildPolicyInput` in [`internal/proxy/handler.go`](../../internal/proxy/handler.go) copies the requested name and version into the payload exactly as they arrived. #168 moves that normalization onto the three CEL payload boundaries, which is the shape this rule asks for.
 - Projections live in the registry. Adding an ecosystem should be one entry, and nothing else should need editing. Until `Parse`, `All`, and the normalization methods read from the registry, adding one still means updating those too.
 - Every entry carries every projection, enforced by test, and no projection is hardcoded outside the registry.
-- Plugins are producers too. Normalize inbound at every plugin boundary, since those producers cannot be reviewed.
+- Plugins are producers too. Normalize inbound at every plugin boundary, since those producers cannot be reviewed. `PluginExtractor.Extract` in [`internal/inventory/registry/adapter.go`](../../internal/inventory/registry/adapter.go) copies a plugin's name and version straight into a SCALIBR package, so an unprefixed Go version or a differently cased name enters the inventory unnormalized.
 
 **Direction:** the industry already has a canonical package identity, and Deputy already has `internal/purlx`. Treating ecosystem, name, and version as projections of a purl, rather than as three parallel strings that drift independently, removes this class rather than fixing instances of it. New surfaces should be designed toward that.
 
