@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/temporalio/deputy/internal/ecosystem"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // Canonical ecosystem contract
@@ -100,7 +101,71 @@ func validateEcosystems(ecosystems []string) ([]string, error) {
 //   - "ecosystems": a list of names (scan/diff/graph request options)
 //   - "ecosystems": a map keyed by ecosystem (graph and SBOM stats counts)
 func canonicalizeEcosystemPayload(payload map[string]any) {
-	canonicalizeEcosystemValue(payload)
+	for name, value := range payload {
+		if !variableCarriesEcosystem(name) {
+			continue
+		}
+		canonicalizeEcosystemValue(value)
+	}
+}
+
+// freeFormStringMaps are payload fields whose keys and values are supplied by
+// the caller rather than by a Deputy schema: JWT custom claims, container image
+// labels, and policy annotations. An ecosystem-shaped key in one of those is
+// somebody's data, not an ecosystem, and rewriting it would silently change
+// what an exact-match rule compares against. The walk never descends into them.
+var freeFormStringMaps = []string{"custom_claims", "labels", "annotations"}
+
+// variableCarriesEcosystem reports whether a top-level policy variable may hold
+// an ecosystem, so canonicalization stays on schema-defined paths. Variables
+// with a proto-typed schema are answered from their descriptor, which keeps
+// caller-controlled payloads such as jwt out of the walk without a hand-written
+// exclusion list. Variables whose payload is untyped ("object" in the variable
+// metadata, for example a scan report) are walked, since their shape is only
+// known at runtime.
+func variableCarriesEcosystem(name string) bool {
+	meta, known := VariableInfo(name)
+	if !known {
+		return true
+	}
+	md, isProto := VariableMessageDescriptor(elementTypeName(meta.Type))
+	if !isProto {
+		return true
+	}
+	return messageCarriesEcosystem(md, map[protoreflect.FullName]bool{})
+}
+
+// elementTypeName unwraps the "list(T)" form used in variable metadata so a
+// repeated variable resolves to the descriptor of its element type.
+func elementTypeName(typeName string) string {
+	if inner, ok := strings.CutPrefix(typeName, "list("); ok {
+		return strings.TrimSuffix(inner, ")")
+	}
+	return typeName
+}
+
+// messageCarriesEcosystem reports whether a message, or anything reachable from
+// it, declares an ecosystem field. The seen set makes recursive message graphs
+// terminate.
+func messageCarriesEcosystem(md protoreflect.MessageDescriptor, seen map[protoreflect.FullName]bool) bool {
+	if md == nil || seen[md.FullName()] {
+		return false
+	}
+	seen[md.FullName()] = true
+	fields := md.Fields()
+	for i := range fields.Len() {
+		field := fields.Get(i)
+		switch string(field.Name()) {
+		case "ecosystem", "ecosystems":
+			return true
+		}
+		if field.Kind() == protoreflect.MessageKind || field.Kind() == protoreflect.GroupKind {
+			if messageCarriesEcosystem(field.Message(), seen) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // canonicalizeEcosystemValue recursively canonicalizes ecosystem fields of any
@@ -118,11 +183,13 @@ func canonicalizeEcosystemValue(value any) {
 			normalizeIdentityFields(v, eco)
 		}
 		for key, child := range v {
-			switch key {
-			case "ecosystem":
+			switch {
+			case key == "ecosystem":
 				continue
-			case "ecosystems":
+			case key == "ecosystems":
 				v[key] = canonicalizeEcosystemCollection(child)
+				continue
+			case slices.Contains(freeFormStringMaps, key):
 				continue
 			}
 			canonicalizeEcosystemValue(child)
