@@ -924,7 +924,7 @@ func mcpPURLType(ecosystemName string) string {
 	// Canonicalize first so every ecosystem alias (including github-actions
 	// spellings like "gha") maps consistently to a purl type.
 	canonical, _ := canonicalMCPEcosystem(ecosystemName)
-	if canonical == "github-actions" {
+	if canonical == ecosystem.GitHubActions.String() {
 		return purlx.TypeGitHubActions
 	}
 	switch ecosystem.Parse(canonical) {
@@ -942,7 +942,7 @@ func mcpPURLType(ecosystemName string) string {
 func mcpEcosystemFromPURLType(purlType string) string {
 	purlType = strings.TrimSpace(purlType)
 	if purlx.IsGitHubActionsType(purlType) {
-		return "github-actions"
+		return ecosystem.GitHubActions.String()
 	}
 	return normalizeMCPPackageEcosystem(purlType)
 }

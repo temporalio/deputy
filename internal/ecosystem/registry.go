@@ -77,6 +77,51 @@ func AllCapabilities() []Capability {
 	return []Capability{CapInventory, CapGraph, CapProxy, CapLicense, CapFix, CapSBOM}
 }
 
+// Projection names a value the registry promises to carry for every
+// ecosystem. Every registration must supply each projection unless it declares
+// the projection absent, so a missing value is always a bug rather than an
+// ambiguous blank. See [Registration.Absent] and [Registration.Lacks].
+type Projection string
+
+const (
+	// ProjectionDisplayName is the human-readable name (see [Display]).
+	ProjectionDisplayName Projection = "display_name"
+
+	// ProjectionDescription is the one-line summary of the ecosystem.
+	ProjectionDescription Projection = "description"
+
+	// ProjectionCapabilities is the capability bitmask.
+	ProjectionCapabilities Projection = "capabilities"
+
+	// ProjectionScalibrPrefixes are the OSV-SCALIBR plugin name prefixes.
+	ProjectionScalibrPrefixes Projection = "scalibr_prefixes"
+
+	// ProjectionManifests are the manifest file patterns.
+	ProjectionManifests Projection = "manifests"
+
+	// ProjectionUpstreamURL is the primary registry URL.
+	ProjectionUpstreamURL Projection = "upstream_url"
+
+	// ProjectionOSVName is the ecosystem name OSV uses. Ecosystems OSV does not
+	// index (tool managers such as mise and asdf) declare it absent, which is
+	// also what makes [Ecosystem.OSVQueryable] false for them.
+	ProjectionOSVName Projection = "osv_name"
+)
+
+// RequiredProjections returns every projection a registration must supply
+// unless it declares the projection absent.
+func RequiredProjections() []Projection {
+	return []Projection{
+		ProjectionDisplayName,
+		ProjectionDescription,
+		ProjectionCapabilities,
+		ProjectionScalibrPrefixes,
+		ProjectionManifests,
+		ProjectionUpstreamURL,
+		ProjectionOSVName,
+	}
+}
+
 // Registration describes an ecosystem's capabilities and metadata.
 // This is the single source of truth for ecosystem information.
 type Registration struct {
@@ -113,6 +158,41 @@ type Registration struct {
 
 	// OSVName is the ecosystem name as used by the OSV database.
 	OSVName string
+
+	// Absent declares the projections this ecosystem intentionally does not
+	// have, so a blank value is a deliberate statement instead of an oversight.
+	// Declaring a projection absent while still supplying it is a bug, and the
+	// registry completeness test rejects both halves of that.
+	Absent []Projection
+}
+
+// Lacks reports whether this registration declares the projection absent.
+func (r Registration) Lacks(p Projection) bool {
+	return slices.Contains(r.Absent, p)
+}
+
+// Projection returns the registration's value for p, and ok=false when p is not
+// a projection this type carries. Values are returned as the empty-checkable
+// any so callers (notably the completeness test) can treat them uniformly.
+func (r Registration) Projection(p Projection) (value any, ok bool) {
+	switch p {
+	case ProjectionDisplayName:
+		return r.DisplayName, true
+	case ProjectionDescription:
+		return r.Description, true
+	case ProjectionCapabilities:
+		return r.Capabilities, true
+	case ProjectionScalibrPrefixes:
+		return r.ScalibrPrefixes, true
+	case ProjectionManifests:
+		return r.Manifests, true
+	case ProjectionUpstreamURL:
+		return r.UpstreamURL, true
+	case ProjectionOSVName:
+		return r.OSVName, true
+	default:
+		return nil, false
+	}
 }
 
 // HasCapability returns true if the registration includes the given capability.
@@ -418,6 +498,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"mise.lock"},
 		UpstreamURL:     "https://mise.jdx.dev",
 		OSVName:         "",
+		Absent:          []Projection{ProjectionOSVName},
 	})
 
 	r.Register(Registration{
@@ -431,6 +512,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       nil,
 		UpstreamURL:     "https://asdf-vm.com",
 		OSVName:         "",
+		Absent:          []Projection{ProjectionOSVName},
 	})
 }
 
