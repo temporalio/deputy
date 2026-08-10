@@ -734,6 +734,113 @@ defaults: &defaults
 			name:   "an empty policies list",
 			bundle: "policies: []\n",
 		},
+		{
+			name: "optional fields written as an explicit null",
+			bundle: `
+policies:
+  - name: explicit-nulls
+    mode: null
+    entrypoints: null
+    commands: null
+    vars: null
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "optional fields written as a tilde",
+			bundle: `
+policies:
+  - name: tilde-nulls
+    mode: ~
+    entrypoints: ~
+    commands: ~
+    vars: ~
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "optional fields written with no value at all",
+			bundle: `
+policies:
+  - name: bare-keys
+    mode:
+    entrypoints:
+    commands:
+    vars:
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "two policies whose names are an explicit null",
+			bundle: `
+policies:
+  - name: null
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+  - name: null
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "two policies whose names are a tilde",
+			bundle: `
+policies:
+  - name: ~
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+  - name: ~
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "a rule whose condition is an explicit null",
+			bundle: `
+policies:
+  - name: null-when
+    rules:
+      - when: null
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "a rule whose action is an explicit null",
+			bundle: `
+policies:
+  - name: null-action
+    rules:
+      - when: "true"
+        action: null
+        reason: "r"
+`,
+		},
+		{
+			name: "a rules list written as an explicit null",
+			bundle: `
+policies:
+  - name: null-rules
+    rules: null
+`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

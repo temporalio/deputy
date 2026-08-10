@@ -575,10 +575,10 @@ func DeclaredVarNames(policyNode *yaml.Node) []string {
 }
 
 // MappingValue returns the value node for a key inside a YAML mapping node, or
-// nil when the node is not a mapping or the key is absent. It reads only what
-// the document says: anchors, aliases, and merge keys are rejected (see
-// anchorIssues) and the nodes carrying them are skipped, so no reader has to
-// resolve them.
+// nil when the node is not a mapping, the key is absent, or the key is present
+// with an explicitly null value. It reads only what the document says: anchors,
+// aliases, and merge keys are rejected (see anchorIssues) and the nodes carrying
+// them are skipped, so no reader has to resolve them.
 func MappingValue(mapNode *yaml.Node, key string) *yaml.Node {
 	if mapNode == nil || mapNode.Kind != yaml.MappingNode {
 		return nil
@@ -586,10 +586,25 @@ func MappingValue(mapNode *yaml.Node, key string) *yaml.Node {
 	for i := 0; i+1 < len(mapNode.Content); i += 2 {
 		k := mapNode.Content[i]
 		if k.Kind == yaml.ScalarNode && k.Value == key {
+			if isNullNode(mapNode.Content[i+1]) {
+				return nil
+			}
 			return mapNode.Content[i+1]
 		}
 	}
 	return nil
+}
+
+// isNullNode reports whether a value node is YAML's null: `key: null`, `key: ~`,
+// and a key written with no value at all all resolve to the !!null tag. The
+// decoder leaves the corresponding Go field at its zero value, which for every
+// optional field of a policy is indistinguishable from the field being absent,
+// so the node walk has to read a null the same way. Without this it reports
+// `mode: null` as an invalid mode and `entrypoints: null` as a malformed list
+// for a bundle the loader accepts, and treats the literal text "null" as a
+// policy name two such policies would then collide on.
+func isNullNode(node *yaml.Node) bool {
+	return node != nil && node.Kind == yaml.ScalarNode && node.Tag == "!!null"
 }
 
 // isMergeKey reports whether a mapping key is YAML's merge key, the "<<" that
