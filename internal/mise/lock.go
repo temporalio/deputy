@@ -186,20 +186,36 @@ func (lf *Lockfile) Sole(name string) *LockedTool {
 // Lookup finds the locked entry that best matches a parsed tool spec at a
 // requested version. It prefers an exact version match (by the tool's short name
 // then its raw key), and otherwise falls back to the sole locked entry under
-// either name — which covers a fuzzy declared version that won't equal any
+// either name, which covers a fuzzy declared version that won't equal any
 // locked version string. Returns nil when nothing matches.
-func (lf *Lockfile) Lookup(spec ToolSpec, version string) *LockedTool {
+//
+// claimedKeys lists the tool keys the surrounding config declares, so a lock
+// entry keyed by a tool's short name is not borrowed when a different
+// declaration owns that name. A config can declare both "npm:node" and node as
+// independent tools with independent lock entries; without this, the
+// backend-qualified spec matches on its stripped name and is enriched with the
+// other tool's version, which after a fix reports the freshly updated tool at
+// the old vulnerable version. Pass nil when no config context is available.
+func (lf *Lockfile) Lookup(spec ToolSpec, version string, claimedKeys map[string]bool) *LockedTool {
 	if lf == nil {
 		return nil
 	}
+	// A name owned by another declaration is not this spec's to match.
+	usable := func(name string) bool {
+		return name == spec.Key || !claimedKeys[name]
+	}
 	for _, name := range [...]string{spec.Name, spec.Key} {
-		if lt := lf.Locked(name, version); lt != nil {
-			return lt
+		if usable(name) {
+			if lt := lf.Locked(name, version); lt != nil {
+				return lt
+			}
 		}
 	}
 	for _, name := range [...]string{spec.Name, spec.Key} {
-		if lt := lf.Sole(name); lt != nil {
-			return lt
+		if usable(name) {
+			if lt := lf.Sole(name); lt != nil {
+				return lt
+			}
 		}
 	}
 	return nil

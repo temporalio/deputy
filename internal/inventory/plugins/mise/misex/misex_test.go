@@ -199,3 +199,37 @@ backend = "npm:prettier"
 		t.Errorf("BackendPURL = %q, want pkg:npm/prettier@3.8.1", md.BackendPURL)
 	}
 }
+
+// TestExtractDoesNotBorrowAnotherToolsLockEntry pins that a backend-qualified
+// tool is not enriched from a lock entry belonging to a separately declared
+// tool of the same short name. Sharing the entry made a fixed "npm:node"
+// declaration report the untouched core node version, so an applied fix still
+// looked vulnerable.
+func TestExtractDoesNotBorrowAnotherToolsLockEntry(t *testing.T) {
+	fsys := fstest.MapFS{
+		"mise.toml": {Data: []byte("[tools]\n\"npm:node\" = \"20.12.0\"\nnode = \"20.11.0\"\n")},
+		"mise.lock": {Data: []byte(`[[tools.node]]
+version = "20.11.0"
+backend = "core:node"
+`)},
+	}
+	f, err := fsys.Open("mise.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, err := New().Extract(t.Context(), &filesystem.ScanInput{Path: "mise.toml", Reader: f, FS: fsys})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	got := map[string]string{}
+	for _, pkg := range inv.Packages {
+		got[pkg.Name] = pkg.Version
+	}
+	if got["npm:node"] != "20.12.0" {
+		t.Errorf("npm:node version = %q, want 20.12.0 (its own declaration)", got["npm:node"])
+	}
+	if got["node"] != "20.11.0" {
+		t.Errorf("node version = %q, want 20.11.0 (its own lock entry)", got["node"])
+	}
+}

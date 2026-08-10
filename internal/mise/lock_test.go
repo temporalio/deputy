@@ -139,10 +139,10 @@ version = "3.12.3"
 		t.Fatalf("ParseLock: %v", err)
 	}
 
-	if got := lf.Lookup(ToolSpec{Name: "python", Key: "python"}, "3.11.9"); got == nil || got.Version != "3.11.9" {
+	if got := lf.Lookup(ToolSpec{Name: "python", Key: "python"}, "3.11.9", nil); got == nil || got.Version != "3.11.9" {
 		t.Fatalf("exact lookup = %+v, want 3.11.9", got)
 	}
-	if got := lf.Lookup(ToolSpec{Name: "python", Key: "python"}, "3"); got != nil {
+	if got := lf.Lookup(ToolSpec{Name: "python", Key: "python"}, "3", nil); got != nil {
 		t.Fatalf("ambiguous fuzzy lookup = %+v, want nil", got)
 	}
 	if got := lf.Sole("python"); got != nil {

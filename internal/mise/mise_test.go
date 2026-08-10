@@ -261,7 +261,7 @@ func TestLockfileLookup(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lt := lf.Lookup(tt.spec, tt.version)
+			lt := lf.Lookup(tt.spec, tt.version, nil)
 			switch {
 			case tt.wantVersion == "":
 				if lt != nil {
@@ -274,8 +274,66 @@ func TestLockfileLookup(t *testing.T) {
 	}
 
 	var nilLF *Lockfile
-	if nilLF.Lookup(ToolSpec{Name: "node"}, "20.11.0") != nil {
+	if nilLF.Lookup(ToolSpec{Name: "node"}, "20.11.0", nil) != nil {
 		t.Error("nil lockfile Lookup should return nil")
+	}
+}
+
+// TestLockfileLookupClaimedKeys pins that a lock entry keyed by a tool's short
+// name is not borrowed when the config declares that name as a separate tool.
+// Sharing it lets a backend-qualified tool inherit the other tool's version,
+// which after a fix reports the freshly updated tool at the old version.
+func TestLockfileLookupClaimedKeys(t *testing.T) {
+	const lock = `[[tools.node]]
+version = "20.11.0"
+backend = "core:node"
+`
+	lf, err := ParseLock("mise.lock", []byte(lock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	qualified := ToolSpec{Name: "node", Key: "npm:node"}
+
+	tests := []struct {
+		name        string
+		spec        ToolSpec
+		version     string
+		claimed     map[string]bool
+		wantVersion string // "" => expect no match
+	}{
+		{
+			name: "short name free to match", spec: qualified, version: "20.12.0",
+			claimed: map[string]bool{"npm:node": true}, wantVersion: "20.11.0",
+		},
+		{
+			name: "short name claimed by another declaration", spec: qualified, version: "20.12.0",
+			claimed: map[string]bool{"npm:node": true, "node": true}, wantVersion: "",
+		},
+		{
+			name: "exact version match also refused when claimed", spec: qualified, version: "20.11.0",
+			claimed: map[string]bool{"npm:node": true, "node": true}, wantVersion: "",
+		},
+		{
+			name: "a tool always matches its own key", spec: ToolSpec{Name: "node", Key: "node"}, version: "20.11.0",
+			claimed: map[string]bool{"npm:node": true, "node": true}, wantVersion: "20.11.0",
+		},
+		{
+			name: "no config context keeps the fallback", spec: qualified, version: "20.12.0",
+			claimed: nil, wantVersion: "20.11.0",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lt := lf.Lookup(tt.spec, tt.version, tt.claimed)
+			switch {
+			case tt.wantVersion == "":
+				if lt != nil {
+					t.Errorf("Lookup = %+v, want nil", lt)
+				}
+			case lt == nil || lt.Version != tt.wantVersion:
+				t.Errorf("Lookup = %+v, want version %q", lt, tt.wantVersion)
+			}
+		})
 	}
 }
 
