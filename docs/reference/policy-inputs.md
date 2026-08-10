@@ -788,7 +788,11 @@ Finding represents a scan-time occurrence of an advisory in a dependency.
 
 ## Canonical ecosystems
 
-The canonical ecosystem strings used by the proxy and policy filters are `go`, `npm`, `pypi`, `rubygems`, `oci`.
+Every ecosystem value in a policy input is canonicalized before evaluation, so a policy sees exactly one spelling no matter which scanner produced the data: a lowercase, hyphenated token. Inventory, graph resolution, and OSV report display names (`Go`, `PyPI`, `crates.io`, `GitHub Actions`); those are for rendering only and never reach a policy.
+
+Canonical tokens: `asdf`, `cargo`, `cocoapods`, `docker`, `github-actions`, `go`, `hex`, `maven`, `mise`, `npm`, `nuget`, `oci`, `packagist`, `pub`, `pypi`, `rubygems`. The proxy entrypoints use `go`, `npm`, `pypi`, `rubygems`, and `oci`.
+
+Write `pkg.ecosystem == "go"`, not `pkg.ecosystem == "Go"`, and drop any `lowerAscii()` workaround. Ecosystems Deputy does not recognize (OS package ecosystems such as `Alpine:v3.19`) are lowercased rather than remapped, so they stay comparable without losing their release suffix.
 
 ## Proxy version semantics
 
@@ -1038,7 +1042,7 @@ Scan vulnerability (simplified):
       "id": "GO-2024-1234",
       "severity": {"level": "SEVERITY_LEVEL_MEDIUM"}
     },
-    "package": {"name": "example.com/pkg", "version": "1.0.0", "ecosystem": "Go"}
+    "package": {"name": "example.com/pkg", "version": "1.0.0", "ecosystem": "go"}
   },
   "env": {"command": "scan", "entrypoint": "scan_vulnerability"}
 }
