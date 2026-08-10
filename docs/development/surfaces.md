@@ -35,7 +35,7 @@ The CEL policy DSL.
 This is the one surface that genuinely is not a projection. It has three parts, and they do not share an owner:
 
 - **Grammar** has two layers. The expression sublanguage is CEL's and is not ours to design. The bundle grammar wrapped around it is entirely ours: `policies`, `vars`, `rules`, actions, modes, entrypoint and command filters, variable ordering, and the validation that rejects a malformed bundle. It lives in [`internal/policy/source.go`](../../internal/policy/source.go) and [`internal/policy/bundle_structured.go`](../../internal/policy/bundle_structured.go) and is specified in [`docs/reference/policy-spec.md`](../reference/policy-spec.md). Most DSL features land in that layer, which means parsing, validation, compatibility, and spec work, not just a CEL expression.
-- **Vocabulary** is entirely ours and must derive from descriptors: the variables bound at each entrypoint, the fields reachable on them, the enum values.
+- **Vocabulary** is entirely ours and should derive from descriptors: the variables bound at each entrypoint, the fields reachable on them, the enum values. Today it does not. `severityConstants` and `scopeConstants` in [`internal/policy/evaluator.go`](../../internal/policy/evaluator.go) are hand-written, and they disagree with each other: `severity.critical` is lowercase, `scope.RUNTIME` is uppercase, and the LSP offers uppercase for both, so accepting a severity completion produces a policy that fails at evaluation (#182). Both enums exist in proto, so this is derivable and simply is not derived.
 - **Standard library** is the affordance layer: helpers that express something the language cannot.
 
 The standard library needs an admission test, because every addition is surface area a human or a model must learn, and unused surface actively misleads:
@@ -60,7 +60,7 @@ They carry one thing that *is* ours: the extension band. The `X-Deputy-*` respon
 
 ## Why this matters, empirically
 
-Auditing every surface split it cleanly by direction, if not by outcome. Every derived surface was correct. Most hand-maintained ones had drifted:
+Auditing every surface split it cleanly by direction, if not by outcome. Every derived surface was faithful to its source. Most hand-maintained ones had drifted. Faithful is not the same as correct, and the difference is the whole point of the next section:
 
 | Surface | Source | Outcome |
 | --- | --- | --- |
@@ -82,7 +82,9 @@ On `main` there is no such test. [`internal/policy/bindings_test.go`](../../inte
 
 A first version is in review, comparing each profile against the names the CEL environment declares. It catches the variables no entrypoint can use, `licenses` among them, but it cannot be the whole contract. The environment is one flat list shared by every entrypoint and every variable in it is `DynType`, so a name it declares may still be unbound at the entrypoint advertising it.
 
-The payload is the real root, and it has two shapes. The five proxy entrypoints evaluate a typed `*PolicyInput` proto, so their profiles can be checked against a descriptor. Every other entrypoint is handed a map assembled at its call site, with no descriptor behind it at all. A profile variable is only as real as the payload that carries it, so a descriptor check is right for the first group and the wrong tool for the second. The rule this section argues for is that such a guard belongs at every derivation root, not only this one.
+The payload is the real root. Most entrypoints already carry a typed proto: the five proxy entrypoints through `buildPolicyInput`, and the service entrypoints through `buildPolicyPayload` in [`internal/server/server.go`](../../internal/server/server.go), which returns a `proto.Message`. Those profiles can be checked against a descriptor directly, and should be.
+
+The remaining ones are CLI paths that hand-assemble a map at the call site, `runDiffPolicies` among them. A typed input exists in proto for several of these and is still the contract, so the check there is two-part: the profile against the descriptor, and a separate test that the assembled map actually supplies what the descriptor declares. Exempting them would preserve exactly the drift this section is about. The rule is that such a guard belongs at every derivation root, not only this one.
 
 ## Identity
 
@@ -101,7 +103,16 @@ The failures were never missing machinery. `Ecosystem.NormalizeVersion` exists a
 - Every entry carries every projection, enforced by test, and no projection is hardcoded outside the registry.
 - Plugins are producers too. Normalize inbound at every plugin boundary, since those producers cannot be reviewed. `PluginExtractor.Extract` in [`internal/inventory/registry/adapter.go`](../../internal/inventory/registry/adapter.go) copies a plugin's name and version straight into a SCALIBR package, so an unprefixed Go version or a differently cased name enters the inventory unnormalized.
 
-**Direction:** the industry already has a canonical package identity, and Deputy already has `internal/purlx`. Treating ecosystem, name, and version as projections of a purl, rather than as three parallel strings that drift independently, removes this class rather than fixing instances of it. New surfaces should be designed toward that.
+**Direction:** the industry already has a canonical package identity, and Deputy already has `internal/purlx`. Treating ecosystem, name, and version as projections of a purl, rather than as three parallel strings that drift independently, gives the domain one identity type to pass around instead of three strings to keep in sync.
+
+It does not remove the normalization, and it is worth being precise about that. `packageurl-go` preserves the version verbatim, so an unnormalized pair still produces two identities:
+
+```
+1.2.3   ->  pkg:golang/github.com/foo/bar@1.2.3
+v1.2.3  ->  pkg:golang/github.com/foo/bar@v1.2.3
+```
+
+Ecosystem-specific name and version normalization still has to happen before the purl is constructed, or the same duplicate identities simply move into a new representation. What the purl buys is a single place to enforce that, and a type that cannot be assembled without deciding.
 
 ## Adding a capability
 
