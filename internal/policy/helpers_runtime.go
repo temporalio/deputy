@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"cmp"
 	"context"
 	"reflect"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"github.com/temporalio/deputy/internal/purlx"
 	"github.com/temporalio/deputy/internal/vulnerability/ssvc"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // levenshteinMaxInputLen is the maximum string length accepted by the levenshtein
@@ -726,20 +728,64 @@ func customHelperFunctions() []cel.EnvOption {
 	}
 }
 
-// Severity ranks order severity levels for comparison. Higher is more severe,
-// and the value of each constant is its index in severityLevelNames.
+// Severity ranks order severity levels for comparison. Higher is more severe.
+// They are the enum numbers of deputy.vulnerability.v1.SeverityLevel, which the
+// proto declares in ascending severity order, so ranking never needs a
+// hand-maintained copy of the level list.
 const (
-	severityRankUnspecified = iota
-	severityRankLow
-	severityRankMedium
-	severityRankHigh
-	severityRankCritical
+	severityRankUnspecified = int(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_UNSPECIFIED)
+	severityRankHigh        = int(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH)
+	severityRankCritical    = int(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL)
 )
 
-// severityLevelNames is the severity vocabulary, ordered least to most severe so
-// that a name's index is its rank. It doubles as the list quoted back to policy
-// authors when they pass a level Deputy does not know.
-var severityLevelNames = []string{"UNSPECIFIED", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
+// severityLevelPrefix is the generated enum's value prefix. Policies write the
+// bare level ("CRITICAL"), not the proto spelling.
+const severityLevelPrefix = "SEVERITY_LEVEL_"
+
+// severityLevels is the severity vocabulary derived from the generated
+// SeverityLevel descriptor.
+var severityLevels = newSeverityVocabulary()
+
+// severityVocabulary is the set of severity level names Deputy accepts, together
+// with their rank. It is built from the proto descriptor rather than written out
+// by hand so that a new or renamed enum value cannot drift away from what
+// severityAtLeast accepts or from the error message it prints.
+type severityVocabulary struct {
+	ranks map[string]int // ranks maps a bare level name to its enum number.
+	names []string       // names lists the bare level names ordered least to most severe.
+}
+
+// newSeverityVocabulary reads the SeverityLevel enum descriptor once at startup,
+// strips the generated prefix from each value, and orders the names by enum
+// number so messages read least to most severe.
+func newSeverityVocabulary() severityVocabulary {
+	values := vulnerabilityv1.SeverityLevel(0).Descriptor().Values()
+	vocab := severityVocabulary{ranks: make(map[string]int, values.Len())}
+	byRank := make([]protoreflect.EnumValueDescriptor, 0, values.Len())
+	for i := range values.Len() {
+		byRank = append(byRank, values.Get(i))
+	}
+	slices.SortFunc(byRank, func(a, b protoreflect.EnumValueDescriptor) int {
+		return cmp.Compare(a.Number(), b.Number())
+	})
+	for _, value := range byRank {
+		name := strings.TrimPrefix(string(value.Name()), severityLevelPrefix)
+		vocab.ranks[name] = int(value.Number())
+		vocab.names = append(vocab.names, name)
+	}
+	return vocab
+}
+
+// nameFor returns the bare level name for a rank, and whether the rank is one
+// the enum defines.
+func (v severityVocabulary) nameFor(rank int) (string, bool) {
+	for name, known := range v.ranks {
+		if known == rank {
+			return name, true
+		}
+	}
+	return "", false
+}
 
 // severityAtLeastBinding is the CEL binding for the severityAtLeast function.
 // The threshold is authored, not observed, so an unrecognized level is a
@@ -750,7 +796,7 @@ func severityAtLeastBinding(vulnVal, levelVal ref.Val) ref.Val {
 	level := toString(levelVal)
 	threshold, ok := severityRank(level)
 	if !ok {
-		return types.NewErr("severityAtLeast: unknown severity level %q (expected %s)", level, strings.Join(severityLevelNames, "|"))
+		return types.NewErr("severityAtLeast: unknown severity level %q (expected %s)", level, strings.Join(severityLevels.names, "|"))
 	}
 	return types.Bool(findingSeverityRank(vulnVal) >= threshold)
 }
@@ -771,11 +817,11 @@ func isHighOrAboveBinding(val ref.Val) ref.Val {
 // author-supplied levels: zero sorts below LOW, so an unknown level would
 // compare "at least" true for every finding.
 func severityRank(name string) (int, bool) {
-	idx := slices.Index(severityLevelNames, strings.ToUpper(strings.TrimSpace(name)))
-	if idx < 0 {
+	rank, ok := severityLevels.ranks[strings.ToUpper(strings.TrimSpace(name))]
+	if !ok {
 		return severityRankUnspecified, false
 	}
-	return idx, true
+	return rank, true
 }
 
 // findingSeverityRank ranks the severity carried by a finding. Unlike an authored
@@ -1214,38 +1260,22 @@ func severityLevelToString(level any) string {
 	}
 }
 
-// severityIntToString converts a severity level int to a string.
+// severityIntToString converts a severity level int to a string, reporting
+// "UNKNOWN" for a number the SeverityLevel enum does not define.
 func severityIntToString(level int32) string {
-	switch level {
-	case 0:
-		return "UNSPECIFIED"
-	case 1:
-		return "LOW"
-	case 2:
-		return "MEDIUM"
-	case 3:
-		return "HIGH"
-	case 4:
-		return "CRITICAL"
-	default:
-		return "UNKNOWN"
+	if name, ok := severityLevels.nameFor(int(level)); ok {
+		return name
 	}
+	return "UNKNOWN"
 }
 
-// severityLevelProtoToString converts a proto SeverityLevel enum to a string.
+// severityLevelProtoToString converts a proto SeverityLevel enum to its bare
+// name, falling back to UNSPECIFIED for a value this build does not know.
 func severityLevelProtoToString(level vulnerabilityv1.SeverityLevel) string {
-	switch level {
-	case vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL:
-		return "CRITICAL"
-	case vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH:
-		return "HIGH"
-	case vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM:
-		return "MEDIUM"
-	case vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW:
-		return "LOW"
-	default:
-		return "UNSPECIFIED"
+	if name, ok := severityLevels.nameFor(int(level)); ok {
+		return name
 	}
+	return "UNSPECIFIED"
 }
 
 // extractImportStatus extracts the import_status field from a node.

@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -27,6 +28,53 @@ func findingWithSeverity(level vulnerabilityv1.SeverityLevel) ref.Val {
 			Severity: &vulnerabilityv1.Severity{Level: level},
 		},
 	})
+}
+
+// TestSeverityVocabularyMatchesProtoDescriptor pins that the levels
+// severityAtLeast accepts, the ranks it compares with, and the levels it names
+// in its error message all come from deputy.vulnerability.v1.SeverityLevel. A
+// level added to or renamed in the proto must not need a matching edit here.
+func TestSeverityVocabularyMatchesProtoDescriptor(t *testing.T) {
+	values := vulnerabilityv1.SeverityLevel(0).Descriptor().Values()
+	if values.Len() == 0 {
+		t.Fatal("SeverityLevel descriptor has no values")
+	}
+	if len(severityLevels.ranks) != values.Len() {
+		t.Fatalf("vocabulary has %d levels, descriptor has %d", len(severityLevels.ranks), values.Len())
+	}
+	lowFinding := findingWithSeverity(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW)
+	for i := range values.Len() {
+		value := values.Get(i)
+		name := strings.TrimPrefix(string(value.Name()), severityLevelPrefix)
+		t.Run(name, func(t *testing.T) {
+			rank, ok := severityRank(name)
+			if !ok {
+				t.Fatalf("severityRank rejects declared level %q", name)
+			}
+			if want := int(value.Number()); rank != want {
+				t.Fatalf("rank of %q = %d, want the enum number %d", name, rank, want)
+			}
+			if got := severityAtLeastBinding(lowFinding, types.String(name)); types.IsError(got) {
+				t.Fatalf("severityAtLeast rejected declared level %q: %v", name, got)
+			}
+			// The error message must quote the whole vocabulary back.
+			err := severityAtLeastBinding(lowFinding, types.String("NOT_A_LEVEL"))
+			if !strings.Contains(err.(*types.Err).String(), name) {
+				t.Fatalf("error message omits declared level %q: %v", name, err)
+			}
+		})
+	}
+}
+
+// TestSeverityRanksAreAscending pins the invariant the ranking relies on: the
+// enum declares levels from least to most severe, so its numbers order them. A
+// value inserted out of order would silently mis-rank comparisons, so it must
+// fail here instead.
+func TestSeverityRanksAreAscending(t *testing.T) {
+	want := []string{"UNSPECIFIED", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
+	if !slices.Equal(severityLevels.names, want) {
+		t.Fatalf("severity levels in enum-number order = %v, want %v (a level added out of severity order breaks ordered comparisons)", severityLevels.names, want)
+	}
 }
 
 // TestSeverityAtLeastRejectsUnknownLevel pins that an unrecognized threshold is a
