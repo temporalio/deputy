@@ -11,6 +11,13 @@
 # Test binary, built with `go test -c`
 *.test
 
+# Deputy binaries built at the repo root. The build commands in AGENTS.md and
+# docs/development/contributing.md write here, and the plugin and sandbox
+# examples in docs/guides build alongside them. Root-anchored so it does not
+# shadow tracked files such as examples/sandbox-plugins/vz/deputy-init.
+/deputy
+/deputy-*
+
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
@@ -23,3 +30,9 @@ go.work.sum
 
 # env file
 .env
+
+# Local agent tooling. Shared config under .claude/ stays tracked; these two are
+# per-machine. Worktrees in particular hold full checkouts and reach hundreds of
+# megabytes.
+.claude/worktrees/
+.claude/settings.local.json
