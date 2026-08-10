@@ -19,6 +19,12 @@ import (
 // "github-actions") before evaluation. Display names stay untouched in the
 // protos Deputy renders; only what policy sees is normalized.
 
+// UnknownVersion is the value Deputy puts in a policy payload when a request
+// has no concrete version, such as a proxy metadata or index request. It is a
+// sentinel rather than an empty string so a policy cannot treat a missing
+// version as a match-all, and it is never run through version normalization.
+const UnknownVersion = "<unknown>"
+
 // NormalizeEcosystem returns the canonical token policies compare against for
 // an author- or scanner-supplied ecosystem name, resolving aliases and casing
 // ("Go", "golang" -> "go"; "GitHub Actions" -> "github-actions"). Names Deputy
@@ -98,17 +104,23 @@ func canonicalizeEcosystemPayload(payload map[string]any) {
 }
 
 // canonicalizeEcosystemValue recursively canonicalizes ecosystem fields of any
-// payload value, descending through maps and lists.
+// payload value, descending through maps and lists. A map's own ecosystem is
+// resolved before its name and version fields, because the ecosystem selects
+// which normalizer those fields get.
 func canonicalizeEcosystemValue(value any) {
 	switch v := value.(type) {
 	case map[string]any:
+		eco, ok := canonicalizeOwnEcosystem(v)
+		if !ok {
+			eco, ok = inheritedChangeEcosystem(v)
+		}
+		if ok {
+			normalizeIdentityFields(v, eco)
+		}
 		for key, child := range v {
 			switch key {
 			case "ecosystem":
-				if name, ok := child.(string); ok {
-					v[key] = NormalizeEcosystem(name)
-					continue
-				}
+				continue
 			case "ecosystems":
 				v[key] = canonicalizeEcosystemCollection(child)
 				continue
@@ -120,6 +132,106 @@ func canonicalizeEcosystemValue(value any) {
 			canonicalizeEcosystemValue(elem)
 		}
 	}
+}
+
+// canonicalizeOwnEcosystem rewrites a map's own "ecosystem" field to its
+// canonical token and returns the resolved ecosystem. ok is false when the map
+// carries no ecosystem string.
+func canonicalizeOwnEcosystem(m map[string]any) (eco ecosystem.Ecosystem, ok bool) {
+	raw, isString := m["ecosystem"].(string)
+	if !isString {
+		return "", false
+	}
+	token := NormalizeEcosystem(raw)
+	m["ecosystem"] = token
+	if token == "" {
+		return "", false
+	}
+	return ecosystem.Ecosystem(token), true
+}
+
+// inheritedChangeEcosystem resolves the ecosystem for a change shape, where the
+// versions being compared sit next to a nested package rather than next to an
+// ecosystem of their own (deputy.diff.v1.PackageChange and
+// deputy.policy.v1.DependencyChange both look like this). It only applies to
+// maps that actually hold change versions, so an unrelated payload that merely
+// contains a package is left alone.
+func inheritedChangeEcosystem(m map[string]any) (eco ecosystem.Ecosystem, ok bool) {
+	if _, hasBase := m["base_version"]; !hasBase {
+		if _, hasTarget := m["target_version"]; !hasTarget {
+			return "", false
+		}
+	}
+	for _, key := range []string{"package", "pkg"} {
+		child, isMap := m[key].(map[string]any)
+		if !isMap {
+			continue
+		}
+		raw, isString := child["ecosystem"].(string)
+		if !isString {
+			continue
+		}
+		if token := NormalizeEcosystem(raw); token != "" {
+			return ecosystem.Ecosystem(token), true
+		}
+	}
+	return "", false
+}
+
+// packageNameKeys are the payload fields that hold a package name and so get
+// the ecosystem's name normalization (PyPI names are case-insensitive, for
+// example, so they are lowercased).
+var packageNameKeys = []string{"name", "old_name"}
+
+// packageVersionKeys are the payload fields that hold a single version string
+// and so get the ecosystem's version normalization (Go versions gain the "v"
+// prefix, so a policy can write "^v1\\." and match the diff path too).
+var packageVersionKeys = []string{"version", "base_version", "target_version", "fixed_version"}
+
+// normalizeIdentityFields applies the ecosystem's own name and version
+// normalization to the identity fields of one payload object. Deputy already
+// uses these normalizers when querying OSV and comparing packages; running them
+// at the policy boundary is what makes a policy see the same identity the rest
+// of the engine does.
+func normalizeIdentityFields(m map[string]any, eco ecosystem.Ecosystem) {
+	for _, key := range packageNameKeys {
+		if name, ok := m[key].(string); ok && name != "" {
+			m[key] = eco.NormalizeName(name)
+		}
+	}
+	if !versionsAreConcrete(m) {
+		return
+	}
+	for _, key := range packageVersionKeys {
+		if version, ok := m[key].(string); ok {
+			m[key] = normalizePayloadVersion(eco, version)
+		}
+	}
+	if versions, ok := m["fixed_versions"].([]any); ok {
+		for i, elem := range versions {
+			if version, isString := elem.(string); isString {
+				versions[i] = normalizePayloadVersion(eco, version)
+			}
+		}
+	}
+}
+
+// versionsAreConcrete reports whether an object's version fields hold real
+// versions. Proxy metadata and index requests carry [UnknownVersion] with
+// has_version set to false; those must survive untouched so the documented
+// sentinel stays comparable.
+func versionsAreConcrete(m map[string]any) bool {
+	hasVersion, present := m["has_version"].(bool)
+	return !present || hasVersion
+}
+
+// normalizePayloadVersion applies the ecosystem's version normalization,
+// leaving empty values and the unknown-version sentinel alone.
+func normalizePayloadVersion(eco ecosystem.Ecosystem, version string) string {
+	if version == "" || version == UnknownVersion {
+		return version
+	}
+	return eco.NormalizeVersion(version)
 }
 
 // canonicalizeEcosystemCollection canonicalizes the ecosystem names held by an

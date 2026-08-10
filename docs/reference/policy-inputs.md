@@ -794,6 +794,18 @@ Canonical tokens: `asdf`, `cargo`, `cocoapods`, `docker`, `github-actions`, `go`
 
 Write `pkg.ecosystem == "go"`, not `pkg.ecosystem == "Go"`, and drop any `lowerAscii()` workaround. Ecosystems Deputy does not recognize (OS package ecosystems such as `Alpine:v3.19`) are lowercased rather than remapped, so they stay comparable without losing their release suffix.
 
+## Canonical package identity
+
+The ecosystem selects how the rest of a package's identity is normalized, so name and version are canonicalized alongside it, using the same rules Deputy applies when it queries OSV or compares two trees:
+
+- Go versions always carry the `v` prefix, including in diff payloads where the extractor reports `1.44.0`. Write `pkg.version.matches("^v1\\.")`.
+- PyPI names are lowercased, so `Flask-SQLAlchemy` and `flask-sqlalchemy` compare equal.
+- Every other ecosystem keeps the version string it reported.
+
+This applies to each identity-carrying object in a payload (`pkg`, `request`, `change`, `node`, `component`, `dependency`, and nested `vulnerability.package`), and to every version field on it: `version`, `base_version`, `target_version`, `fixed_version`, and `fixed_versions`. A change carries base and target versions next to its package, and both are normalized with that package's ecosystem.
+
+The `<unknown>` sentinel described below is never normalized.
+
 ## Proxy version semantics
 
 Proxy requests always include `request.version` as a string. When a request has no concrete version (metadata/index requests), Deputy sets:

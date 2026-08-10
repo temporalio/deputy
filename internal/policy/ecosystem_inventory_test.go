@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/osv-scalibr/extractor"
+	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/policy"
 	internalproto "github.com/temporalio/deputy/internal/proto"
@@ -98,6 +100,67 @@ func TestDisplayCasedPolicyNoLongerMatches(t *testing.T) {
 	if len(actions) != 0 {
 		t.Fatalf(`pkg.ecosystem == "Go" still matched after canonicalization: %v`, actions)
 	}
+}
+
+// TestShippedPolicyFiresOnRealDiffPath drives the real diff construction path
+// (inventory of two trees -> compare -> proto change -> policy payload) against
+// the shipped deny-aws-sdk-v1 example. The example asks for ecosystem "go" and a
+// version matching "^v1\.", and before identity normalization the diff path
+// handed policies "Go" and "1.44.0", so the rule never fired.
+func TestShippedPolicyFiresOnRealDiffPath(t *testing.T) {
+	basePkgs := scanGoModule(t, "module example.com/demo\n\ngo 1.24\n")
+	targetPkgs := scanGoModule(t, "module example.com/demo\n\ngo 1.24\n\nrequire github.com/aws/aws-sdk-go v1.44.0\n")
+
+	changes := compare.ComparePackages(basePkgs, targetPkgs, nil, nil, nil)
+	protoChanges := internalproto.PackageChangesToProto(changes)
+	if len(protoChanges) != 1 {
+		t.Fatalf("expected exactly one dependency change, got %d: %v", len(protoChanges), changes)
+	}
+	change := protoChanges[0]
+	if got := change.GetPackage().GetEcosystem(); got != "Go" {
+		t.Fatalf("fixture precondition: raw ecosystem = %q, want the display form %q", got, "Go")
+	}
+	if got := change.GetPackage().GetVersion(); got != "1.44.0" {
+		t.Fatalf("fixture precondition: raw version = %q, want the unprefixed form %q", got, "1.44.0")
+	}
+
+	sources, err := policy.LoadSources([]string{filepath.Join("..", "..", "policy", "examples", "deny-aws-sdk-v1.yaml")})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+
+	payload := map[string]any{
+		"change": change,
+		"pkg":    change.GetPackage(),
+	}
+	actions, err := policy.EvaluateMap(t.Context(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateMap: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Type != policy.ActionDeny {
+		t.Fatalf("deny-aws-sdk-v1 did not fire on the diff path for %s@%s (%s): actions=%v",
+			change.GetPackage().GetName(), change.GetPackage().GetVersion(), change.GetPackage().GetEcosystem(), actions)
+	}
+}
+
+// scanGoModule inventories a temporary module with the given go.mod contents.
+func scanGoModule(t *testing.T, gomod string) []*extractor.Package {
+	t.Helper()
+
+	dir := t.TempDir()
+	writeFixture(t, filepath.Join(dir, "go.mod"), gomod)
+
+	ws, err := workspace.NewDir(dir)
+	if err != nil {
+		t.Fatalf("workspace.NewDir: %v", err)
+	}
+	t.Cleanup(func() { _ = ws.Close() })
+
+	pkgs, err := inventory.ScanPackagesWorking(t.Context(), ws, inventory.ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanPackagesWorking: %v", err)
+	}
+	return pkgs
 }
 
 // scanFixtureWorkspace inventories a temporary project that exercises three
