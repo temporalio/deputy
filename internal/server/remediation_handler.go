@@ -683,17 +683,30 @@ func effectiveStepID(step *remediationv1.Step, index int) string {
 	return fmt.Sprintf("step-%d", index+1)
 }
 
-// validateStepDependencies rejects plans whose depends_on references cannot
-// be honored by in-order execution. Steps run in plan order, so a dependency
-// must name an earlier step: an unknown ID can never be satisfied, and a self
-// or forward reference asks for an ordering the plan itself contradicts.
-// Requiring earlier-only references also rules out dependency cycles, since a
-// cycle needs at least one backward edge.
+// validateStepDependencies rejects plans whose step IDs or depends_on
+// references cannot be honored by in-order execution.
+//
+// Effective IDs must be unique, as Step.id promises. Execution keys skip
+// state and dependency satisfaction by that ID, so duplicates alias each
+// other: if one of two steps sharing an ID succeeds and the other fails, the
+// ID still counts as satisfied and a dependent step runs without the setup it
+// named. A synthesized step-N ID can collide with an explicit one, so the
+// check is on effective IDs rather than the raw field.
+//
+// Dependencies must name an earlier step, since steps run in plan order: an
+// unknown ID can never be satisfied, and a self or forward reference asks for
+// an ordering the plan itself contradicts. Requiring earlier-only references
+// also rules out dependency cycles, since a cycle needs at least one backward
+// edge.
 func validateStepDependencies(steps []*remediationv1.Step) error {
 	seen := make(map[string]struct{}, len(steps))
 	known := make(map[string]struct{}, len(steps))
 	for i, step := range steps {
-		known[effectiveStepID(step, i)] = struct{}{}
+		id := effectiveStepID(step, i)
+		if _, dup := known[id]; dup {
+			return fmt.Errorf("step %d/%d reuses step id %q, which must be unique within the plan", i+1, len(steps), id)
+		}
+		known[id] = struct{}{}
 	}
 
 	for i, step := range steps {
