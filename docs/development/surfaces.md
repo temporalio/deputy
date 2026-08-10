@@ -12,11 +12,13 @@ The protos in [`api/deputy`](../../api/deputy) are the domain. Everything a user
 
 ### 1. Direct projections
 
-ConnectRPC handlers, MCP tool schemas, the generated policy input reference.
+ConnectRPC service contracts and their transport bindings, MCP tool schemas, the generated policy input reference.
 
-These are the domain re-encoded. They should be generated, and drift is a bug rather than a maintenance chore. `internal/mcp/protoschema` derives every MCP tool schema from descriptors, and `internal/docsgen` renders the policy entrypoint reference from proto comments. Both hold up well.
+These are the domain re-encoded. They should be generated, and drift is a bug rather than a maintenance chore. Buf emits the Connect bindings under [`gen/deputy`](../../gen/deputy), `internal/mcp/protoschema` derives every MCP tool schema from descriptors, and `internal/docsgen` renders the policy entrypoint reference from proto comments. All three hold up well.
 
-**Rule:** generate. Do not hand-maintain a copy.
+Handler bodies are not part of this. The behavior behind an endpoint (`internal/server/scan_handler.go` and its siblings) is written by hand, as it should be. What is generated is the contract the handler implements, and what this rule forbids is a second, hand-written copy of that contract living somewhere else.
+
+**Rule:** generate the contract. Do not hand-maintain a copy of it.
 
 ### 2. Ergonomic projections
 
@@ -30,9 +32,9 @@ These need affordances the proto cannot carry: short flag names, sensible defaul
 
 The CEL policy DSL.
 
-This is the one surface that genuinely is not a projection. It has three parts with three different owners:
+This is the one surface that genuinely is not a projection. It has three parts, and they do not share an owner:
 
-- **Grammar** belongs to CEL. Not ours to design.
+- **Grammar** has two layers. The expression sublanguage is CEL's and is not ours to design. The bundle grammar wrapped around it is entirely ours: `policies`, `vars`, `rules`, actions, modes, entrypoint and command filters, variable ordering, and the validation that rejects a malformed bundle. It lives in [`internal/policy/source.go`](../../internal/policy/source.go) and [`internal/policy/bundle_structured.go`](../../internal/policy/bundle_structured.go) and is specified in [`docs/reference/policy-spec.md`](../reference/policy-spec.md). Most DSL features land in that layer, which means parsing, validation, compatibility, and spec work, not just a CEL expression.
 - **Vocabulary** is entirely ours and must derive from descriptors: the variables bound at each entrypoint, the fields reachable on them, the enum values.
 - **Standard library** is the affordance layer: helpers that express something the language cannot.
 
@@ -42,7 +44,7 @@ The standard library needs an admission test, because every addition is surface 
 
 `age()` earns it (time arithmetic on a domain value). `isCritical()` does not (it abbreviates `== severity.critical`, and the corpus shows nobody uses it).
 
-**Rule:** derive the vocabulary, apply the admission test to the standard library, and declare that standard library in one machine-readable place so tooling derives from it too.
+**Rule:** design the bundle grammar deliberately (it is ours, and the spec is part of the change), derive the vocabulary, apply the admission test to the standard library, and declare that standard library in one machine-readable place so tooling derives from it too.
 
 ### 4. Foreign contracts
 
@@ -71,20 +73,24 @@ One nuance decides the whole design. The policy entrypoint reference **is** gene
 
 > Generation propagates correctness and incorrectness equally. Deriving from a wrong root is not better than copying by hand.
 
-So generation is necessary and not sufficient. The root needs a contract test, which is what `TestBindingProfilesDeclareRealVariables` provides for variable bindings.
+So generation is necessary and not sufficient. The root needs a contract test: one that fails when a binding profile declares a variable the runtime cannot supply.
+
+On `main` there is no such test. [`internal/policy/bindings_test.go`](../../internal/policy/bindings_test.go) checks profile membership, descriptions, and a short list of expected variables, none of which reach the payload, which is why `go_artifact_request` still declares an optional `licenses` variable that `GoArtifactRequestPolicyInput` has no field for. A first version is in review, comparing each profile against the variables the CEL environment actually declares. The rule this section argues for is that such a guard belongs at every derivation root, not only this one.
 
 ## Identity
 
 Package identity deserves its own rule, because it crosses every surface and has drifted on several.
 
-A package coordinate has more than one legitimate spelling. `Go` is the display name, `go` the canonical token, `golang` a purl type, and Go versions appear with and without a leading `v` depending on the path that produced them. The registry in `internal/ecosystem` already models this correctly: one entry per ecosystem, with `DisplayName`, `OSVName`, `ScalibrPrefixes`, and normalization methods as explicit projections.
+A package coordinate has more than one legitimate spelling. `Go` is the display name, `go` the canonical token, `golang` a purl type, and Go versions appear with and without a leading `v` depending on the path that produced them. The registry in [`internal/ecosystem`](../../internal/ecosystem) has the right shape for this: one entry per ecosystem, with `DisplayName`, `OSVName`, and `ScalibrPrefixes` as explicit projections read back through the registry.
 
-The failures were never missing machinery. `Ecosystem.NormalizeVersion` exists and five call sites use it; the policy path did not, so a rule matching `^v1\.` never fired where versions arrived unprefixed. Correctness was opt-in per caller, and that drifts as callers multiply.
+It is not finished. `Registration` carries no normalization rules and no purl type, and the package-level `Parse`, `All`, `NormalizeName`, and `NormalizeVersion` are still hardcoded switches in `ecosystem.go`. `Parse` does not even consult the `Aliases` a registration declares. So adding an ecosystem today means a registry entry *and* several edits elsewhere, and an entry added on its own will be invisible to parsing and enumeration.
 
-**Rules:**
+The failures were never missing machinery. `Ecosystem.NormalizeVersion` exists and five packages call it; the policy path did not, so a rule matching `^v1\.` never fired where versions arrived unprefixed. Correctness was opt-in per caller, and that drifts as callers multiply.
+
+**Rules to design toward** (the first and last hold today, the middle two describe where the registry is going):
 
 - Exactly one canonical form crosses a boundary, and the boundary normalizes rather than trusting its callers.
-- Projections live in the registry. Adding an ecosystem is one entry; nothing else should need editing.
+- Projections live in the registry. Adding an ecosystem should be one entry, and nothing else should need editing. Until `Parse`, `All`, and the normalization methods read from the registry, adding one still means updating those too.
 - Every entry carries every projection, enforced by test, and no projection is hardcoded outside the registry.
 - Plugins are producers too. Normalize inbound at every plugin boundary, since those producers cannot be reviewed.
 
