@@ -141,6 +141,18 @@ type structuredRule struct {
 	Details     map[string]any    `yaml:"details,omitempty"`     // Details provides extra context.
 }
 
+// normalizeNames trims surrounding whitespace from every policy name, so that
+// "audit" and " audit " are the one name they read as. A name identifies a
+// policy: validation reports the second as a duplicate, and the name is what
+// ends up in a source name and in the generated policy.name metadata, so the
+// loader has to fold them together too or a bundle the linter rejects would
+// still compile.
+func (b *structuredBundle) normalizeNames() {
+	for i := range b.Policies {
+		b.Policies[i].Name = strings.TrimSpace(b.Policies[i].Name)
+	}
+}
+
 // tryParseStructuredBundle attempts to parse a byte slice as a structured YAML bundle.
 // It returns the generated CEL sources if successful, or a boolean indicating
 // whether the input looked like a bundle but failed validation. A file that has
@@ -166,6 +178,7 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 	if len(bundle.Policies) == 0 {
 		return nil, false, nil
 	}
+	bundle.normalizeNames()
 	seenNames := map[string]struct{}{}
 	var sources []Source
 	for _, pol := range bundle.Policies {
@@ -209,6 +222,7 @@ func TryParseStructuredBundleBytes(data []byte) (*structuredBundle, bool, error)
 	if len(bundle.Policies) == 0 {
 		return nil, false, nil
 	}
+	bundle.normalizeNames()
 	return &bundle, true, nil
 }
 

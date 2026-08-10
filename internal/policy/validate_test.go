@@ -697,6 +697,22 @@ policies:
 `,
 		},
 		{
+			name: "policy names that differ only by surrounding whitespace",
+			bundle: `
+policies:
+  - name: same
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+  - name: "  same  "
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
 			name: "a policies list supplied by a root merge key",
 			bundle: `
 defaults: &defaults
