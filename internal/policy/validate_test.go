@@ -734,6 +734,92 @@ defaults: &defaults
 	}
 }
 
+// TestValidateBundleAgreesWithCompilation pins the promise lint makes to an
+// author: a bundle that lints clean is a bundle `deputy policy bundle` can
+// compile. Rule conditions are checked one at a time, but a policy's vars wrap
+// every condition in a CEL comprehension, so a var whose value or name is not
+// valid CEL breaks only the body the policy expands into and is invisible to the
+// per-rule check.
+func TestValidateBundleAgreesWithCompilation(t *testing.T) {
+	cases := []struct {
+		name   string
+		bundle string
+	}{
+		{
+			name: "a policy with usable vars",
+			bundle: `
+policies:
+  - name: usable-vars
+    vars:
+      blocked: '["left-pad"]'
+    rules:
+      - when: "pkg.name in blocked"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "a var holding invalid CEL",
+			bundle: `
+policies:
+  - name: broken-var
+    vars:
+      threshold: '1 +'
+    rules:
+      - when: "true"
+        action: warn
+        reason: "r"
+`,
+		},
+		{
+			name: "a var name CEL cannot bind",
+			bundle: `
+policies:
+  - name: broken-var-name
+    vars:
+      not-an-identifier: '1'
+    rules:
+      - when: "true"
+        action: warn
+        reason: "r"
+`,
+		},
+		{
+			name: "a plain policy with no vars",
+			bundle: `
+policies:
+  - name: plain
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{Source: "bundle.yaml"})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			reported := slices.ContainsFunc(issues, func(i Issue) bool { return i.Severity != IssueHint })
+			compiles := true
+			sources, loadErr := ParseStructuredSources([]byte(tc.bundle), "bundle.yaml")
+			if loadErr != nil {
+				compiles = false
+			}
+			for _, src := range sources {
+				if Compile(src.Body, nil) != nil {
+					compiles = false
+				}
+			}
+			if reported == compiles {
+				t.Fatalf("validation reported=%v but the bundle compiles=%v; issues=%v", reported, compiles, issues)
+			}
+		})
+	}
+}
+
 // TestLooksLikeStructuredBundle pins the shape probe callers use to decide
 // whether a file is an authored policy. It must say yes for a policy that does
 // not decode, so validation still runs and reports the offending field, and no

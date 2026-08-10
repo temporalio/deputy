@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -228,7 +229,8 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	// failure, so its message is dropped when a located issue already reports the
 	// same thing, and is anchored on the line it names when it names one.
 	source := cmp.Or(opts.Source, "policy")
-	if _, err := ParseStructuredSources([]byte(text), source); err != nil {
+	sources, err := ParseStructuredSources([]byte(text), source)
+	if err != nil {
 		if message, duplicate := loaderMessage(err, source, issues); !duplicate {
 			issues = append(issues, Issue{
 				RuleIndex: NoRule,
@@ -239,8 +241,44 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 				Message:   message,
 			})
 		}
+		return issues, nil
 	}
-	return issues, nil
+	return append(issues, generatedSourceIssues(sources, policiesNode, opts.ExtraVars, issues)...), nil
+}
+
+// generatedSourceIssues compiles the CEL each policy expands into, so a bundle
+// that lints clean is a bundle `deputy policy bundle` can compile. Loading a
+// bundle only generates that CEL; nothing before this compiles it. A rule's
+// condition is checked on its own, while a policy's vars wrap every condition in
+// a comprehension, so a var whose value or name is not valid CEL breaks the
+// generated body alone and no per-rule check can see it.
+//
+// Nothing is reported once the walk has located an error, because the generated
+// body is then expected to fail too and restating that failure in expanded CEL
+// the author never wrote would only obscure the real defect. The loader returns
+// one source per policy in document order, which is how each failure is anchored
+// on the policy that produced it.
+func generatedSourceIssues(sources []Source, policiesNode *yaml.Node, extraVars []string, located []Issue) []Issue {
+	if slices.ContainsFunc(located, func(i Issue) bool { return i.Severity == IssueError }) {
+		return nil
+	}
+	var issues []Issue
+	for i, src := range sources {
+		err := Compile(src.Body, extraVars)
+		if err == nil {
+			continue
+		}
+		var node *yaml.Node
+		if i < len(policiesNode.Content) {
+			node = policiesNode.Content[i]
+		}
+		issue := issueAt(node, IssueError, "cel-error", err.Error())
+		if nameNode := MappingValue(node, "name"); nameNode != nil && nameNode.Kind == yaml.ScalarNode {
+			issue.Policy = strings.TrimSpace(nameNode.Value)
+		}
+		issues = append(issues, issue)
+	}
+	return issues
 }
 
 // validatePolicyNode checks one policy mapping: its name uniqueness, its
