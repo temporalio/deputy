@@ -98,6 +98,7 @@ Canonical entrypoints (snake_case):
 - `action` must be `allow`, `deny`, or `warn`.
 - `mode`, if set, must be `enforce` or `advisory`.
 - Canonical ecosystem strings used by built-in entrypoints: `go`, `npm`, `pypi`, `rubygems`, `oci`.
+- An optional field written as an explicit YAML null (`mode:`, `mode: null`, `mode: ~`) is unset, not a value to validate.
 - YAML anchors, aliases, and merge keys are rejected. See below.
 
 ### YAML anchors are not supported
