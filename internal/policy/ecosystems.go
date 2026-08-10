@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/proto/descriptorset"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -105,16 +106,27 @@ func canonicalizeEcosystemPayload(payload map[string]any) {
 		if !variableCarriesEcosystem(name) {
 			continue
 		}
-		canonicalizeEcosystemValue(value)
+		// Each top-level variable is its own object; nothing outside it can
+		// name its ecosystem, so the walk starts with none inherited.
+		canonicalizeEcosystemValue(value, "")
 	}
 }
 
-// freeFormStringMaps are payload fields whose keys and values are supplied by
-// the caller rather than by a Deputy schema: JWT custom claims, container image
-// labels, and policy annotations. An ecosystem-shaped key in one of those is
-// somebody's data, not an ecosystem, and rewriting it would silently change
-// what an exact-match rule compares against. The walk never descends into them.
-var freeFormStringMaps = []string{"custom_claims", "labels", "annotations"}
+// isFreeFormMap reports whether a payload key holds opaque key/value data
+// rather than a schema-described object: JWT custom claims, container image
+// labels, target provenance, an advisory's source-specific metadata. An
+// ecosystem- or version-shaped entry in one of those is somebody's data, not a
+// package identity, and rewriting it would silently change what an exact-match
+// rule compares against. The walk never descends into them.
+//
+// The set is derived from the proto descriptors, where those fields are
+// declared as maps with scalar values, so a new free-form map is covered the
+// day it is added instead of the day someone remembers to extend a list. The
+// ecosystem-keyed count maps ("ecosystems") are also scalar maps, so callers
+// must resolve that key before consulting this.
+func isFreeFormMap(key string) bool {
+	return descriptorset.IsScalarMapField(key)
+}
 
 // variableCarriesEcosystem reports whether a top-level policy variable may hold
 // an ecosystem, so canonicalization stays on schema-defined paths. Variables
@@ -172,12 +184,21 @@ func messageCarriesEcosystem(md protoreflect.MessageDescriptor, seen map[protore
 // payload value, descending through maps and lists. A map's own ecosystem is
 // resolved before its name and version fields, because the ecosystem selects
 // which normalizer those fields get.
-func canonicalizeEcosystemValue(value any) {
+//
+// inherited is the ecosystem resolved by an enclosing object. An object that
+// does not identify an ecosystem of its own belongs to the one that contains
+// it: an advisory's fixed versions are versions of the finding's package, and
+// the finding names the ecosystem through that package. An object with its own
+// ecosystem overrides the inherited one for itself and everything below it.
+func canonicalizeEcosystemValue(value any, inherited ecosystem.Ecosystem) {
 	switch v := value.(type) {
 	case map[string]any:
 		eco, ok := canonicalizeOwnEcosystem(v)
 		if !ok {
-			eco, ok = inheritedChangeEcosystem(v)
+			eco, ok = nestedPackageEcosystem(v)
+		}
+		if !ok && inherited != "" {
+			eco, ok = inherited, true
 		}
 		if ok {
 			normalizeIdentityFields(v, eco)
@@ -189,14 +210,14 @@ func canonicalizeEcosystemValue(value any) {
 			case key == "ecosystems":
 				v[key] = canonicalizeEcosystemCollection(child)
 				continue
-			case slices.Contains(freeFormStringMaps, key):
+			case isFreeFormMap(key):
 				continue
 			}
-			canonicalizeEcosystemValue(child)
+			canonicalizeEcosystemValue(child, eco)
 		}
 	case []any:
 		for _, elem := range v {
-			canonicalizeEcosystemValue(elem)
+			canonicalizeEcosystemValue(elem, inherited)
 		}
 	}
 }
@@ -217,18 +238,13 @@ func canonicalizeOwnEcosystem(m map[string]any) (eco ecosystem.Ecosystem, ok boo
 	return ecosystem.Ecosystem(token), true
 }
 
-// inheritedChangeEcosystem resolves the ecosystem for a change shape, where the
-// versions being compared sit next to a nested package rather than next to an
-// ecosystem of their own (deputy.diff.v1.PackageChange and
-// deputy.policy.v1.DependencyChange both look like this). It only applies to
-// maps that actually hold change versions, so an unrelated payload that merely
-// contains a package is left alone.
-func inheritedChangeEcosystem(m map[string]any) (eco ecosystem.Ecosystem, ok bool) {
-	if _, hasBase := m["base_version"]; !hasBase {
-		if _, hasTarget := m["target_version"]; !hasTarget {
-			return "", false
-		}
-	}
+// nestedPackageEcosystem resolves the ecosystem of an object that identifies
+// its package through a nested one rather than through an ecosystem field of
+// its own. A change carries the versions being compared next to the package
+// they belong to (deputy.diff.v1.PackageChange, deputy.policy.v1.
+// DependencyChange), and a finding carries its advisory next to the affected
+// package (deputy.vulnerability.v1.Finding).
+func nestedPackageEcosystem(m map[string]any) (eco ecosystem.Ecosystem, ok bool) {
 	for _, key := range []string{"package", "pkg"} {
 		child, isMap := m[key].(map[string]any)
 		if !isMap {
@@ -316,7 +332,7 @@ func canonicalizeEcosystemCollection(value any) any {
 				out[i] = NormalizeEcosystem(name)
 				continue
 			}
-			canonicalizeEcosystemValue(elem)
+			canonicalizeEcosystemValue(elem, "")
 			out[i] = elem
 		}
 		return out
@@ -331,7 +347,7 @@ func canonicalizeEcosystemCollection(value any) any {
 		for _, key := range slices.Sorted(maps.Keys(v)) {
 			token := NormalizeEcosystem(key)
 			child := v[key]
-			canonicalizeEcosystemValue(child)
+			canonicalizeEcosystemValue(child, "")
 			if existing, dup := out[token]; dup {
 				if sum, ok := addNumeric(existing, child); ok {
 					out[token] = sum
@@ -342,7 +358,7 @@ func canonicalizeEcosystemCollection(value any) any {
 		}
 		return out
 	default:
-		canonicalizeEcosystemValue(value)
+		canonicalizeEcosystemValue(value, "")
 		return value
 	}
 }

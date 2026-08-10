@@ -826,7 +826,11 @@ The ecosystem selects how the rest of a package's identity is normalized, so nam
 - PyPI names are lowercased, so `Flask-SQLAlchemy` and `flask-sqlalchemy` compare equal.
 - Every other ecosystem keeps the version string it reported.
 
-This applies to each identity-carrying object in a payload (`pkg`, `request`, `change`, `node`, `component`, `dependency`, and nested `vulnerability.package`), and to every version field on it: `version`, `base_version`, `target_version`, `fixed_version`, and `fixed_versions`. A change carries base and target versions next to its package, and both are normalized with that package's ecosystem.
+This applies to each identity-carrying object in a payload (`pkg`, `request`, `change`, `node`, `component`, `dependency`, and nested `vulnerability.package`), and to every version field on it: `version`, `base_version`, `target_version`, `fixed_version`, and `fixed_versions`.
+
+An object that does not name an ecosystem of its own belongs to the one that contains it. A change carries base and target versions next to its package, and both are normalized with that package's ecosystem; a finding's `advisory.fixed_versions` are versions of `vulnerability.package`, so they are normalized with that package's ecosystem too. An object that does name an ecosystem overrides the inherited one for itself and everything below it, which is how an advisory's `package_fixes` entries keep their own.
+
+Free-form key/value maps are never rewritten. `jwt.custom_claims`, container image `labels`, `target.provenance`, and an advisory's `database_specific` hold caller- or source-supplied data, so an entry that happens to be named `ecosystem` or `version` reaches a policy exactly as it arrived.
 
 The `<unknown>` sentinel described below is never normalized.
 

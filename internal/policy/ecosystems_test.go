@@ -248,6 +248,29 @@ func TestCanonicalizeIdentityFields(t *testing.T) {
 			want:    map[string]any{"request": map[string]any{"ecosystem": "go", "name": "example.com/m", "version": UnknownVersion, "has_version": false}},
 		},
 		{
+			name: "advisory fixed versions inherit the finding's package ecosystem",
+			payload: map[string]any{"vulnerability": map[string]any{
+				"advisory_id": "GHSA-x",
+				"package":     map[string]any{"ecosystem": "Go", "name": "example.com/m", "version": "1.0.0"},
+				"advisory": map[string]any{
+					"id":             "GHSA-x",
+					"fixed_versions": []any{"1.2.0"},
+					"resolved_fix":   map[string]any{"version": "1.2.0"},
+					"package_fixes":  []any{map[string]any{"ecosystem": "Go", "module": "example.com/m/v2", "fixed_versions": []any{"2.0.1"}}},
+				},
+			}},
+			want: map[string]any{"vulnerability": map[string]any{
+				"advisory_id": "GHSA-x",
+				"package":     map[string]any{"ecosystem": "go", "name": "example.com/m", "version": "v1.0.0"},
+				"advisory": map[string]any{
+					"id":             "GHSA-x",
+					"fixed_versions": []any{"v1.2.0"},
+					"resolved_fix":   map[string]any{"version": "v1.2.0"},
+					"package_fixes":  []any{map[string]any{"ecosystem": "go", "module": "example.com/m/v2", "fixed_versions": []any{"v2.0.1"}}},
+				},
+			}},
+		},
+		{
 			name:    "docker tags are left alone",
 			payload: map[string]any{"pkg": map[string]any{"ecosystem": "docker", "name": "alpine", "version": "3.19"}},
 			want:    map[string]any{"pkg": map[string]any{"ecosystem": "docker", "name": "alpine", "version": "3.19"}},
@@ -312,6 +335,34 @@ func TestCanonicalizeLeavesCallerDataAlone(t *testing.T) {
 			want: map[string]any{
 				"image_info": map[string]any{"labels": map[string]any{"ecosystem": "Customer_Success"}},
 			},
+		},
+		{
+			name: "advisory source metadata survives",
+			payload: map[string]any{"vulnerability": map[string]any{
+				"package": map[string]any{"ecosystem": "Go", "version": "1.0.0"},
+				"advisory": map[string]any{
+					"database_specific": map[string]any{"version": "1.2.0", "ecosystem": "Customer_Success"},
+				},
+			}},
+			want: map[string]any{"vulnerability": map[string]any{
+				"package": map[string]any{"ecosystem": "go", "version": "v1.0.0"},
+				"advisory": map[string]any{
+					"database_specific": map[string]any{"version": "1.2.0", "ecosystem": "Customer_Success"},
+				},
+			}},
+		},
+		{
+			name: "target provenance survives",
+			payload: map[string]any{"node": map[string]any{
+				"ecosystem":  "Go",
+				"version":    "1.0.0",
+				"provenance": map[string]any{"version": "1.0.0", "ecosystem": "Customer_Success"},
+			}},
+			want: map[string]any{"node": map[string]any{
+				"ecosystem":  "go",
+				"version":    "v1.0.0",
+				"provenance": map[string]any{"version": "1.0.0", "ecosystem": "Customer_Success"},
+			}},
 		},
 		{
 			name:    "environment is left alone",
