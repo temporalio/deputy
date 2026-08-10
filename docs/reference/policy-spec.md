@@ -104,7 +104,10 @@ Canonical entrypoints (snake_case):
 
 A bundle may not use YAML anchors (`&name`), aliases (`*name`), or merge keys
 (`<<:`). Both `deputy policy lint` and bundle loading refuse them, naming the
-line and the alternatives.
+line and the alternatives. That includes a bundle whose `policies` key is not
+written directly but arrives through a top-level merge key. A refused anchor
+does not stop the rest of the checks: lint reports it alongside any unrelated
+defect in the policies written plainly.
 
 This is closed for now, not closed forever. Nothing prevents Deputy from
 resolving these constructs, and the decision can be revisited if a real need

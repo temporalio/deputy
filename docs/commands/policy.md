@@ -69,9 +69,12 @@ policy that lints clean is a policy the editor considers clean:
 
 - `action` values outside `allow|deny|warn`
 - unknown `entrypoints` and `commands`
-- duplicate policy names
+- duplicate policy names, compared with surrounding whitespace trimmed
+- a `policies` key that is missing, empty, or not a list
 - rules missing `when` or `action`, and `deny`/`warn` rules with no `reason`
 - invalid `mode`, malformed `vars`, and conditions that do not compile
+- vars that break the CEL a policy expands into, which no single condition
+  reveals, so a bundle that lints clean is one `deputy policy bundle` compiles
 - YAML anchors, aliases, and merge keys, which bundles do not support (see
   [policy-spec](../reference/policy-spec.md#yaml-anchors-are-not-supported))
 
