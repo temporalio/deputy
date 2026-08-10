@@ -1,10 +1,13 @@
 package remediation
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsDeputyInternalCommand(t *testing.T) {
@@ -319,7 +322,7 @@ jobs:
 				t.Fatalf("failed to write test file: %v", err)
 			}
 
-			err := applyActionUpdate(filePath, tt.actionRef, tt.newVersion)
+			err := applyActionUpdate(t.Context(), filePath, tt.actionRef, tt.newVersion)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("applyActionUpdate() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -563,7 +566,7 @@ COPY app /app
 				t.Fatalf("failed to write test file: %v", err)
 			}
 
-			err := applyDockerfileUpdate(filePath, tt.image, tt.newVersion)
+			err := applyDockerfileUpdate(t.Context(), filePath, tt.image, tt.newVersion)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("applyDockerfileUpdate() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -666,7 +669,7 @@ COPY . /usr/share/nginx/html
 				}
 			}
 
-			err := ApplyDeputyCommand(tmpDir, tt.cmd)
+			err := ApplyDeputyCommand(t.Context(), tmpDir, tt.cmd)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ApplyDeputyCommand() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -770,7 +773,7 @@ func TestApplyDeputyCommandRejectsWhatValidationRejects(t *testing.T) {
 			if _, err := ValidateDeputyCommand(cmd); err == nil {
 				t.Fatalf("ValidateDeputyCommand(%q) unexpectedly succeeded", cmd)
 			}
-			if err := ApplyDeputyCommand(t.TempDir(), cmd); err == nil {
+			if err := ApplyDeputyCommand(t.Context(), t.TempDir(), cmd); err == nil {
 				t.Fatalf("ApplyDeputyCommand(%q) unexpectedly succeeded", cmd)
 			}
 		})
@@ -838,7 +841,7 @@ func TestApplyDeputyCommandThroughSymlinkedRepoDir(t *testing.T) {
 				t.Skipf("symlinks unsupported: %v", err)
 			}
 
-			if err := ApplyDeputyCommand(linkDir, tt.cmd); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), linkDir, tt.cmd); err != nil {
 				t.Fatalf("ApplyDeputyCommand() through symlinked repoDir failed: %v", err)
 			}
 			got, err := os.ReadFile(target)
@@ -848,6 +851,124 @@ func TestApplyDeputyCommandThroughSymlinkedRepoDir(t *testing.T) {
 			if !strings.Contains(string(got), tt.wantApplied) {
 				t.Fatalf("edit not applied: want %q in:\n%s", tt.wantApplied, got)
 			}
+		})
+	}
+}
+
+// TestApplyDeputyCommandHonorsContext pins the execution timeout for
+// deputy-internal steps. These commands are applied in process, so no
+// subprocess machinery enforces the caller's deadline on them: if the apply
+// path ignored its context, a step whose deadline expired while it ran would
+// still commit its rewrite, and the caller that was already told the step
+// timed out would find the workspace modified anyway.
+//
+// Each opcode is checked with a context that is already done and with a live
+// one. The live case is the positive control: without it, an apply path that
+// refused every command would pass the cancelled cases.
+func TestApplyDeputyCommandHonorsContext(t *testing.T) {
+	const (
+		workflow   = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
+		dockerfile = "FROM alpine:3.18\nRUN echo hi\n"
+		sha        = "11bd71901bbe5b1630ceea73d27597364c9af683"
+	)
+	tests := []struct {
+		name string
+		// file is the workspace-relative path the command edits.
+		file string
+		// content is what that file holds before the command runs.
+		content string
+		cmd     string
+		// wantApplied is a substring the live run must produce, so a
+		// silently-skipped edit cannot masquerade as success.
+		wantApplied string
+	}{
+		{
+			name:        "action update",
+			file:        ".github/workflows/ci.yml",
+			content:     workflow,
+			cmd:         "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+			wantApplied: "actions/checkout@v5",
+		},
+		{
+			name:        "action pin",
+			file:        ".github/workflows/ci.yml",
+			content:     workflow,
+			cmd:         "deputy:action:pin .github/workflows/ci.yml actions/checkout " + sha + " v4.2.2",
+			wantApplied: "actions/checkout@" + sha + " # v4.2.2",
+		},
+		{
+			name:        "dockerfile update",
+			file:        "Dockerfile",
+			content:     dockerfile,
+			cmd:         "deputy:dockerfile:update Dockerfile alpine 3.19",
+			wantApplied: "FROM alpine:3.19",
+		},
+	}
+
+	// writeWorkspace lays down one command's target file in a fresh directory
+	// and returns that directory and the absolute path of the file.
+	writeWorkspace := func(t *testing.T, relPath, content string) (dir, path string) {
+		t.Helper()
+		dir = t.TempDir()
+		path = filepath.Join(dir, relPath)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+		return dir, path
+	}
+
+	// requireUnmodified fails when the command touched the workspace.
+	requireUnmodified := func(t *testing.T, path, want string) {
+		t.Helper()
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile failed: %v", err)
+		}
+		if string(got) != want {
+			t.Fatalf("workspace modified despite a dead context:\n%s", got)
+		}
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Run("cancelled context modifies nothing", func(t *testing.T) {
+				dir, path := writeWorkspace(t, tt.file, tt.content)
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+
+				if err := ApplyDeputyCommand(ctx, dir, tt.cmd); !errors.Is(err, context.Canceled) {
+					t.Fatalf("ApplyDeputyCommand() error = %v, want context.Canceled", err)
+				}
+				requireUnmodified(t, path, tt.content)
+			})
+
+			t.Run("expired deadline modifies nothing", func(t *testing.T) {
+				dir, path := writeWorkspace(t, tt.file, tt.content)
+				ctx, cancel := context.WithTimeout(t.Context(), -time.Second)
+				defer cancel()
+
+				if err := ApplyDeputyCommand(ctx, dir, tt.cmd); !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("ApplyDeputyCommand() error = %v, want context.DeadlineExceeded", err)
+				}
+				requireUnmodified(t, path, tt.content)
+			})
+
+			t.Run("live context applies the edit", func(t *testing.T) {
+				dir, path := writeWorkspace(t, tt.file, tt.content)
+				if err := ApplyDeputyCommand(t.Context(), dir, tt.cmd); err != nil {
+					t.Fatalf("ApplyDeputyCommand() failed: %v", err)
+				}
+				got, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("ReadFile failed: %v", err)
+				}
+				if !strings.Contains(string(got), tt.wantApplied) {
+					t.Fatalf("edit not applied, positive control is vacuous: want %q in:\n%s", tt.wantApplied, got)
+				}
+			})
 		})
 	}
 }

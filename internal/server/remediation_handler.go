@@ -931,8 +931,9 @@ func stepExecDir(workDir string, step *remediationv1.Step) (string, error) {
 // executeStep runs a single remediation step and returns output.
 func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) (string, error) {
 	// Both execution paths must respect cancellation: exec.CommandContext
-	// does on its own, but deputy-internal commands apply file edits without
-	// a context, so an expired timeout must stop the step before it starts.
+	// does on its own, and ApplyDeputyCommand takes the same context so an
+	// in-process edit is bounded by the caller's timeout too. This check just
+	// spends no filesystem work on a step whose deadline has already passed.
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("step not started: %w", err)
 	}
@@ -952,7 +953,7 @@ func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) 
 
 	// Handle deputy internal commands
 	if remediation.IsDeputyInternalCommand(cmd) {
-		if err := remediation.ApplyDeputyCommand(workDir, cmd); err != nil {
+		if err := remediation.ApplyDeputyCommand(ctx, workDir, cmd); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Applied: %s", cmd), nil

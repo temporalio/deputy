@@ -1,6 +1,7 @@
 package remediation
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -91,7 +92,14 @@ func resolveDeputyCommand(repoDir, cmd string) ([]string, string, error) {
 
 // ApplyDeputyCommand executes a deputy-internal command.
 // Returns an error if the command is not recognized or fails.
-func ApplyDeputyCommand(repoDir, cmd string) error {
+//
+// ctx bounds the edit. A deputy-internal command is applied in process rather
+// than as a subprocess, so nothing else enforces the caller's deadline on it:
+// the execution timeout an RPC or a fix run advertises covers these steps only
+// because this path checks ctx itself. The checks bracket the filesystem work
+// (see [ensureLive]), so a read that outlived the deadline cannot go on to
+// modify the workspace.
+func ApplyDeputyCommand(ctx context.Context, repoDir, cmd string) error {
 	parts, file, err := resolveDeputyCommand(repoDir, cmd)
 	if err != nil {
 		return err
@@ -102,26 +110,42 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 		// Format: deputy:action:update <file> <owner/repo> <new-version>
 		actionRef := parts[2]
 		newVersion := parts[3]
-		return applyActionUpdate(file, actionRef, newVersion)
+		return applyActionUpdate(ctx, file, actionRef, newVersion)
 
 	case "deputy:action:pin":
 		// Format: deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
 		actionRef := parts[2]
 		sha := parts[3]
 		tag := parts[4]
-		return applyActionPin(repoDir, file, actionRef, sha, tag)
+		return applyActionPin(ctx, repoDir, file, actionRef, sha, tag)
 
 	case "deputy:dockerfile:update":
 		// Format: deputy:dockerfile:update <file> <image> <new-version>
 		image := parts[2]
 		newVersion := parts[3]
-		return applyDockerfileUpdate(file, image, newVersion)
+		return applyDockerfileUpdate(ctx, file, image, newVersion)
 
 	default:
 		// Unreachable: ValidateDeputyCommand rejects unknown opcodes, and
 		// this switch must stay exhaustive over deputyCommandSpecs.
 		return fmt.Errorf("unknown deputy command: %s", parts[0])
 	}
+}
+
+// ensureLive reports ctx's cancellation as an error naming the file the step
+// was about to touch and the operation it was about to perform.
+//
+// Every deputy-internal edit calls it twice: once before reading, so an already
+// expired deadline costs no filesystem work, and once after the read and before
+// the write, which is the check that matters. A rewrite that took longer than
+// the caller allowed must not still be committed, because the caller has by
+// then been told the step timed out and is entitled to treat the workspace as
+// untouched by it.
+func ensureLive(ctx context.Context, operation, filePath string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("not %s %s: %w", operation, filePath, err)
+	}
+	return nil
 }
 
 // resolveBaseDir returns the absolute, symlink-resolved form of a repository
@@ -207,7 +231,10 @@ func safeJoinPath(baseDir, relPath string) (string, error) {
 // When a SHA is pinned with a version comment, we only update the comment
 // because we cannot resolve the new SHA without GitHub API access. This
 // signals to the user that they need to update the SHA manually.
-func applyActionUpdate(filePath, actionRef, newVersion string) error {
+func applyActionUpdate(ctx context.Context, filePath, actionRef, newVersion string) error {
+	if err := ensureLive(ctx, "reading", filePath); err != nil {
+		return err
+	}
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", filePath, err)
@@ -261,6 +288,9 @@ func applyActionUpdate(filePath, actionRef, newVersion string) error {
 	}
 
 	// Write back
+	if err := ensureLive(ctx, "writing", filePath); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filePath, []byte(contentStr), 0644); err != nil {
 		return fmt.Errorf("writing %s: %w", filePath, err)
 	}
@@ -281,7 +311,10 @@ func applyActionUpdate(filePath, actionRef, newVersion string) error {
 // the security-conscious digest-pinned patterns. When a digest is present, we update
 // the human-readable tag/comment but preserve the digest since we cannot resolve the
 // new digest without registry API access.
-func applyDockerfileUpdate(filePath, image, newVersion string) error {
+func applyDockerfileUpdate(ctx context.Context, filePath, image, newVersion string) error {
+	if err := ensureLive(ctx, "reading", filePath); err != nil {
+		return err
+	}
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", filePath, err)
@@ -363,6 +396,9 @@ func applyDockerfileUpdate(filePath, image, newVersion string) error {
 	// Write back, preserving original line endings
 	output := strings.Join(lines, "\n")
 
+	if err := ensureLive(ctx, "writing", filePath); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filePath, []byte(output), 0644); err != nil {
 		return fmt.Errorf("writing %s: %w", filePath, err)
 	}
@@ -384,7 +420,18 @@ func applyDockerfileUpdate(filePath, image, newVersion string) error {
 // in ("../../../private/var/..."), which os.Root then refuses. That makes the
 // opcode fail on any checkout reached through a symlink, which on macOS is
 // every path under /tmp and /var.
-func applyActionPin(repoDir, filePath, actionRef, sha, tag string) error {
+//
+// The deadline is checked here rather than around the rewrite's own read and
+// write: RewriteWorkflow backs [pin.Strategy].Rewrite, whose signature is
+// shared by every pin strategy, so it takes no context and threading one
+// through would change that interface for every strategy. This opcode's window
+// between the check and the write is therefore wider than the other two, and
+// is the single read and single write of one already-resolved file.
+func applyActionPin(ctx context.Context, repoDir, filePath, actionRef, sha, tag string) error {
+	if err := ensureLive(ctx, "rewriting", filePath); err != nil {
+		return err
+	}
+
 	base, err := resolveBaseDir(repoDir)
 	if err != nil {
 		return err
@@ -401,7 +448,10 @@ func applyActionPin(repoDir, filePath, actionRef, sha, tag string) error {
 		return fmt.Errorf("computing relative path: %w", err)
 	}
 
-	return githubactions.RewriteWorkflow(root, filepath.ToSlash(relPath), []pin.Update{
+	if err := githubactions.RewriteWorkflow(root, filepath.ToSlash(relPath), []pin.Update{
 		{Name: actionRef, PinnedValue: sha, VersionTag: tag},
-	})
+	}); err != nil {
+		return fmt.Errorf("pinning %s in %s: %w", actionRef, filePath, err)
+	}
+	return nil
 }
