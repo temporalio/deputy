@@ -483,7 +483,15 @@ func pruneStaleMiseLock(root *os.Root, configRelPath, tool string, currentVersio
 // first process mid-write, publishing partial content. A hard interrupt can
 // leave a stray temporary behind, which is the same trade os.CreateTemp makes
 // and is preferable to deleting a file another process is writing.
+//
+// A symlinked relPath is resolved first, so the replacement lands on the file
+// the link points at rather than on the link itself. Reads follow the link, so
+// writing anywhere else would publish the edit to a file nobody reads.
 func replaceFileAtomically(root *os.Root, relPath string, content []byte, perm os.FileMode) error {
+	relPath, err := resolveLinkTarget(root, relPath)
+	if err != nil {
+		return err
+	}
 	f, tmpRel, err := createUniqueTemp(root, relPath, perm)
 	if err != nil {
 		return err
@@ -497,6 +505,52 @@ func replaceFileAtomically(root *os.Root, relPath string, content []byte, perm o
 		return fmt.Errorf("replacing %s: %w", relPath, err)
 	}
 	return nil
+}
+
+// maxSymlinkHops bounds symlink resolution so a cyclic or absurdly deep chain
+// ends in an error instead of looping. The limit is generous next to any real
+// repository layout; the operating system's own limit is typically far lower.
+const maxSymlinkHops = 32
+
+// resolveLinkTarget returns the path a replacement should be published to: the
+// regular file relPath ultimately names, following any in-repository symlink
+// chain. Renaming over a link's own pathname would swap the link for a regular
+// file, so the shared target it pointed at keeps whatever it had. For a
+// lockfile that means every other config resolving through that target still
+// gets the version the fix just removed, while the repository silently loses
+// the layout choice the link expressed.
+//
+// Each hop is read through the os.Root, and a target that is absolute or
+// climbs out of the repository is refused rather than followed, so resolution
+// cannot be talked into publishing outside the tree being fixed. A path that
+// does not exist resolves to itself: there is no link to follow, and the
+// caller is creating the file.
+func resolveLinkTarget(root *os.Root, relPath string) (string, error) {
+	for range maxSymlinkHops {
+		info, err := root.Lstat(relPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			return relPath, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("stat %s: %w", relPath, err)
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			return relPath, nil
+		}
+		target, err := root.Readlink(relPath)
+		if err != nil {
+			return "", fmt.Errorf("reading link %s: %w", relPath, err)
+		}
+		if filepath.IsAbs(target) {
+			return "", fmt.Errorf("refusing to replace %s: it links to the absolute path %s", relPath, target)
+		}
+		next := path.Join(path.Dir(relPath), filepath.ToSlash(target))
+		if next == ".." || strings.HasPrefix(next, "../") {
+			return "", fmt.Errorf("refusing to replace %s: it links outside the repository via %s", relPath, target)
+		}
+		relPath = next
+	}
+	return "", fmt.Errorf("resolving %s: more than %d symbolic links", relPath, maxSymlinkHops)
 }
 
 // createUniqueTemp opens a new file that no other process holds, in the same

@@ -808,6 +808,241 @@ func TestApplyMiseUpdateSymlinkedManifest(t *testing.T) {
 	}
 }
 
+// TestResolveLinkTarget covers the resolution rules directly, including the
+// refusals an end-to-end apply reaches only after some earlier read has
+// already failed on the same link.
+func TestResolveLinkTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// links map a repository-relative path to the target text stored in it.
+		links map[string]string
+		// outsideLink, when set, is a link to a path outside the repository.
+		outsideLink string
+		in          string
+		want        string
+		wantErr     bool
+	}{
+		{name: "a regular file resolves to itself", in: "mise.lock", want: "mise.lock"},
+		{name: "a missing path resolves to itself", in: "absent.lock", want: "absent.lock"},
+		{
+			name:  "a link resolves to its target",
+			links: map[string]string{"link.lock": "shared/mise.lock"},
+			in:    "link.lock", want: "shared/mise.lock",
+		},
+		{
+			name: "a chain resolves to its final target",
+			links: map[string]string{
+				"link.lock":     "hop/next.lock",
+				"hop/next.lock": "../shared/mise.lock",
+			},
+			in: "link.lock", want: "shared/mise.lock",
+		},
+		{
+			name:  "a link out of the repository is refused",
+			links: map[string]string{"link.lock": "../escape.lock"},
+			in:    "link.lock", wantErr: true,
+		},
+		{
+			name:  "a nested link climbing past the root is refused",
+			links: map[string]string{"hop/next.lock": "../../outside/mise.lock"},
+			in:    "hop/next.lock", wantErr: true,
+		},
+		{
+			name: "an absolute link is refused", outsideLink: "link.lock",
+			in: "link.lock", wantErr: true,
+		},
+		{
+			name: "a cycle is refused",
+			links: map[string]string{
+				"a.lock": "b.lock",
+				"b.lock": "a.lock",
+			},
+			in: "a.lock", wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dir, "shared"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, rel := range []string{"mise.lock", "shared/mise.lock"} {
+				if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(rel)), []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for from, to := range tt.links {
+				full := filepath.Join(dir, filepath.FromSlash(from))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(to), full); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+			if tt.outsideLink != "" {
+				outside := filepath.Join(t.TempDir(), "mise.lock")
+				if err := os.Symlink(outside, filepath.Join(dir, filepath.FromSlash(tt.outsideLink))); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			got, err := resolveLinkTarget(root, tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("resolveLinkTarget(%q) = %q, want an error", tt.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveLinkTarget(%q): %v", tt.in, err)
+			}
+			if got != tt.want {
+				t.Errorf("resolveLinkTarget(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdateSymlinkedLock pins that pruning a lockfile which is
+// itself an in-repository symlink updates what the link points at instead of
+// replacing the link with a regular file. Severing the link would leave the
+// shared target stale, so every other config pointing at it keeps resolving
+// the vulnerable version, and the repository quietly loses a deliberate layout
+// choice. A link that leaves the repository must still be refused.
+func TestApplyMiseUpdateSymlinkedLock(t *testing.T) {
+	t.Parallel()
+
+	const config = "[tools]\ngo = \"1.22.12\"\n"
+	const lock = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
+
+	tests := []struct {
+		name string
+		// links are symlinks to create, each as a repository-relative path and
+		// the target text to store in it. target is the regular lockfile the
+		// chain ends at, which is the file that must end up pruned; it is
+		// empty when the chain is not expected to resolve.
+		links   map[string]string
+		target  string
+		wantErr bool
+		escapes bool
+	}{
+		{
+			name:   "lock symlinked to a shared target",
+			links:  map[string]string{"mise.lock": "shared/mise.lock"},
+			target: "shared/mise.lock",
+		},
+		{
+			name: "lock symlinked through a chain",
+			links: map[string]string{
+				"mise.lock":      "link/mise.lock",
+				"link/mise.lock": "../shared/mise.lock",
+			},
+			target: "shared/mise.lock",
+		},
+		{
+			name: "a cycle of lock symlinks is refused",
+			links: map[string]string{
+				"mise.lock":  "other.lock",
+				"other.lock": "mise.lock",
+			},
+			wantErr: true,
+		},
+		{name: "lock symlinked outside the repository is refused", escapes: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			write := func(base, rel, content string) string {
+				t.Helper()
+				full := filepath.Join(base, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return full
+			}
+			link := func(from, to string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(from), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(to), from); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+			write(dir, "mise.toml", config)
+			lockFull := filepath.Join(dir, "mise.lock")
+
+			if tt.escapes {
+				outside := write(t.TempDir(), "shared.lock", lock)
+				link(lockFull, outside)
+				if err := ApplyDeputyCommand(dir, "deputy:mise:update mise.toml go 1.24.3 1.22.12"); err == nil {
+					t.Fatal("expected an error for a lockfile symlinked outside the repository")
+				}
+				got, err := os.ReadFile(outside)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(got) != lock {
+					t.Errorf("wrote outside the repository: %q", got)
+				}
+				return
+			}
+
+			var targetFull string
+			if tt.target != "" {
+				targetFull = write(dir, tt.target, lock)
+			}
+			for from, to := range tt.links {
+				link(filepath.Join(dir, filepath.FromSlash(from)), to)
+			}
+
+			err := ApplyDeputyCommand(dir, "deputy:mise:update mise.toml go 1.24.3 1.22.12")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error for a lockfile symlink that does not resolve")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			fi, lstatErr := os.Lstat(lockFull)
+			if lstatErr != nil {
+				t.Fatal(lstatErr)
+			}
+			if fi.Mode()&os.ModeSymlink == 0 {
+				t.Errorf("mise.lock is no longer a symlink after the fix")
+			}
+			got, err := os.ReadFile(targetFull)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(got), "1.22.12") {
+				t.Errorf("stale entry survived in the link target %s:\n%s", tt.target, got)
+			}
+		})
+	}
+}
+
 // TestApplyMiseUpdatePrunesStaleLock pins the lockfile half of the mise fix:
 // after the config edit, a sibling mise.lock entry still pinning the old
 // version must be removed, otherwise the extractor substitutes the locked
