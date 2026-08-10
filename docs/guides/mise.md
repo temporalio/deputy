@@ -162,13 +162,20 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
   `.mise.toml`, `mise.<env>.toml`, `.config/mise/config.toml`, `conf.d`
   drop-ins), and replaces only the vulnerable array elements, single-line or
   multiline, carrying every vulnerable version so one command can fix several
-  pins in one array; a multi-version declaration with no matching version
-  fails with an error instead of guessing. All declaration forms mise accepts
-  are handled: `[tools]` entries, `[tools.<name>]` tables, dotted keys
-  (`tools.go = "..."`), inline tables (single-line or multiline, including a
-  quoted `"version"` key), arrays of inline tables, version arrays nested in
-  an inline table, the root `tools = { ... }` table, and option-bearing keys
-  such as `"ubi:cli/cli[exe=gh]"` (tool options survive throughout).
+  pins in one array; a declaration with no matching version fails with an
+  error instead of guessing. All declaration forms mise accepts are handled:
+  `[tools]` entries, `[tools.<name>]` tables (quoted spellings such as
+  `["tools".go]` included), dotted keys (`tools.go = "..."`), inline tables
+  (single-line or multiline, including a quoted `"version"` key), arrays of
+  inline tables, version arrays nested in an inline table, the root
+  `tools = { ... }` table, and option-bearing keys such as
+  `"ubi:cli/cli[exe=gh]"` (tool options survive throughout).
+- Applying a plan the config has outgrown fails closed. If the file now
+  declares an exact version the finding does not name (someone bumped
+  `1.22.12` to `1.25.1` after the plan was generated), Deputy errors rather
+  than rolling the newer pin backwards. A selector that could still resolve to
+  the vulnerable version is still rewritten, so `node = "20"`, `"20.11"`, and
+  `"lts"` are all updated for a finding against `20.11.0`.
 - The config's lockfile is kept honest: entries pinning the replaced versions
   are removed (their checksums describe the old artifact, so updating them in
   place would lie), which stops scans from re-reporting the old locked

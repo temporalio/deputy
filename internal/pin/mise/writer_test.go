@@ -293,6 +293,108 @@ go = ["1.22.12"]
 go = ["1.24.3"]
 `,
 		},
+		// A sole declaration is replaced only when the finding still describes
+		// what the file says. An exact version the plan does not name means
+		// the config moved on, and rewriting it would roll the user backwards;
+		// a partial or non-numeric selector may still resolve to the
+		// vulnerable version, so it is fair game. The scalar and one-element
+		// array forms must answer identically.
+		{
+			name: "stale exact scalar fails closed",
+			input: `[tools]
+go = "1.25.1"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = "1.25.1"
+`,
+			wantErr: true,
+		},
+		{
+			name: "stale exact sole array element fails closed",
+			input: `[tools]
+go = ["1.25.1"]
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = ["1.25.1"]
+`,
+			wantErr: true,
+		},
+		{
+			name: "stale exact sole inline table fails closed",
+			input: `[tools]
+go = { version = "1.25.1" }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = { version = "1.25.1" }
+`,
+			wantErr: true,
+		},
+		{
+			name: "partial major selector rewritten",
+			input: `[tools]
+node = "20"
+`,
+			tool: "node", currents: []string{"20.11.0"}, version: "20.11.1",
+			want: `[tools]
+node = "20.11.1"
+`,
+		},
+		{
+			name: "partial minor selector rewritten",
+			input: `[tools]
+node = "20.11"
+`,
+			tool: "node", currents: []string{"20.11.0"}, version: "20.11.1",
+			want: `[tools]
+node = "20.11.1"
+`,
+		},
+		{
+			name: "alias selector rewritten",
+			input: `[tools]
+node = "lts"
+`,
+			tool: "node", currents: []string{"20.11.0"}, version: "20.11.1",
+			want: `[tools]
+node = "20.11.1"
+`,
+		},
+		{
+			name: "partial selector in a sole array element rewritten",
+			input: `[tools]
+node = ["20"]
+`,
+			tool: "node", currents: []string{"20.11.0"}, version: "20.11.1",
+			want: `[tools]
+node = ["20.11.1"]
+`,
+		},
+		{
+			// A partial selector for a different release line cannot resolve
+			// to the vulnerable version, so it is stale like an exact one.
+			name: "partial selector for another line fails closed",
+			input: `[tools]
+node = "22.1"
+`,
+			tool: "node", currents: []string{"20.11.0"}, version: "20.11.1",
+			want: `[tools]
+node = "22.1"
+`,
+			wantErr: true,
+		},
+		{
+			name: "v-prefixed declaration matches the bare current",
+			input: `[tools]
+go = "v1.22.12"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = "1.24.3"
+`,
+		},
 		{
 			// Multiline arrays are first-class: the vulnerable element is
 			// replaced in place, preserving line structure and comments.

@@ -283,12 +283,13 @@ func replaceVersionInValue(value, pinned string) (string, bool) {
 // reaches the scalar path, which would replace the opening bracket and corrupt
 // the file.
 //
-// Ambiguity decides whether currents are consulted: a single declared version
-// (a scalar, or a one-element array) is unambiguous and is always replaced,
-// which matters because a config often declares a fuzzy version ("20") while
-// the finding reports the resolved one ("20.11.0"). With several declared
+// Currents are always consulted, at every arity. With several declared
 // versions only the elements equal to one of currents are replaced, so the
-// other pinned versions survive and an unmatched declaration changes nothing,
+// other pinned versions survive. A sole declaration (a scalar, or a
+// one-element array) is additionally replaced when it is a selector that could
+// still resolve to a current version, which matters because a config often
+// declares a fuzzy version ("20") while the finding reports the resolved one
+// ("20.11.0"); see selectorTargetsCurrent. Anything else changes nothing,
 // letting the caller fail closed instead of guessing. The value may span
 // multiple lines; only version tokens are rewritten, so line structure and
 // comments survive.
@@ -321,21 +322,88 @@ func replaceVersionInValueTargeting(value string, currents []string, pinned stri
 	if m == nil {
 		return value, false
 	}
+	if !selectorTargetsCurrent(unquoteKey(m[2]), currents) {
+		return value, false
+	}
 	newValue := m[1] + `"` + pinned + `"` + m[3]
 	return newValue, newValue != value
+}
+
+// selectorTargetsCurrent reports whether a sole declared version token may be
+// rewritten to pinned, given the versions the finding says are vulnerable. It
+// is what keeps an exact declaration from being rolled backwards: a plan built
+// when the config said "1.22.12" must not overwrite a "1.25.1" that the user
+// or another process has since committed, because the finding no longer
+// describes what the file declares. Multi-version arrays already fail closed
+// on a current-version mismatch, so sole declarations follow the same rule.
+//
+// Replacement is allowed when the declaration names a current version, when it
+// is a partial selector that a current version satisfies ("20" or "20.11" for
+// 20.11.0), or when it is not version-shaped at all ("lts", "latest",
+// "ref:main", "prefix:20"), since mise resolves those at install time and they
+// may well be resolving to the vulnerable version today. With no known current
+// versions there is nothing to contradict, so the rewrite proceeds; that is
+// the pinning path, which targets whatever is declared.
+func selectorTargetsCurrent(declared string, currents []string) bool {
+	if len(currents) == 0 {
+		return true
+	}
+	declared = strings.TrimSpace(declared)
+	for _, current := range currents {
+		if versionSelectorMatches(declared, current) {
+			return true
+		}
+	}
+	return !looksLikeVersion(declared)
+}
+
+// versionSelectorMatches reports whether declared names version exactly or is
+// one of its leading dot-separated components, the way mise treats a partial
+// version as a selector for the releases beneath it. A leading "v" on either
+// side is ignored so "v20" still selects "20.11.0".
+func versionSelectorMatches(declared, version string) bool {
+	declared = trimVersionPrefix(declared)
+	version = trimVersionPrefix(version)
+	if declared == version {
+		return true
+	}
+	return len(version) > len(declared) &&
+		strings.HasPrefix(version, declared) &&
+		version[len(declared)] == '.'
+}
+
+// looksLikeVersion reports whether a declared token is version-shaped, meaning
+// it starts with a digit (optionally behind a "v"). Tokens that are not are
+// mise selectors resolved at install time rather than literal versions.
+func looksLikeVersion(s string) bool {
+	s = trimVersionPrefix(s)
+	return s != "" && s[0] >= '0' && s[0] <= '9'
+}
+
+// trimVersionPrefix drops a leading "v" or "V" from a version token when a
+// digit follows it, so "v1.24.3" and "1.24.3" compare equal.
+func trimVersionPrefix(s string) string {
+	if len(s) > 1 && (s[0] == 'v' || s[0] == 'V') && s[1] >= '0' && s[1] <= '9' {
+		return s[1:]
+	}
+	return s
 }
 
 // replaceArrayElements rewrites the matching elements of a TOML array value,
 // splicing replacements in by offset so element order, layout, and comments
 // survive. Elements may be scalars, inline tables, or nested arrays; a
 // structured element is rewritten by recursion, so an inline table keeps its
-// tool options and a nested version array is edited element-wise in turn. A
-// one-element array is unambiguous and is replaced without consulting
-// currents; otherwise an element is touched only when one of the versions it
-// declares, at any nesting depth, is a known vulnerable version.
+// tool options and a nested version array is edited element-wise in turn.
+//
+// An element is touched when one of the versions it declares, at any nesting
+// depth, is a known vulnerable version. A one-element array declares the tool
+// on its own, so it is additionally touched when its version is a selector
+// that a current version satisfies, the same rule the scalar path applies (see
+// selectorTargetsCurrent); an element declaring no version at all keeps the
+// older unconditional behavior, since there is nothing to compare.
 func replaceArrayElements(value string, spans [][2]int, currents []string, pinned string) (string, bool) {
 	quoted := `"` + pinned + `"`
-	unambiguous := len(spans) == 1
+	sole := len(spans) == 1
 
 	var b strings.Builder
 	b.Grow(len(value) + len(spans)*(len(quoted)+2))
@@ -343,9 +411,11 @@ func replaceArrayElements(value string, spans [][2]int, currents []string, pinne
 	changed := false
 	for _, span := range spans {
 		elem := value[span[0]:span[1]]
-		if !unambiguous && !slices.ContainsFunc(elementVersions(elem), func(v string) bool {
+		versions := elementVersions(elem)
+		targeted := slices.ContainsFunc(versions, func(v string) bool {
 			return slices.Contains(currents, v)
-		}) {
+		})
+		if !targeted && !(sole && soleElementTargetsCurrent(versions, currents)) {
 			continue
 		}
 		repl := quoted
@@ -367,6 +437,20 @@ func replaceArrayElements(value string, spans [][2]int, currents []string, pinne
 	b.WriteString(value[last:])
 	newValue := b.String()
 	return newValue, newValue != value
+}
+
+// soleElementTargetsCurrent reports whether the sole element of a
+// single-element array may be rewritten. An element that declares no version
+// has nothing to contradict the finding and stays replaceable; otherwise at
+// least one of its declared versions must be a selector the finding's current
+// versions satisfy.
+func soleElementTargetsCurrent(versions, currents []string) bool {
+	if len(versions) == 0 {
+		return true
+	}
+	return slices.ContainsFunc(versions, func(v string) bool {
+		return selectorTargetsCurrent(v, currents)
+	})
 }
 
 // elementVersions returns every version an array element declares, flattening
