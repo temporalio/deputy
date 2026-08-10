@@ -885,6 +885,16 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			wantReason:       `executable "npm" not allowed for manager "go"`,
 			needsProcessTree: true,
 		},
+		{
+			name:       "deputy command target escaping the work directory",
+			step:       &remediationv1.Step{Id: "step-1", Title: "pin elsewhere", Command: "deputy:action:update ../outside/ci.yml actions/checkout v4", Executable: true},
+			wantReason: `path traversal detected: ../outside/ci.yml escapes base directory`,
+		},
+		{
+			name:       "deputy command target reached through a traversal",
+			step:       &remediationv1.Step{Id: "step-1", Title: "pin around", Command: "deputy:action:pin .github/../../outside/ci.yml actions/checkout deadbeef v4", Executable: true},
+			wantReason: "escapes base directory",
+		},
 	}
 
 	for _, tt := range tests {

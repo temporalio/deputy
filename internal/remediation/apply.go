@@ -17,43 +17,82 @@ func IsDeputyInternalCommand(cmd string) bool {
 	return strings.HasPrefix(cmd, "deputy:")
 }
 
-// deputyCommandArity is the minimum token count each deputy-internal command
-// requires, including the command word itself. It is the single source of
-// truth for which opcodes exist and how many arguments they take, shared by
-// validation and application so a dry run cannot approve a command the apply
-// path would reject.
-var deputyCommandArity = map[string]int{
-	"deputy:action:update":     4, // deputy:action:update <file> <owner/repo> <new-version>
-	"deputy:action:pin":        5, // deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
-	"deputy:dockerfile:update": 4, // deputy:dockerfile:update <file> <image> <new-version>
+// deputyCommandSpec describes the wire shape of one deputy-internal command.
+type deputyCommandSpec struct {
+	// arity is the minimum token count the command requires, including the
+	// command word itself.
+	arity int
+	// pathArg is the index of the token naming the file the command edits.
+	// Resolution and containment read it from here rather than from each
+	// opcode's own branch, so an opcode cannot be applied through a position
+	// preflight did not check.
+	pathArg int
+}
+
+// deputyCommandSpecs is the single source of truth for which deputy-internal
+// opcodes exist, how many arguments they take, and which argument names the
+// file they edit. Validation, preflight, and application all read it, so a
+// dry run cannot approve a command the apply path would reject.
+var deputyCommandSpecs = map[string]deputyCommandSpec{
+	"deputy:action:update":     {arity: 4, pathArg: 1}, // deputy:action:update <file> <owner/repo> <new-version>
+	"deputy:action:pin":        {arity: 5, pathArg: 1}, // deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
+	"deputy:dockerfile:update": {arity: 4, pathArg: 1}, // deputy:dockerfile:update <file> <image> <new-version>
 }
 
 // ValidateDeputyCommand checks that a deputy-internal command parses, names a
 // known opcode, and carries enough arguments, returning the parsed tokens.
-// It touches nothing on disk, so callers can use it to predict whether
-// ApplyDeputyCommand would accept the command (a dry run) without applying
-// it. Checks that require the filesystem, such as path containment and
-// whether the target file matches, necessarily remain in the apply path.
+// It touches nothing on disk. Callers predicting whether ApplyDeputyCommand
+// would accept a command want PreflightDeputyCommand instead, which adds the
+// checks that need a repository to resolve against.
 func ValidateDeputyCommand(cmd string) ([]string, error) {
 	parts, err := ParseCommandArgs(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("invalid command: %w", err)
 	}
 
-	want, known := deputyCommandArity[parts[0]]
+	spec, known := deputyCommandSpecs[parts[0]]
 	if !known {
 		return nil, fmt.Errorf("unknown deputy command: %s", parts[0])
 	}
-	if len(parts) < want {
-		return nil, fmt.Errorf("invalid %s command: expected %d parts, got %d", parts[0], want, len(parts))
+	if len(parts) < spec.arity {
+		return nil, fmt.Errorf("invalid %s command: expected %d parts, got %d", parts[0], spec.arity, len(parts))
 	}
 	return parts, nil
+}
+
+// PreflightDeputyCommand reports whether ApplyDeputyCommand would accept a
+// command, without applying it. It runs every check the apply path runs before
+// it touches a file: parsing, the opcode vocabulary, arity, and containment of
+// the target path within repoDir. A dry run that skipped the containment check
+// would report a step naming ../outside/ci.yml as applicable and then watch
+// execution refuse it, so the two share one implementation and one message.
+func PreflightDeputyCommand(repoDir, cmd string) error {
+	_, _, err := resolveDeputyCommand(repoDir, cmd)
+	return err
+}
+
+// resolveDeputyCommand validates a deputy-internal command and resolves the
+// file it edits against repoDir, returning the parsed tokens and the contained
+// absolute path. It is the one place that knows where a command's target path
+// lives, so preflight and application cannot disagree about which path is
+// checked or how a refusal reads.
+func resolveDeputyCommand(repoDir, cmd string) ([]string, string, error) {
+	parts, err := ValidateDeputyCommand(cmd)
+	if err != nil {
+		return nil, "", err
+	}
+	spec := deputyCommandSpecs[parts[0]]
+	file, err := safeJoinPath(repoDir, parts[spec.pathArg])
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid file path: %w", err)
+	}
+	return parts, file, nil
 }
 
 // ApplyDeputyCommand executes a deputy-internal command.
 // Returns an error if the command is not recognized or fails.
 func ApplyDeputyCommand(repoDir, cmd string) error {
-	parts, err := ValidateDeputyCommand(cmd)
+	parts, file, err := resolveDeputyCommand(repoDir, cmd)
 	if err != nil {
 		return err
 	}
@@ -61,20 +100,12 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 	switch parts[0] {
 	case "deputy:action:update":
 		// Format: deputy:action:update <file> <owner/repo> <new-version>
-		file, err := safeJoinPath(repoDir, parts[1])
-		if err != nil {
-			return fmt.Errorf("invalid file path: %w", err)
-		}
 		actionRef := parts[2]
 		newVersion := parts[3]
 		return applyActionUpdate(file, actionRef, newVersion)
 
 	case "deputy:action:pin":
 		// Format: deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
-		file, err := safeJoinPath(repoDir, parts[1])
-		if err != nil {
-			return fmt.Errorf("invalid file path: %w", err)
-		}
 		actionRef := parts[2]
 		sha := parts[3]
 		tag := parts[4]
@@ -82,17 +113,13 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 
 	case "deputy:dockerfile:update":
 		// Format: deputy:dockerfile:update <file> <image> <new-version>
-		file, err := safeJoinPath(repoDir, parts[1])
-		if err != nil {
-			return fmt.Errorf("invalid file path: %w", err)
-		}
 		image := parts[2]
 		newVersion := parts[3]
 		return applyDockerfileUpdate(file, image, newVersion)
 
 	default:
 		// Unreachable: ValidateDeputyCommand rejects unknown opcodes, and
-		// this switch must stay exhaustive over deputyCommandArity.
+		// this switch must stay exhaustive over deputyCommandSpecs.
 		return fmt.Errorf("unknown deputy command: %s", parts[0])
 	}
 }

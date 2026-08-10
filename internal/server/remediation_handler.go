@@ -796,9 +796,10 @@ const (
 // escapes the work directory, or whose manager and command disagree, would be
 // reported as runnable and then fail for real.
 //
-// Deputy-internal commands are validated only for parseability: they are
-// applied in process rather than executed, so ExecArgs does not apply to
-// them, and their argument-level checks live in the apply path.
+// Deputy-internal commands are applied in process rather than executed, so
+// ExecArgs does not apply to them. They go through remediation's own preflight
+// instead, which runs every check the apply path runs before it touches a
+// file, containment of the target path among them.
 //
 // A predicted refusal is returned as an error as well as a message, so callers
 // can treat it the way they treat a real step failure (connect code mapping,
@@ -820,7 +821,7 @@ func dryRunStep(position, total int, workDir string, step *remediationv1.Step, t
 	}
 
 	if remediation.IsDeputyInternalCommand(cmd) {
-		if _, err := remediation.ValidateDeputyCommand(cmd); err != nil {
+		if err := remediation.PreflightDeputyCommand(workDir, cmd); err != nil {
 			return reject(err)
 		}
 		return fmt.Sprintf("[dry run] Step %d/%d would apply: %s", position, total, cmd), dryRunWouldRun, nil
