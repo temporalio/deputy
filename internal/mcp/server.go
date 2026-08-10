@@ -896,14 +896,10 @@ func (s *Server) excludePaths(paths []string) []string {
 // below, which differ only in that fallback).
 func canonicalMCPEcosystem(name string) (canonical string, ok bool) {
 	name = strings.TrimSpace(name)
-	switch strings.ToLower(strings.ReplaceAll(name, "_", "-")) {
-	case "github", "github action", "github actions", "github-action", "github-actions", "githubaction", "githubactions", "gha":
-		// GitHub Actions is not a core SCA ecosystem, so ecosystem.Parse does
-		// not recognize it; keep the alias set here.
-		return "github-actions", true
-	}
-	if eco := ecosystem.Parse(name); eco != ecosystem.Unknown {
-		return eco.String(), true
+	// The alias table lives in internal/ecosystem so tools, policies, and the
+	// CLI resolve names identically instead of drifting apart.
+	if token, known := ecosystem.Canonical(name); known {
+		return token, true
 	}
 	return name, false
 }
