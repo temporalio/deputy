@@ -66,14 +66,20 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 		if len(parts) < 4 {
 			return fmt.Errorf("invalid mise update command: expected at least 4 parts, got %d", len(parts))
 		}
-		file, err := safeJoinPath(repoDir, parts[1])
+		// Validate containment, then keep working with the detected path
+		// rather than safeJoinPath's symlink-resolved target: the manifest's
+		// own location is what determines its sibling lockfile.
+		if _, err := safeJoinPath(repoDir, parts[1]); err != nil {
+			return fmt.Errorf("invalid file path: %w", err)
+		}
+		configRel, err := repoRelPath(repoDir, parts[1])
 		if err != nil {
 			return fmt.Errorf("invalid file path: %w", err)
 		}
 		tool := parts[2]
 		newVersion := parts[3]
 		currentVersions := parts[4:]
-		return applyMiseUpdate(repoDir, file, tool, currentVersions, newVersion)
+		return applyMiseUpdate(repoDir, configRel, tool, currentVersions, newVersion)
 
 	case "deputy:dockerfile:update":
 		// Format: deputy:dockerfile:update <file> <image> <new-version>
@@ -148,6 +154,32 @@ func safeJoinPath(baseDir, relPath string) (string, error) {
 	}
 
 	return realJoined, nil
+}
+
+// repoRelPath returns declared as a slash-separated path relative to repoDir,
+// joined and cleaned the same lexical way safeJoinPath joins it but without
+// resolving symlinks, so the file keeps the identity the scan gave it. That
+// matters wherever a sibling file is derived from the manifest's location: an
+// in-repository symlink (`mise.toml -> configs/shared.toml`) has a different
+// sibling lockfile than its target, and following it would prune the wrong
+// one. Containment is still enforced here, and again by the os.Root the caller
+// opens.
+func repoRelPath(repoDir, declared string) (string, error) {
+	if strings.Contains(declared, "\x00") {
+		return "", fmt.Errorf("path contains null byte")
+	}
+	base, err := filepath.Abs(repoDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid base directory: %w", err)
+	}
+	rel, err := filepath.Rel(base, filepath.Join(base, declared))
+	if err != nil {
+		return "", fmt.Errorf("computing relative path: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path traversal detected: %s escapes base directory", declared)
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 // applyActionUpdate updates a GitHub Action reference in a workflow file.
@@ -332,35 +364,26 @@ func applyDockerfileUpdate(filePath, image, newVersion string) error {
 // arrays to a scalar. Delegates to pinmise.RewriteToolVersion for a single
 // source of truth on format-preserving mise config rewrites, then prunes any
 // stale sibling mise.lock entries so lock resolution cannot keep substituting
-// the vulnerable version the fix just removed. The filePath must be under
-// repoDir; currentVersions may be empty when unknown (array declarations then
-// fail closed rather than guess).
-func applyMiseUpdate(repoDir, filePath, tool string, currentVersions []string, newVersion string) error {
+// the vulnerable version the fix just removed.
+//
+// configRel is the detected manifest as a slash-separated path relative to
+// repoDir, kept unresolved on purpose: it is the path inventory read the
+// config and its lockfile from, so deriving the lockfile from it prunes the
+// lock that is actually in effect even when the manifest is an in-repository
+// symlink. Containment comes from the os.Root, which refuses to traverse a
+// link that leaves the repository. currentVersions may be empty when unknown
+// (array declarations then fail closed rather than guess).
+func applyMiseUpdate(repoDir, configRel, tool string, currentVersions []string, newVersion string) error {
 	root, err := os.OpenRoot(repoDir)
 	if err != nil {
 		return fmt.Errorf("opening repo root: %w", err)
 	}
 	defer root.Close()
 
-	// filePath comes from safeJoinPath and is symlink-resolved; resolve the
-	// base the same way so the relative path stays inside the root.
-	base, err := filepath.Abs(repoDir)
-	if err != nil {
-		return fmt.Errorf("resolving repo directory: %w", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(base); err == nil {
-		base = resolved
-	}
-	relPath, err := filepath.Rel(base, filePath)
-	if err != nil {
-		return fmt.Errorf("computing relative path: %w", err)
-	}
-
-	relPath = filepath.ToSlash(relPath)
-	if err := pinmise.RewriteToolVersion(root, relPath, tool, currentVersions, newVersion); err != nil {
+	if err := pinmise.RewriteToolVersion(root, configRel, tool, currentVersions, newVersion); err != nil {
 		return fmt.Errorf("updating mise config: %w", err)
 	}
-	if err := pruneStaleMiseLock(root, relPath, tool, currentVersions, newVersion); err != nil {
+	if err := pruneStaleMiseLock(root, configRel, tool, currentVersions, newVersion); err != nil {
 		return fmt.Errorf("updating mise lockfile: %w", err)
 	}
 	return nil

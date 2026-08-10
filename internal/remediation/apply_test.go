@@ -678,6 +678,130 @@ func TestApplyMiseUpdatePrunesLockForLayouts(t *testing.T) {
 	}
 }
 
+// TestApplyMiseUpdateSymlinkedManifest pins which manifest path decides the
+// lockfile. A detected manifest that is an in-repository symlink has its own
+// sibling lockfile, and that is the one mise (and Deputy's own inventory)
+// reads, so following the link to the target's directory would edit the config
+// while leaving the lock that is actually in effect still pinning the
+// vulnerable version. The symlink itself must survive the edit, and a link
+// that leaves the repository must still be refused.
+func TestApplyMiseUpdateSymlinkedManifest(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// link is the detected manifest; target is where it points, relative
+		// to the repository unless escapes is set.
+		link      string
+		target    string
+		lockPath  string
+		staleLock string
+		escapes   bool
+	}{
+		{
+			name: "root symlink to a nested config",
+			link: "mise.toml", target: "configs/shared.toml",
+			lockPath: "mise.lock", staleLock: "configs/shared.lock",
+		},
+		{
+			name: "nested symlink to a root config",
+			link: "envs/mise.toml", target: "shared.toml",
+			lockPath: "envs/mise.lock", staleLock: "mise.lock",
+		},
+		{
+			name: "symlink escaping the repository is refused",
+			link: "mise.toml", escapes: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			write := func(base, rel, content string) string {
+				t.Helper()
+				full := filepath.Join(base, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return full
+			}
+			const config = "[tools]\ngo = \"1.22.12\"\n"
+			const lock = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
+
+			linkFull := filepath.Join(dir, filepath.FromSlash(tt.link))
+			if err := os.MkdirAll(filepath.Dir(linkFull), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			if tt.escapes {
+				outside := write(t.TempDir(), "victim.toml", config)
+				if err := os.Symlink(outside, linkFull); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				err := ApplyDeputyCommand(dir, "deputy:mise:update "+tt.link+" go 1.24.3 1.22.12")
+				if err == nil {
+					t.Fatal("expected an error for a manifest symlinked outside the repository")
+				}
+				got, readErr := os.ReadFile(outside)
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if string(got) != config {
+					t.Errorf("wrote outside the repository: %q", got)
+				}
+				return
+			}
+
+			targetFull := write(dir, tt.target, config)
+			write(dir, tt.lockPath, lock)
+			write(dir, tt.staleLock, lock)
+			linkTo, err := filepath.Rel(filepath.Dir(linkFull), targetFull)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(linkTo, linkFull); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+
+			if err := ApplyDeputyCommand(dir, "deputy:mise:update "+tt.link+" go 1.24.3 1.22.12"); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			if got, err := os.ReadFile(targetFull); err != nil {
+				t.Fatal(err)
+			} else if !strings.Contains(string(got), "1.24.3") {
+				t.Errorf("config not updated through the symlink:\n%s", got)
+			}
+			fi, err := os.Lstat(linkFull)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fi.Mode()&os.ModeSymlink == 0 {
+				t.Errorf("%s is no longer a symlink after the edit", tt.link)
+			}
+			sibling, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(tt.lockPath)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(sibling), "1.22.12") {
+				t.Errorf("stale entry survived in the detected manifest's lock %s:\n%s", tt.lockPath, sibling)
+			}
+			other, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(tt.staleLock)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(other), "1.22.12") {
+				t.Errorf("pruned the link target's lock %s, which is not in effect:\n%s", tt.staleLock, other)
+			}
+		})
+	}
+}
+
 // TestApplyMiseUpdatePrunesStaleLock pins the lockfile half of the mise fix:
 // after the config edit, a sibling mise.lock entry still pinning the old
 // version must be removed, otherwise the extractor substitutes the locked
