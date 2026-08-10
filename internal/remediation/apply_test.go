@@ -1,9 +1,12 @@
 package remediation
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -1377,33 +1380,40 @@ node = "20.11.1"
 // TestReplaceFileAtomically pins the durability contract for lockfile writes:
 // the file is either its old content or its new content, a failure leaves the
 // original intact rather than a truncated remnant, no temporary file is left
-// behind, and a stale temporary from an earlier interrupted run does not block
-// a later write.
+// behind, and an existing temporary beside the target neither blocks the write
+// nor gets destroyed, since it may be a concurrent apply's in-flight file.
 func TestReplaceFileAtomically(t *testing.T) {
 	t.Parallel()
 
 	const original = "[[tools.go]]\nversion = \"1.22.12\"\n"
 	const replacement = "[[tools.node]]\nversion = \"20.11.0\"\n"
+	// Deliberately the fixed name an earlier implementation cleared before
+	// writing, so reintroducing clear-by-known-name goes red here.
+	const inFlight = ".mise.lock.deputy-tmp"
 
 	tests := []struct {
 		name      string
 		setup     func(t *testing.T, dir string)
 		wantErr   bool
 		wantAfter string
+		// wantIntact names a sibling file that must still hold its original
+		// bytes after the call.
+		wantIntact string
 	}{
 		{
 			name:      "replaces content",
 			wantAfter: replacement,
 		},
 		{
-			name: "stale temporary does not block the write",
+			name: "another apply's temporary is neither reused nor removed",
 			setup: func(t *testing.T, dir string) {
 				t.Helper()
-				if err := os.WriteFile(filepath.Join(dir, ".mise.lock.deputy-tmp"), []byte("junk"), 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, inFlight), []byte("in flight"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			},
-			wantAfter: replacement,
+			wantAfter:  replacement,
+			wantIntact: inFlight,
 		},
 		{
 			name: "unwritable directory leaves the original intact",
@@ -1450,9 +1460,84 @@ func TestReplaceFileAtomically(t *testing.T) {
 			if string(got) != tt.wantAfter {
 				t.Errorf("content = %q, want %q", got, tt.wantAfter)
 			}
-			if _, err := os.Stat(filepath.Join(dir, ".mise.lock.deputy-tmp")); !os.IsNotExist(err) {
-				t.Errorf("temporary file left behind (stat err = %v)", err)
+			if tt.wantIntact != "" {
+				kept, err := os.ReadFile(filepath.Join(dir, tt.wantIntact))
+				if err != nil {
+					t.Fatalf("%s was removed: %v", tt.wantIntact, err)
+				}
+				if string(kept) != "in flight" {
+					t.Errorf("%s was overwritten: %q", tt.wantIntact, kept)
+				}
+			}
+			// Any temporary this call created must be gone, whatever it was
+			// named; only a pre-existing one may remain.
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				name := entry.Name()
+				if strings.HasPrefix(name, ".mise.lock.deputy-") && name != tt.wantIntact {
+					t.Errorf("temporary file left behind: %s", name)
+				}
 			}
 		})
+	}
+}
+
+// TestReplaceFileAtomicallyConcurrent pins that two applies pruning the same
+// lockfile cannot corrupt each other. With a shared temporary name one call
+// unlinks the other's open file, refills the name, and has the refill renamed
+// into place mid-write; every call must therefore end with the target holding
+// exactly one caller's complete content and no temporary left over.
+func TestReplaceFileAtomicallyConcurrent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "mise.lock"), []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+
+	const writers = 8
+	contents := make([]string, writers)
+	for i := range contents {
+		contents[i] = strings.Repeat(fmt.Sprintf("writer-%d\n", i), 4096)
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, writers)
+	for i := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = replaceFileAtomically(root, "mise.lock", []byte(contents[i]), 0o644)
+		}()
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("writer %d: %v", i, err)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(contents, string(got)) {
+		t.Errorf("lockfile holds no writer's complete content (%d bytes)", len(got))
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".mise.lock.deputy-") {
+			t.Errorf("temporary file left behind: %s", entry.Name())
+		}
 	}
 }

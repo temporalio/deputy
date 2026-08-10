@@ -1,6 +1,7 @@
 package remediation
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -479,20 +480,19 @@ func pruneStaleMiseLock(root *os.Root, configRelPath, tool string, currentVersio
 // recover because the pruner would read the damaged file and find nothing left
 // to prune. The temporary file is created in the same directory so the rename
 // stays on one filesystem, and is removed on any failure.
+//
+// Each call gets its own randomly named temporary. A shared fixed name would
+// make two concurrent applies collide: one would unlink the other's open
+// temporary, refill the name, and have the refill renamed into place by the
+// first process mid-write, publishing partial content. A hard interrupt can
+// leave a stray temporary behind, which is the same trade os.CreateTemp makes
+// and is preferable to deleting a file another process is writing.
 func replaceFileAtomically(root *os.Root, relPath string, content []byte, perm os.FileMode) error {
-	dir := path.Dir(relPath)
-	tmpRel := path.Join(dir, "."+path.Base(relPath)+".deputy-tmp")
-	// A leftover temporary from an earlier interrupted run must not block us.
-	if err := root.Remove(tmpRel); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("clearing %s: %w", tmpRel, err)
-	}
-
-	f, err := root.OpenFile(tmpRel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	f, tmpRel, err := createUniqueTemp(root, relPath, perm)
 	if err != nil {
-		return fmt.Errorf("creating %s: %w", tmpRel, err)
+		return err
 	}
-	writeErr := writeAndSync(f, content)
-	if writeErr != nil {
+	if writeErr := writeAndSync(f, content); writeErr != nil {
 		_ = root.Remove(tmpRel)
 		return fmt.Errorf("writing %s: %w", tmpRel, writeErr)
 	}
@@ -501,6 +501,26 @@ func replaceFileAtomically(root *os.Root, relPath string, content []byte, perm o
 		return fmt.Errorf("replacing %s: %w", relPath, err)
 	}
 	return nil
+}
+
+// createUniqueTemp opens a new file that no other process holds, in the same
+// directory as relPath so a later rename stays on one filesystem. O_EXCL is
+// what makes the name exclusively ours; a name already taken is retried rather
+// than cleared, so a concurrent apply's in-flight temporary is never unlinked.
+func createUniqueTemp(root *os.Root, relPath string, perm os.FileMode) (*os.File, string, error) {
+	dir := path.Dir(relPath)
+	base := "." + path.Base(relPath) + ".deputy-"
+	for range 100 {
+		tmpRel := path.Join(dir, base+rand.Text())
+		f, err := root.OpenFile(tmpRel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+		if err == nil {
+			return f, tmpRel, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, "", fmt.Errorf("creating %s: %w", tmpRel, err)
+		}
+	}
+	return nil, "", fmt.Errorf("creating a temporary file beside %s: too many name collisions", relPath)
 }
 
 // writeAndSync writes content to f and flushes it to stable storage before
