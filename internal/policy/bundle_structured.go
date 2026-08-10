@@ -241,10 +241,10 @@ func (p structuredPolicy) toCELSource() (string, error) {
 	}
 	var builder strings.Builder
 	builder.WriteString("[]")
-	for _, rule := range p.Rules {
+	for i, rule := range p.Rules {
 		expr, err := rule.toRuleExpr(p.Ecosystems)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("rule[%d]: %w", i, err)
 		}
 		builder.WriteString(" + ")
 		builder.WriteString(expr)
@@ -311,7 +311,11 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 	if strings.TrimSpace(r.Action) == "" {
 		return "", fmt.Errorf("rule missing action")
 	}
-	action := map[string]any{"action": r.Action}
+	normalizedAction, err := ValidateActionType(r.Action)
+	if err != nil {
+		return "", err
+	}
+	action := map[string]any{"action": normalizedAction}
 	if r.Reason != "" {
 		action["reason"] = r.Reason
 	}

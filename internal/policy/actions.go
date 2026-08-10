@@ -30,6 +30,38 @@ func ActionTypeIs(actionType, expected string) bool {
 	return strings.EqualFold(actionType, expected)
 }
 
+// ActionTypes returns the action vocabulary a policy rule may emit, in the order
+// used by error messages and editor surfaces. The slice is freshly allocated so
+// callers cannot mutate the vocabulary.
+func ActionTypes() []string {
+	return []string{ActionAllow, ActionDeny, ActionWarn}
+}
+
+// NormalizeActionType folds an authored action value into its canonical form by
+// trimming surrounding whitespace and lowercasing it. "DENY", "Deny" and " deny "
+// all mean deny: evaluation already compares action types case-insensitively
+// (see ActionTypeIs), so parsing accepts exactly what the runtime accepts and
+// everything downstream sees the canonical lowercase spelling. This mirrors how
+// a policy's mode field is normalized before validation.
+func NormalizeActionType(actionType string) string {
+	return strings.ToLower(strings.TrimSpace(actionType))
+}
+
+// ValidateActionType returns the canonical form of an authored action value, or
+// an error naming the offending value and the valid vocabulary. A typo such as
+// "dney" is otherwise accepted verbatim and yields a rule that can never deny
+// anything, so an unknown action must fail at load time instead of degrading
+// into a silently permissive rule.
+func ValidateActionType(actionType string) (string, error) {
+	normalized := NormalizeActionType(actionType)
+	switch normalized {
+	case ActionAllow, ActionDeny, ActionWarn:
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("invalid action %q (expected %s)", actionType, strings.Join(ActionTypes(), "|"))
+	}
+}
+
 // Action represents a normalized policy decision emitted by a CEL program.
 type Action struct {
 	Source      string            // Source is the name of the policy that generated this action.

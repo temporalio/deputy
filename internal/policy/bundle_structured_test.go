@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -76,6 +77,85 @@ func TestOrderedVarsRejectDuplicateNames(t *testing.T) {
 	}
 	if _, err := p.toCELSource(); err == nil {
 		t.Fatalf("expected error for duplicate var names, got nil")
+	}
+}
+
+// TestStructuredPolicyValidatesActionVocabulary pins that a rule action outside
+// the allow/deny/warn vocabulary is a load-time error, and that casing and
+// surrounding whitespace are normalized rather than rejected.
+func TestStructuredPolicyValidatesActionVocabulary(t *testing.T) {
+	cases := []struct {
+		name        string
+		action      string
+		wantErr     bool
+		wantInError []string
+		wantEmitted string
+	}{
+		{name: "deny", action: "deny", wantEmitted: "deny"},
+		{name: "warn", action: "warn", wantEmitted: "warn"},
+		{name: "allow", action: "allow", wantEmitted: "allow"},
+		{name: "uppercase is normalized", action: "DENY", wantEmitted: "deny"},
+		{name: "padded is normalized", action: "  Warn\t", wantEmitted: "warn"},
+		{
+			name:        "typo is rejected",
+			action:      "dney",
+			wantErr:     true,
+			wantInError: []string{`"dney"`, "allow|deny|warn"},
+		},
+		{
+			name:        "unknown verb is rejected",
+			action:      "block",
+			wantErr:     true,
+			wantInError: []string{`"block"`, "allow|deny|warn"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := structuredPolicy{
+				Name:  "vocabulary",
+				Rules: []structuredRule{{Action: tc.action, When: "true", Reason: "because"}},
+			}
+			src, err := p.toCELSource()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for action %q, got source: %s", tc.action, src)
+				}
+				for _, want := range append(tc.wantInError, "rule[0]") {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("error %q missing %q", err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("toCELSource: %v", err)
+			}
+			if !strings.Contains(src, fmt.Sprintf(`"action":"%s"`, tc.wantEmitted)) {
+				t.Fatalf("expected normalized action %q in source: %s", tc.wantEmitted, src)
+			}
+		})
+	}
+}
+
+// TestStructuredBundleActionErrorNamesPolicyAndFile pins that the parse error for
+// an unknown action identifies the file, policy, and rule the author must fix.
+func TestStructuredBundleActionErrorNamesPolicyAndFile(t *testing.T) {
+	data := []byte(`
+policies:
+  - name: typo-action
+    rules:
+      - when: "true"
+        action: dney
+        reason: "should deny"
+`)
+	_, err := ParseStructuredSources(data, "bundle.yaml")
+	if err == nil {
+		t.Fatal("expected error for unknown action")
+	}
+	for _, want := range []string{"bundle.yaml", "typo-action", "rule[0]", `"dney"`, "allow|deny|warn"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err, want)
+		}
 	}
 }
 
