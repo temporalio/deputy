@@ -617,47 +617,18 @@ func isCargoEcosystem(eco string) bool {
 	return false
 }
 
-// normalizePyPIName normalizes a PyPI package name according to PEP 503.
-// Per PEP 503, valid package names must be lowercase and consecutive runs of
-// underscores, hyphens, and periods are replaced with a single hyphen.
-// This ensures that "My_Package", "my-package", and "my.package" all match.
+// normalizePyPIName folds a PyPI distribution name to the PEP 503 form. The
+// rule lives in [ecosystem.Ecosystem.NormalizeName] so the comparison key and
+// the identity a policy sees are produced by the same code.
 func normalizePyPIName(name string) string {
-	if name == "" {
-		return name
-	}
-	// Already lowercased by caller, but ensure it
-	name = strings.ToLower(name)
-	// Replace consecutive runs of [-_.] with a single hyphen
-	var result strings.Builder
-	result.Grow(len(name))
-	inSeparator := false
-	for _, r := range name {
-		if r == '-' || r == '_' || r == '.' {
-			if !inSeparator {
-				result.WriteByte('-')
-				inSeparator = true
-			}
-			// Skip additional separators in a run
-		} else {
-			result.WriteRune(r)
-			inSeparator = false
-		}
-	}
-	return result.String()
+	return ecosystem.PyPI.NormalizeName(name)
 }
 
-// normalizeCargoName normalizes a Cargo/crates.io package name per RFC 940.
-// On crates.io, hyphens and underscores are equivalent: "serde-json" and
-// "serde_json" refer to the same crate. We normalize to underscores to match
-// Rust's internal convention (crate names in code use underscores).
+// normalizeCargoName folds a crate name the way crates.io does. The rule lives
+// in [ecosystem.Ecosystem.NormalizeName] for the same reason as
+// [normalizePyPIName].
 func normalizeCargoName(name string) string {
-	if name == "" {
-		return name
-	}
-	// Crate names are case-insensitive on crates.io
-	name = strings.ToLower(name)
-	// Replace hyphens with underscores (Rust convention)
-	return strings.ReplaceAll(name, "-", "_")
+	return ecosystem.Cargo.NormalizeName(name)
 }
 
 // CompareOptions configures package comparison behavior.

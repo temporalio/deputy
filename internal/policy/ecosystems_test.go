@@ -691,3 +691,61 @@ func TestIdentityKeysCoverSchema(t *testing.T) {
 		t.Fatalf("RangeMessages: %v", err)
 	}
 }
+
+// TestPayloadNamesCollapseEquivalentSpellings pins the name half of the
+// canonical identity contract: two payloads that name the same package in
+// different but equivalent spellings must reach a policy as the same string.
+// Lowercasing alone left "Flask_SQLAlchemy" and "flask.sqlalchemy" as distinct
+// identities, so an exact-match rule matched one spelling and missed the other
+// even though inventory comparison treats them as one package.
+func TestPayloadNamesCollapseEquivalentSpellings(t *testing.T) {
+	tests := []struct {
+		name      string
+		ecosystem string
+		spellings []string
+		want      string
+	}{
+		{
+			name:      "pypi separators and case",
+			ecosystem: "PyPI",
+			spellings: []string{"Flask_SQLAlchemy", "flask.sqlalchemy", "Flask-SQLAlchemy", "flask-sqlalchemy"},
+			want:      "flask-sqlalchemy",
+		},
+		{
+			name:      "cargo hyphen and underscore",
+			ecosystem: "crates.io",
+			spellings: []string{"serde-json", "serde_json", "Serde-JSON"},
+			want:      "serde_json",
+		},
+		{
+			name:      "npm names stay verbatim",
+			ecosystem: "npm",
+			spellings: []string{"@types/Node"},
+			want:      "@types/Node",
+		},
+		{
+			name:      "go module paths stay verbatim",
+			ecosystem: "Go",
+			spellings: []string{"github.com/Masterminds/semver"},
+			want:      "github.com/Masterminds/semver",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, spelling := range tt.spellings {
+				payload := map[string]any{
+					"pkg": map[string]any{"ecosystem": tt.ecosystem, "name": spelling},
+				}
+				canonicalizeEcosystemPayload(payload)
+				pkg, ok := payload["pkg"].(map[string]any)
+				if !ok {
+					t.Fatalf("pkg is %T, want map", payload["pkg"])
+				}
+				if got := pkg["name"]; got != tt.want {
+					t.Errorf("name %q canonicalized to %v, want %q", spelling, got, tt.want)
+				}
+			}
+		})
+	}
+}

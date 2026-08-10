@@ -823,8 +823,9 @@ Write `pkg.ecosystem == "go"`, not `pkg.ecosystem == "Go"`, and drop any `lowerA
 The ecosystem selects how the rest of a package's identity is normalized, so name and version are canonicalized alongside it, using the same rules Deputy applies when it queries OSV or compares two trees:
 
 - Go versions always carry the `v` prefix, including in diff payloads where the extractor reports `1.44.0`. Write `pkg.version.matches("^v1\\.")`.
-- PyPI names are lowercased, so `Flask-SQLAlchemy` and `flask-sqlalchemy` compare equal.
-- Every other ecosystem keeps the version string it reported.
+- PyPI names arrive in PEP 503 form: lowercase, with every run of `-`, `_`, and `.` collapsed to a single `-`. `Flask_SQLAlchemy`, `flask.sqlalchemy`, and `Flask-SQLAlchemy` all reach a policy as `flask-sqlalchemy`. Write allowlist and denylist entries in that form; a prefix such as `acme_` never matches.
+- Cargo names arrive folded the way crates.io folds them: lowercase, with `-` written as `_`. `serde-json` and `serde_json` both reach a policy as `serde_json`.
+- Every other ecosystem keeps the name and version string it reported. npm, Go, and Maven names are case-sensitive and separator-significant, so folding them would merge distinct packages.
 
 This applies to each identity-carrying object in a payload (`pkg`, `request`, `change`, `node`, `component`, `dependency`, and nested `vulnerability.package`), to every version field on it (`version`, `base_version`, `target_version`, `fixed_version`, and `fixed_versions`), and to every field that names the package, whichever alias the schema uses: `name`, `old_name`, `request.package`, `request.module`, and a container vulnerability change's `package_name`. Reading one alias never gives a different string than reading another.
 
