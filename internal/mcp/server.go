@@ -920,23 +920,22 @@ func mcpOutputEcosystem(name string) string {
 	return canonical
 }
 
+// mcpPURLType returns the purl type an agent-supplied ecosystem name belongs
+// in. The name is canonicalized first so every alias ("gha", "conan", a display
+// name) lands on one ecosystem, and the type then comes from that ecosystem's
+// registry projection rather than from the token: the two differ often enough
+// ("go" is pkg:golang, "conancenter" is pkg:conan) that echoing the token
+// builds a target nothing can route. Names Deputy does not recognize fall back
+// to their lowercased form, which is the best a caller-invented ecosystem can
+// do.
 func mcpPURLType(ecosystemName string) string {
-	// Canonicalize first so every ecosystem alias (including github-actions
-	// spellings like "gha") maps consistently to a purl type.
-	canonical, _ := canonicalMCPEcosystem(ecosystemName)
-	if canonical == ecosystem.GitHubActions.String() {
-		return purlx.TypeGitHubActions
+	canonical, known := canonicalMCPEcosystem(ecosystemName)
+	if known {
+		if purlType := ecosystem.PURLType(ecosystem.Ecosystem(canonical)); purlType != "" {
+			return purlType
+		}
 	}
-	switch ecosystem.Parse(canonical) {
-	case ecosystem.Go:
-		return "golang"
-	case ecosystem.RubyGems:
-		return "gem"
-	case ecosystem.Packagist:
-		return "composer"
-	default:
-		return strings.ToLower(strings.TrimSpace(canonical))
-	}
+	return strings.ToLower(strings.TrimSpace(canonical))
 }
 
 func mcpEcosystemFromPURLType(purlType string) string {

@@ -3,6 +3,10 @@ package ecosystem
 import (
 	"slices"
 	"strings"
+
+	packageurl "github.com/package-url/packageurl-go"
+
+	"github.com/temporalio/deputy/internal/purlx"
 )
 
 // Canonical tokens for ecosystems Deputy inventories or proxies but does not
@@ -45,36 +49,42 @@ var extraCanonicalEcosystems = []Registration{
 		DisplayName: "docker",
 		Description: "Dockerfile base images",
 		Aliases:     []string{"dockerfile", "containerfile", "container"},
+		PURLType:    packageurl.TypeDocker,
 	},
 	{
 		Ecosystem:   GitHubActions,
 		DisplayName: "GitHub Actions",
 		Description: "Workflow action references (.github/workflows)",
 		Aliases:     []string{"githubactions", "github-action", "githubaction", "github", "actions", "gha"},
+		PURLType:    purlx.TypeGitHubActions,
 	},
 	{
 		Ecosystem:   OCI,
 		DisplayName: "oci",
 		Description: "OCI registry artifacts served through the proxy",
 		Aliases:     []string{},
+		PURLType:    packageurl.TypeOCI,
 	},
 	{
 		Ecosystem:   Hackage,
 		DisplayName: "Hackage",
 		Description: "Haskell packages, inventoried through OSV-SCALIBR (cabal, stack)",
 		Aliases:     []string{"haskell", "cabal", "stack"},
+		PURLType:    packageurl.TypeHackage,
 	},
 	{
 		Ecosystem:   CRAN,
 		DisplayName: "CRAN",
 		Description: "R packages, inventoried through OSV-SCALIBR (renv)",
 		Aliases:     []string{"r", "renv"},
+		PURLType:    packageurl.TypeCran,
 	},
 	{
 		Ecosystem:   ConanCenter,
 		DisplayName: "ConanCenter",
 		Description: "C/C++ packages, inventoried through OSV-SCALIBR (conan)",
 		Aliases:     []string{"cpp", "c++", "conan"},
+		PURLType:    packageurl.TypeConan,
 	},
 }
 
@@ -107,6 +117,25 @@ func Display(eco Ecosystem) string {
 		}
 	}
 	return string(eco)
+}
+
+// PURLType returns the package-url type that identifies eco inside a PURL. It
+// is the registry's [ProjectionPURLType], for both the ecosystems [Default]
+// carries and the registry-less canonical tokens, so no surface has to keep its
+// own ecosystem-to-purl-type switch. The type is often not the canonical token
+// ("go" is pkg:golang, "conancenter" is pkg:conan), which is exactly why
+// guessing it from the token produces PURLs that do not route. Ecosystems
+// Deputy does not know return "".
+func PURLType(eco Ecosystem) string {
+	if reg := Default().Get(eco); reg != nil && reg.PURLType != "" {
+		return reg.PURLType
+	}
+	for _, reg := range extraCanonicalEcosystems {
+		if reg.Ecosystem == eco {
+			return reg.PURLType
+		}
+	}
+	return ""
 }
 
 // Canonical resolves raw into the single spelling of an ecosystem that Deputy

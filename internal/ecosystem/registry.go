@@ -26,6 +26,10 @@ import (
 	"cmp"
 	"slices"
 	"sync"
+
+	packageurl "github.com/package-url/packageurl-go"
+
+	"github.com/temporalio/deputy/internal/purlx"
 )
 
 // Capability represents a feature an ecosystem may support.
@@ -106,6 +110,10 @@ const (
 	// index (tool managers such as mise and asdf) declare it absent, which is
 	// also what makes [Ecosystem.OSVQueryable] false for them.
 	ProjectionOSVName Projection = "osv_name"
+
+	// ProjectionPURLType is the package-url type for the ecosystem (see
+	// [PURLType]).
+	ProjectionPURLType Projection = "purl_type"
 )
 
 // RequiredProjections returns every projection a registration must supply
@@ -119,6 +127,7 @@ func RequiredProjections() []Projection {
 		ProjectionManifests,
 		ProjectionUpstreamURL,
 		ProjectionOSVName,
+		ProjectionPURLType,
 	}
 }
 
@@ -159,6 +168,12 @@ type Registration struct {
 	// OSVName is the ecosystem name as used by the OSV database.
 	OSVName string
 
+	// PURLType is the package-url type that identifies this ecosystem in a
+	// PURL. It is frequently not the canonical token ("go" is pkg:golang,
+	// "rubygems" is pkg:gem, "conancenter" is pkg:conan), which is why every
+	// registration states it instead of letting callers guess from the token.
+	PURLType string
+
 	// Absent declares the projections this ecosystem intentionally does not
 	// have, so a blank value is a deliberate statement instead of an oversight.
 	// Declaring a projection absent while still supplying it is a bug, and the
@@ -190,6 +205,8 @@ func (r Registration) Projection(p Projection) (value any, ok bool) {
 		return r.UpstreamURL, true
 	case ProjectionOSVName:
 		return r.OSVName, true
+	case ProjectionPURLType:
+		return r.PURLType, true
 	default:
 		return nil, false
 	}
@@ -355,6 +372,7 @@ func (r *Registry) registerDefaults() {
 		Manifests:       []string{"go.mod"},
 		UpstreamURL:     "https://proxy.golang.org",
 		OSVName:         "Go",
+		PURLType:        packageurl.TypeGolang,
 	})
 
 	r.Register(Registration{
@@ -368,6 +386,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"package-lock.json", "yarn.lock", "pnpm-lock.yaml"},
 		UpstreamURL:     "https://registry.npmjs.org",
 		OSVName:         "npm",
+		PURLType:        packageurl.TypeNPM,
 	})
 
 	r.Register(Registration{
@@ -381,6 +400,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"requirements.txt", "Pipfile.lock", "poetry.lock", "uv.lock"},
 		UpstreamURL:     "https://pypi.org",
 		OSVName:         "PyPI",
+		PURLType:        packageurl.TypePyPi,
 	})
 
 	r.Register(Registration{
@@ -394,6 +414,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"Gemfile.lock"},
 		UpstreamURL:     "https://rubygems.org",
 		OSVName:         "RubyGems",
+		PURLType:        packageurl.TypeGem,
 	})
 
 	r.Register(Registration{
@@ -407,6 +428,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"Cargo.lock"},
 		UpstreamURL:     "https://crates.io",
 		OSVName:         "crates.io",
+		PURLType:        packageurl.TypeCargo,
 	})
 
 	r.Register(Registration{
@@ -420,6 +442,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"gradle/verification-metadata.xml"},
 		UpstreamURL:     "https://repo1.maven.org/maven2",
 		OSVName:         "Maven",
+		PURLType:        packageurl.TypeMaven,
 	})
 
 	r.Register(Registration{
@@ -433,6 +456,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"packages.lock.json"},
 		UpstreamURL:     "https://api.nuget.org/v3/index.json",
 		OSVName:         "NuGet",
+		PURLType:        packageurl.TypeNuget,
 	})
 
 	r.Register(Registration{
@@ -446,6 +470,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"mix.lock"},
 		UpstreamURL:     "https://hex.pm",
 		OSVName:         "Hex",
+		PURLType:        packageurl.TypeHex,
 	})
 
 	r.Register(Registration{
@@ -459,6 +484,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"pubspec.lock"},
 		UpstreamURL:     "https://pub.dev",
 		OSVName:         "Pub",
+		PURLType:        packageurl.TypePub,
 	})
 
 	r.Register(Registration{
@@ -472,6 +498,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"Podfile.lock"},
 		UpstreamURL:     "https://cocoapods.org",
 		OSVName:         "CocoaPods",
+		PURLType:        packageurl.TypeCocoapods,
 	})
 
 	r.Register(Registration{
@@ -485,6 +512,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"composer.lock"},
 		UpstreamURL:     "https://packagist.org",
 		OSVName:         "Packagist",
+		PURLType:        packageurl.TypeComposer,
 	})
 
 	r.Register(Registration{
@@ -499,6 +527,7 @@ func (r *Registry) registerDefaults() {
 		UpstreamURL:     "https://mise.jdx.dev",
 		OSVName:         "",
 		Absent:          []Projection{ProjectionOSVName},
+		PURLType:        purlx.TypeMise,
 	})
 
 	r.Register(Registration{
@@ -513,6 +542,7 @@ func (r *Registry) registerDefaults() {
 		UpstreamURL:     "https://asdf-vm.com",
 		OSVName:         "",
 		Absent:          []Projection{ProjectionOSVName},
+		PURLType:        purlx.TypeAsdf,
 	})
 }
 

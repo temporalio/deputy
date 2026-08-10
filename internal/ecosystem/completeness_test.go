@@ -112,6 +112,21 @@ func TestDisplayIsDefinedForEveryToken(t *testing.T) {
 	}
 }
 
+// TestPURLTypeIsDefinedForEveryToken pins that [PURLType] covers the whole
+// canonical vocabulary, including the registry-less tokens, so no caller needs
+// a local ecosystem-to-purl-type switch. The registered half is enforced by
+// [TestRegistrationsCarryEveryProjection]; this covers the extras, which is the
+// half that shipped ConanCenter with no purl type at all.
+func TestPURLTypeIsDefinedForEveryToken(t *testing.T) {
+	for _, token := range CanonicalEcosystems() {
+		t.Run(token, func(t *testing.T) {
+			if PURLType(Ecosystem(token)) == "" {
+				t.Errorf("PURLType(%q) is empty", token)
+			}
+		})
+	}
+}
+
 // isEmptyProjection reports whether a projection value counts as unsupplied.
 func isEmptyProjection(value any) bool {
 	switch v := value.(type) {
