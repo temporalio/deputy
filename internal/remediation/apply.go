@@ -395,23 +395,29 @@ func applyMiseUpdate(repoDir, configRel, tool string, currentVersions []string, 
 // name as separate tools (`"npm:node"` and `node`) whose lock entries are
 // independent, and pruning both would discard integrity metadata for a
 // declaration that was never edited. The backend-stripped name is used only as
-// an unambiguous fallback: the lock has no entry under the exact key, and the
-// config does not declare that short name as a tool of its own.
+// an unambiguous fallback: the lock has no entry under the exact key, and no
+// other declaration in the config could own that short name.
 func miseLockKeys(root *os.Root, configRelPath string, lockData []byte, tool string) []string {
 	_, name := mise.SplitBackend(tool)
 	if name == "" || name == tool {
 		return []string{tool}
 	}
-	if mise.HasLockedTool(lockData, tool) || configDeclaresMiseTool(root, configRelPath, name) {
+	if mise.HasLockedTool(lockData, tool) || shortNameContested(root, configRelPath, tool, name) {
 		return []string{tool}
 	}
 	return []string{tool, name}
 }
 
-// configDeclaresMiseTool reports whether the config at relPath declares key as
-// a tool in its own right. An unreadable or unparsable config is reported as
-// declaring the tool, so an ambiguous case never widens lock pruning.
-func configDeclaresMiseTool(root *os.Root, relPath, key string) bool {
+// shortNameContested reports whether any declaration in the config other than
+// tool could be the owner of a legacy lock entry keyed by the short name.
+// Ownership is decided on the backend-stripped name rather than a literal
+// match, because every qualified declaration that strips to the same name is
+// an equally plausible claimant: with both "npm:foo" and "ubi:foo" declared,
+// no bare "foo" key appears in the config, yet a [[tools.foo]] lock entry
+// could belong to either, and pruning it while fixing one would discard the
+// other's checksums. An unreadable or unparsable config counts as contested,
+// so an ambiguous case never widens lock pruning.
+func shortNameContested(root *os.Root, relPath, tool, name string) bool {
 	data, err := fs.ReadFile(root.FS(), relPath)
 	if err != nil {
 		return true
@@ -420,7 +426,9 @@ func configDeclaresMiseTool(root *os.Root, relPath, key string) bool {
 	if err != nil {
 		return true
 	}
-	return slices.ContainsFunc(cfg.Tools, func(t mise.ToolSpec) bool { return t.Key == key })
+	return slices.ContainsFunc(cfg.Tools, func(t mise.ToolSpec) bool {
+		return t.Key != tool && t.Name == name
+	})
 }
 
 // pruneStaleMiseLock removes lock entries for the replaced versions from the

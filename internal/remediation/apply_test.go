@@ -889,7 +889,7 @@ checksum = "sha256:node"
 // separate tools with independent lock entries, so fixing one must not prune
 // the other's integrity metadata. The backend-stripped name is only a
 // fallback, used when the lock has no entry under the exact configured key and
-// the config does not declare that short name itself.
+// no other declaration in the config could own that short name.
 func TestApplyMiseUpdateLockKeyPrecision(t *testing.T) {
 	t.Parallel()
 
@@ -950,6 +950,32 @@ node = "20.11.0"
 			cmd:      `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
 			wantGone: []string{"sha256:npmnode"},
 			wantKept: []string{"sha256:corenode"},
+		},
+		{
+			// Two qualified declarations strip to the same short name, so no
+			// bare key appears in the config, yet the legacy short-name lock
+			// entry could belong to either. Claimants must be matched on the
+			// stripped name, not on a literal bare key, or fixing one tool
+			// discards the other's checksums.
+			name: "short name contested by another qualified declaration",
+			config: `[tools]
+"npm:node" = "20.11.0"
+"ubi:node" = "20.11.0"
+`,
+			lock:     coreNodeEntry,
+			cmd:      `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			wantKept: []string{"sha256:corenode"},
+		},
+		{
+			// Tool options do not create a distinct claimant name, and the
+			// edited declaration must not count as contesting itself.
+			name: "option-bearing key still gets the fallback",
+			config: `[tools]
+"npm:node[exe=node]" = "20.11.0"
+`,
+			lock:     coreNodeEntry,
+			cmd:      `deputy:mise:update mise.toml "npm:node[exe=node]" 20.12.0 20.11.0`,
+			wantGone: []string{"sha256:corenode"},
 		},
 	}
 
