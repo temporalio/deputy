@@ -172,6 +172,108 @@ func TestCanonicalizeEcosystemPayload(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeIdentityFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload map[string]any
+		want    map[string]any
+	}{
+		{
+			name:    "go version gains the v prefix",
+			payload: map[string]any{"pkg": map[string]any{"ecosystem": "Go", "name": "github.com/aws/aws-sdk-go", "version": "1.44.0"}},
+			want:    map[string]any{"pkg": map[string]any{"ecosystem": "go", "name": "github.com/aws/aws-sdk-go", "version": "v1.44.0"}},
+		},
+		{
+			name:    "go version already prefixed is unchanged",
+			payload: map[string]any{"pkg": map[string]any{"ecosystem": "go", "version": "v1.44.0"}},
+			want:    map[string]any{"pkg": map[string]any{"ecosystem": "go", "version": "v1.44.0"}},
+		},
+		{
+			name:    "npm version keeps its shape",
+			payload: map[string]any{"pkg": map[string]any{"ecosystem": "npm", "name": "Lodash", "version": "4.17.21"}},
+			want:    map[string]any{"pkg": map[string]any{"ecosystem": "npm", "name": "Lodash", "version": "4.17.21"}},
+		},
+		{
+			name:    "pypi name is lowercased",
+			payload: map[string]any{"pkg": map[string]any{"ecosystem": "PyPI", "name": "Flask-SQLAlchemy", "version": "3.1.1"}},
+			want:    map[string]any{"pkg": map[string]any{"ecosystem": "pypi", "name": "flask-sqlalchemy", "version": "3.1.1"}},
+		},
+		{
+			name: "change versions normalize from the nested package",
+			payload: map[string]any{"change": map[string]any{
+				"package":        map[string]any{"ecosystem": "Go", "name": "example.com/m", "version": "1.2.0"},
+				"base_version":   "1.1.0",
+				"target_version": "1.2.0",
+				"change_kind":    "upgraded",
+			}},
+			want: map[string]any{"change": map[string]any{
+				"package":        map[string]any{"ecosystem": "go", "name": "example.com/m", "version": "v1.2.0"},
+				"base_version":   "v1.1.0",
+				"target_version": "v1.2.0",
+				"change_kind":    "upgraded",
+			}},
+		},
+		{
+			name: "flat container change normalizes its own versions",
+			payload: map[string]any{"change": map[string]any{
+				"ecosystem":      "Debian:12",
+				"name":           "openssl",
+				"base_version":   "1.1.1k",
+				"target_version": "1.1.1w",
+			}},
+			want: map[string]any{"change": map[string]any{
+				"ecosystem":      "debian:12",
+				"name":           "openssl",
+				"base_version":   "1.1.1k",
+				"target_version": "1.1.1w",
+			}},
+		},
+		{
+			name: "nested vulnerability package normalizes",
+			payload: map[string]any{"vulnerability": map[string]any{
+				"package": map[string]any{"ecosystem": "Go", "name": "example.com/m", "version": "1.0.0"},
+			}},
+			want: map[string]any{"vulnerability": map[string]any{
+				"package": map[string]any{"ecosystem": "go", "name": "example.com/m", "version": "v1.0.0"},
+			}},
+		},
+		{
+			name:    "fixed versions normalize",
+			payload: map[string]any{"step": map[string]any{"ecosystem": "go", "fixed_version": "1.3.0", "fixed_versions": []any{"1.3.0", "1.4.0"}}},
+			want:    map[string]any{"step": map[string]any{"ecosystem": "go", "fixed_version": "v1.3.0", "fixed_versions": []any{"v1.3.0", "v1.4.0"}}},
+		},
+		{
+			name:    "unknown version sentinel survives",
+			payload: map[string]any{"request": map[string]any{"ecosystem": "go", "name": "example.com/m", "version": UnknownVersion, "has_version": false}},
+			want:    map[string]any{"request": map[string]any{"ecosystem": "go", "name": "example.com/m", "version": UnknownVersion, "has_version": false}},
+		},
+		{
+			name:    "docker tags are left alone",
+			payload: map[string]any{"pkg": map[string]any{"ecosystem": "docker", "name": "alpine", "version": "3.19"}},
+			want:    map[string]any{"pkg": map[string]any{"ecosystem": "docker", "name": "alpine", "version": "3.19"}},
+		},
+		{
+			name:    "object without an ecosystem keeps its version",
+			payload: map[string]any{"sbom": map[string]any{"name": "report", "version": "1.5"}},
+			want:    map[string]any{"sbom": map[string]any{"name": "report", "version": "1.5"}},
+		},
+		{
+			name:    "package sibling without change versions does not leak normalization",
+			payload: map[string]any{"pkg": map[string]any{"ecosystem": "go", "version": "1.0.0"}, "version": "2.0.0"},
+			want:    map[string]any{"pkg": map[string]any{"ecosystem": "go", "version": "v1.0.0"}, "version": "2.0.0"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			canonicalizeEcosystemPayload(tt.payload)
+			if !reflect.DeepEqual(tt.payload, tt.want) {
+				t.Errorf("canonicalizeEcosystemPayload() = %#v, want %#v", tt.payload, tt.want)
+			}
+		})
+	}
+}
+
 // TestStructuredBundleRejectsUnknownEcosystem pins the load-time contract: an
 // ecosystems: value Deputy does not know is an error naming the offending value
 // and the valid set, and a known one is rewritten to its canonical token in
