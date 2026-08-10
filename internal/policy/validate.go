@@ -110,11 +110,12 @@ type ValidateOptions struct {
 }
 
 // LooksLikeStructuredBundle reports whether data has the shape of an authored
-// policy bundle: a mapping carrying a non-empty "policies" list. It deliberately
-// does not require the bundle to decode into Deputy's types, so a policy with a
-// mistyped field is still recognized as a policy and can be reported with
-// located, specific errors instead of being dismissed as an unknown format.
-// Compiled bundles are ruled out first: their JSON has a "policies" array too.
+// policy bundle: a mapping carrying a "policies" key. It deliberately does not
+// require the bundle to decode into Deputy's types, nor the key to hold a
+// well-formed list, so a policy with a mistyped field or a "policies" mapping is
+// still recognized as a policy and can be reported with located, specific errors
+// instead of being dismissed as an unknown format. Compiled bundles are ruled
+// out first: their JSON has a "policies" array too.
 func LooksLikeStructuredBundle(data []byte) bool {
 	if IsCompiledBundle(data) {
 		return false
@@ -123,8 +124,7 @@ func LooksLikeStructuredBundle(data []byte) bool {
 	if err := yaml.Unmarshal(data, root); err != nil || len(root.Content) == 0 {
 		return false
 	}
-	policies := MappingValue(root.Content[0], "policies")
-	return policies != nil && policies.Kind == yaml.SequenceNode && len(policies.Content) > 0
+	return MappingValue(root.Content[0], "policies") != nil
 }
 
 // ValidateBundle reports every structural problem in a structured policy bundle:
@@ -165,6 +165,11 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	}
 	if policiesNode.Kind != yaml.SequenceNode {
 		return append(issues, issueAt(policiesNode, IssueError, "policies-not-list", "'policies' must be a list")), nil
+	}
+	// An empty list is reported here rather than left to the loader backstop, so
+	// the diagnostic names the line the author has to fill in.
+	if len(policiesNode.Content) == 0 {
+		return append(issues, issueAt(policiesNode, IssueError, "empty-policies", "'policies' must contain at least one policy")), nil
 	}
 	seenNames := map[string]struct{}{}
 	for _, item := range policiesNode.Content {

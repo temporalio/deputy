@@ -284,6 +284,23 @@ policies:
 			bundle:    "policies: &loop\n  - *loop\n",
 			wantCodes: []string{"yaml-anchor"},
 		},
+		{
+			name:      "a policies mapping is reported by shape",
+			bundle:    "policies: {}\n",
+			wantCodes: []string{"policies-not-list"},
+			wantText:  []string{"'policies' must be a list"},
+		},
+		{
+			name:      "a policies scalar is reported by shape",
+			bundle:    "policies: none\n",
+			wantCodes: []string{"policies-not-list"},
+		},
+		{
+			name:      "an empty policies list is reported",
+			bundle:    "policies: []\n",
+			wantCodes: []string{"empty-policies"},
+			wantText:  []string{"at least one policy"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -628,6 +645,14 @@ policies:
         reason: "r"
 `,
 		},
+		{
+			name:   "a policies key written as a mapping",
+			bundle: "policies: {}\n",
+		},
+		{
+			name:   "an empty policies list",
+			bundle: "policies: []\n",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -680,6 +705,17 @@ func TestLooksLikeStructuredBundle(t *testing.T) {
 		{
 			name: "empty policies list",
 			data: "policies: []\n",
+			want: true,
+		},
+		{
+			name: "policies written as a mapping",
+			data: "policies: {}\n",
+			want: true,
+		},
+		{
+			name: "policies written as a scalar",
+			data: "policies: none\n",
+			want: true,
 		},
 		{
 			name: "not YAML at all",
