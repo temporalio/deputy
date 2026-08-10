@@ -177,12 +177,7 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 				toolKey = toolTable
 			}
 		case inTools:
-			switch {
-			case len(segs) == 1:
-				toolKey = segs[0]
-			case len(segs) == 2 && segs[1] == "version":
-				toolKey = segs[0]
-			}
+			toolKey, _ = toolsTableKey(segs)
 		default: // root context
 			switch {
 			case len(segs) == 1 && segs[0] == "tools":
@@ -559,13 +554,16 @@ func tomlDelimitersBalanced(s string) bool {
 
 // replaceInlineToolValue rewrites the value of one tool key inside a root
 // `tools = { ... }` inline table, a form mise's parser accepts. It locates
-// the key (bare or quoted) at the table's top level and applies replace to
-// its value token; nested values it does not understand are skipped, leaving
-// the caller to fail closed.
+// the key at the table's top level and applies replace to its value token;
+// nested values it does not understand are skipped, leaving the caller to fail
+// closed. The inline table is the [tools] table written inline, so a field is
+// resolved to a tool by toolsTableKey, the same rule the table form uses: both
+// `{ go = "1.22.12" }` and its dotted `{ go.version = "1.22.12" }` spelling
+// declare go's version.
 func replaceInlineToolValue(s, tool, pinned string, replace func(value, pinned string) (string, bool)) (string, bool) {
 	out, changed := s, false
-	inlineTableFields(s, func(name string, vstart, vend int) bool {
-		if name != tool {
+	inlineTableFields(s, func(key []string, vstart, vend int) bool {
+		if name, ok := toolsTableKey(key); !ok || name != tool {
 			return true
 		}
 		if sub, ok := replace(s[vstart:vend], pinned); ok {
@@ -577,13 +575,15 @@ func replaceInlineToolValue(s, tool, pinned string, replace func(value, pinned s
 }
 
 // inlineTableFields walks the top-level fields of a TOML inline table, calling
-// visit with each field's key (unquoted) and the [start, end) offsets of its
-// value; visit returns false to stop. Nested tables and arrays are consumed as
-// whole values, so visit only ever sees the table's own fields, and keys are
-// read with TOML quoting rules so a quoted spelling such as `"version"` is
-// recognized exactly like the bare one. Whitespace includes newlines because
+// visit with each field's key path and the [start, end) offsets of its value;
+// visit returns false to stop. Nested tables and arrays are consumed as whole
+// values, so visit only ever sees the table's own fields. Keys are read with
+// TOML quoting rules, so a quoted spelling such as `"version"` is recognized
+// exactly like the bare one, and split into path segments by mise.SplitKeyPath,
+// the same splitter the line-oriented walker uses, so a dotted field key means
+// the same thing wherever it is written. Whitespace includes newlines because
 // mise accepts inline tables written across several lines.
-func inlineTableFields(s string, visit func(name string, vstart, vend int) bool) {
+func inlineTableFields(s string, visit func(key []string, vstart, vend int) bool) {
 	i := skipTomlSpaces(s, 0)
 	if i >= len(s) || s[i] != '{' {
 		return
@@ -600,11 +600,15 @@ func inlineTableFields(s string, visit func(name string, vstart, vend int) bool)
 		case c == '}':
 			return
 		default:
-			name, nameEnd, ok := tomlKeyToken(s, i)
+			keyEnd, ok := tomlKeyPathEnd(s, i)
 			if !ok {
 				return
 			}
-			j := skipTomlSpaces(s, nameEnd)
+			key := mise.SplitKeyPath(strings.TrimSpace(s[i:keyEnd]))
+			if len(key) == 0 {
+				return
+			}
+			j := skipTomlSpaces(s, keyEnd)
 			if j >= len(s) || s[j] != '=' {
 				return
 			}
@@ -613,7 +617,7 @@ func inlineTableFields(s string, visit func(name string, vstart, vend int) bool)
 			if vend <= vstart {
 				return
 			}
-			if !visit(name, vstart, vend) {
+			if !visit(key, vstart, vend) {
 				return
 			}
 			i = vend
@@ -648,6 +652,43 @@ func tomlAssignmentIndex(line string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// tomlKeyPathEnd returns the offset just past the TOML key path starting at i.
+// A key may be a dotted path (`go.version`) and may quote any of its segments
+// (`"go".version`), so the scan follows the path across dots instead of
+// stopping at the first token; the segments themselves are read from the
+// spanned text by mise.SplitKeyPath. ok is false when no key starts at i, a
+// quoted segment is unterminated, or a dot ends the path.
+func tomlKeyPathEnd(s string, i int) (end int, ok bool) {
+	for {
+		_, next, tokenOK := tomlKeyToken(s, i)
+		if !tokenOK {
+			return 0, false
+		}
+		i = next
+		dot := skipTomlSpaces(s, i)
+		if dot >= len(s) || s[dot] != '.' {
+			return i, true
+		}
+		i = skipTomlSpaces(s, dot+1)
+	}
+}
+
+// toolsTableKey resolves which tool a key path inside the [tools] table
+// declares a version for. mise accepts both `go = "1.22.12"` and the dotted
+// `go.version = "1.22.12"` spelling of the same declaration, and the root
+// inline table (`tools = { ... }`) is that table written inline, so both forms
+// must be recognized wherever the table appears. ok is false for any other
+// path, which belongs to something the rewriter does not understand.
+func toolsTableKey(key []string) (tool string, ok bool) {
+	switch {
+	case len(key) == 1:
+		return key[0], true
+	case len(key) == 2 && key[1] == "version":
+		return key[0], true
+	}
+	return "", false
 }
 
 // tomlKeyToken reads the key token starting at i, returning its unquoted name
@@ -732,8 +773,8 @@ func tomlValueSpan(s string, i int) int {
 // tables, so an array-valued version field is returned intact for element-wise
 // rewriting rather than truncated into corrupt TOML.
 func inlineTableVersionSpan(s string) (start, end int, ok bool) {
-	inlineTableFields(s, func(name string, vstart, vend int) bool {
-		if name != "version" {
+	inlineTableFields(s, func(key []string, vstart, vend int) bool {
+		if len(key) != 1 || key[0] != "version" {
 			return true
 		}
 		start, end, ok = vstart, vend, true

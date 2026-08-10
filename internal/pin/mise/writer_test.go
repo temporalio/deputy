@@ -752,6 +752,47 @@ go = [{ opts = { version = "meta" }, version = "1.24.3" }, { version = "1.23.8" 
 `,
 		},
 		{
+			// A dotted field key inside the root inline table is the same
+			// declaration as `[tools] go.version = ...`, and mise's parser
+			// reads it as one, so the rewriter must resolve it to the tool
+			// rather than to a field literally named "go.version".
+			name: "root inline table with a dotted tool key",
+			input: `tools = { go.version = "1.22.12" }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `tools = { go.version = "1.24.3" }
+`,
+		},
+		{
+			name: "root inline table with a dotted tool key beside a plain one",
+			input: `tools = { node = "20.11.0", go.version = "1.22.12" }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `tools = { node = "20.11.0", go.version = "1.24.3" }
+`,
+		},
+		{
+			// Segments may be quoted independently, which is how a
+			// backend-qualified tool gets a dotted version key.
+			name: "root inline table with a quoted dotted tool key",
+			input: `tools = { "npm:lodash".version = "4.17.20" }
+`,
+			tool: "npm:lodash", currents: []string{"4.17.20"}, version: "4.17.22",
+			want: `tools = { "npm:lodash".version = "4.17.22" }
+`,
+		},
+		{
+			// Only the tool's own version key declares its version: a deeper
+			// path is some other table's field and must not be rewritten.
+			name: "root inline table with a deeper dotted key fails closed",
+			input: `tools = { go.opts.version = "1.22.12" }
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `tools = { go.opts.version = "1.22.12" }
+`,
+			wantErr: true,
+		},
+		{
 			name: "root inline table with a nested version key",
 			input: `tools = { go = { opts = { version = "meta" }, version = "1.22.12" } }
 `,
