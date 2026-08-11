@@ -549,7 +549,7 @@ func validateRules(item *yaml.Node, policyName string, declaredVars []string, ch
 		return []Issue{issueAt(rulesNode, IssueError, "rules-not-list", "'rules' must be a list")}
 	}
 	if len(rulesNode.Content) == 0 {
-		return []Issue{issueAt(rulesNode, IssueError, "empty-rules", "policy must contain at least one rule")}
+		return []Issue{issueAt(rulesNode, IssueError, "empty-rules", policyNeedsRuleMessage)}
 	}
 	var issues []Issue
 	for idx, rule := range rulesNode.Content {
@@ -631,8 +631,15 @@ func checkRuleWhen(checkWhen func(RuleWhen) []Issue, when RuleWhen) []Issue {
 // message contain one another: the two describe the same defect in slightly
 // different words. Anything else is a shape the node walk does not model and is
 // reported as is.
+//
+// Containment alone is not enough for the defects the two readers name in
+// different vocabularies, so a rule shape the walk located also covers the
+// loader's refusal of a policy with no rules to run.
 func loaderMessage(err error, source string, located []Issue) (string, bool) {
-	message := err.Error()
+	message, ok := unlocatedDecodeMessage(err, located)
+	if !ok {
+		return "", true
+	}
 	detail := strings.TrimPrefix(message, source+"/")
 	if _, rest, ok := strings.Cut(detail, ": "); ok {
 		detail = rest
@@ -653,8 +660,70 @@ func loaderMessage(err error, source string, located []Issue) (string, bool) {
 		if strings.Contains(issue.Message, detail) || strings.Contains(detail, issue.Message) {
 			return message, true
 		}
+		if detail == policyNeedsRuleMessage && slices.Contains(ruleShapeCodes, issue.Code) {
+			return message, true
+		}
 	}
 	return message, false
+}
+
+// ruleShapeCodes are the codes the node walk reports for a policy whose rules it
+// cannot read as a list of rules: absent, not a list, or empty. Every reader of
+// a bundle refuses such a policy, so each of these codes means the loader is
+// about to say the same thing in its own words, either as its refusal of a
+// policy with no rules to run or as the decoder's complaint about the value's
+// type. Neither wording contains the walk's, so the codes are what lets the
+// backstop recognize the restatement and leave one mistake as one issue.
+var ruleShapeCodes = []string{"missing-rules", "rules-not-list", "empty-rules"}
+
+// unlocatedDecodeMessage returns the loader's failure with the decoder
+// complaints a located issue already reports removed, and false when that leaves
+// nothing to report. The decoder gathers every field it refuses into one error,
+// so a restatement has to be dropped one complaint at a time: dropping the whole
+// error would take the fields only the decoder finds down with it, and hide them
+// until the located defect is fixed and lint rerun. An error that is not the
+// decoder's is passed through for the comparison the caller makes on the whole
+// message.
+func unlocatedDecodeMessage(err error, located []Issue) (string, bool) {
+	var typeErr *yaml.TypeError
+	if !errors.As(err, &typeErr) {
+		return err.Error(), true
+	}
+	kept := make([]string, 0, len(typeErr.Errors))
+	for _, complaint := range typeErr.Errors {
+		if slices.ContainsFunc(located, func(issue Issue) bool { return coversComplaint(issue, complaint) }) {
+			continue
+		}
+		kept = append(kept, complaint)
+	}
+	if len(kept) == 0 {
+		return "", false
+	}
+	if len(kept) == len(typeErr.Errors) {
+		return err.Error(), true
+	}
+	// The decode error is wrapped in the source and policy it came from, so the
+	// remaining complaints replace the original ones in place rather than losing
+	// that prefix.
+	return strings.Replace(err.Error(), typeErr.Error(), (&yaml.TypeError{Errors: kept}).Error(), 1), true
+}
+
+// coversComplaint reports whether a located issue already reports what one of
+// the decoder's complaints says. A complaint quoted verbatim is one this run has
+// already reported, which is how the per-policy expansion keeps the bundle-wide
+// decode from restating what it found. Otherwise only a rule shape is folded: a
+// rules value the walk calls "not a list" is a value the decoder cannot
+// unmarshal into its rule slice, one mistake in two vocabularies, and the line
+// the decoder names is the line the walk located it on.
+func coversComplaint(issue Issue, complaint string) bool {
+	if issue.Severity == IssueHint {
+		return false
+	}
+	if strings.Contains(issue.Message, complaint) {
+		return true
+	}
+	line := lineFromYAMLError(complaint)
+	return line > 0 && line == issue.Line && slices.Contains(ruleShapeCodes, issue.Code)
 }
 
 // lineFromYAMLError returns the 1-based line a YAML decode error names, or zero

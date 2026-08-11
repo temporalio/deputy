@@ -1139,6 +1139,38 @@ policies:
     rules: []
 `,
 		},
+		{
+			name: "missing rules",
+			bundle: `
+policies:
+  - name: once
+`,
+		},
+		{
+			name: "rules written as a mapping",
+			bundle: `
+policies:
+  - name: once
+    rules: {}
+`,
+		},
+		{
+			name: "rules written as a block mapping",
+			bundle: `
+policies:
+  - name: once
+    rules:
+      when: "true"
+`,
+		},
+		{
+			name: "rules written as a scalar",
+			bundle: `
+policies:
+  - name: once
+    rules: "when true deny"
+`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1151,6 +1183,89 @@ policies:
 			}
 			if issues[0].Code == "bundle-error" {
 				t.Fatalf("expected a located issue, got the loader backstop: %v", issues[0])
+			}
+		})
+	}
+}
+
+// TestValidateBundleFoldsOnlyTheRestatedDefect pins that folding a loader
+// restatement drops that restatement alone. The decoder reports every field it
+// refuses in one error, so a defect the node walk already located travels
+// alongside defects only the decoder finds, and dropping the whole error would
+// hide them until the located one is fixed and lint rerun.
+func TestValidateBundleFoldsOnlyTheRestatedDefect(t *testing.T) {
+	cases := []struct {
+		name       string
+		bundle     string
+		wantIssues int
+		wantCodes  []string
+		wantText   []string
+		denyText   []string
+	}{
+		{
+			name: "bundle metadata of the wrong type beside a non-list rules value",
+			bundle: `
+metadata: []
+
+policies:
+  - name: once
+    rules: {}
+`,
+			wantIssues: 2,
+			wantCodes:  []string{"rules-not-list", "bundle-error"},
+			wantText:   []string{"line 2: cannot unmarshal"},
+			denyText:   []string{"structuredRule"},
+		},
+		{
+			name: "two policies whose fields the decoder refuses",
+			bundle: `
+policies:
+  - name: first
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+        status: nope
+  - name: second
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+        status: nah
+`,
+			wantIssues: 2,
+			wantCodes:  []string{"bundle-error"},
+			wantText:   []string{"nope", "nah"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			if len(issues) != tc.wantIssues {
+				t.Fatalf("expected %d issues, got %d: %v", tc.wantIssues, len(issues), issues)
+			}
+			for _, want := range tc.wantCodes {
+				if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == want }) {
+					t.Fatalf("expected an issue with code %q, got %v", want, issues)
+				}
+			}
+			var reported strings.Builder
+			for _, issue := range issues {
+				reported.WriteString(issue.Message)
+				reported.WriteString("\n")
+			}
+			for _, want := range tc.wantText {
+				if !strings.Contains(reported.String(), want) {
+					t.Fatalf("expected the report to mention %q, got %v", want, issues)
+				}
+			}
+			for _, deny := range tc.denyText {
+				if strings.Contains(reported.String(), deny) {
+					t.Fatalf("the report restates %q the walk already located: %v", deny, issues)
+				}
 			}
 		})
 	}

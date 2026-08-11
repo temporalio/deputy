@@ -2,6 +2,7 @@ package policy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -165,6 +166,13 @@ func (b *structuredBundle) normalizeNames() {
 	}
 }
 
+// policyNeedsRuleMessage is how a reader of a bundle says that a policy has no
+// rules to run. The node walk locates the same defect from the document, in its
+// own words, so validation matches this spelling to fold the loader's
+// restatement of it; one constant is what keeps the two readers from drifting
+// into reporting one mistake twice.
+const policyNeedsRuleMessage = "policy must contain at least one rule"
+
 // tryParseStructuredBundle attempts to parse a byte slice as a structured YAML bundle.
 // It returns the generated CEL sources if successful, or a boolean indicating
 // whether the input looked like a bundle but failed validation. A file that has
@@ -210,7 +218,7 @@ func decodeStructuredBundle(data []byte, path string) ([]Source, bool, error) {
 	var sources []Source
 	for _, pol := range bundle.Policies {
 		if len(pol.Rules) == 0 {
-			return nil, false, fmt.Errorf("%s/%s: policy must contain at least one rule", path, pol.Name)
+			return nil, false, fmt.Errorf("%s/%s: %s", path, pol.Name, policyNeedsRuleMessage)
 		}
 		if pol.Name != "" {
 			if _, dup := seenNames[pol.Name]; dup {
@@ -272,7 +280,7 @@ func ParseStructuredSources(data []byte, virtualPath string) ([]Source, error) {
 // It generates the necessary metadata comments and constructs the rule evaluation logic.
 func (p structuredPolicy) toCELSource() (string, error) {
 	if len(p.Rules) == 0 {
-		return "", fmt.Errorf("policy must contain at least one rule")
+		return "", errors.New(policyNeedsRuleMessage)
 	}
 	for _, ep := range p.Entrypoints {
 		if !IsAllowedEntrypoint(ep) {
