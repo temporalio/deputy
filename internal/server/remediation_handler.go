@@ -434,7 +434,8 @@ func (h *RemediationHandler) ExecutePlan(
 		// execution. This branch must stay ahead of the execStep call so the
 		// simulation can never execute anything. Only executable steps with
 		// commands count toward the would-execute total; manual and
-		// commandless steps are described but never run.
+		// commandless steps are described and counted as skipped, which is
+		// what a real run reports for them.
 		if dryRun {
 			message, outcome, rejectErr := dryRunStep(i+1, len(steps), absWorkDir, step, processTreeTerminationSupported)
 			phase := remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING
@@ -445,6 +446,12 @@ func (h *RemediationHandler) ExecutePlan(
 				// that depend on it, so the simulation predicts the same
 				// ordering a real run would take.
 				satisfied[stepID] = struct{}{}
+			case dryRunNotRunnable:
+				// A real run skips manual guidance and commandless steps and
+				// counts them (see stepSkipReason below), so the preview
+				// counts them the same way; a summary that dropped them would
+				// describe a smaller plan than the one that will run.
+				skipped++
 			case dryRunWouldReject:
 				// A step a real run would refuse is a prediction of failure,
 				// so report it as one and leave its dependents unsatisfied.

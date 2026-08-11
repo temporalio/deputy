@@ -1014,6 +1014,113 @@ func TestExecuteStepRunsRelativeWrapper(t *testing.T) {
 	}
 }
 
+// TestDryRunSkipCountMatchesExecution pins that a dry run reports the same
+// number of skipped steps as the run it predicts. Manual guidance and
+// commandless steps are legitimate plan content that neither mode runs, so a
+// terminal summary that counts them in one mode and not the other tells a
+// client reading the summary that the plan is smaller than it is.
+//
+// Both modes drive the same plan and are compared against the same expected
+// count, so the test cannot pass by agreeing on a wrong number.
+func TestDryRunSkipCountMatchesExecution(t *testing.T) {
+	// A deputy-internal step is the runnable step here because it is refused
+	// or accepted for the same reasons on every platform: no PATH lookup and
+	// no process group to bound.
+	const workflow = ".github/workflows/ci.yml"
+	runnable := func(id string) *remediationv1.Step {
+		return &remediationv1.Step{Id: id, Title: "pin action", Command: "deputy:action:pin " + workflow + " actions/checkout abc123 v4", Executable: true}
+	}
+
+	tests := []struct {
+		name        string
+		steps       []*remediationv1.Step
+		wantSkipped int
+	}{
+		{
+			name:        "manual step",
+			steps:       []*remediationv1.Step{{Id: "step-1", Title: "migrate module path", Command: "rewrite imports by hand", Manager: "go"}},
+			wantSkipped: 1,
+		},
+		{
+			name:        "step with no command",
+			steps:       []*remediationv1.Step{{Id: "step-1", Title: "review the advisory", Executable: true}},
+			wantSkipped: 1,
+		},
+		{
+			name: "runnable step alongside both kinds",
+			steps: []*remediationv1.Step{
+				runnable("step-1"),
+				{Id: "step-2", Title: "migrate module path", Command: "rewrite imports by hand", Manager: "go"},
+				{Id: "step-3", Title: "review the advisory", Executable: true},
+			},
+			wantSkipped: 2,
+		},
+		{
+			name:        "every step runnable",
+			steps:       []*remediationv1.Step{runnable("step-1")},
+			wantSkipped: 0,
+		},
+	}
+
+	modes := []struct {
+		name   string
+		dryRun bool
+	}{
+		{name: "dry run", dryRun: true},
+		{name: "execution", dryRun: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, mode := range modes {
+				t.Run(mode.name, func(t *testing.T) {
+					handler := NewRemediationHandler(WithRemediationLocalMode())
+					// Execution runs through the recorder seam so the
+					// runnable step reports success without editing anything.
+					handler.execStep = (&stepRecorder{}).run
+					client := newRemediationTestClient(t, handler)
+
+					targetPath := t.TempDir()
+					path := filepath.Join(targetPath, workflow)
+					if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+						t.Fatalf("MkdirAll failed: %v", err)
+					}
+					if err := os.WriteFile(path, []byte("placeholder\n"), 0o644); err != nil {
+						t.Fatalf("WriteFile failed: %v", err)
+					}
+
+					stream, err := client.ExecutePlan(t.Context(), connect.NewRequest(&remediationv1.ExecutePlanRequest{
+						Source:     &remediationv1.ExecutePlanRequest_Plan{Plan: &remediationv1.Plan{Id: "plan-skip", Steps: tt.steps}},
+						TargetPath: targetPath,
+						Options:    &remediationv1.ExecutionOptions{DryRun: mode.dryRun},
+					}))
+					if err != nil {
+						t.Fatalf("ExecutePlan failed to start: %v", err)
+					}
+					var events []*remediationv1.ExecutionEvent
+					for stream.Receive() {
+						events = append(events, stream.Msg())
+					}
+					if err := stream.Err(); err != nil {
+						t.Fatalf("ExecutePlan failed: %v", err)
+					}
+
+					terminal := events[len(events)-1].GetMessage()
+					if tt.wantSkipped == 0 {
+						if strings.Contains(terminal, "skipped") {
+							t.Fatalf("terminal summary %q reports skipped steps, want none", terminal)
+						}
+						return
+					}
+					if want := fmt.Sprintf("(%d skipped)", tt.wantSkipped); !strings.Contains(terminal, want) {
+						t.Fatalf("terminal summary %q does not report %q", terminal, want)
+					}
+				})
+			}
+		})
+	}
+}
+
 // TestDryRunMatchesExecutionRejection pins that preflight and execution refuse
 // the same step for the same reason, with the same precedence. A dry run whose
 // verdict disagrees with the run it predicts is worse than no dry run: it
