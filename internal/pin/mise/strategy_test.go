@@ -330,6 +330,69 @@ version = "3.6.2"
 	}
 }
 
+// TestDiscoverDoesNotBorrowAContestedLockEntry pins that pin discovery decides
+// lock ownership the way inventory does. A legacy [[tools.foo]] entry beside
+// declarations of "npm:foo" and "ubi:foo" belongs to at most one of them, and
+// the fragments of a mise directory's conf.d all write to that one lockfile, so
+// the count spans them. Accepting the entry for both makes `deputy pin` treat
+// one backend's locked version as authoritative for the other and write it into
+// the declaration, which is a wrong pin presented as a reproducible one.
+func TestDiscoverDoesNotBorrowAContestedLockEntry(t *testing.T) {
+	const lock = "[[tools.foo]]\nversion = \"1.2.3\"\nbackend = \"ubi:owner/foo\"\n"
+	tests := []struct {
+		name  string
+		files fstest.MapFS
+		want  map[string]string // ref name -> locked version
+	}{
+		{
+			name: "sole declaration still borrows the short-name entry",
+			files: fstest.MapFS{
+				"mise.toml": {Data: []byte("[tools]\n\"ubi:foo\" = \"1\"\n")},
+				"mise.lock": {Data: []byte(lock)},
+			},
+			want: map[string]string{"ubi:foo": "1.2.3"},
+		},
+		{
+			name: "colliding backends in one config",
+			files: fstest.MapFS{
+				"mise.toml": {Data: []byte("[tools]\n\"npm:foo\" = \"1\"\n\"ubi:foo\" = \"1\"\n")},
+				"mise.lock": {Data: []byte(lock)},
+			},
+			want: map[string]string{"npm:foo": "", "ubi:foo": ""},
+		},
+		{
+			name: "colliding backends in two conf.d fragments sharing a lock",
+			files: fstest.MapFS{
+				"mise/conf.d/a.toml": {Data: []byte("[tools]\n\"npm:foo\" = \"1\"\n")},
+				"mise/conf.d/b.toml": {Data: []byte("[tools]\n\"ubi:foo\" = \"1\"\n")},
+				"mise/mise.lock":     {Data: []byte(lock)},
+			},
+			want: map[string]string{"npm:foo": "", "ubi:foo": ""},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs, err := NewStrategyWithResolver(fakeResolver{}).Discover(t.Context(), tt.files)
+			if err != nil {
+				t.Fatalf("Discover: %v", err)
+			}
+			got := map[string]string{}
+			for _, r := range refs {
+				got[r.Name] = r.LockedVersion
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("discovered %v, want %d refs", got, len(tt.want))
+			}
+			for name, wantLocked := range tt.want {
+				if got[name] != wantLocked {
+					t.Errorf("locked version for %s = %q, want %q", name, got[name], wantLocked)
+				}
+			}
+		})
+	}
+}
+
 func TestPinWritesLockedVersion(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "mise.toml", `

@@ -219,6 +219,7 @@ func stringOptions(opts map[string]any) map[string]string {
 func (s *Strategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]pin.Ref, error) {
 	var refs []pin.Ref
 	seen := map[string]bool{}
+	claimsFor := lockClaimsCache(fsys)
 
 	err := fs.WalkDir(fsys, ".", func(relPath string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -254,6 +255,22 @@ func (s *Strategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]pin.Ref, 
 		if err != nil {
 			slog.DebugContext(ctx, "toolchain pin: skipping unusable lockfile", "path", mise.LockfilePath(relPath), "error", err)
 		}
+		// Which names are claimed across every config sharing this lockfile,
+		// so a locked version is not lent to a declaration that may not own
+		// the entry it came from. The scope is the lockfile's, not this
+		// file's: a mise directory's conf.d drop-ins all write to one
+		// mise.lock. With ownership unresolved nothing is provably this
+		// config's, so the lockfile is set aside and the tools resolve
+		// upstream instead of pinning to an entry that might be another
+		// declaration's.
+		var claims map[string]int
+		if lock != nil {
+			claims, err = claimsFor(relPath)
+			if err != nil {
+				slog.DebugContext(ctx, "toolchain pin: lock ownership unresolved, ignoring lockfile", "path", relPath, "error", err)
+				lock = nil
+			}
+		}
 		for _, tool := range cfg.Tools {
 			version := versionForRef(tool.Versions)
 			if version == "" {
@@ -267,7 +284,7 @@ func (s *Strategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]pin.Ref, 
 				Raw:       tool.Key + " " + version,
 				Options:   stringOptions(tool.Options),
 			}
-			ref.LockedVersion = lockedVersionForRef(lock, tool, version)
+			ref.LockedVersion = lockedVersionForRef(lock, tool, version, claims)
 			key := pin.DedupeKey(ref)
 			if !seen[key] {
 				seen[key] = true
@@ -295,33 +312,58 @@ func versionForRef(versions []string) string {
 	}
 }
 
+// lockClaimsCache returns a function giving the claimant counts that decide
+// lock ownership for a config, memoized per lockfile. A mise directory's
+// conf.d drop-ins share one mise.lock and therefore one set of counts, so a
+// walk over N of them parses those configs once rather than N times.
+func lockClaimsCache(fsys fs.FS) func(configPath string) (map[string]int, error) {
+	type result struct {
+		claims map[string]int
+		err    error
+	}
+	byLock := map[string]result{}
+	return func(configPath string) (map[string]int, error) {
+		lockPath := mise.LockfilePath(configPath)
+		if cached, ok := byLock[lockPath]; ok {
+			return cached.claims, cached.err
+		}
+		claims, err := mise.LockClaims(fsys, configPath)
+		byLock[lockPath] = result{claims: claims, err: err}
+		return claims, err
+	}
+}
+
 // lockedVersionForRef returns a compatible exact version from a sibling
 // mise.lock entry. It rejects ambiguous or stale-looking fuzzy matches so pin
 // can preserve an existing lock without blindly trusting unrelated lock data.
-func lockedVersionForRef(lock *mise.Lockfile, tool mise.ToolSpec, request string) string {
+//
+// claims carries how many declarations across the configs sharing the lockfile
+// could own each name, and the gates it feeds are the ones inventory applies
+// in [mise.Lockfile.Lookup]. Without them a legacy [[tools.foo]] entry is
+// accepted for a declaration of "npm:foo" and for one of "ubi:foo" alike, and
+// pin writes one backend's locked version into the other's declaration.
+func lockedVersionForRef(lock *mise.Lockfile, tool mise.ToolSpec, request string, claims map[string]int) string {
 	if lock == nil || strings.Contains(request, arraySentinel) {
 		return ""
 	}
-	for _, name := range lockedToolNames(tool) {
+	names := mise.LockCandidateNames(tool)
+	for _, name := range names {
+		if !mise.MayMatchLockName(tool, name, claims) {
+			continue
+		}
 		if lt := lock.Locked(name, request); lt != nil && mise.IsConcreteVersion(lt.Version) {
 			return lt.Version
 		}
 	}
-	for _, name := range lockedToolNames(tool) {
+	for _, name := range names {
+		if !mise.MayBorrowSoleLockEntry(name, claims) {
+			continue
+		}
 		if lt := lock.Sole(name); lt != nil && lockedVersionSatisfiesRequest(lt.Version, request) {
 			return lt.Version
 		}
 	}
 	return ""
-}
-
-// lockedToolNames returns the possible mise.lock keys for a tool, with the
-// short tool name first because real lockfiles usually key entries that way.
-func lockedToolNames(tool mise.ToolSpec) []string {
-	if tool.Name == tool.Key || tool.Key == "" {
-		return []string{tool.Name}
-	}
-	return []string{tool.Name, tool.Key}
 }
 
 // lockedVersionSatisfiesRequest reports whether a sole lockfile entry is
