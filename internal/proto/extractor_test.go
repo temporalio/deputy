@@ -34,6 +34,27 @@ func TestDirectKeysSurviveTheManifestRoundTrip(t *testing.T) {
 			want:     true,
 		},
 		{
+			name:     "cargo renamed dependency",
+			manifest: "Cargo.toml",
+			contents: "[dependencies]\nmy-serde = { package = \"serde\", version = \"1.0\" }\n",
+			pkg:      &extractor.Package{Name: "serde", Version: "1.0.203", PURLType: "cargo"},
+			want:     true,
+		},
+		{
+			name:     "cargo renamed dependency under its manifest key",
+			manifest: "Cargo.toml",
+			contents: "[dependencies]\nmy-serde = { package = \"serde\", version = \"1.0\" }\n",
+			pkg:      &extractor.Package{Name: "my-serde", Version: "1.0.203", PURLType: "cargo"},
+			want:     true,
+		},
+		{
+			name:     "npm aliased dependency",
+			manifest: "package.json",
+			contents: `{"dependencies":{"my-lodash":"npm:lodash@^4.17.21"}}`,
+			pkg:      &extractor.Package{Name: "lodash", Version: "4.17.21", PURLType: "npm"},
+			want:     true,
+		},
+		{
 			name:     "cargo transitive crate stays transitive",
 			manifest: "Cargo.toml",
 			contents: "[dependencies]\nserde = \"1.0\"\n",

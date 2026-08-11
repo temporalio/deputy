@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -141,6 +142,7 @@ func CollectDirectDependenciesFromCommit(repo *git.Repository, hash plumbing.Has
 // getNpmDirectDeps extracts direct dependencies from package.json.
 // Returns map of package names to true (direct).
 // devDependencies are marked as direct=true since they're explicitly declared.
+// An aliased entry contributes both spellings, see [recordNpmDependency].
 func getNpmDirectDeps(data []byte) map[string]bool {
 	deps := make(map[string]bool)
 
@@ -152,62 +154,114 @@ func getNpmDirectDeps(data []byte) map[string]bool {
 		return deps
 	}
 
-	for name := range pkg.Dependencies {
-		// Use package name as key - will be matched against PURL name
-		deps[name] = true
+	for name, spec := range pkg.Dependencies {
+		recordNpmDependency(deps, name, spec)
 	}
-	for name := range pkg.DevDependencies {
-		deps[name] = true
+	for name, spec := range pkg.DevDependencies {
+		recordNpmDependency(deps, name, spec)
 	}
 	return deps
 }
 
-// getCargoDirectDeps extracts direct dependencies from Cargo.toml.
-// Returns map of crate names to true (direct).
-// Uses simple TOML parsing without external dependencies.
+// recordNpmDependency records the names a single package.json entry can be
+// reported under. The manifest key is one of them, and an aliased entry
+// ("my-lodash": "npm:lodash@^4.17.21") adds the package the alias points at,
+// because that is the name the lockfile carries and the name every npm
+// extractor reports.
+func recordNpmDependency(deps map[string]bool, name, spec string) {
+	if name = strings.TrimSpace(name); name != "" {
+		deps[name] = true
+	}
+	if aliased := npmAliasTarget(spec); aliased != "" {
+		deps[aliased] = true
+	}
+}
+
+// npmAliasTarget returns the package an "npm:" specifier aliases, without its
+// version range, and "" for any other specifier. The range is separated by the
+// last "@", which is never the one that opens a scope because a scope only
+// leads the name.
+func npmAliasTarget(spec string) string {
+	target, ok := strings.CutPrefix(strings.TrimSpace(spec), "npm:")
+	if !ok {
+		return ""
+	}
+	if idx := strings.LastIndex(target, "@"); idx > 0 {
+		target = target[:idx]
+	}
+	return strings.TrimSpace(target)
+}
+
+// cargoDependencyTables are the three dependency tables a Cargo manifest
+// section can declare. Each entry's value is decoded as any because a
+// dependency is either a version string or a table, and only the table form
+// carries the "package" key that renames a crate.
+type cargoDependencyTables struct {
+	Dependencies      map[string]any `toml:"dependencies"`
+	DevDependencies   map[string]any `toml:"dev-dependencies"`
+	BuildDependencies map[string]any `toml:"build-dependencies"`
+}
+
+// tables returns this section's dependency tables. Absent tables decode to nil
+// maps, which range over nothing, so callers need no presence checks.
+func (t cargoDependencyTables) tables() []map[string]any {
+	return []map[string]any{t.Dependencies, t.DevDependencies, t.BuildDependencies}
+}
+
+// cargoManifest is the slice of Cargo.toml that declares dependencies: the
+// package's own tables, the per-target tables a platform-conditional
+// dependency lives in, and the workspace tables a root manifest shares with
+// its members. Every one of them is a place a project declares a dependency
+// itself, so every one of them is direct.
+type cargoManifest struct {
+	cargoDependencyTables
+	Target    map[string]cargoDependencyTables `toml:"target"`
+	Workspace cargoDependencyTables            `toml:"workspace"`
+}
+
+// getCargoDirectDeps extracts direct dependencies from Cargo.toml, keyed by the
+// crate names a scanned package can be reported under. A manifest that does not
+// parse as TOML yields nothing: Cargo would not build it either.
 func getCargoDirectDeps(data []byte) map[string]bool {
 	deps := make(map[string]bool)
 
-	// Simple TOML parsing for [dependencies] and [dev-dependencies] sections
-	lines := strings.Split(string(data), "\n")
-	inDeps := false
-	inDevDeps := false
-	inBuildDeps := false
+	var manifest cargoManifest
+	if err := toml.Unmarshal(data, &manifest); err != nil {
+		return deps
+	}
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Track which section we're in
-		if strings.HasPrefix(line, "[") {
-			inDeps = line == "[dependencies]"
-			inDevDeps = line == "[dev-dependencies]"
-			inBuildDeps = line == "[build-dependencies]"
-			continue
-		}
-
-		// Skip if not in a dependencies section
-		if !inDeps && !inDevDeps && !inBuildDeps {
-			continue
-		}
-
-		// Skip comments and empty lines
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		// Parse "crate_name = ..." or "crate_name = { version = ... }"
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		crateName := ecosystem.Cargo.NormalizeName(strings.Trim(strings.TrimSpace(parts[0]), `"'`))
-		if crateName != "" {
-			deps[crateName] = true
+	sections := []cargoDependencyTables{manifest.cargoDependencyTables, manifest.Workspace}
+	for _, target := range manifest.Target {
+		sections = append(sections, target)
+	}
+	for _, section := range sections {
+		for _, table := range section.tables() {
+			for name, entry := range table {
+				recordCargoDependency(deps, name, entry)
+			}
 		}
 	}
 
 	return deps
+}
+
+// recordCargoDependency records the crate names a single Cargo.toml dependency
+// entry can be reported under. The manifest key is one of them because the
+// Cargo.toml extractor reports it verbatim, and a renamed dependency
+// (my-serde = { package = "serde" }) adds the crate it actually names, which is
+// what Cargo.lock records and what crates.io and OSV know it as.
+func recordCargoDependency(deps map[string]bool, name string, entry any) {
+	if key := ecosystem.Cargo.NormalizeName(name); key != "" {
+		deps[key] = true
+	}
+	table, ok := entry.(map[string]any)
+	if !ok {
+		return
+	}
+	renamed, _ := table["package"].(string)
+	if key := ecosystem.Cargo.NormalizeName(renamed); key != "" {
+		deps[key] = true
+	}
 }
 
 // getPyprojectDirectDeps extracts direct dependencies from pyproject.toml.
