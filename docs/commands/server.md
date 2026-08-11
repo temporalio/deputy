@@ -222,6 +222,13 @@ Streaming operations (`StreamScan`) are listed for completeness but are not
 enforced yet: the policy interceptor is a unary interceptor, so streaming RPCs
 pass through without evaluation.
 
+A policy runs on an operation when it declares that operation's entrypoint, or
+when it declares no `entrypoints` at all. A policy scoped to
+`service_scan_request` does not run on diff or list requests, and a policy
+written for a CLI entrypoint such as `scan_vulnerability` does not run on server
+requests. Policies can also read `env.command`, which is `server` for every
+request the server evaluates.
+
 Example authorization policy:
 
 ```yaml

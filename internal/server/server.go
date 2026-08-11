@@ -1074,6 +1074,30 @@ var procedureToEntrypoint = map[string]policy.Entrypoint{
 	graphv1connect.GraphServiceQueryGraphProcedure:    policy.EntrypointServiceGraphRequest,
 }
 
+// evaluateServicePolicies runs the configured policy sources for one RPC at the
+// entrypoint the interceptor resolved from procedureToEntrypoint.
+//
+// It exists to forward that entrypoint. The package-level policy.EvaluateAll
+// helper evaluates with an empty entrypoint, which disables the engine's
+// entrypoint filter entirely, so every loaded policy would run at every mapped
+// procedure and a policy declaring entrypoints: [service_scan_request] would
+// deny diff requests. Compiling per request matches the helper it replaces.
+//
+// The command filter is deliberately left empty. Policy commands name CLI
+// invocations, while every service_*_request entrypoint is server only, so the
+// entrypoint is the precise filter here; passing "server" would additionally
+// skip any policy that declares commands: without listing "server", silently
+// disabling a policy an operator explicitly loaded into the server. Policies
+// that want to discriminate can still read env.command, which the payload sets
+// to "server".
+func evaluateServicePolicies(ctx context.Context, policies []policy.Source, entrypoint policy.Entrypoint, payload proto.Message) ([]policy.Action, error) {
+	engine, err := policy.NewEngine(policies)
+	if err != nil {
+		return nil, fmt.Errorf("compile policies: %w", err)
+	}
+	return engine.EvaluateAll(ctx, payload, "", entrypoint.String())
+}
+
 // policyInterceptor evaluates service-level policies for authorization.
 // It maps RPC procedures to policy entrypoints via procedureToEntrypoint and
 // evaluates policies with JWT claims (jwt.*), request metadata, and target
@@ -1094,8 +1118,8 @@ func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
 			// Build the policy payload
 			payload := buildPolicyPayload(ctx, req, entrypoint)
 
-			// Evaluate policies
-			actions, err := policy.EvaluateAll(ctx, policies, payload)
+			// Evaluate policies that declare this entrypoint
+			actions, err := evaluateServicePolicies(ctx, policies, entrypoint, payload)
 			if err != nil {
 				logs.Error(ctx, "policy evaluation failed",
 					"procedure", procedure,

@@ -19,6 +19,7 @@ import (
 	"github.com/temporalio/deputy/gen/deputy/graph/v1/graphv1connect"
 	"github.com/temporalio/deputy/gen/deputy/list/v1/listv1connect"
 	"github.com/temporalio/deputy/gen/deputy/sbom/v1/sbomv1connect"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	"github.com/temporalio/deputy/gen/deputy/scan/v1/scanv1connect"
 	"github.com/temporalio/deputy/gen/deputy/secrets/v1/secretsv1connect"
 	"github.com/temporalio/deputy/internal/policy"
@@ -149,71 +150,101 @@ func writePolicyFile(t *testing.T, contents string) string {
 	return path
 }
 
-// TestDiffPackagesPolicyEnforcement pins the behavior change from mapping the
-// real DiffService procedures. DiffPackages is now evaluated at
-// service_diff_request, so a matching deny policy blocks it, while a server
-// with no policies, or with a policy that denies nothing, reaches the handler
-// exactly as it did before.
+// denyPolicy renders a policy document with one always-firing deny rule,
+// optionally scoped to the given entrypoints. No entrypoints means the policy
+// declares none and therefore applies everywhere.
+func denyPolicy(name, when string, entrypoints ...policy.Entrypoint) string {
+	var b strings.Builder
+	b.WriteString("policies:\n")
+	b.WriteString("  - name: " + name + "\n")
+	if len(entrypoints) > 0 {
+		b.WriteString("    entrypoints:\n")
+		for _, entrypoint := range entrypoints {
+			b.WriteString("      - " + entrypoint.String() + "\n")
+		}
+	}
+	b.WriteString("    rules:\n")
+	b.WriteString("      - action: deny\n")
+	b.WriteString("        when: \"" + when + "\"\n")
+	b.WriteString("        reason: \"denied by " + name + "\"\n")
+	return b.String()
+}
+
+// TestServicePolicyEnforcement pins the two behavior changes that have to ship
+// together. Mapping the real DiffService procedures makes DiffPackages evaluate
+// service_diff_request, and forwarding that entrypoint to the engine keeps a
+// policy scoped to some other entrypoint from firing on it. Without the second
+// change, mapping twelve more procedures would start firing every loaded policy
+// on RPCs it never touched.
 //
-// The last case records a separate, pre-existing gap: policyInterceptor calls
-// policy.EvaluateAll, which passes no entrypoint to the engine, so a policy's
-// declared entrypoints are not honored on the server and every loaded policy
-// runs at every mapped procedure. That already applied to scan, list and sbom
-// requests; mapping the remaining procedures widens its reach. Scoping the
-// evaluation belongs with the rest of the interceptor work in #194.
-func TestDiffPackagesPolicyEnforcement(t *testing.T) {
-	denyDiff := `policies:
-  - name: deny-diff
-    entrypoints:
-      - service_diff_request
-    rules:
-      - action: deny
-        when: "true"
-        reason: "diff denied by policy"
-`
-	denyNothing := `policies:
-  - name: deny-nothing
-    entrypoints:
-      - service_diff_request
-    rules:
-      - action: deny
-        when: "false"
-        reason: "never fires"
-`
-	denyScan := `policies:
-  - name: deny-scan
-    entrypoints:
-      - service_scan_request
-    rules:
-      - action: deny
-        when: "true"
-        reason: "scan denied by policy"
-`
+// Each request is deliberately empty, so a request that clears policy fails in
+// the handler with invalid_argument. That code therefore means "reached the
+// handler exactly as before", and permission_denied means a policy fired.
+func TestServicePolicyEnforcement(t *testing.T) {
+	diffPackages := func(t *testing.T, ts *httptest.Server) error {
+		t.Helper()
+		client := diffv1connect.NewDiffServiceClient(ts.Client(), ts.URL)
+		_, err := client.DiffPackages(context.Background(), connect.NewRequest(&diffv1.DiffPackagesRequest{}))
+		return err
+	}
+	scan := func(t *testing.T, ts *httptest.Server) error {
+		t.Helper()
+		client := scanv1connect.NewScanServiceClient(ts.Client(), ts.URL)
+		_, err := client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{}))
+		return err
+	}
+
+	denyDiff := denyPolicy("deny-diff", "true", policy.EntrypointServiceDiffRequest)
+	denyScan := denyPolicy("deny-scan", "true", policy.EntrypointServiceScanRequest)
+	denyNothing := denyPolicy("deny-nothing", "false", policy.EntrypointServiceDiffRequest)
+	denyEverywhere := denyPolicy("deny-everywhere", "true")
 
 	tests := []struct {
 		name     string
 		policy   string
+		call     func(*testing.T, *httptest.Server) error
 		wantCode connect.Code
 	}{
 		{
-			name:     "no policies loaded reaches the handler",
+			name:     "diff with no policies loaded",
+			call:     diffPackages,
 			wantCode: connect.CodeInvalidArgument,
 		},
 		{
-			name:     "policy that denies nothing reaches the handler",
+			name:     "diff with a policy that denies nothing",
 			policy:   denyNothing,
+			call:     diffPackages,
 			wantCode: connect.CodeInvalidArgument,
 		},
 		{
-			name:     "policy for service_diff_request is enforced",
+			name:     "diff with a diff policy is now enforced",
 			policy:   denyDiff,
+			call:     diffPackages,
 			wantCode: connect.CodePermissionDenied,
 		},
 		{
-			// KNOWN GAP, pinned rather than hidden: see the doc comment.
-			name:     "policy scoped to another entrypoint still evaluates",
+			name:     "diff with a scan policy does not fire",
 			policy:   denyScan,
+			call:     diffPackages,
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			name:     "diff with an unscoped policy still fires",
+			policy:   denyEverywhere,
+			call:     diffPackages,
 			wantCode: connect.CodePermissionDenied,
+		},
+		{
+			name:     "scan with a scan policy stays enforced",
+			policy:   denyScan,
+			call:     scan,
+			wantCode: connect.CodePermissionDenied,
+		},
+		{
+			name:     "scan with a diff policy does not fire",
+			policy:   denyDiff,
+			call:     scan,
+			wantCode: connect.CodeInvalidArgument,
 		},
 	}
 
@@ -231,16 +262,12 @@ func TestDiffPackagesPolicyEnforcement(t *testing.T) {
 			ts := httptest.NewServer(srv.Handler())
 			defer ts.Close()
 
-			client := diffv1connect.NewDiffServiceClient(ts.Client(), ts.URL)
-			// An empty request fails validation in the handler, which is the
-			// pre-existing behavior we expect to survive untouched unless a
-			// diff policy denies the request first.
-			_, err = client.DiffPackages(context.Background(), connect.NewRequest(&diffv1.DiffPackagesRequest{}))
+			err = tt.call(t, ts)
 			if err == nil {
-				t.Fatal("DiffPackages succeeded, want an error")
+				t.Fatal("request succeeded, want an error")
 			}
 			if got := connect.CodeOf(err); got != tt.wantCode {
-				t.Errorf("DiffPackages returned code %v (%v), want %v", got, err, tt.wantCode)
+				t.Errorf("request returned code %v (%v), want %v", got, err, tt.wantCode)
 			}
 		})
 	}
