@@ -162,6 +162,20 @@ func TestNormalizeVersion(t *testing.T) {
 		{NPM, "1.2.3", "1.2.3"},
 		{NPM, "v1.2.3", "v1.2.3"},
 		{Go, "", ""},
+		// The "v" prefix only belongs on a version that is one. SCALIBR's
+		// gobinary extractor reports an unstamped main module as the literal
+		// "(devel)", and the Go toolchain reports "devel go1.24-abc123" for a
+		// development build; "v(devel)" is neither a version nor the sentinel a
+		// policy matches on.
+		{Go, "(devel)", "(devel)"},
+		{Go, "devel go1.24-abc123", "devel go1.24-abc123"},
+		{Go, "unknown", "unknown"},
+		// Everything that is a Go version still gains the prefix, including
+		// partial versions, pseudo-versions, and +incompatible builds.
+		{Go, "1.21", "v1.21"},
+		{Go, "0.0.0-20240101120000-abcdef123456", "v0.0.0-20240101120000-abcdef123456"},
+		{Go, "2.1.0+incompatible", "v2.1.0+incompatible"},
+		{Go, "1.2.3-rc.1", "v1.2.3-rc.1"},
 	}
 
 	for _, tt := range tests {
