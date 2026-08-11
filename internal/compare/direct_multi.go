@@ -11,6 +11,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 
+	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
@@ -45,11 +46,13 @@ func isVendoredManifestPath(p string) bool {
 // CollectDirectDependenciesFromWorkspace scans the workspace for manifest files
 // across multiple ecosystems and extracts direct dependencies. Returns a map
 // keyed by the name a package goes by in its own ecosystem: a module path for
-// Go, a scoped package name for npm, a crate name for Cargo, and a normalized
-// distribution name for PyPI. Values indicate if the dependency is direct
-// (true) or indirect (false). Lookups go through
-// proto.ExtractorPackageIsDirect, which builds the same key from a scanned
-// package.
+// Go, a scoped package name for npm, a crate name for Cargo, and a
+// distribution name for PyPI. Cargo and PyPI keys are folded by
+// [ecosystem.Ecosystem.NormalizeName], because a manifest and a lockfile are
+// free to spell one package two ways. Values indicate if the dependency is
+// direct (true) or indirect (false). Lookups go through
+// proto.ExtractorPackageIsDirect, which runs the same normalizer on the
+// scanned package, so both sides build one key.
 //
 // Supported ecosystems:
 //   - Go (go.mod)
@@ -198,7 +201,7 @@ func getCargoDirectDeps(data []byte) map[string]bool {
 			continue
 		}
 
-		crateName := strings.TrimSpace(parts[0])
+		crateName := ecosystem.Cargo.NormalizeName(strings.Trim(strings.TrimSpace(parts[0]), `"'`))
 		if crateName != "" {
 			deps[crateName] = true
 		}
@@ -275,11 +278,9 @@ func getPyprojectDirectDeps(data []byte) map[string]bool {
 		if inPoetryDeps && !strings.HasPrefix(trimmed, "#") && trimmed != "" {
 			parts := strings.SplitN(trimmed, "=", 2)
 			if len(parts) == 2 {
-				pkgName := strings.TrimSpace(parts[0])
+				pkgName := strings.Trim(strings.TrimSpace(parts[0]), `"'`)
 				if pkgName != "" && pkgName != "python" {
-					// Normalize package name (PEP 503: lowercase, replace - with _)
-					pkgName = strings.ToLower(strings.ReplaceAll(pkgName, "-", "_"))
-					deps[pkgName] = true
+					recordPyPIDirectDep(deps, pkgName)
 				}
 			}
 		}
@@ -288,23 +289,38 @@ func getPyprojectDirectDeps(data []byte) map[string]bool {
 	return deps
 }
 
-// parsePyPIDep extracts and normalizes a single PyPI dependency string.
-func parsePyPIDep(entry string, deps map[string]bool) {
-	// Extract package name (before any version specifier)
-	// Valid specifiers: >=, <=, ==, !=, ~=, <, >, [extras], ;
+// pyPIRequirementSeparators are the characters that end the distribution name
+// in a PEP 508 requirement. "@" is one of them: a direct reference is spelled
+// "name @ https://...", so the name stops there too.
+var pyPIRequirementSeparators = []string{">=", "<=", "==", "!=", "~=", "<", ">", "[", ";", "@"}
+
+// pyPIRequirementName returns the distribution name a PEP 508 requirement
+// declares, with the version specifier, extras, environment marker, and direct
+// reference URL stripped. The name is returned as written; callers normalize.
+func pyPIRequirementName(entry string) string {
 	pkgName := entry
-	for _, sep := range []string{">=", "<=", "==", "!=", "~=", "<", ">", "[", ";"} {
+	for _, sep := range pyPIRequirementSeparators {
 		if idx := strings.Index(pkgName, sep); idx != -1 {
 			pkgName = pkgName[:idx]
 		}
 	}
-	pkgName = strings.TrimSpace(pkgName)
+	return strings.TrimSpace(pkgName)
+}
 
-	if pkgName != "" {
-		// Normalize package name (PEP 503)
-		pkgName = strings.ToLower(strings.ReplaceAll(pkgName, "-", "_"))
-		deps[pkgName] = true
+// recordPyPIDirectDep records a declared distribution under the one spelling
+// PyPI considers it. The rule is [ecosystem.Ecosystem.NormalizeName], the same
+// call the directness lookup makes on the scanned package's PURL name, so a
+// manifest that writes "Flask-SQLAlchemy" and an extractor that reports
+// "flask_sqlalchemy" agree on one key.
+func recordPyPIDirectDep(deps map[string]bool, name string) {
+	if normalized := ecosystem.PyPI.NormalizeName(name); normalized != "" {
+		deps[normalized] = true
 	}
+}
+
+// parsePyPIDep extracts and normalizes a single PyPI dependency string.
+func parsePyPIDep(entry string, deps map[string]bool) {
+	recordPyPIDirectDep(deps, pyPIRequirementName(entry))
 }
 
 // parseInlineDepsArray parses a Python dependency array like ["pkg1>=1.0", "pkg2"]
@@ -321,22 +337,7 @@ func parseInlineDepsArray(line string, deps map[string]bool) {
 	for entry := range strings.SplitSeq(content, ",") {
 		entry = strings.TrimSpace(entry)
 		entry = strings.Trim(entry, "\"'")
-
-		// Extract package name (before any version specifier)
-		// Valid specifiers: >=, <=, ==, !=, ~=, <, >, [extras]
-		pkgName := entry
-		for _, sep := range []string{">=", "<=", "==", "!=", "~=", "<", ">", "[", ";"} {
-			if idx := strings.Index(pkgName, sep); idx != -1 {
-				pkgName = pkgName[:idx]
-			}
-		}
-		pkgName = strings.TrimSpace(pkgName)
-
-		if pkgName != "" {
-			// Normalize package name (PEP 503)
-			pkgName = strings.ToLower(strings.ReplaceAll(pkgName, "-", "_"))
-			deps[pkgName] = true
-		}
+		parsePyPIDep(entry, deps)
 	}
 }
 
@@ -358,20 +359,7 @@ func getRequirementsDirectDeps(data []byte) map[string]bool {
 			continue
 		}
 
-		// Extract package name (before any version specifier or extras)
-		pkgName := line
-		for _, sep := range []string{">=", "<=", "==", "!=", "~=", "<", ">", "[", "@", ";"} {
-			if idx := strings.Index(pkgName, sep); idx != -1 {
-				pkgName = pkgName[:idx]
-			}
-		}
-		pkgName = strings.TrimSpace(pkgName)
-
-		if pkgName != "" {
-			// Normalize package name (PEP 503)
-			pkgName = strings.ToLower(strings.ReplaceAll(pkgName, "-", "_"))
-			deps[pkgName] = true
-		}
+		recordPyPIDirectDep(deps, pyPIRequirementName(line))
 	}
 
 	return deps

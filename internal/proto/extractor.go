@@ -39,6 +39,12 @@ func ecosystemFromPURLType(purlType string) string {
 
 // ExtractorPackageIsDirect reports whether pkg should be treated as a direct
 // dependency using the same rules as ExtractorPackageToProto.
+//
+// The key it builds from the scanned package is folded by
+// [ecosystem.Ecosystem.NormalizeName], the same call
+// compare.CollectDirectDependenciesFromWorkspace makes when it reads the
+// manifest. Both sides run one rule, so a Cargo crate a manifest spells
+// "serde-json" and a lockfile spells "serde_json" is one key, not two.
 func ExtractorPackageIsDirect(pkg *extractor.Package, direct map[string]bool) bool {
 	if pkg == nil {
 		return false
@@ -90,9 +96,9 @@ func ExtractorPackageIsDirect(pkg *extractor.Package, direct map[string]bool) bo
 		}
 		return direct[pkgName]
 	case "cargo":
-		return direct[purl.Name]
+		return direct[ecosystem.Cargo.NormalizeName(purl.Name)]
 	case "pypi":
-		return direct[normalizePyPIName(purl.Name)]
+		return direct[ecosystem.PyPI.NormalizeName(purl.Name)]
 	default:
 		return direct[purl.String()]
 	}
@@ -251,9 +257,9 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 			recordDirectKey(direct, parsed.Name, isDirect)
 		}
 	case "cargo":
-		recordDirectKey(direct, parsed.Name, isDirect)
+		recordDirectKey(direct, ecosystem.Cargo.NormalizeName(parsed.Name), isDirect)
 	case "pypi":
-		recordDirectKey(direct, normalizePyPIName(parsed.Name), isDirect)
+		recordDirectKey(direct, ecosystem.PyPI.NormalizeName(parsed.Name), isDirect)
 	default:
 		recordDirectKey(direct, packageName, isDirect)
 	}
@@ -268,16 +274,6 @@ func recordDirectKey(direct map[string]bool, key string, isDirect bool) {
 		return
 	}
 	direct[key] = isDirect
-}
-
-// normalizePyPIName normalizes a PyPI package name per PEP 503:
-// lowercase and replace all runs of [-_.] with a single underscore.
-// This ensures consistent matching between manifest files and PURLs.
-func normalizePyPIName(name string) string {
-	name = strings.ToLower(name)
-	name = strings.ReplaceAll(name, "-", "_")
-	name = strings.ReplaceAll(name, ".", "_")
-	return name
 }
 
 // FilterOptions configures which packages to exclude from output.

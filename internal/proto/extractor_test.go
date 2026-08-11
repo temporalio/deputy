@@ -6,31 +6,87 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
-func TestNormalizePyPIName(t *testing.T) {
+// TestDirectKeysSurviveTheManifestRoundTrip drives the real contract between
+// the two halves of directness classification: the manifest a project ships is
+// read by compare.CollectDirectDependenciesFromWorkspace, and the package an
+// extractor reports is looked up by ExtractorPackageIsDirect. A key either
+// side folds differently is a dependency silently reported as transitive, so
+// the assertion is end to end rather than on either normalizer alone (the
+// rules themselves are covered in internal/ecosystem).
+func TestDirectKeysSurviveTheManifestRoundTrip(t *testing.T) {
 	tests := []struct {
-		input string
-		want  string
+		name     string
+		manifest string
+		contents string
+		pkg      *extractor.Package
+		want     bool
 	}{
-		{"flask", "flask"},
-		{"Flask", "flask"},
-		{"FLASK", "flask"},
-		{"flask-restful", "flask_restful"},
-		{"Flask-RESTful", "flask_restful"},
-		{"google-cloud-storage", "google_cloud_storage"},
-		{"zope.interface", "zope_interface"},
-		{"Zope.Interface", "zope_interface"},
-		{"Flask_RESTful", "flask_restful"},
-		{"some.package-name", "some_package_name"},
+		{
+			name:     "cargo separator folding",
+			manifest: "Cargo.toml",
+			contents: "[dependencies]\nserde-json = \"1.0\"\n",
+			pkg:      &extractor.Package{Name: "serde_json", Version: "1.0.117", PURLType: "cargo"},
+			want:     true,
+		},
+		{
+			name:     "cargo transitive crate stays transitive",
+			manifest: "Cargo.toml",
+			contents: "[dependencies]\nserde = \"1.0\"\n",
+			pkg:      &extractor.Package{Name: "syn", Version: "2.0.0", PURLType: "cargo"},
+			want:     false,
+		},
+		{
+			name:     "pypi poetry dotted distribution",
+			manifest: "pyproject.toml",
+			contents: "[tool.poetry.dependencies]\npython = \"^3.9\"\nzope.interface = \"^5.4\"\n",
+			pkg:      &extractor.Package{Name: "zope.interface", Version: "5.4.0", PURLType: "pypi"},
+			want:     true,
+		},
+		{
+			name:     "pypi poetry mixed case and hyphens",
+			manifest: "pyproject.toml",
+			contents: "[tool.poetry.dependencies]\nFlask-SQLAlchemy = \"^3.0\"\n",
+			pkg:      &extractor.Package{Name: "flask_sqlalchemy", Version: "3.0.5", PURLType: "pypi"},
+			want:     true,
+		},
+		{
+			name:     "pypi pep 508 direct reference",
+			manifest: "pyproject.toml",
+			contents: "[project]\ndependencies = [\"my-pkg @ git+https://example.com/my-pkg.git\"]\n",
+			pkg:      &extractor.Package{Name: "my_pkg", Version: "1.0.0", PURLType: "pypi"},
+			want:     true,
+		},
+		{
+			name:     "pypi requirements dotted distribution",
+			manifest: "requirements.txt",
+			contents: "zope.interface==5.4.0\n",
+			pkg:      &extractor.Package{Name: "zope-interface", Version: "5.4.0", PURLType: "pypi"},
+			want:     true,
+		},
+		{
+			name:     "npm names are not folded",
+			manifest: "package.json",
+			contents: `{"dependencies":{"left-pad":"^1.3.0"}}`,
+			pkg:      &extractor.Package{Name: "left_pad", Version: "1.3.0", PURLType: "npm"},
+			want:     false,
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := normalizePyPIName(tt.input)
-			if got != tt.want {
-				t.Errorf("normalizePyPIName(%q) = %q, want %q", tt.input, got, tt.want)
+		t.Run(tt.name, func(t *testing.T) {
+			ws := workspace.NewMemory()
+			t.Cleanup(func() { _ = ws.Close() })
+			if err := ws.WriteFile(tt.manifest, []byte(tt.contents), 0o644); err != nil {
+				t.Fatalf("write %s: %v", tt.manifest, err)
+			}
+			direct := compare.CollectDirectDependenciesFromWorkspace(ws)
+			if got := ExtractorPackageIsDirect(tt.pkg, direct); got != tt.want {
+				t.Errorf("ExtractorPackageIsDirect(%q) = %v, want %v (collected %v)", tt.pkg.Name, got, tt.want, direct)
 			}
 		})
 	}
@@ -148,7 +204,19 @@ func TestExtractorPackageToProto_DirectDetection(t *testing.T) {
 				PURLType: "pypi",
 			},
 			direct: map[string]bool{
-				"flask_sqlalchemy": true,
+				"flask-sqlalchemy": true,
+			},
+			wantDirect: true,
+		},
+		{
+			name: "cargo hyphenated crate matches the folded key",
+			pkg: &extractor.Package{
+				Name:     "serde-json",
+				Version:  "1.0.117",
+				PURLType: "cargo",
+			},
+			direct: map[string]bool{
+				"serde_json": true,
 			},
 			wantDirect: true,
 		},
