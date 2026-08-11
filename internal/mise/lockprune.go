@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/BurntSushi/toml"
 )
 
 // PruneLockedVersions removes mise.lock entries for a tool whose locked
@@ -217,9 +219,12 @@ func SplitKeyPath(key string) []string {
 
 // UnquoteTOMLString decodes a quoted TOML string token to the text a TOML
 // parser produces for it, so `"1.22.12"` reads as 1.22.12 and `'a\b'`
-// keeps its backslash. A token that is not quoted, is unterminated, or carries
-// an undefined escape is returned unchanged, leaving the caller comparing the
-// text as written.
+// keeps its backslash. All four of TOML's string forms are read, the two
+// multi-line ones (opened by three double quotes or three apostrophes)
+// included, because a config may spell a version with any of them and mise
+// resolves them all the same way. A token that is not quoted, is unterminated,
+// or carries an undefined escape is returned unchanged, leaving the caller
+// comparing the text as written.
 //
 // Deputy compares declared version tokens against versions that came out of
 // [Parse], which decoded them. Comparing an undecoded token against a decoded
@@ -228,6 +233,9 @@ func SplitKeyPath(key string) []string {
 func UnquoteTOMLString(token string) string {
 	if len(token) < 2 {
 		return token
+	}
+	if IsMultilineStringOpener(token, 0) {
+		return unquoteMultilineTOMLString(token)
 	}
 	switch token[0] {
 	case '"':
@@ -246,6 +254,47 @@ func UnquoteTOMLString(token string) string {
 		return token[1 : len(token)-1]
 	}
 	return token
+}
+
+// IsMultilineStringOpener reports whether a TOML multi-line string opener,
+// three identical quote characters, begins at s[i]. It is the one place that
+// spells out what starts TOML's multi-line string forms, so the scanners that
+// have to skip such a string and the decoder that has to read it agree on
+// where one begins.
+func IsMultilineStringOpener(s string, i int) bool {
+	if i < 0 || i+2 >= len(s) {
+		return false
+	}
+	q := s[i]
+	return (q == '"' || q == '\'') && s[i+1] == q && s[i+2] == q
+}
+
+// unquoteMultilineTOMLString decodes a triple-quoted token by handing it back
+// to the TOML parser, which is the only reading guaranteed to agree with the
+// one behind [Parse]. The multi-line forms carry rules a second
+// implementation would have to mirror exactly: a newline immediately after the
+// opener is dropped, a backslash at the end of a line swallows the whitespace
+// that follows it, and one or two adjacent quote characters are content rather
+// than a terminator. Deriving the answer from the parser keeps those rules in
+// one place instead of in a copy that drifts.
+//
+// The token is decoded on its own, and anything that decodes to more than the
+// single value is refused, so text smuggled in after the closing delimiter
+// cannot be read as if it were part of the version. A token the parser refuses
+// is returned unchanged, matching how the single-line forms fail closed.
+func unquoteMultilineTOMLString(token string) string {
+	var decoded map[string]any
+	if _, err := toml.Decode("v = "+token+"\n", &decoded); err != nil {
+		return token
+	}
+	if len(decoded) != 1 {
+		return token
+	}
+	value, ok := decoded["v"].(string)
+	if !ok {
+		return token
+	}
+	return value
 }
 
 // decodeBasicString reads the TOML basic string whose opening quote sits at

@@ -1198,6 +1198,64 @@ go = [
 `,
 		},
 		{
+			// TOML's multi-line basic string is a perfectly ordinary scalar
+			// when it holds no newline, and mise 2026.7.3 resolves
+			// `go = """1.22.12"""` to 1.22.12 under `mise ls --current`. A
+			// quote-pair reading sees an empty string followed by junk and
+			// refuses a fix the config can take.
+			name: "triple-quoted basic string version",
+			input: `[tools]
+go = """1.22.12"""
+`,
+			tool: "go", current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+go = "1.24.3"
+`,
+		},
+		{
+			name: "triple-quoted literal string version",
+			input: `[tools]
+go = '''1.22.12'''
+`,
+			tool: "go", current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+go = "1.24.3"
+`,
+		},
+		{
+			name: "triple-quoted version in an inline table",
+			input: `[tools]
+go = { version = """1.22.12""", postinstall = "go version" }
+`,
+			tool: "go", current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+go = { version = "1.24.3", postinstall = "go version" }
+`,
+		},
+		{
+			name: "triple-quoted version in an array",
+			input: `[tools]
+go = ['''1.22.12''']
+`,
+			tool: "go", current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+go = ["1.24.3"]
+`,
+		},
+		{
+			// A triple-quoted token whose trailing comment holds an
+			// apostrophe: the comment starts outside the string, so the
+			// apostrophe is comment text and not a literal-string opener.
+			name: "triple-quoted version with an apostrophe in the comment",
+			input: `[tools]
+go = """1.22.12""" # don't touch the rest
+`,
+			tool: "go", current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+go = "1.24.3" # don't touch the rest
+`,
+		},
+		{
 			// An escaped quote is part of the key, not its terminator.
 			name: "escaped quote in key",
 			input: `[tools]
@@ -1250,6 +1308,89 @@ go = [
 				return s.Key == tt.tool && slices.Contains(s.Versions, tt.pinned)
 			}) {
 				t.Errorf("rewritten config does not declare %s@%s: %+v", tt.tool, tt.pinned, after.Tools)
+			}
+		})
+	}
+}
+
+// TestRewriteRefusesLineSpanningVersionToken pins the fail-closed half of
+// multi-line string handling. TOML lets a version token run across lines
+// (`go = """` then `1.22.12"""`), and mise 2026.7.3 resolves that to 1.22.12,
+// but the token cannot be swapped for a single-line one without changing how
+// many lines the declaration occupies. Reading only the first line instead
+// replaces the opening delimiter and leaves the rest of the string stranded as
+// a bare line, turning a valid config into one no parser will read: a silent
+// corruption reported as success. The rewriter must decline the edit and leave
+// the file byte-for-byte alone.
+func TestRewriteRefusesLineSpanningVersionToken(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		// currents is the finding's known vulnerable versions; nil is the
+		// pinning path, which targets whatever is declared.
+		currents []string
+	}{
+		{
+			name:     "multiline basic string, targeted",
+			input:    "[tools]\ngo = \"\"\"\n1.22.12\"\"\"\n",
+			currents: []string{"1.22.12"},
+		},
+		{
+			name:  "multiline basic string, pinning",
+			input: "[tools]\ngo = \"\"\"\n1.22.12\"\"\"\n",
+		},
+		{
+			name:     "multiline literal string, targeted",
+			input:    "[tools]\ngo = '''\n1.22.12'''\n",
+			currents: []string{"1.22.12"},
+		},
+		{
+			name:  "multiline literal string, pinning",
+			input: "[tools]\ngo = '''\n1.22.12'''\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// The case only proves something if the parser reads the
+			// declaration, so the rewriter is refusing a real one.
+			cfg, err := mise.Parse("mise.toml", []byte(tt.input))
+			if err != nil {
+				t.Fatalf("mise.Parse: %v", err)
+			}
+			if !slices.ContainsFunc(cfg.Tools, func(s mise.ToolSpec) bool {
+				return s.Key == "go" && slices.Contains(s.Versions, "1.22.12")
+			}) {
+				t.Fatalf("inventory does not report go@1.22.12, so this case proves nothing: %+v", cfg.Tools)
+			}
+
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "mise.toml")
+			if err := os.WriteFile(configPath, []byte(tt.input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			if err := RewriteToolVersion(root, "mise.toml", "go", tt.currents, "1.24.3"); err == nil {
+				t.Error("expected the line-spanning version token to be refused")
+			}
+			got, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tt.input {
+				t.Errorf("refused rewrite still changed the file:\n--- got ---\n%s\n--- want ---\n%s", got, tt.input)
+			}
+			if _, err := mise.Parse("mise.toml", got); err != nil {
+				t.Errorf("config no longer parses after a refused rewrite: %v", err)
 			}
 		})
 	}

@@ -278,6 +278,22 @@ func TestUnquoteTOMLString(t *testing.T) {
 		{`"a" trailing`, `"a" trailing`},
 		{`"a\/b"`, `"a\/b"`},
 		{`'a'b'`, `'a'b'`},
+		// Multi-line strings: TOML's other two string forms. A tool may write
+		// a version with either, and mise reads them as ordinary scalars.
+		{`"""1.22.12"""`, "1.22.12"},
+		{`'''1.22.12'''`, "1.22.12"},
+		{"\"\"\"\n1.22.12\"\"\"", "1.22.12"}, // a newline right after the opener is dropped
+		{"'''\n1.22.12'''", "1.22.12"},
+		{`"""a\"b"""`, `a"b`},
+		{`""""quoted""""`, `"quoted"`},            // one adjacent quote is content
+		{"\"\"\"1.22.\\\n   12\"\"\"", "1.22.12"}, // a trailing backslash swallows the line break
+		// Refused the same way the single-line forms are: an unterminated
+		// token, trailing junk, or a second key smuggled in after the string.
+		{`"""unterminated`, `"""unterminated`},
+		{`'''unterminated`, `'''unterminated`},
+		{`"""a""" trailing`, `"""a""" trailing`},
+		{"\"\"\"a\"\"\"\nother = 1", "\"\"\"a\"\"\"\nother = 1"},
+		{`"""a\/b"""`, `"""a\/b"""`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.token, func(t *testing.T) {
