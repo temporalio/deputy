@@ -60,15 +60,18 @@ Deputy does not design the npm registry protocol, the Go module proxy protocol, 
 
 They carry one thing that *is* ours: the extension band, the `X-Deputy-*` response headers. These are domain objects projected onto HTTP, and they should be derived and validated like any other projection rather than assembled from string literals.
 
-The prefix is not one contract though, and treating it as one is how a derived replacement would conflate them. There are at least three families, from independent sources:
+The prefix is not one contract though, and treating it as one is how a derived replacement would conflate them. There are at least four families, from independent sources:
 
 | family | source | when |
 | --- | --- | --- |
-| policy decision and package coordinates | `internal/proxy/policy.go`, `oci.go` | on a refusal |
+| policy decision and package coordinates | `internal/proxy/policy.go` | on a policy refusal |
+| mutable tag refusal | `internal/proxy/oci.go` | on a refused mutable tag |
 | authentication errors | `internal/proxy/auth_middleware.go` | on an auth failure |
 | digest pinning audit | `internal/proxy/oci_toctou.go` | including on success |
 
-The third is the one that breaks the simple reading: `X-Deputy-Pinned-Digest` and `X-Deputy-Digest-Pinning` describe what the proxy did, not why it said no. `internal/cli/cmd/proxy_exec.go` is a consumer and parses the first family back.
+The last breaks the simple reading: `X-Deputy-Pinned-Digest` and `X-Deputy-Digest-Pinning` describe what the proxy did, not why it said no. `internal/cli/cmd/proxy_exec.go` is a consumer and parses the first family back.
+
+The second is why this is a table of four rather than a note on one. `oci.go` reaches the first family through the `blockMeta` it hands the shared writer, but its mutable-tag refusal is a separate exit that never goes through that writer: it sets `X-Deputy-Mutable-Tag-Blocked`, `X-Deputy-Ecosystem`, `X-Deputy-Package`, and `X-Deputy-Version`, and no `X-Deputy-Policy`, so it is a refusal that names no policy. It also spells the package coordinate differently. The policy family writes `X-Deputy-Name`, which is the name `proxy_exec.go` reads; `X-Deputy-Package` is written at that one line and read nowhere in the repository, so a blocked mutable tag is already recorded with an empty package name. A refactor that read this table as one contract would carry that incompatible vocabulary forward, or drop the refusal entirely. Unify the headers and the consumer, or model it as its own message; do not fold it into the first row.
 
 **Rule:** conform to the foreign contract, and treat each extension family as a projection of its own domain message. One message per family, not one for the prefix.
 
