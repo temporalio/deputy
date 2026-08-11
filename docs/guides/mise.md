@@ -168,11 +168,15 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
   pins in one array; a declaration with no matching version fails with an
   error instead of guessing. All declaration forms mise accepts are handled:
   `[tools]` entries, `[tools.<name>]` tables (quoted spellings such as
-  `["tools".go]` included), dotted keys (`tools.go = "..."`), inline tables
-  (single-line or multiline, including a quoted `"version"` key), arrays of
-  inline tables, version arrays nested in an inline table, the root
-  `tools = { ... }` table, and option-bearing keys such as
-  `"ubi:cli/cli[exe=gh]"` (tool options survive throughout).
+  `["tools".go]` included), `[[tools.<name>]]` array-of-table entries, dotted
+  keys (`tools.go = "..."`), inline tables (single-line or multiline, including
+  a quoted `"version"` key), arrays of inline tables, version arrays nested in
+  an inline table, the root `tools = { ... }` table, and option-bearing keys
+  such as `"ubi:cli/cli[exe=gh]"` (tool options survive throughout). Repeating
+  `[[tools.<name>]]` requests several versions of one tool, so a repeated
+  entry follows the same rule as `go = ["1.22.12", "1.23.8"]`: the entry naming
+  the vulnerable version is rewritten and the others survive, while `pin`,
+  which names no vulnerable version, leaves the declaration for a manual pin.
 - Applying a plan the config has outgrown fails closed. If the file now
   declares an exact version the finding does not name (someone bumped
   `1.22.12` to `1.25.1` after the plan was generated), Deputy errors rather

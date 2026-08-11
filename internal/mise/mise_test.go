@@ -481,6 +481,72 @@ cosign = true
 	}
 }
 
+// TestParseToolsArrayOfTables pins the array-of-tables form of a tool
+// declaration, `[[tools.<name>]]` with the fields below it. It is ordinary
+// TOML for the value shapes the [tools] table already accepts, and mise reads
+// it: with a mise.toml holding `[[tools.go]]` and `version = "1.22.12"`, mise
+// 2026.7.3 reports
+//
+//	go  1.22.12 (missing)  /private/tmp/misearr/mise.toml  1.22.12
+//
+// and repeating the header reports both entries. A parser that skips the form
+// inventories the tool with no versions at all, so the toolchain mise resolves
+// is a toolchain Deputy never scans.
+func TestParseToolsArrayOfTables(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    map[string][]string
+	}{
+		{
+			name:    "single entry",
+			content: "[[tools.go]]\nversion = \"1.22.12\"\n",
+			want:    map[string][]string{"go": {"1.22.12"}},
+		},
+		{
+			name:    "repeated entries request both versions",
+			content: "[[tools.go]]\nversion = \"1.21.13\"\n\n[[tools.go]]\nversion = \"1.22.12\"\n",
+			want:    map[string][]string{"go": {"1.21.13", "1.22.12"}},
+		},
+		{
+			name:    "an entry with options",
+			content: "[[tools.\"npm:prettier\"]]\nversion = \"3.3.3\"\npostinstall = \"echo hi\"\n",
+			want:    map[string][]string{"npm:prettier": {"3.3.3"}},
+		},
+		{
+			name:    "an entry whose version is an array",
+			content: "[[tools.java]]\nversion = [\"21.0.5\", \"17.0.13\"]\n",
+			want:    map[string][]string{"java": {"21.0.5", "17.0.13"}},
+		},
+		{
+			name:    "an entry beside a plain table declaration",
+			content: "[tools]\nnode = \"20.11.0\"\n\n[[tools.go]]\nversion = \"1.22.12\"\n",
+			want:    map[string][]string{"node": {"20.11.0"}, "go": {"1.22.12"}},
+		},
+		{
+			name:    "an entry with no version requests nothing",
+			content: "[[tools.go]]\nbackend = \"core:go\"\n",
+			want:    map[string][]string{"go": nil},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Parse("mise.toml", []byte(tt.content))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			got := make(map[string][]string, len(cfg.Tools))
+			for _, spec := range cfg.Tools {
+				got[spec.Key] = spec.Versions
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("tools = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseToolVersions(t *testing.T) {
 	data := []byte("node 22.5.0\npython 3.11 3.12  # comment\n# full comment\nnpm:prettier latest\n")
 	cfg, err := Parse(".tool-versions", data)

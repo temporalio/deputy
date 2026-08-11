@@ -132,7 +132,8 @@ func mergeKeyOptions(key string, tableOpts map[string]any) map[string]any {
 
 // toolVersions extracts the requested version strings (and any inline options)
 // from a single [tools] value, which may be a string, an array of strings, an
-// inline table with a version field, or an array of such tables.
+// inline table with a version field, or an array of such tables, whether that
+// array was written inline or as repeated [[tools.<name>]] headers.
 func toolVersions(val any) (versions []string, opts map[string]any) {
 	switch t := val.(type) {
 	case string:
@@ -156,11 +157,28 @@ func toolVersions(val any) (versions []string, opts map[string]any) {
 			}
 		}
 		return versions, opts
+	case []map[string]any:
+		// The array-of-tables form, `[[tools.go]]` with its fields below it.
+		// The TOML decoder types it as a slice of tables rather than a slice
+		// of any, so it reaches none of the cases above, and mise reads it the
+		// same as an inline array of tables. Reusing that case keeps one
+		// reading of an element instead of a second copy that can drift.
+		return toolVersions(anySlice(t))
 	case map[string]any:
 		return tableVersions(t), t
 	default:
 		return nil, nil
 	}
+}
+
+// anySlice widens a slice of TOML tables to a slice of any, so the decoder's
+// two spellings of "an array of tables" reach one reader.
+func anySlice(tables []map[string]any) []any {
+	out := make([]any, len(tables))
+	for i, t := range tables {
+		out[i] = t
+	}
+	return out
 }
 
 // tableVersions reads the version field from an inline table, supporting both a

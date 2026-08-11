@@ -191,7 +191,9 @@ func TestReplaceVersionInValue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, changed := replaceVersionInValue(tt.value, tt.pinned)
+			// Every value here is the tool's sole declaration; the
+			// repeated-entry form has its own test.
+			got, changed := replaceVersionInValue(tt.value, tt.pinned, true)
 			if got != tt.want || changed != tt.wantChanged {
 				t.Errorf("replaceVersionInValue(%q,%q) = (%q,%v), want (%q,%v)", tt.value, tt.pinned, got, changed, tt.want, tt.wantChanged)
 			}
@@ -1319,6 +1321,243 @@ go = "1.24.3" # don't touch the rest
 				return s.Key == tt.tool && slices.Contains(s.Versions, tt.pinned)
 			}) {
 				t.Errorf("rewritten config does not declare %s@%s: %+v", tt.tool, tt.pinned, after.Tools)
+			}
+		})
+	}
+}
+
+// TestRewriteArrayOfTableDeclarations pins the array-of-tables form of a tool
+// declaration, `[[tools.<name>]]` with the fields below it. mise 2026.7.3
+// reads it: a mise.toml holding `[[tools.go]]` and `version = "1.22.12"`
+// reports
+//
+//	go  1.22.12 (missing)  /private/tmp/misearr/mise.toml  1.22.12
+//
+// under `mise ls --current`, and a repeated header reports both entries as
+// separate requests. A header scanner that skips the form does not merely miss
+// the fix: the table context of whatever header came before leaks past it, so
+// the assignment below `[[tools.go]]` is rewritten as if it belonged to the
+// previous tool, silently writing one tool's pin over another's version.
+//
+// Repeated entries are one multi-version declaration, so they follow the array
+// rule: only the entries naming a current version are rewritten, and with no
+// current version known the whole declaration is left for a manual fix.
+func TestRewriteArrayOfTableDeclarations(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		// tool and pinned describe the edit; currents are the versions the
+		// finding names, empty for the pinning path.
+		tool     string
+		currents []string
+		pinned   string
+		// want is the file after the edit. wantErr expects the edit to be
+		// refused, which must leave the file byte-for-byte alone.
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "sole entry",
+			input: "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n",
+			tool:  "go", currents: []string{"1.22.12"}, pinned: "1.24.3",
+			want: "[[tools.go]]\nversion = \"1.24.3\"\nbackend = \"core:go\"\n",
+		},
+		{
+			name:  "sole entry with a quoted key",
+			input: "[[tools.\"npm:prettier\"]]\nversion = \"3.3.2\"\n",
+			tool:  "npm:prettier", currents: []string{"3.3.2"}, pinned: "3.3.3",
+			want: "[[tools.\"npm:prettier\"]]\nversion = \"3.3.3\"\n",
+		},
+		{
+			name:  "sole entry with no current version known",
+			input: "[[tools.go]]\nversion = \"1.22.12\"\n",
+			tool:  "go", pinned: "1.24.3",
+			want: "[[tools.go]]\nversion = \"1.24.3\"\n",
+		},
+		{
+			name:  "a following table header ends the entry",
+			input: "[[tools.go]]\nversion = \"1.22.12\"\n\n[settings]\nversion = \"ignored\"\n",
+			tool:  "go", currents: []string{"1.22.12"}, pinned: "1.24.3",
+			want: "[[tools.go]]\nversion = \"1.24.3\"\n\n[settings]\nversion = \"ignored\"\n",
+		},
+		{
+			// The entry the finding names is rewritten; the other request is
+			// not the vulnerable one and survives.
+			name:  "repeated entries rewrite only the named version",
+			input: "[[tools.go]]\nversion = \"1.21.13\"\n\n[[tools.go]]\nversion = \"1.22.12\"\n",
+			tool:  "go", currents: []string{"1.22.12"}, pinned: "1.24.3",
+			want: "[[tools.go]]\nversion = \"1.21.13\"\n\n[[tools.go]]\nversion = \"1.24.3\"\n",
+		},
+		{
+			// Without a current version there is nothing to tell the two
+			// requests apart, and rewriting both would collapse a deliberate
+			// pair of toolchains into one version declared twice.
+			name:  "repeated entries with no current version fail closed",
+			input: "[[tools.go]]\nversion = \"1.21.13\"\n\n[[tools.go]]\nversion = \"1.22.12\"\n",
+			tool:  "go", pinned: "1.24.3",
+			wantErr: true,
+		},
+		{
+			// The header scanner has to see [[tools.go]] to know the
+			// assignment under it is not still node's.
+			name:  "an entry after a tool table is not the table's",
+			input: "[tools.node]\nversion = \"20.11.0\"\n\n[[tools.go]]\nversion = \"1.22.12\"\n",
+			tool:  "node", currents: []string{"20.11.0"}, pinned: "20.11.1",
+			want: "[tools.node]\nversion = \"20.11.1\"\n\n[[tools.go]]\nversion = \"1.22.12\"\n",
+		},
+		{
+			name:  "an entry after a tools table is not the table's",
+			input: "[tools]\nnode = \"20.11.0\"\n\n[[tools.go]]\nversion = \"1.22.12\"\n",
+			tool:  "go", currents: []string{"1.22.12"}, pinned: "1.24.3",
+			want: "[tools]\nnode = \"20.11.0\"\n\n[[tools.go]]\nversion = \"1.24.3\"\n",
+		},
+		{
+			// An array of tables under a name that is not a tool declares
+			// nothing the rewriter may touch.
+			name:  "an unrelated array of tables is left alone",
+			input: "[[env]]\nversion = \"1.22.12\"\n\n[tools]\ngo = \"1.22.12\"\n",
+			tool:  "go", currents: []string{"1.22.12"}, pinned: "1.24.3",
+			want: "[[env]]\nversion = \"1.22.12\"\n\n[tools]\ngo = \"1.24.3\"\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// The case only proves something if inventory reports the version
+			// the edit names, so a refusal is a fix Deputy could have offered.
+			cfg, err := mise.Parse("mise.toml", []byte(tt.input))
+			if err != nil {
+				t.Fatalf("mise.Parse: %v", err)
+			}
+			for _, current := range tt.currents {
+				if !slices.ContainsFunc(cfg.Tools, func(s mise.ToolSpec) bool {
+					return s.Key == tt.tool && slices.Contains(s.Versions, current)
+				}) {
+					t.Fatalf("inventory does not report %s@%s: %+v", tt.tool, current, cfg.Tools)
+				}
+			}
+
+			dir := t.TempDir()
+			path := filepath.Join(dir, "mise.toml")
+			if err := os.WriteFile(path, []byte(tt.input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			err = RewriteToolVersion(root, "mise.toml", tt.tool, tt.currents, tt.pinned)
+			got, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected the edit to be refused, got:\n%s", got)
+				}
+				if string(got) != tt.input {
+					t.Errorf("refused edit still changed the file:\n--- got ---\n%s\n--- want ---\n%s", got, tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RewriteToolVersion: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("rewrite mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+			after, err := mise.Parse("mise.toml", got)
+			if err != nil {
+				t.Fatalf("rewritten config no longer parses: %v", err)
+			}
+			if !slices.ContainsFunc(after.Tools, func(s mise.ToolSpec) bool {
+				return s.Key == tt.tool && slices.Contains(s.Versions, tt.pinned)
+			}) {
+				t.Errorf("rewritten config does not declare %s@%s: %+v", tt.tool, tt.pinned, after.Tools)
+			}
+		})
+	}
+}
+
+// TestPinArrayOfTableDeclarations pins the same form on the pinning path,
+// which names no current version: a sole entry is pinned like any other
+// declaration, and repeated entries are a multi-version declaration that
+// pinning leaves for a manual fix, exactly as it leaves `go = ["1.22", "1.23"]`
+// alone. Rewriting one tool's entry must never touch another's, which is what
+// a header scanner blind to [[tools.<name>]] would do.
+func TestPinArrayOfTableDeclarations(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		updates []pin.Update
+		want    string
+		wantErr bool
+	}{
+		{
+			name:    "sole entry",
+			input:   "[[tools.go]]\nversion = \"1.22\"\nbackend = \"core:go\"\n",
+			updates: []pin.Update{{Name: "go", PinnedValue: "1.22.12"}},
+			want:    "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n",
+		},
+		{
+			name:    "repeated entries are left for a manual pin",
+			input:   "[[tools.go]]\nversion = \"1.21\"\n\n[[tools.go]]\nversion = \"1.22\"\n",
+			updates: []pin.Update{{Name: "go", PinnedValue: "1.22.12"}},
+			wantErr: true,
+		},
+		{
+			// Before the header was recognized, node's pin landed on go's
+			// version because the [tools.node] context leaked past
+			// [[tools.go]].
+			name:    "a neighbouring entry keeps its own version",
+			input:   "[tools.node]\nversion = \"20\"\n\n[[tools.go]]\nversion = \"1.22\"\n",
+			updates: []pin.Update{{Name: "node", PinnedValue: "20.11.1"}},
+			want:    "[tools.node]\nversion = \"20.11.1\"\n\n[[tools.go]]\nversion = \"1.22\"\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			path := filepath.Join(dir, "mise.toml")
+			if err := os.WriteFile(path, []byte(tt.input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			err = rewriteMiseVersions(root, "mise.toml", tt.updates)
+			got, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected the pin to be refused, got:\n%s", got)
+				}
+				if string(got) != tt.input {
+					t.Errorf("refused pin still changed the file:\n--- got ---\n%s\n--- want ---\n%s", got, tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("rewriteMiseVersions: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("pin mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
 			}
 		})
 	}

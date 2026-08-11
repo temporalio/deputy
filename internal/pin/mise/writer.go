@@ -55,8 +55,8 @@ func RewriteToolVersion(root *os.Root, relPath, tool string, currentVersions []s
 	if err := validateMiseUpdate(pin.Update{Name: tool, PinnedValue: newVersion}); err != nil {
 		return err
 	}
-	replace := func(value, pinned string) (string, bool) {
-		return replaceVersionInValueTargeting(value, currentVersions, pinned)
+	replace := func(value, pinned string, sole bool) (string, bool) {
+		return replaceEntryVersion(value, currentVersions, pinned, sole)
 	}
 	err := rewriteToolsTable(root, relPath, map[string]string{tool: newVersion}, replace)
 	if err == nil {
@@ -113,10 +113,11 @@ func alreadyAtVersion(root *os.Root, relPath, tool string, currentVersions []str
 // value of every [tools] entry (or [tools.<tool>] version key) named in want,
 // writing the file back only when something changed. It is the shared engine
 // behind pinning (rewriteMiseVersions) and remediation (RewriteToolVersion);
-// replace receives the raw value text after `=` and the pinned version, and
-// reports the new value text and whether it changed. Entries in want that no
-// replace call rewrote produce an error so callers never silently skip a tool.
-func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, replace func(value, pinned string) (string, bool)) error {
+// replace receives the raw value text after `=`, the pinned version, and
+// whether this value is the tool's sole declaration, and reports the new value
+// text and whether it changed. Entries in want that no replace call rewrote
+// produce an error so callers never silently skip a tool.
+func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, replace func(value, pinned string, sole bool) (string, bool)) error {
 	applied := make(map[string]bool, len(want))
 
 	rootFS := root.FS()
@@ -130,6 +131,7 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 	}
 
 	lines := strings.Split(string(content), "\n")
+	entries := arrayToolEntryCounts(lines)
 	inRoot := true
 	inTools := false
 	toolTable := ""
@@ -138,13 +140,17 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
-		if header, ok := tomlHeader(trimmed); ok {
+		if header, isArray, ok := tomlHeader(trimmed); ok {
 			// Track whether we're inside the [tools] table, or in a
 			// [tools.<tool>] table where the version is a child key. Root
 			// context ends at the first table header (TOML places all
 			// root-level keys before it).
+			//
+			// A [[tools.<tool>]] entry declares that tool the same way, so it
+			// sets the same context; a [[tools]] array is not a form mise
+			// accepts, so its keys declare nothing here.
 			inRoot = false
-			inTools = len(header) == 1 && header[0] == "tools"
+			inTools = !isArray && len(header) == 1 && header[0] == "tools"
 			toolTable = ""
 			if len(header) == 2 && header[0] == "tools" {
 				toolTable = header[1]
@@ -217,7 +223,7 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 			}
 		case toolKey != "":
 			if pinned, ok := want[toolKey]; ok {
-				if nv, changed := replace(value, pinned); changed {
+				if nv, changed := replace(value, pinned, entries[toolKey] <= 1); changed {
 					newValue = nv
 					rewrote = append(rewrote, toolKey)
 				}
@@ -260,11 +266,44 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 // replaceVersionInValue replaces the version in a [tools] value (the text after
 // `=`) with a quoted pinned version, for pinning: scalar values, inline tables,
 // and single-version arrays are rewritten, while multi-version declarations are
-// left for a manual pin. That is exactly replaceVersionInValueTargeting with no
-// known vulnerable versions, so it delegates rather than duplicating the TOML
-// value handling.
-func replaceVersionInValue(value, pinned string) (string, bool) {
-	return replaceVersionInValueTargeting(value, nil, pinned)
+// left for a manual pin. That is exactly replaceEntryVersion with no known
+// vulnerable versions, so it delegates rather than duplicating the TOML value
+// handling.
+func replaceVersionInValue(value, pinned string, sole bool) (string, bool) {
+	return replaceEntryVersion(value, nil, pinned, sole)
+}
+
+// replaceEntryVersion rewrites the version in one declaration of a tool. sole
+// says the value is the whole declaration, which it is for every form but
+// repeated [[tools.<tool>]] entries.
+//
+// Repeated entries are the line-oriented spelling of a multi-version array
+// (mise 2026.7.3 lists both `[[tools.go]]` entries of a config as separate
+// requests), so they take the array's rule: an entry is rewritten only when it
+// names one of the versions the finding reports, and the licence a sole
+// declaration has to rewrite a selector that could still resolve to a
+// vulnerable version is withheld, because a sibling entry may be the request
+// that selector meant. With no current version to pick an entry out, nothing
+// is rewritten and the caller fails closed, rather than collapsing two
+// requested toolchains into one version declared twice.
+func replaceEntryVersion(value string, currents []string, pinned string, sole bool) (string, bool) {
+	if !sole && !namesCurrentVersion(value, currents) {
+		return value, false
+	}
+	return replaceVersionInValueTargeting(value, currents, pinned)
+}
+
+// namesCurrentVersion reports whether a declaration or array element spells one
+// of the versions a finding reports, comparing through [mise.SameVersion] so
+// the plan's spelling of a version ("v1.22.12") matches the config's. It is the
+// one definition of "this is the declaration the finding is about" that both
+// array elements and repeated tool entries are matched by.
+func namesCurrentVersion(value string, currents []string) bool {
+	return slices.ContainsFunc(elementVersions(value), func(v string) bool {
+		return slices.ContainsFunc(currents, func(current string) bool {
+			return mise.SameVersion(current, v)
+		})
+	})
 }
 
 // replaceVersionInValueTargeting rewrites the version(s) in a [tools] value
@@ -426,13 +465,8 @@ func replaceArrayElements(value string, spans [][2]int, currents []string, pinne
 	changed := false
 	for _, span := range spans {
 		elem := value[span[0]:span[1]]
-		versions := elementVersions(elem)
-		targeted := slices.ContainsFunc(versions, func(v string) bool {
-			return slices.ContainsFunc(currents, func(current string) bool {
-				return mise.SameVersion(current, v)
-			})
-		})
-		if !targeted && !(sole && soleElementTargetsCurrent(versions, currents)) {
+		if !namesCurrentVersion(elem, currents) &&
+			!(sole && soleElementTargetsCurrent(elementVersions(elem), currents)) {
 			continue
 		}
 		repl := quoted
@@ -605,13 +639,15 @@ func tomlDelimitersBalanced(s string) bool {
 // resolved to a tool by toolsTableKey, the same rule the table form uses: both
 // `{ go = "1.22.12" }` and its dotted `{ go.version = "1.22.12" }` spelling
 // declare go's version.
-func replaceInlineToolValue(s, tool, pinned string, replace func(value, pinned string) (string, bool)) (string, bool) {
+// A field of the root inline table is a whole declaration on its own: a TOML
+// table cannot repeat a key, so the value is passed to replace as a sole one.
+func replaceInlineToolValue(s, tool, pinned string, replace func(value, pinned string, sole bool) (string, bool)) (string, bool) {
 	out, changed := s, false
 	inlineTableFields(s, func(key []string, vstart, vend int) bool {
 		if name, ok := toolsTableKey(key); !ok || name != tool {
 			return true
 		}
-		if sub, ok := replace(s[vstart:vend], pinned); ok {
+		if sub, ok := replace(s[vstart:vend], pinned, true); ok {
 			out, changed = s[:vstart]+sub+s[vend:], true
 		}
 		return false
@@ -957,17 +993,54 @@ func rewriteToolVersions(root *os.Root, relPath string, updates []pin.Update) er
 // quoting resolved the same way assignments are parsed: `["tools".go]` yields
 // ["tools", "go"], exactly as mise's own TOML parser reads it. Returning the
 // raw text instead would make quoted spellings of the tools table invisible to
-// the rewriter, which would then refuse a fix for a config it can parse. ok is
-// false for non-header lines and for array-of-tables headers, which a mise
-// config's [tools] table never uses.
-func tomlHeader(line string) ([]string, bool) {
+// the rewriter, which would then refuse a fix for a config it can parse.
+//
+// isArray reports the array-of-tables form, `[[tools.go]]`, which mise does
+// accept: it reads the entry's version like any other declaration. A scanner
+// that reads such a line as ordinary text does worse than miss it, since the
+// table context of the previous header then leaks past the new header and the
+// assignments below it are attributed to the wrong tool. ok is false for
+// non-header lines.
+func tomlHeader(line string) (segs []string, isArray bool, ok bool) {
 	line, _ = splitTomlComment(line)
 	line = strings.TrimSpace(line)
-	if !strings.HasPrefix(line, "[") || strings.HasPrefix(line, "[[") || !strings.HasSuffix(line, "]") {
-		return nil, false
+	if !strings.HasPrefix(line, "[") {
+		return nil, false, false
 	}
-	segs := mise.SplitKeyPath(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
-	return segs, len(segs) > 0
+	open, closing := "[", "]"
+	if strings.HasPrefix(line, "[[") {
+		isArray, open, closing = true, "[[", "]]"
+	}
+	if len(line) < len(open)+len(closing) || !strings.HasSuffix(line, closing) {
+		return nil, false, false
+	}
+	segs = mise.SplitKeyPath(line[len(open) : len(line)-len(closing)])
+	if len(segs) == 0 {
+		return nil, false, false
+	}
+	return segs, isArray, true
+}
+
+// arrayToolEntryCounts counts, per tool, the [[tools.<tool>]] entries a config
+// declares. Repeating the header requests another version of the same tool, so
+// the count is how the rewriter learns that a version assignment is one of
+// several declarations rather than the whole of one, and has to be rewritten
+// under the multi-version rule.
+//
+// The scan is over raw lines, so a header spelled inside a multi-line string
+// is counted too. That can only overstate a declaration's arity, which makes
+// the rewriter refuse an edit it might have made; understating it would let
+// one entry's pin overwrite another's version.
+func arrayToolEntryCounts(lines []string) map[string]int {
+	counts := make(map[string]int)
+	for _, line := range lines {
+		header, isArray, ok := tomlHeader(line)
+		if !ok || !isArray || len(header) != 2 || header[0] != "tools" {
+			continue
+		}
+		counts[header[1]]++
+	}
+	return counts
 }
 
 // splitTomlComment cuts s at the `#` that begins a trailing comment, returning
