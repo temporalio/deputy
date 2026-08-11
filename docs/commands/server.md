@@ -214,9 +214,13 @@ Service-level policy entrypoints enable authorization based on JWT claims:
 | `service_scan_request` | Scan, StreamScan |
 | `service_list_request` | ListPackages, ListEcosystems |
 | `service_sbom_request` | Generate, Diff |
-| `service_diff_request` | Diff |
-| `service_secrets_request` | Scan |
-| `service_graph_request` | Resolve, Why |
+| `service_diff_request` | DiffPackages, DiffVulnerabilities, DiffContainerImages |
+| `service_secrets_request` | Scan, StreamScan, ScanHistory, ScanDiff, Verify, ListDetectors, RegisterDetector |
+| `service_graph_request` | BuildGraph, WhyDependency, QueryGraph |
+
+Streaming operations (`StreamScan`) are listed for completeness but are not
+enforced yet: the policy interceptor is a unary interceptor, so streaming RPCs
+pass through without evaluation.
 
 Example authorization policy:
 

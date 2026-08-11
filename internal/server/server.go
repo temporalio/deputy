@@ -1033,27 +1033,52 @@ func recoveryInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
-// procedureToEntrypoint maps RPC procedures to the policy entrypoints that
-// authorize them. Procedures absent from this map are allowed without policy
-// evaluation, so every entry is security-relevant: a stale procedure name
-// silently disables enforcement for that RPC. A drift test checks each key
-// against the procedures the server actually registers.
+// procedureToEntrypoint maps every procedure of a policy-bearing service to
+// the policy entrypoint that authorizes it. Procedures absent from this map
+// are allowed without evaluating any policy, so an omission silently disables
+// authorization for that RPC. A drift test checks the map against the
+// procedures the server actually registers, in both directions.
+//
+// Keys are the generated Connect procedure constants rather than string
+// literals: a renamed or removed procedure then breaks the build here instead
+// of turning into a dead key whose entrypoint is never evaluated.
+//
+// Streaming procedures are listed for completeness but are inert today, since
+// policyInterceptor is a connect.UnaryInterceptorFunc whose
+// WrapStreamingHandler returns the next handler untouched. Enforcing them
+// needs a streaming interceptor, tracked in #194.
 var procedureToEntrypoint = map[string]policy.Entrypoint{
-	"/deputy.scan.v1.ScanService/Scan":           policy.EntrypointServiceScanRequest,
-	"/deputy.scan.v1.ScanService/StreamScan":     policy.EntrypointServiceScanRequest,
-	"/deputy.list.v1.ListService/ListPackages":   policy.EntrypointServiceListRequest,
-	"/deputy.list.v1.ListService/ListEcosystems": policy.EntrypointServiceListRequest,
-	"/deputy.sbom.v1.SBOMService/Generate":       policy.EntrypointServiceSBOMRequest,
-	"/deputy.sbom.v1.SBOMService/Diff":           policy.EntrypointServiceSBOMRequest,
-	"/deputy.diff.v1.DiffService/Diff":           policy.EntrypointServiceDiffRequest,
-	"/deputy.secrets.v1.SecretsService/Scan":     policy.EntrypointServiceSecretsRequest,
-	"/deputy.graph.v1.GraphService/Resolve":      policy.EntrypointServiceGraphRequest,
-	"/deputy.graph.v1.GraphService/Why":          policy.EntrypointServiceGraphRequest,
+	scanv1connect.ScanServiceScanProcedure:       policy.EntrypointServiceScanRequest,
+	scanv1connect.ScanServiceStreamScanProcedure: policy.EntrypointServiceScanRequest,
+
+	listv1connect.ListServiceListPackagesProcedure:   policy.EntrypointServiceListRequest,
+	listv1connect.ListServiceListEcosystemsProcedure: policy.EntrypointServiceListRequest,
+
+	sbomv1connect.SBOMServiceGenerateProcedure: policy.EntrypointServiceSBOMRequest,
+	sbomv1connect.SBOMServiceDiffProcedure:     policy.EntrypointServiceSBOMRequest,
+
+	diffv1connect.DiffServiceDiffPackagesProcedure:        policy.EntrypointServiceDiffRequest,
+	diffv1connect.DiffServiceDiffVulnerabilitiesProcedure: policy.EntrypointServiceDiffRequest,
+	diffv1connect.DiffServiceDiffContainerImagesProcedure: policy.EntrypointServiceDiffRequest,
+
+	secretsv1connect.SecretsServiceScanProcedure:             policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceStreamScanProcedure:       policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceScanHistoryProcedure:      policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceScanDiffProcedure:         policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceVerifyProcedure:           policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceListDetectorsProcedure:    policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceRegisterDetectorProcedure: policy.EntrypointServiceSecretsRequest,
+
+	graphv1connect.GraphServiceBuildGraphProcedure:    policy.EntrypointServiceGraphRequest,
+	graphv1connect.GraphServiceWhyDependencyProcedure: policy.EntrypointServiceGraphRequest,
+	graphv1connect.GraphServiceQueryGraphProcedure:    policy.EntrypointServiceGraphRequest,
 }
 
 // policyInterceptor evaluates service-level policies for authorization.
-// It maps RPC procedures to policy entrypoints and evaluates policies with
-// JWT claims (jwt.*), request metadata, and target information.
+// It maps RPC procedures to policy entrypoints via procedureToEntrypoint and
+// evaluates policies with JWT claims (jwt.*), request metadata, and target
+// information. Procedures with no mapping, and every streaming procedure, are
+// passed through unevaluated (see procedureToEntrypoint and #194).
 func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
