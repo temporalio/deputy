@@ -11,6 +11,7 @@ import (
 	"io"
 	nethttp "net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -447,7 +448,18 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 		}
 		var ids []string
 		if strings.HasPrefix(modulePath, "github.com/") {
-			if parts := strings.Split(modulePath, "/"); len(parts) >= 3 {
+			// Strip the semantic-import major suffix before deriving the
+			// repository subdirectory: for github.com/owner/repo/sub/v2 the
+			// release tag is sub/v2.3.0, not sub/v2/v2.3.0. Leaving the
+			// suffix in would probe a tag that cannot exist and then fall
+			// back to the unrelated root tag of a different module.
+			pathNoMajor, _, _ := module.SplitPathVersion(modulePath)
+			if parts := strings.Split(pathNoMajor, "/"); len(parts) >= 3 {
+				// A module below the repo root (github.com/owner/repo/sub)
+				// follows Go's submodule conventions: tags carry the subpath
+				// prefix and the module's license is the closest one up its
+				// directory tree.
+				subpath := strings.Join(parts[3:], "/")
 				if version == "" {
 					// The GitHub License API reports the repository default branch.
 					// It is only ref-accurate for unversioned/default-branch lookups.
@@ -456,13 +468,13 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 					}
 				}
 				if len(ids) == 0 && version != "" {
-					if rawIDs, err := fetchLicensesFromGitHubRaw(ctx, parts[1], parts[2], version); err == nil && len(rawIDs) > 0 {
+					if rawIDs, err := fetchLicensesFromGitHubRaw(ctx, parts[1], parts[2], subpath, version); err == nil && len(rawIDs) > 0 {
 						ids = rawIDs
 					}
 				}
 				if len(ids) == 0 {
 					repoURL := fmt.Sprintf("https://github.com/%s/%s.git", parts[1], parts[2])
-					ids = scanGitHubRepoLicensesByClone(ctx, repoURL, version)
+					ids = scanGitHubRepoLicensesByClone(ctx, repoURL, subpath, version)
 				}
 			}
 		}
@@ -483,10 +495,56 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 	return nil
 }
 
+// moduleLicenseScan resolves the license for a module rooted at subpath the
+// way Go does: the closest license file walking up from the module directory
+// to the repository root. Sibling directories are never consulted, so a
+// submodule in a monorepo cannot inherit an unrelated module's license.
+//
+// An empty subpath means the repository root module.
+func moduleLicenseScan(ws workspace.FS, subpath string) []string {
+	if ws == nil {
+		return nil
+	}
+	dir := path.Clean(strings.TrimSpace(subpath))
+	if dir == "" || dir == "/" {
+		dir = "."
+	}
+	for {
+		var ids []string
+		for _, name := range defaultLicenseFilenames {
+			rel := name
+			if dir != "." {
+				rel = path.Join(dir, name)
+			}
+			data, err := ws.ReadFile(rel)
+			if err != nil {
+				continue
+			}
+			for _, id := range DetectLicenseIDs(data) {
+				if id != "" && !slices.Contains(ids, id) {
+					ids = append(ids, id)
+				}
+			}
+		}
+		if len(ids) > 0 {
+			slices.Sort(ids)
+			return ids
+		}
+		if dir == "." {
+			return nil
+		}
+		parent := path.Dir(dir)
+		if parent == dir {
+			return nil
+		}
+		dir = parent
+	}
+}
+
 // scanGitHubRepoLicensesByClone clones a GitHub repository just far enough to
 // run local license detection. Versioned lookups only try tag refs so an
 // explicit tag miss cannot silently become a default-branch license result.
-func scanGitHubRepoLicensesByClone(ctx context.Context, repoURL, version string) []string {
+func scanGitHubRepoLicensesByClone(ctx context.Context, repoURL, subpath, version string) []string {
 	if repoURL == "" || ctx.Err() != nil {
 		return nil
 	}
@@ -497,15 +555,15 @@ func scanGitHubRepoLicensesByClone(ctx context.Context, repoURL, version string)
 	if version == "" {
 		if src, err := repository.CloneInMemory(ctx, opts); err == nil {
 			defer src.Close()
-			return LocalRepoLicenseScan(src.Workspace())
+			return moduleLicenseScan(src.Workspace(), subpath)
 		}
 		return nil
 	}
-	for _, ref := range gitTagReferenceNames(version) {
+	for _, ref := range gitTagReferenceNames(version, subpath) {
 		opts.ReferenceName = ref
 		if src, err := repository.CloneInMemory(ctx, opts); err == nil {
 			defer src.Close()
-			return LocalRepoLicenseScan(src.Workspace())
+			return moduleLicenseScan(src.Workspace(), subpath)
 		}
 	}
 	return nil
@@ -515,9 +573,9 @@ func scanGitHubRepoLicensesByClone(ctx context.Context, repoURL, version string)
 // fallback. Commit SHAs are excluded because go-git's shallow clone path needs
 // a branch or tag reference; SHA-addressed license lookups are handled by the
 // raw-content path before clone fallback.
-func gitTagReferenceNames(version string) []plumbing.ReferenceName {
+func gitTagReferenceNames(version, subpath string) []plumbing.ReferenceName {
 	var refs []plumbing.ReferenceName
-	for _, ref := range githubLicenseRefCandidates(version) {
+	for _, ref := range githubLicenseRefCandidates(version, subpath) {
 		if isGitCommitSHARef(ref) {
 			continue
 		}
@@ -1240,24 +1298,36 @@ func fetchLicenseFromGitHubAPI(ctx context.Context, owner, repo string) []string
 //
 // License files are fetched in parallel with bounded concurrency to improve
 // performance while respecting GitHub rate limits.
-func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string) ([]string, error) {
-	refs := githubLicenseRefCandidates(version)
+func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, subpath, version string) ([]string, error) {
+	refs := githubLicenseRefCandidates(version, subpath)
 	if len(refs) == 0 {
 		return nil, fmt.Errorf("unable to derive git ref")
 	}
+	// A submodule's license is the closest one up its directory tree (the
+	// pkg.go.dev rule), so a module below the repo root checks its own
+	// directory at each ref before the repository root.
+	var dirs []string
+	if subpath = strings.Trim(strings.TrimSpace(subpath), "/"); subpath != "" {
+		dirs = append(dirs, subpath)
+	}
+	dirs = append(dirs, "")
 	for _, ref := range refs {
-		ids, err := fetchLicensesFromGitHubRawRef(ctx, owner, repo, ref)
-		if err == nil && len(ids) > 0 {
-			return ids, nil
+		for _, dir := range dirs {
+			ids, err := fetchLicensesFromGitHubRawRef(ctx, owner, repo, ref, dir)
+			if err == nil && len(ids) > 0 {
+				return ids, nil
+			}
 		}
 	}
 	return nil, fmt.Errorf("no license files via raw")
 }
 
 // fetchLicensesFromGitHubRawRef scans common license filenames at one concrete
-// GitHub raw-content ref. It treats missing files and transient fetch failures
-// as non-fatal so callers can try the next candidate ref or fallback strategy.
-func fetchLicensesFromGitHubRawRef(ctx context.Context, owner, repo, ref string) ([]string, error) {
+// GitHub raw-content ref, under dir when non-empty (a submodule's own
+// directory) or the repository root. It treats missing files and transient
+// fetch failures as non-fatal so callers can try the next candidate ref or
+// fallback strategy.
+func fetchLicensesFromGitHubRawRef(ctx context.Context, owner, repo, ref, dir string) ([]string, error) {
 	if owner == "" || repo == "" || ref == "" || ctx.Err() != nil {
 		return nil, fmt.Errorf("invalid github raw license request")
 	}
@@ -1277,7 +1347,11 @@ func fetchLicensesFromGitHubRawRef(ctx context.Context, owner, repo, ref string)
 
 	for _, name := range defaultLicenseFilenames {
 		g.Go(func() error {
-			url := fmt.Sprintf("%s/%s/%s/%s/%s", strings.TrimRight(githubRawBase, "/"), owner, repo, ref, name)
+			filePath := name
+			if dir != "" {
+				filePath = dir + "/" + name
+			}
+			url := fmt.Sprintf("%s/%s/%s/%s/%s", strings.TrimRight(githubRawBase, "/"), owner, repo, ref, filePath)
 			req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
 			if err != nil {
 				return nil // non-fatal, continue with other files
@@ -1345,7 +1419,7 @@ func fetchLicensesFromGitHubRawRef(ctx context.Context, owner, repo, ref string)
 // Candidates are ordered from most precise to fallback. Commit SHAs and Go
 // pseudo-version commits are used verbatim; non-v-prefixed tag-like versions
 // try the common GitHub release tag form first, then the literal ref.
-func githubLicenseRefCandidates(version string) []string {
+func githubLicenseRefCandidates(version, subpath string) []string {
 	if version == "" {
 		return nil
 	}
@@ -1359,10 +1433,25 @@ func githubLicenseRefCandidates(version string) []string {
 	if isGitCommitSHARef(v) {
 		return []string{strings.ToLower(v)}
 	}
+	var plain []string
 	if !strings.HasPrefix(v, "v") {
-		return []string{"v" + v, v}
+		plain = []string{"v" + v, v}
+	} else {
+		plain = []string{v}
 	}
-	return []string{v}
+	// Go submodules tag releases as "<subpath>/<version>" (module
+	// github.com/owner/repo/sub tags sub/v1.2.3), so a module below the repo
+	// root tries its subpath-prefixed tags first. Commit SHAs and
+	// pseudo-versions above are path-independent and skip this.
+	subpath = strings.Trim(strings.TrimSpace(subpath), "/")
+	if subpath == "" {
+		return plain
+	}
+	refs := make([]string, 0, len(plain)*2)
+	for _, p := range plain {
+		refs = append(refs, subpath+"/"+p)
+	}
+	return append(refs, plain...)
 }
 
 // isGitCommitSHARef reports whether version is a short or full hexadecimal Git
