@@ -383,6 +383,36 @@ func DeclaredVersion(request string) (version string, ok bool) {
 	return s, true
 }
 
+// SelectorMatches reports whether a version request selects a concrete
+// release, which is the question behind "could this declaration still be
+// resolving to the version the finding names".
+//
+// mise matches a partial request against candidate release strings by leading
+// characters, with no notion of a version component. Verified against mise
+// 2026.7.3: `mise ls-remote node@20.1` lists all 25 releases from 20.1.0
+// through 20.19.6, `mise latest node@20.1` answers 20.19.6, `node@2` reaches
+// 26.7.0, and `java@temurin-21.0` lists temurin-21.0.12+8.0.LTS. An exact
+// request is just the case where the prefix runs to the end. A leading "v" on
+// either side is ignored so "v20" still selects "20.11.0".
+//
+// Reading a partial request as a dot-separated component selector instead
+// refuses precisely the requests mise resolves loosest. "20.1" really does
+// resolve to 20.19.6, so a remediation gate that calls it a mismatch reports
+// "could not rewrite" and leaves the vulnerable toolchain declared.
+func SelectorMatches(request, version string) bool {
+	return strings.HasPrefix(trimVersionV(strings.TrimSpace(version)), trimVersionV(strings.TrimSpace(request)))
+}
+
+// trimVersionV drops a leading "v" or "V" from a version token when a digit
+// follows it, so "v1.24.3" and "1.24.3" compare equal while a tool named
+// "vault" keeps its name.
+func trimVersionV(s string) string {
+	if len(s) > 1 && (s[0] == 'v' || s[0] == 'V') && s[1] >= '0' && s[1] <= '9' {
+		return s[1:]
+	}
+	return s
+}
+
 // trimSelectorWrapper strips one leading mise selector wrapper from a version
 // request and returns the request it wraps, so "prefix:20" yields "20" and
 // "sub-1:lts" yields "lts". ok is false when no wrapper is present or the

@@ -355,21 +355,23 @@ func lockedVersionSatisfiesRequest(locked, request string) bool {
 	return versionHasPrefix(locked, request)
 }
 
-// versionHasPrefix checks dotted version-prefix compatibility with a segment
-// boundary so "1.9" matches "1.9.8" but not "1.90.0".
+// versionHasPrefix reports whether a fuzzy request selects a concrete version,
+// deferring to [mise.SelectorMatches] so this answers the question the same way
+// the remediation staleness gate and the release filter do. A rule spelled out
+// here as well was a second answer waiting to disagree with them, and it did:
+// it read "1.9" as selecting only 1.9.x, while mise resolves it to the newest
+// release whose text starts with "1.9".
+//
+// The one thing it adds is the Go toolchain's "go" prefix, which mise selectors
+// carry and release strings do not.
 func versionHasPrefix(version, prefix string) bool {
-	version = normalizedVersionPrefix(version)
-	prefix = normalizedVersionPrefix(prefix)
-	return version == prefix || strings.HasPrefix(version, prefix+".")
+	return mise.SelectorMatches(trimGoPrefix(prefix), trimGoPrefix(version))
 }
 
-// normalizedVersionPrefix strips common runtime version prefixes used in mise
-// selectors before prefix comparison.
-func normalizedVersionPrefix(v string) string {
-	v = strings.TrimSpace(v)
-	v = strings.TrimPrefix(v, "v")
-	v = strings.TrimPrefix(v, "go")
-	return v
+// trimGoPrefix strips the Go toolchain's "go" release prefix so "go1.22" and
+// "1.22" compare equal.
+func trimGoPrefix(v string) string {
+	return strings.TrimPrefix(strings.TrimSpace(v), "go")
 }
 
 // Resolve implements pin.Strategy. It resolves a fuzzy version to an exact one.

@@ -1046,18 +1046,18 @@ func isPrerelease(version string) bool {
 		strings.Contains(v, ".beta")
 }
 
-// versionMatchesPrefix implements mise's fuzzy prefix matching for concrete
-// candidate versions.
+// versionMatchesPrefix reports whether a candidate release satisfies a fuzzy
+// request, which is what narrows a release list before the newest survivor is
+// pinned. An empty request and "latest" name no version and so admit every
+// candidate; everything else defers to [misecfg.SelectorMatches], the one
+// reading of mise's matching rule, so the release Deputy pins is the release
+// mise would install.
 func versionMatchesPrefix(version, prefix string) bool {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" || strings.EqualFold(prefix, "latest") {
 		return true
 	}
-	v := strings.TrimPrefix(strings.TrimSpace(version), "v")
-	p := strings.TrimPrefix(prefix, "v")
-	return v == p ||
-		strings.HasPrefix(v, p+".") ||
-		strings.HasPrefix(v, p+"-")
+	return misecfg.SelectorMatches(prefix, version)
 }
 
 // newestRelease selects the newest release matching a mise selector from a

@@ -353,36 +353,9 @@ func selectorTargetsCurrent(declared string, currents []string) bool {
 	if !constrained {
 		return true
 	}
-	for _, current := range currents {
-		if versionSelectorMatches(version, current) {
-			return true
-		}
-	}
-	return false
-}
-
-// versionSelectorMatches reports whether declared names version exactly or is
-// one of its leading dot-separated components, the way mise treats a partial
-// version as a selector for the releases beneath it. A leading "v" on either
-// side is ignored so "v20" still selects "20.11.0".
-func versionSelectorMatches(declared, version string) bool {
-	declared = trimVersionPrefix(declared)
-	version = trimVersionPrefix(version)
-	if declared == version {
-		return true
-	}
-	return len(version) > len(declared) &&
-		strings.HasPrefix(version, declared) &&
-		version[len(declared)] == '.'
-}
-
-// trimVersionPrefix drops a leading "v" or "V" from a version token when a
-// digit follows it, so "v1.24.3" and "1.24.3" compare equal.
-func trimVersionPrefix(s string) string {
-	if len(s) > 1 && (s[0] == 'v' || s[0] == 'V') && s[1] >= '0' && s[1] <= '9' {
-		return s[1:]
-	}
-	return s
+	return slices.ContainsFunc(currents, func(current string) bool {
+		return mise.SelectorMatches(version, current)
+	})
 }
 
 // replaceArrayElements rewrites the matching elements of a TOML array value,
