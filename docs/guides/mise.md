@@ -64,7 +64,10 @@ deputy pin check --ecosystems mise                # CI gate: no mise binary requ
 
 Pinning rewrites fuzzy versions (channels like `latest`/`lts`, partial versions
 like `20`, and scopes like `prefix:1.20` / `sub-0.1:latest`) to exact,
-reproducible versions. For `mise.toml`, plain `deputy pin` first prefers a
+reproducible versions. A partial version selects releases the way mise selects
+them, by leading characters rather than by version component, so `20.1` covers
+everything from `20.1.0` through `20.19.6` and resolves to the newest of them,
+matching `mise latest node@20.1`. For `mise.toml`, plain `deputy pin` first prefers a
 compatible exact version from the sibling `mise.lock` so it preserves the tool
 version already resolved by Mise. If the lock entry is absent, ambiguous, or
 stale relative to the source selector, Deputy resolves from native upstream
@@ -192,7 +195,11 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
   and `node` keeps the untouched declaration's integrity metadata, and a
   legacy entry keyed by a bare short name that more than one declaration could
   own (`"npm:foo"` and `"ubi:foo"` with a `[[tools.foo]]` entry) is left
-  alone, which is also the entry inventory refuses to read. An uncontested
+  alone, which is also the entry inventory refuses to read. Claimants are
+  counted across every config sharing the lockfile, not just the one being
+  edited, since a `mise` directory's `config.toml` and all of its `conf.d`
+  drop-ins write to one `mise.lock`; a sharing config Deputy cannot read or
+  parse counts as a claimant. An uncontested
   legacy entry is pruned even when the exact key is locked too, because lock
   resolution would otherwise fall back to it and hand the fixed tool its old
   version back. After applying, run `mise install` to install the
