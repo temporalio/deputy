@@ -197,6 +197,13 @@ const maxPolicySubjectsShown = 5
 // prints, so warnings cannot interleave with the report body, and the same
 // grouped shape is what CI renderers derive from the JSON contract. Denies
 // render before warns; allow results are counted as passed and not listed.
+//
+// policyCount is passed separately because it cannot be recovered from
+// actions. An empty slice means two different things: no policy ran, so the
+// section is omitted entirely, or every policy passed, so the section reports
+// how many passed. Only the caller knows which. The count is not yet part of
+// the response contract, so a consumer reading JSON cannot render that line
+// (#187).
 func PolicyActionsSection(w io.Writer, policyCount int, actions []*policyv1.Action) {
 	if policyCount == 0 {
 		return
