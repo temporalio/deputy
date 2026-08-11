@@ -290,16 +290,6 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 		}
 		located := validatePolicyNode(item, seenNames, opts)
 		issues = append(issues, located...)
-		// A policy the walk already located an error in is not expanded whole: its
-		// expansion is expected to fail too, and restating that failure in
-		// generated CEL the author never wrote would only obscure the real defect.
-		// Its vars are still compiled, since they are a defect of their own and
-		// expansion stops at the first failure, which would leave them unreported
-		// until the located one is fixed and lint rerun.
-		if slices.ContainsFunc(located, func(is Issue) bool { return is.Severity == IssueError }) {
-			issues = append(issues, varExpansionIssues(item, opts.ExtraVars)...)
-			continue
-		}
 		issues = append(issues, expandedPolicyIssues(item, source, opts.ExtraVars, located)...)
 	}
 	// Decoding the whole bundle is the last backstop, for the shapes that belong
@@ -331,17 +321,34 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 // written anywhere in the document, used to withhold the diagnostics for every
 // other policy and cost the author a lint run per defect.
 //
+// Within one policy the same rule holds, which is why the vars are compiled
+// first and on their own: every step after them stops at its first failure, so
+// asking about them last is asking only about the policies nothing else is wrong
+// with. Whatever the vars answer is independent of the field the decoder refuses
+// and of the entrypoint the walk does not recognize, and an author who has to
+// fix one before being told about the other pays a lint run per defect.
+//
 // located is what the walk already reported for this policy, so a failure that
 // restates one of those is dropped and a single mistake stays a single issue.
 func expandedPolicyIssues(item *yaml.Node, source string, extraVars []string, located []Issue) []Issue {
 	var pol structuredPolicy
 	// Decoding resolves aliases and merge keys, which the format refuses; that is
 	// safe here because a policy carrying one anywhere beneath it never reaches
-	// this point, so the decoder reads only what the policy itself writes.
-	if err := item.Decode(&pol); err != nil {
-		return backstopIssue(fmt.Errorf("%s: %w", source, err), source, item, located)
-	}
+	// this point, so the decoder reads only what the policy itself writes. A field
+	// the decoder refuses leaves the rest of the policy decoded, so the vars are
+	// still worth asking about.
+	decodeErr := item.Decode(&pol)
 	pol.Name = strings.TrimSpace(pol.Name)
+	issues := varCompileIssues(pol, item, extraVars)
+	if decodeErr != nil {
+		return append(issues, backstopIssue(fmt.Errorf("%s: %w", source, decodeErr), source, item, located)...)
+	}
+	// Expanding the policy whole would stop at, or restate in generated CEL the
+	// author never wrote, a defect that is already reported: an uncompilable var
+	// wraps every condition, and a located error is the mistake itself.
+	if len(issues) > 0 || slices.ContainsFunc(located, func(is Issue) bool { return is.Severity == IssueError }) {
+		return issues
+	}
 	body, err := pol.toCELSource()
 	if err != nil {
 		return backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, err), source, item, located)
@@ -354,21 +361,16 @@ func expandedPolicyIssues(item *yaml.Node, source string, extraVars []string, lo
 	return nil
 }
 
-// varExpansionIssues reports the vars of one policy that do not compile. It
-// exists for the policy the walk already found an error in, which is not
-// expanded whole: expansion stops at its first failure, so a rule the walk has
-// already reported would hide an uncompilable var behind it and hand the author
-// the var only after the rule is fixed. Wrapping an empty body in the policy's
-// vars asks the one question the located issue leaves open.
+// varCompileIssues reports the vars of one policy that do not compile. Wrapping
+// an empty body in them asks about the vars and nothing else, which is the one
+// question every other step of the expansion can stop short of: it compiles the
+// generated CEL only once the whole policy has decoded and expanded, so a rule
+// the walk has already reported, an entrypoint it does not recognize, or a field
+// the decoder refuses would each hide an uncompilable var behind them.
 //
-// It reports only what nothing else owns. A policy that does not decode, and a
-// var name that is empty or duplicated, are already reported by the walk, so
-// neither is restated here.
-func varExpansionIssues(item *yaml.Node, extraVars []string) []Issue {
-	var pol structuredPolicy
-	if err := item.Decode(&pol); err != nil {
-		return nil
-	}
+// It reports only what nothing else owns. A var name that is empty or
+// duplicated is already reported by the walk, so neither is restated here.
+func varCompileIssues(pol structuredPolicy, item *yaml.Node, extraVars []string) []Issue {
 	if len(pol.Vars) == 0 {
 		return nil
 	}

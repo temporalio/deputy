@@ -1382,6 +1382,36 @@ policies:
 			wantCodes: []string{"missing-rules", "cel-error"},
 		},
 		{
+			name: "a var holding invalid CEL beside a field the decoder refuses",
+			bundle: `
+policies:
+  - name: bad-var-and-status
+    vars:
+      threshold: '1 +'
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+        status: nope
+`,
+			wantCodes: []string{"bundle-error", "cel-error"},
+		},
+		{
+			name: "a var holding invalid CEL beside an unknown entrypoint",
+			bundle: `
+policies:
+  - name: bad-var-and-entrypoint
+    entrypoints: ["scan_vulnerabilities"]
+    vars:
+      threshold: '1 +'
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+			wantCodes: []string{"invalid-entrypoint", "cel-error"},
+		},
+		{
 			name: "an anchored field beside a bad action in the same policy",
 			bundle: `
 policies:
