@@ -156,6 +156,91 @@ version = "3.12.3"
 	}
 }
 
+// TestLockfileLookupContestedName pins that the sole-entry fallback needs an
+// uncontested claim, the literal key included. The fallback is a guess: it
+// hands a declaration an entry whose version it never asked for, which is only
+// defensible when no other declaration could have put that entry there. Two
+// conf.d fragments sharing a lockfile can declare the same key, and lending one
+// fragment the other's entry reports a version that fragment does not declare,
+// which after a fix reads as the vulnerable version coming back.
+//
+// An exact version match stays available for the literal key: an entry keyed by
+// exactly what a declaration spells, at exactly the version it spells, is that
+// declaration's however many others share the name.
+func TestLockfileLookupContestedName(t *testing.T) {
+	const data = `
+[[tools.go]]
+version = "1.23.4"
+
+[[tools."npm:foo"]]
+version = "1.0.0"
+`
+	lf, err := ParseLock("mise.lock", []byte(data))
+	if err != nil {
+		t.Fatalf("ParseLock: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		spec    ToolSpec
+		request string
+		claims  map[string]int
+		want    string // "" means no entry may be borrowed
+	}{
+		{
+			name:    "sole entry serves an uncontested literal key",
+			spec:    ToolSpec{Name: "go", Key: "go"},
+			request: "1.22",
+			claims:  map[string]int{"go": 1},
+			want:    "1.23.4",
+		},
+		{
+			name:    "sole entry is refused for a contested literal key",
+			spec:    ToolSpec{Name: "go", Key: "go"},
+			request: "1.22",
+			claims:  map[string]int{"go": 2},
+			want:    "",
+		},
+		{
+			name:    "exact match survives a contested literal key",
+			spec:    ToolSpec{Name: "go", Key: "go"},
+			request: "1.23.4",
+			claims:  map[string]int{"go": 2},
+			want:    "1.23.4",
+		},
+		{
+			name:    "sole entry is refused for a contested short name",
+			spec:    ToolSpec{Name: "foo", Key: "ubi:foo"},
+			request: "1",
+			claims:  map[string]int{"foo": 2, "npm:foo": 1, "ubi:foo": 1},
+			want:    "",
+		},
+		{
+			name:    "no claims recorded leaves the fallback open",
+			spec:    ToolSpec{Name: "go", Key: "go"},
+			request: "1.22",
+			claims:  nil,
+			want:    "1.23.4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lf.Lookup(tt.spec, tt.request, tt.claims)
+			switch {
+			case tt.want == "":
+				if got != nil {
+					t.Fatalf("Lookup = %q, want no entry", got.Version)
+				}
+			case got == nil:
+				t.Fatalf("Lookup = nil, want %q", tt.want)
+			case got.Version != tt.want:
+				t.Fatalf("Lookup = %q, want %q", got.Version, tt.want)
+			}
+		})
+	}
+}
+
 // TestConfigsSharingLock pins which configs mise merges into one lockfile.
 // mise 2026.7.3 reports ".config/mise/mise.lock" as the lock target for a tool
 // declared only in ".config/mise/conf.d/b.toml", so a mise directory's

@@ -318,39 +318,70 @@ func LockClaims(fsys fs.FS, configPath string) (map[string]int, error) {
 // either name, which covers a fuzzy declared version that won't equal any
 // locked version string. Returns nil when nothing matches.
 //
-// claims comes from [NameClaims] over the surrounding config, so a lock entry
-// keyed by a tool's short name is not borrowed when another declaration could
-// own that name. A config can declare both "npm:node" and node, or both
-// "npm:foo" and "ubi:foo", as independent tools with independent lock entries;
-// without this, a backend-qualified spec matches on its stripped name and is
-// enriched with another tool's version, which after a fix reports the freshly
-// updated tool at the old vulnerable version. Pass nil when no config context
-// is available.
+// claims comes from [LockClaims] over every config sharing the lockfile, so a
+// lock entry is not borrowed when another declaration could own the name it is
+// keyed by. A config can declare both "npm:node" and node, or both "npm:foo"
+// and "ubi:foo", as independent tools with independent lock entries; without
+// this, a backend-qualified spec matches on its stripped name and is enriched
+// with another tool's version, which after a fix reports the freshly updated
+// tool at the old vulnerable version. Pass nil when no config context is
+// available.
 func (lf *Lockfile) Lookup(spec ToolSpec, version string, claims map[string]int) *LockedTool {
 	if lf == nil {
 		return nil
 	}
-	// A spec always owns its literal key. Any other name is only this spec's
-	// to match when no second declaration claims it, since the spec itself
-	// accounts for one claim.
-	usable := func(name string) bool {
-		return name == spec.Key || claims[name] <= 1
-	}
-	for _, name := range [...]string{spec.Name, spec.Key} {
-		if usable(name) {
+	names := LockCandidateNames(spec)
+	for _, name := range names {
+		if MayMatchLockName(spec, name, claims) {
 			if lt := lf.Locked(name, version); lt != nil {
 				return lt
 			}
 		}
 	}
-	for _, name := range [...]string{spec.Name, spec.Key} {
-		if usable(name) {
+	for _, name := range names {
+		if MayBorrowSoleLockEntry(name, claims) {
 			if lt := lf.Sole(name); lt != nil {
 				return lt
 			}
 		}
 	}
 	return nil
+}
+
+// LockCandidateNames returns the mise.lock table keys a declaration could be
+// recorded under, short name first because real lockfiles usually key entries
+// that way. Both readers of a lockfile, inventory enrichment and pin
+// discovery, walk this list, so neither can grow a candidate the other does
+// not know to gate.
+func LockCandidateNames(spec ToolSpec) []string {
+	if spec.Key == "" || spec.Name == spec.Key {
+		return []string{spec.Name}
+	}
+	return []string{spec.Name, spec.Key}
+}
+
+// MayMatchLockName reports whether spec may take a lock entry keyed by name
+// whose version is exactly the one spec requests. A spec always owns its
+// literal key here: an entry keyed by exactly what the declaration spells, at
+// exactly the version it spells, is that declaration's however many others
+// share the name. Any other name is only this spec's when no second
+// declaration claims it, since the spec itself accounts for one claim.
+//
+// claims comes from [LockClaims]. A nil map records no claims and gates
+// nothing, which is what a caller with no config context gets.
+func MayMatchLockName(spec ToolSpec, name string, claims map[string]int) bool {
+	return name == spec.Key || claims[name] <= 1
+}
+
+// MayBorrowSoleLockEntry reports whether the sole entry keyed by name may be
+// handed to a declaration that matched no version. This fallback is a guess,
+// so it needs an uncontested claim even for a declaration's literal key: two
+// configs sharing a lockfile can spell the same key, and the count in claims
+// spans all of them. Lending one of them the other's entry reports a version
+// the declaration does not ask for, which is how a fix applied to one fragment
+// reads as the vulnerable version coming back.
+func MayBorrowSoleLockEntry(name string, claims map[string]int) bool {
+	return claims[name] <= 1
 }
 
 // Checksums returns the per-platform checksums for a locked tool, keyed by the

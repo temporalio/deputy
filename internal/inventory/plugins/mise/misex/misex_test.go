@@ -262,3 +262,57 @@ func TestExtractDoesNotBorrowAnotherToolsLockEntry(t *testing.T) {
 		})
 	}
 }
+
+// TestExtractDoesNotBorrowAcrossSharedLockConfigs pins that a name declared by
+// two configs writing to one mise.lock is contested even when both spell it
+// identically. mise merges a mise directory's conf.d drop-ins into one
+// lockfile, so a sole [[tools.go]] entry beside two fragments that both declare
+// go belongs to at most one of them; enriching the other with it reports a
+// version that fragment never declared, and after a fix on that fragment the
+// borrowed entry reads as the vulnerable version coming back.
+func TestExtractDoesNotBorrowAcrossSharedLockConfigs(t *testing.T) {
+	const lock = "[[tools.go]]\nversion = \"1.23.4\"\nbackend = \"core:go\"\n"
+	tests := []struct {
+		name  string
+		files fstest.MapFS
+		want  string
+	}{
+		{
+			name: "sole fragment owns the entry",
+			files: fstest.MapFS{
+				".config/mise/conf.d/a.toml": {Data: []byte("[tools]\ngo = \"1.22\"\n")},
+				".config/mise/mise.lock":     {Data: []byte(lock)},
+			},
+			want: "1.23.4",
+		},
+		{
+			name: "a fragment beside it declaring the same key contests it",
+			files: fstest.MapFS{
+				".config/mise/conf.d/a.toml": {Data: []byte("[tools]\ngo = \"1.22\"\n")},
+				".config/mise/conf.d/b.toml": {Data: []byte("[tools]\ngo = \"1.23\"\n")},
+				".config/mise/mise.lock":     {Data: []byte(lock)},
+			},
+			want: "1.22",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const cfgPath = ".config/mise/conf.d/a.toml"
+			f, err := tt.files.Open(cfgPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv, err := New().Extract(t.Context(), &filesystem.ScanInput{Path: cfgPath, Reader: f, FS: tt.files})
+			if err != nil {
+				t.Fatalf("Extract: %v", err)
+			}
+			if len(inv.Packages) != 1 {
+				t.Fatalf("got %d packages, want 1", len(inv.Packages))
+			}
+			if got := inv.Packages[0].Version; got != tt.want {
+				t.Errorf("go version = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
