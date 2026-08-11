@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -217,11 +218,22 @@ func NameClaims(tools []ToolSpec) map[string]int {
 // ".config/mise/conf.d/b.toml".
 //
 // The set is derived from [LockfilePath] rather than listed here, so a change
-// to mise's lockfile naming moves the sharing rule with it. Only two
-// directories can hold a config for a given lockfile, the lockfile's own and
-// the conf.d beside it, and a candidate joins the set when [LockfilePath]
-// sends it to the same file. That keeps a sibling with a different target,
-// such as config.production.toml, out of it.
+// to mise's lockfile naming moves the sharing rule with it. Membership is
+// decided on the file a config's lockfile path resolves to, not on the path
+// itself, because a lockfile may be a symlink and mise reads through it: with
+// "a/mise.lock" and "b/mise.lock" both linked to one "shared.lock", mise
+// 2026.7.3 resolves each directory's declarations against that one file. A fix
+// publishes its edit to the link target too, so counting only the declarations
+// beside the link would delete integrity metadata another directory still
+// needs.
+//
+// The candidates are the lockfile's own directory and the conf.d beside it,
+// the only two a lexical lock path can come from. When the lockfile is a
+// symlink its claimants can be anywhere, so the tree is walked instead; that
+// costs a traversal per config, which is why it is spent only on the configs
+// that are actually linked. A config whose lockfile is a regular file and
+// which some directory outside those two links into is the case this does not
+// see.
 //
 // An empty result means configPath has no lockfile at all (a .tool-versions
 // file, say). A read error other than a missing conf.d is returned, because a
@@ -235,9 +247,62 @@ func ConfigsSharingLock(fsys fs.FS, configPath string) ([]string, error) {
 	if fsys == nil {
 		return nil, fmt.Errorf("mise: no filesystem to resolve the configs sharing %s", lockPath)
 	}
-	lockDir := path.Dir(lockPath)
+	target, linked, err := ResolveLinkedPath(fsys, lockPath)
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := lockSharingCandidates(fsys, lockPath, linked)
+	if err != nil {
+		return nil, err
+	}
+
 	seen := make(map[string]struct{})
 	var shared []string
+	for _, candidate := range candidates {
+		if _, ok := IsConfigPath(candidate); !ok {
+			continue
+		}
+		candidateLock := LockfilePath(candidate)
+		if candidateLock == "" {
+			continue
+		}
+		candidateTarget, _, err := ResolveLinkedPath(fsys, candidateLock)
+		if err != nil {
+			return nil, fmt.Errorf("resolving the lockfile of %s: %w", candidate, err)
+		}
+		if candidateTarget != target {
+			continue
+		}
+		if _, dup := seen[candidate]; dup {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		shared = append(shared, candidate)
+	}
+	// configPath itself belongs in the set even when the walk above missed it,
+	// so a caller never decides ownership without the config it is editing.
+	if clean := path.Clean(configPath); len(shared) > 0 {
+		if _, ok := seen[clean]; !ok {
+			shared = append(shared, clean)
+		}
+	}
+	slices.Sort(shared)
+	return shared, nil
+}
+
+// lockSharingCandidates returns the paths that might be configs locking into
+// lockPath's target. When the lockfile sits at its own path, only its
+// directory and the conf.d beside it can send a config there, so those are
+// listed. A linked lockfile is shared by whoever links to it, which no
+// directory listing can name, so the tree is walked for every config in it.
+// The caller decides membership by resolving each candidate's own lockfile, so
+// a candidate listed here is a maybe, never a member.
+func lockSharingCandidates(fsys fs.FS, lockPath string, linked bool) ([]string, error) {
+	if linked {
+		return allConfigPaths(fsys)
+	}
+	lockDir := path.Dir(lockPath)
+	var out []string
 	for _, dir := range [...]string{lockDir, path.Join(lockDir, "conf.d")} {
 		entries, err := fs.ReadDir(fsys, dir)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -250,29 +315,84 @@ func ConfigsSharingLock(fsys fs.FS, configPath string) ([]string, error) {
 			if entry.IsDir() {
 				continue
 			}
-			candidate := path.Join(dir, entry.Name())
-			if _, ok := IsConfigPath(candidate); !ok {
-				continue
-			}
-			if LockfilePath(candidate) != lockPath {
-				continue
-			}
-			if _, dup := seen[candidate]; dup {
-				continue
-			}
-			seen[candidate] = struct{}{}
-			shared = append(shared, candidate)
+			out = append(out, path.Join(dir, entry.Name()))
 		}
 	}
-	// configPath itself belongs in the set even when the walk above missed it,
-	// so a caller never decides ownership without the config it is editing.
-	if clean := path.Clean(configPath); len(shared) > 0 {
-		if _, ok := seen[clean]; !ok {
-			shared = append(shared, clean)
+	return out, nil
+}
+
+// allConfigPaths walks fsys for every mise config in it. A directory that
+// cannot be read is an error rather than an omission: a config it hides is one
+// whose declarations would have contested a lock entry, and the caller reads
+// the error as "ownership unknown" and leaves the entry alone.
+func allConfigPaths(fsys fs.FS) ([]string, error) {
+	var out []string
+	err := fs.WalkDir(fsys, ".", func(p string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
+		if entry.IsDir() {
+			return nil
+		}
+		if _, ok := IsConfigPath(p); ok {
+			out = append(out, p)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing the configs that could share a lockfile: %w", err)
 	}
-	slices.Sort(shared)
-	return shared, nil
+	return out, nil
+}
+
+// maxLinkHops bounds symlink resolution so a cyclic or absurdly deep chain
+// ends in an error instead of looping. The limit is generous next to any real
+// repository layout; the operating system's own limit is typically far lower.
+const maxLinkHops = 32
+
+// ResolveLinkedPath returns the path relPath ultimately names in fsys,
+// following an in-repository symlink chain, and reports whether any link was
+// followed. It is the one answer to "which file is this really", shared by the
+// reader that decides who owns a lockfile and the writer that publishes an
+// edit to one, so the file a claim is counted against is the file the edit
+// lands on.
+//
+// Each hop is read through fsys, and a target that is absolute or climbs out
+// of the tree is refused rather than followed, so resolution cannot be talked
+// into naming a file outside it. A path that does not exist resolves to
+// itself: there is no link to follow, and a caller may be about to create it.
+// A filesystem that cannot report links resolves every path to itself, which
+// is the reading it would have had before links were considered at all.
+func ResolveLinkedPath(fsys fs.FS, relPath string) (target string, linked bool, err error) {
+	reader, ok := fsys.(fs.ReadLinkFS)
+	if !ok {
+		return relPath, false, nil
+	}
+	for range maxLinkHops {
+		info, err := reader.Lstat(relPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			return relPath, linked, nil
+		}
+		if err != nil {
+			return "", false, fmt.Errorf("stat %s: %w", relPath, err)
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			return relPath, linked, nil
+		}
+		text, err := reader.ReadLink(relPath)
+		if err != nil {
+			return "", false, fmt.Errorf("reading link %s: %w", relPath, err)
+		}
+		if filepath.IsAbs(text) {
+			return "", false, fmt.Errorf("refusing to follow %s: it links to the absolute path %s", relPath, text)
+		}
+		next := path.Join(path.Dir(relPath), filepath.ToSlash(text))
+		if next == ".." || strings.HasPrefix(next, "../") {
+			return "", false, fmt.Errorf("refusing to follow %s: it links outside the repository via %s", relPath, text)
+		}
+		relPath, linked = next, true
+	}
+	return "", false, fmt.Errorf("resolving %s: more than %d symbolic links", relPath, maxLinkHops)
 }
 
 // LockClaims counts, over every config that shares configPath's lockfile, how

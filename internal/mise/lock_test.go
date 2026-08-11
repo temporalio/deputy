@@ -315,6 +315,130 @@ func TestConfigsSharingLock(t *testing.T) {
 	}
 }
 
+// TestConfigsSharingLockFollowsLinks pins that a lockfile's identity, not its
+// path, decides who shares it. mise reads a config's lockfile through a
+// symlink: with "a/mise.toml" declaring node = "20", "b/mise.toml" declaring
+// go = "1.22", and both "a/mise.lock" and "b/mise.lock" linked to one
+// "shared.lock" recording 20.11.0 and 1.22.12, mise 2026.7.3 reports
+//
+//	node  20.11.0 (missing)  /private/tmp/miselink/a/mise.toml  20
+//	go    1.22.12 (missing)  /private/tmp/miselink/b/mise.toml  1.22
+//
+// so both directories' declarations claim entries in that one file, and a fix
+// to either publishes through the link to it.
+func TestConfigsSharingLockFollowsLinks(t *testing.T) {
+	const decl = "[tools]\ngo = \"1.22.12\"\n"
+	link := func(to string) *fstest.MapFile {
+		return &fstest.MapFile{Mode: fs.ModeSymlink, Data: []byte(to)}
+	}
+	files := fstest.MapFS{
+		"shared.lock":     {Data: []byte("")},
+		"a/mise.toml":     {Data: []byte(decl)},
+		"a/mise.lock":     link("../shared.lock"),
+		"b/mise.toml":     {Data: []byte(decl)},
+		"b/mise.lock":     link("../shared.lock"),
+		"c/mise.toml":     {Data: []byte(decl)},
+		"c/mise.lock":     link("../b/mise.lock"),
+		"own/mise.toml":   {Data: []byte(decl)},
+		"own/mise.lock":   {Data: []byte("")},
+		"plain/mise.toml": {Data: []byte(decl)},
+	}
+	tests := []struct {
+		name       string
+		configPath string
+		want       []string
+	}{
+		{
+			// Every config whose lockfile resolves to shared.lock, including
+			// the one that gets there through a second link.
+			name:       "configs linked to one target share it",
+			configPath: "a/mise.toml",
+			want:       []string{"a/mise.toml", "b/mise.toml", "c/mise.toml"},
+		},
+		{
+			name:       "a chained link lands on the same target",
+			configPath: "c/mise.toml",
+			want:       []string{"a/mise.toml", "b/mise.toml", "c/mise.toml"},
+		},
+		{
+			// A regular lockfile at its own path is nobody else's.
+			name:       "a config with its own lockfile shares with nobody",
+			configPath: "own/mise.toml",
+			want:       []string{"own/mise.toml"},
+		},
+		{
+			// A lockfile that does not exist yet still resolves to its own
+			// path, so the config is alone rather than an error.
+			name:       "a config with no lockfile yet shares with nobody",
+			configPath: "plain/mise.toml",
+			want:       []string{"plain/mise.toml"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ConfigsSharingLock(files, tt.configPath)
+			if err != nil {
+				t.Fatalf("ConfigsSharingLock: %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("ConfigsSharingLock(%q) = %q, want %q", tt.configPath, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestResolveLinkedPath pins the resolution both the lockfile reader and the
+// lockfile writer share. A link that leaves the tree, or one that never lands,
+// is refused rather than followed, so neither side can be talked into reading
+// or publishing outside the repository being scanned.
+func TestResolveLinkedPath(t *testing.T) {
+	link := func(to string) *fstest.MapFile {
+		return &fstest.MapFile{Mode: fs.ModeSymlink, Data: []byte(to)}
+	}
+	files := fstest.MapFS{
+		"shared.lock":  {Data: []byte("")},
+		"a/mise.lock":  link("../shared.lock"),
+		"b/mise.lock":  link("../a/mise.lock"),
+		"abs.lock":     link("/etc/passwd"),
+		"escape.lock":  link("../../outside.lock"),
+		"cycle.lock":   link("cycle2.lock"),
+		"cycle2.lock":  link("cycle.lock"),
+		"regular.lock": {Data: []byte("")},
+	}
+	tests := []struct {
+		name       string
+		path       string
+		want       string
+		wantLinked bool
+		wantErr    bool
+	}{
+		{name: "a regular file is itself", path: "regular.lock", want: "regular.lock"},
+		{name: "a missing file is itself", path: "absent.lock", want: "absent.lock"},
+		{name: "one hop", path: "a/mise.lock", want: "shared.lock", wantLinked: true},
+		{name: "a chain", path: "b/mise.lock", want: "shared.lock", wantLinked: true},
+		{name: "an absolute target is refused", path: "abs.lock", wantErr: true},
+		{name: "a target outside the tree is refused", path: "escape.lock", wantErr: true},
+		{name: "a cycle is refused", path: "cycle.lock", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, linked, err := ResolveLinkedPath(files, tt.path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ResolveLinkedPath(%q) = %q, want an error", tt.path, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveLinkedPath(%q): %v", tt.path, err)
+			}
+			if got != tt.want || linked != tt.wantLinked {
+				t.Errorf("ResolveLinkedPath(%q) = (%q, %v), want (%q, %v)", tt.path, got, linked, tt.want, tt.wantLinked)
+			}
+		})
+	}
+}
+
 // TestLockClaims pins that ownership of a shared lock entry is counted over
 // every config sharing the lockfile. Counting only the fragment being read
 // makes a name look uncontested when a fragment beside it claims it too, and

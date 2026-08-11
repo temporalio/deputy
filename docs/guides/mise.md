@@ -203,7 +203,10 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
   counted across every config sharing the lockfile, not just the one being
   edited, since a `mise` directory's `config.toml` and all of its `conf.d`
   drop-ins write to one `mise.lock`; a sharing config Deputy cannot read or
-  parse counts as a claimant. An uncontested
+  parse counts as a claimant. Sharing is decided on the file a config's
+  lockfile path resolves to, so directories whose `mise.lock` symlinks point at
+  one shared file all count as claimants of its entries, matching where the fix
+  publishes its edit. An uncontested
   legacy entry is pruned even when the exact key is locked too, because lock
   resolution would otherwise fall back to it and hand the fixed tool its old
   version back. After applying, run `mise install` to install the

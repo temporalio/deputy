@@ -2207,3 +2207,181 @@ checksum = "sha256:legacyfoo"
 		})
 	}
 }
+
+// TestApplyMiseUpdateSymlinkedSharedLock pins ownership of a lock entry that
+// several config directories share through symlinks. mise resolves a config's
+// lockfile through the link: with a/mise.toml declaring node = "20", b/mise.toml
+// declaring go = "1.22", and both a/mise.lock and b/mise.lock symlinked to one
+// ../shared.lock recording 20.11.0 and 1.22.12, mise 2026.7.3 reports
+//
+//	node  20.11.0 (missing)  /private/tmp/miselink/a/mise.toml  20
+//	go    1.22.12 (missing)  /private/tmp/miselink/b/mise.toml  1.22
+//
+// so the entries in that file belong to two directories at once. Counting
+// claimants by listing the directory beside the link therefore counts the
+// wrong set: the fix publishes its edit through the link to the shared target,
+// where the other config's declaration is the one that loses its integrity
+// metadata.
+func TestApplyMiseUpdateSymlinkedSharedLock(t *testing.T) {
+	t.Parallel()
+
+	const legacyLock = `[[tools.foo]]
+version = "1.0.0"
+backend = "ubi:foo"
+
+[tools.foo.platforms.linux-x64]
+checksum = "sha256:legacyfoo"
+`
+	tests := []struct {
+		name string
+		// files are configs to write, by repository-relative path.
+		files map[string]string
+		// links map a repository-relative lockfile path to the link text it
+		// holds; the shared target is written at sharedLock.
+		links map[string]string
+		// wantKept says the legacy short-name entry must survive because
+		// another config sharing the target could own it.
+		wantKept bool
+	}{
+		{
+			// b/mise.toml resolves to the same lockfile and strips to the same
+			// short name, so the legacy entry may be its own.
+			name: "a config sharing the link target contests the short name",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				"b/mise.toml": "[tools]\n\"ubi:foo\" = \"1.0.0\"\n",
+			},
+			links:    map[string]string{"a/mise.lock": "../shared.lock", "b/mise.lock": "../shared.lock"},
+			wantKept: true,
+		},
+		{
+			// A config beside the target itself claims the name too.
+			name: "the target's own directory contests the short name",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				"mise.toml":   "[tools]\nfoo = \"1.0.0\"\n",
+			},
+			links:    map[string]string{"a/mise.lock": "../mise.lock"},
+			wantKept: true,
+		},
+		{
+			// Nothing else resolves to the target, so the stale entry is the
+			// edited tool's and has to go.
+			name: "a lone config owns the short name",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				"b/mise.toml": "[tools]\n\"ubi:bar\" = \"2.0.0\"\n",
+			},
+			links: map[string]string{"a/mise.lock": "../shared.lock", "b/mise.lock": "../shared.lock"},
+		},
+		{
+			// A config resolving to a different lockfile claims nothing here.
+			name: "a config with its own lockfile does not contest",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				"b/mise.toml": "[tools]\n\"ubi:foo\" = \"1.0.0\"\n",
+			},
+			links: map[string]string{"a/mise.lock": "../shared.lock"},
+		},
+		{
+			// A config sharing the target that will not parse is exactly the
+			// one that might have claimed the name.
+			name: "an unparsable sharing config is contested, not absent",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				"b/mise.toml": "[tools\nbroken\n",
+			},
+			links:    map[string]string{"a/mise.lock": "../shared.lock", "b/mise.lock": "../shared.lock"},
+			wantKept: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			write := func(rel, content string) {
+				t.Helper()
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, content := range tt.files {
+				write(rel, content)
+			}
+			// The shared target is named mise.lock so a config beside it
+			// resolves there lexically, which is what makes that directory a
+			// claimant in its own right.
+			target := "shared.lock"
+			if _, ok := tt.files["mise.toml"]; ok {
+				target = "mise.lock"
+			}
+			write(target, legacyLock)
+			for rel, to := range tt.links {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(to), full); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+
+			cmd := `deputy:mise:update a/mise.toml "npm:foo" 1.0.1 1.0.0`
+			if err := ApplyDeputyCommand(dir, cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			lock, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(target)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kept := strings.Contains(string(lock), "sha256:legacyfoo"); kept != tt.wantKept {
+				t.Errorf("legacy entry kept = %v, want %v:\n%s", kept, tt.wantKept, lock)
+			}
+
+			// What the next scan sees. Pruning and enrichment answer "who owns
+			// this name" with the same count, so an entry kept here as
+			// contested must also be one the extractor refuses to borrow;
+			// otherwise the fixed tool comes back reporting its old version.
+			fsys := fstest.MapFS{target: &fstest.MapFile{Data: lock}}
+			for rel := range tt.files {
+				data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				fsys[rel] = &fstest.MapFile{Data: data}
+			}
+			for rel, to := range tt.links {
+				fsys[rel] = &fstest.MapFile{Mode: os.ModeSymlink, Data: []byte(to)}
+			}
+			const configRel = "a/mise.toml"
+			f, err := fsys.Open(configRel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv, err := misex.New().Extract(t.Context(), &filesystem.ScanInput{
+				Path:   configRel,
+				Reader: f,
+				FS:     fsys,
+			})
+			if err != nil {
+				t.Fatalf("Extract: %v", err)
+			}
+			var got string
+			for _, pkg := range inv.Packages {
+				if pkg.Name == "npm:foo" {
+					got = pkg.Version
+				}
+			}
+			if got != "1.0.1" {
+				t.Errorf("extractor reports npm:foo %q after fix, want 1.0.1\nlock:\n%s", got, lock)
+			}
+		})
+	}
+}

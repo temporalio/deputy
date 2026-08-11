@@ -525,11 +525,6 @@ func replaceFileAtomically(root *os.Root, relPath string, content []byte, perm o
 	return nil
 }
 
-// maxSymlinkHops bounds symlink resolution so a cyclic or absurdly deep chain
-// ends in an error instead of looping. The limit is generous next to any real
-// repository layout; the operating system's own limit is typically far lower.
-const maxSymlinkHops = 32
-
 // resolveLinkTarget returns the path a replacement should be published to: the
 // regular file relPath ultimately names, following any in-repository symlink
 // chain. Renaming over a link's own pathname would swap the link for a regular
@@ -538,37 +533,14 @@ const maxSymlinkHops = 32
 // gets the version the fix just removed, while the repository silently loses
 // the layout choice the link expressed.
 //
-// Each hop is read through the os.Root, and a target that is absolute or
-// climbs out of the repository is refused rather than followed, so resolution
-// cannot be talked into publishing outside the tree being fixed. A path that
-// does not exist resolves to itself: there is no link to follow, and the
-// caller is creating the file.
+// The chain is followed by [mise.ResolveLinkedPath], the same resolution that
+// decides which configs share a lockfile, so the file whose claimants were
+// counted is the file this writes to. Resolution runs against the os.Root's
+// own filesystem, so it cannot be talked into publishing outside the tree
+// being fixed.
 func resolveLinkTarget(root *os.Root, relPath string) (string, error) {
-	for range maxSymlinkHops {
-		info, err := root.Lstat(relPath)
-		if errors.Is(err, fs.ErrNotExist) {
-			return relPath, nil
-		}
-		if err != nil {
-			return "", fmt.Errorf("stat %s: %w", relPath, err)
-		}
-		if info.Mode()&fs.ModeSymlink == 0 {
-			return relPath, nil
-		}
-		target, err := root.Readlink(relPath)
-		if err != nil {
-			return "", fmt.Errorf("reading link %s: %w", relPath, err)
-		}
-		if filepath.IsAbs(target) {
-			return "", fmt.Errorf("refusing to replace %s: it links to the absolute path %s", relPath, target)
-		}
-		next := path.Join(path.Dir(relPath), filepath.ToSlash(target))
-		if next == ".." || strings.HasPrefix(next, "../") {
-			return "", fmt.Errorf("refusing to replace %s: it links outside the repository via %s", relPath, target)
-		}
-		relPath = next
-	}
-	return "", fmt.Errorf("resolving %s: more than %d symbolic links", relPath, maxSymlinkHops)
+	target, _, err := mise.ResolveLinkedPath(root.FS(), relPath)
+	return target, err
 }
 
 // createUniqueTemp opens a new file that no other process holds, in the same
