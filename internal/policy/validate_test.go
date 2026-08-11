@@ -1317,18 +1317,43 @@ policies:
 	}
 }
 
-// TestValidateBundleReportsIndependentDefects pins that a defect the format
-// refuses does not withhold the diagnostics for an unrelated one. Anchors,
+// TestValidateBundleReportsIndependentDefects pins that one defect does not
+// withhold the diagnostics for an unrelated one anywhere in a document. Anchors,
 // aliases, and merge keys are refused wherever they appear, but refusing them is
 // a diagnostic like any other: it must not cost the author a lint run per defect
 // on parts of the document that are written plainly and read the same either
-// way.
+// way. A policy's vars are independent of its rules for the same reason, since
+// they are wrong or right on their own.
 func TestValidateBundleReportsIndependentDefects(t *testing.T) {
 	cases := []struct {
 		name      string
 		bundle    string
 		wantCodes []string
 	}{
+		{
+			name: "a var holding invalid CEL beside a bad action",
+			bundle: `
+policies:
+  - name: bad-var-and-action
+    vars:
+      threshold: '1 +'
+    rules:
+      - when: "true"
+        action: dney
+        reason: "r"
+`,
+			wantCodes: []string{"invalid-action", "cel-error"},
+		},
+		{
+			name: "a var name CEL cannot bind beside a missing rules list",
+			bundle: `
+policies:
+  - name: bad-var-name-and-no-rules
+    vars:
+      not-an-identifier: '1'
+`,
+			wantCodes: []string{"missing-rules", "cel-error"},
+		},
 		{
 			name: "an anchored field beside a bad action in the same policy",
 			bundle: `

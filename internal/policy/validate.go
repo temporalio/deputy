@@ -290,10 +290,14 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 		}
 		located := validatePolicyNode(item, seenNames, opts)
 		issues = append(issues, located...)
-		// A policy the walk already located an error in is not expanded: its
+		// A policy the walk already located an error in is not expanded whole: its
 		// expansion is expected to fail too, and restating that failure in
 		// generated CEL the author never wrote would only obscure the real defect.
+		// Its vars are still compiled, since they are a defect of their own and
+		// expansion stops at the first failure, which would leave them unreported
+		// until the located one is fixed and lint rerun.
 		if slices.ContainsFunc(located, func(is Issue) bool { return is.Severity == IssueError }) {
+			issues = append(issues, varExpansionIssues(item, opts.ExtraVars)...)
 			continue
 		}
 		issues = append(issues, expandedPolicyIssues(item, source, opts.ExtraVars, located)...)
@@ -345,6 +349,36 @@ func expandedPolicyIssues(item *yaml.Node, source string, extraVars []string, lo
 	if err := Compile(body, extraVars); err != nil {
 		issue := issueAt(item, IssueError, "cel-error", err.Error())
 		issue.Policy = pol.Name
+		return []Issue{issue}
+	}
+	return nil
+}
+
+// varExpansionIssues reports the vars of one policy that do not compile. It
+// exists for the policy the walk already found an error in, which is not
+// expanded whole: expansion stops at its first failure, so a rule the walk has
+// already reported would hide an uncompilable var behind it and hand the author
+// the var only after the rule is fixed. Wrapping an empty body in the policy's
+// vars asks the one question the located issue leaves open.
+//
+// It reports only what nothing else owns. A policy that does not decode, and a
+// var name that is empty or duplicated, are already reported by the walk, so
+// neither is restated here.
+func varExpansionIssues(item *yaml.Node, extraVars []string) []Issue {
+	var pol structuredPolicy
+	if err := item.Decode(&pol); err != nil {
+		return nil
+	}
+	if len(pol.Vars) == 0 {
+		return nil
+	}
+	body, err := pol.wrapVars("[]")
+	if err != nil {
+		return nil
+	}
+	if err := Compile(body, extraVars); err != nil {
+		issue := issueAt(item, IssueError, "cel-error", err.Error())
+		issue.Policy = strings.TrimSpace(pol.Name)
 		return []Issue{issue}
 	}
 	return nil

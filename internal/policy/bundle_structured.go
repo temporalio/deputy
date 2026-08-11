@@ -298,24 +298,9 @@ func (p structuredPolicy) toCELSource() (string, error) {
 		builder.WriteString(" + ")
 		builder.WriteString(expr)
 	}
-	body := builder.String()
-	if len(p.Vars) > 0 {
-		seen := map[string]struct{}{}
-		for _, kv := range p.Vars {
-			if strings.TrimSpace(kv.Name) == "" {
-				return "", fmt.Errorf("vars must have non-empty names")
-			}
-			if _, ok := seen[kv.Name]; ok {
-				return "", fmt.Errorf("duplicate var name %q", kv.Name)
-			}
-			seen[kv.Name] = struct{}{}
-		}
-		// expand vars in reverse author order so earlier vars are in scope for later ones
-		for _, v := range slices.Backward(p.Vars) {
-			name := v.Name
-			expr := v.exprString()
-			body = fmt.Sprintf("([%s]).map(%s, %s)[0]", expr, name, body)
-		}
+	body, err := p.wrapVars(builder.String())
+	if err != nil {
+		return "", err
 	}
 	metadata := []string{}
 	if p.Name != "" {
@@ -340,6 +325,35 @@ func (p structuredPolicy) toCELSource() (string, error) {
 		return body, nil
 	}
 	return strings.Join(metadata, "\n") + "\n" + body, nil
+}
+
+// wrapVars binds a policy's variables around a CEL body, one comprehension per
+// variable in reverse author order so an earlier var is in scope for a later
+// one. Names have to be unique and non-empty, since a duplicate would silently
+// shadow the binding before it.
+//
+// It is separate from the rest of the expansion because a policy's vars are
+// wrong or right on their own: validation wraps an empty body with it to report
+// vars that do not compile in a policy whose rules the walk has already found a
+// defect in, which the whole-policy expansion cannot do.
+func (p structuredPolicy) wrapVars(body string) (string, error) {
+	if len(p.Vars) == 0 {
+		return body, nil
+	}
+	seen := map[string]struct{}{}
+	for _, kv := range p.Vars {
+		if strings.TrimSpace(kv.Name) == "" {
+			return "", fmt.Errorf("vars must have non-empty names")
+		}
+		if _, ok := seen[kv.Name]; ok {
+			return "", fmt.Errorf("duplicate var name %q", kv.Name)
+		}
+		seen[kv.Name] = struct{}{}
+	}
+	for _, v := range slices.Backward(p.Vars) {
+		body = fmt.Sprintf("([%s]).map(%s, %s)[0]", v.exprString(), v.Name, body)
+	}
+	return body, nil
 }
 
 // toRuleExpr converts a structured rule into a CEL expression string.
