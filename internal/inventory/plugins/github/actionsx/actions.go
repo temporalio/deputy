@@ -218,8 +218,11 @@ func (s *parseState) handleUses(ctx context.Context, parentPath string, usesStr 
 		return []*extractor.Package{dockerPackageFromRef(after, parentPath)}, nil
 	}
 
-	// Local action or reusable workflow.
-	if strings.HasPrefix(usesStr, "./") || strings.HasPrefix(usesStr, "../") {
+	// Local action or reusable workflow. The $/ prefix is GitHub's
+	// self-repository syntax: it resolves repo-root-relative at the exact
+	// commit the workflow is running, so like ./ it is an in-repo reference
+	// to recurse into, never a remote package.
+	if strings.HasPrefix(usesStr, "./") || strings.HasPrefix(usesStr, "../") || strings.HasPrefix(usesStr, "$/") {
 		for _, target := range s.resolveLocalCandidates(parentPath, usesStr) {
 			if target == "" {
 				continue
@@ -350,6 +353,17 @@ func splitDockerRef(ref string) (name, version string, hasDigest bool) {
 // declaring file for compatibility with existing repositories.
 func (s *parseState) resolveLocalCandidates(parentPath, rel string) []string {
 	rel = filepath.ToSlash(strings.TrimSpace(rel))
+
+	// Self-repository references ($/path) are defined repo-root-relative,
+	// so no parent-relative fallback applies.
+	if after, ok := strings.CutPrefix(rel, "$/"); ok {
+		candidate := path.Clean(after)
+		if candidate == "." || candidate == ".." || strings.HasPrefix(candidate, "../") {
+			return nil
+		}
+		return []string{candidate}
+	}
+
 	rel = strings.TrimPrefix(rel, "./")
 	rootCandidate := path.Clean(rel)
 	if rootCandidate == "." {

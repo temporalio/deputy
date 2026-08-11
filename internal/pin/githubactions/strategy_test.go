@@ -209,6 +209,51 @@ runs:
 	}
 }
 
+// Self-repository references ($/) resolve to the running commit, so they are
+// pinned by construction: Discover must not emit them as pinnable refs (an
+// owner of "$" would otherwise hit the GitHub API during resolution).
+func TestStrategy_DiscoverSkipsSelfRepositoryRefs(t *testing.T) {
+	fsys := testMapFS(map[string]string{
+		".github/workflows/ci.yml": `
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/my-action
+      - uses: actions/checkout@v4`,
+		"my-action/action.yml": `
+name: My Action
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v3`,
+	})
+
+	s := &Strategy{}
+	refs, err := s.Discover(t.Context(), fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawCheckout, sawCache bool
+	for _, r := range refs {
+		if strings.HasPrefix(r.Name, "$") {
+			t.Errorf("self-repository reference leaked into pinnable refs: %+v", r)
+		}
+		if r.Name == "actions/checkout" {
+			sawCheckout = true
+		}
+		if r.Name == "actions/cache" {
+			sawCache = true
+		}
+	}
+	if !sawCheckout || !sawCache {
+		t.Errorf("expected remote refs alongside the skipped self reference, got: %v", refNames(refs))
+	}
+}
+
 func TestStrategy_DiscoverSubpathAction(t *testing.T) {
 	fsys := testMapFS(map[string]string{
 		".github/workflows/ci.yml": `
@@ -443,4 +488,49 @@ func testResolver(refs []refEntry) *Resolver {
 		return refs, nil
 	}
 	return r
+}
+
+// TestStrategy_DiscoverAttributesNestedRefToDeclaringFile pins where a
+// recursively discovered ref is reported. A workflow referencing a composite
+// action pulls in that action's own uses statements, and each must name the
+// file it appears in. Attributing them to the workflow makes pin rewrite the
+// wrong file, and when the action sits under a skipped directory it is the
+// only result, so pin would report success while leaving the ref unpinned.
+func TestStrategy_DiscoverAttributesNestedRefToDeclaringFile(t *testing.T) {
+	fsys := testMapFS(map[string]string{
+		".github/workflows/ci.yml": `
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/tools/build`,
+		"tools/build/action.yml": `
+name: build
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5`,
+	})
+
+	s := &Strategy{}
+	refs, err := s.Discover(t.Context(), fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var found bool
+	for _, r := range refs {
+		if r.Name != "actions/setup-go" {
+			continue
+		}
+		found = true
+		if r.FilePath != "tools/build/action.yml" {
+			t.Errorf("FilePath = %q, want tools/build/action.yml (the file the uses appears in)", r.FilePath)
+		}
+	}
+	if !found {
+		t.Fatalf("actions/setup-go not discovered through the composite action; refs: %v", refNames(refs))
+	}
 }

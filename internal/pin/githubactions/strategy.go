@@ -235,8 +235,10 @@ func (s *Strategy) scanActionManifest(
 			continue
 		}
 		usesStr = strings.TrimSpace(usesStr)
-		if usesStr == "" || strings.HasPrefix(usesStr, "./") || strings.HasPrefix(usesStr, "../") || strings.HasPrefix(usesStr, "docker://") {
-			continue // local or docker — skip
+		if usesStr == "" || strings.HasPrefix(usesStr, "./") || strings.HasPrefix(usesStr, "../") || strings.HasPrefix(usesStr, "$/") || strings.HasPrefix(usesStr, "docker://") {
+			// Local, self-repository ($/ resolves to the running commit, so it
+			// is already pinned by construction), or docker: nothing to pin.
+			continue
 		}
 
 		// Parse remote action reference: owner/repo[/subpath]@ref
@@ -401,8 +403,21 @@ func (s *Strategy) Rewrite(root *os.Root, relPath string, updates []pin.Update) 
 	return RewriteWorkflow(root, relPath, updates)
 }
 
-// packageToRef converts an extractor.Package from the actionsx extractor to
+// packageToRef converts an extractor.Package from the actionsx extractor into
 // a pin.Ref. Returns nil for non-GitHub-Actions packages (docker, local).
+//
+// relPath is the file the extraction pass started from and is only a fallback.
+// The extractor recurses into local composite actions and reusable workflows
+// and records each declaring file in pkg.Locations, so a ref must be named
+// from Locations: pin groups rewrites by FilePath, and naming the entry file
+// for an action declared elsewhere rewrites a file that does not contain the
+// ref, which silently pins nothing while still counting as pinned.
+//
+// Locations is a list because the extractor dedupes packages by
+// type+name+subpath+version and merges their locations, so [0] is the first
+// declaring file in traversal order. When an action is declared in more than
+// one file reached by a single pass, the remaining locations are dropped here;
+// see #134.
 func packageToRef(pkg *extractor.Package, relPath string) *pin.Ref {
 	if !purlx.IsGitHubActionsType(pkg.PURLType) {
 		return nil // docker or other type
@@ -418,12 +433,17 @@ func packageToRef(pkg *extractor.Package, relPath string) *pin.Ref {
 		subpath = md.Subpath
 	}
 
+	filePath := relPath
+	if len(pkg.Locations) > 0 && strings.TrimSpace(pkg.Locations[0]) != "" {
+		filePath = pkg.Locations[0]
+	}
+
 	return &pin.Ref{
 		Ecosystem: Ecosystem,
 		Name:      owner + "/" + repo,
 		Subpath:   subpath,
 		Version:   pkg.Version,
-		FilePath:  relPath,
+		FilePath:  filePath,
 		Raw:       rawFromMetadata(pkg),
 	}
 }
@@ -435,4 +455,3 @@ func rawFromMetadata(pkg *extractor.Package) string {
 	}
 	return ""
 }
-
