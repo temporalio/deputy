@@ -221,13 +221,17 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		return Result{}, err
 	}
 
+	// An SBOM inventories every ecosystem Deputy extracts, so its direct
+	// dependency set has to come from every ecosystem's manifests too. The
+	// Go-only collectors left each npm, Cargo, and PyPI component marked
+	// indirect, which is what a policy scoped to direct dependencies reads.
 	var directDeps map[string]bool
 	switch {
 	case strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0"):
-		directDeps = compare.CollectGoDirectModulesFromWorkspace(src.Workspace())
+		directDeps = compare.CollectDirectDependenciesFromWorkspace(src.Workspace())
 	default:
 		if hash, err := gitx.ResolveRevisionEnhanced(src.Repo, effRef); err == nil {
-			directDeps, _ = compare.CollectGoDirectModulesFromCommit(src.Repo, *hash)
+			directDeps, _ = compare.CollectDirectDependenciesFromCommit(src.Repo, *hash)
 		}
 	}
 

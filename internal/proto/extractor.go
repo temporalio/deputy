@@ -97,9 +97,12 @@ func ExtractorPackageIsDirect(pkg *extractor.Package, direct map[string]bool) bo
 }
 
 // ExtractorPackageToProto converts an OSV-SCALIBR extractor.Package to proto Package.
-// The direct map indicates which packages are direct dependencies. For Go packages,
-// the map keys are module roots (e.g., "github.com/google/osv-scalibr"). For other
-// ecosystems, keys are PURL strings.
+// The direct map indicates which packages are direct dependencies, keyed by the
+// name a package goes by in its own ecosystem: a module root for Go (e.g.
+// "github.com/google/osv-scalibr"), a scoped package name for npm, a crate name
+// for Cargo, and a normalized distribution name for PyPI. Ecosystems with no
+// rule of their own are keyed by PURL string. ExtractorPackageIsDirect builds
+// the key, and compare.CollectDirectDependenciesFromWorkspace produces the map.
 func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *dependencyv1.Package {
 	if pkg == nil {
 		return nil

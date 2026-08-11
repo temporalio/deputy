@@ -44,8 +44,12 @@ func isVendoredManifestPath(p string) bool {
 
 // CollectDirectDependenciesFromWorkspace scans the workspace for manifest files
 // across multiple ecosystems and extracts direct dependencies. Returns a map
-// where keys are package identifiers (PURLs for non-Go, module paths for Go)
-// and values indicate if the dependency is direct (true) or indirect (false).
+// keyed by the name a package goes by in its own ecosystem: a module path for
+// Go, a scoped package name for npm, a crate name for Cargo, and a normalized
+// distribution name for PyPI. Values indicate if the dependency is direct
+// (true) or indirect (false). Lookups go through
+// proto.ExtractorPackageIsDirect, which builds the same key from a scanned
+// package.
 //
 // Supported ecosystems:
 //   - Go (go.mod)
