@@ -153,11 +153,11 @@ func LooksLikeStructuredBundle(data []byte) bool {
 // reads, so the probe and the loader cannot drift apart.
 const bundlePoliciesKey = "policies"
 
-// unparsedBundleKey matches the bundle's policies key written at the top level
-// of a document, in raw text. It is deliberately a last resort: YAML that parses
-// is always probed by walking its nodes, and this runs only for a document the
-// parser rejected outright, where no structure is available to walk.
-var unparsedBundleKey = regexp.MustCompile(`(?m)^` + yamlKeyPattern(bundlePoliciesKey) + `[ \t]*:`)
+// unparsedBundleKey matches the bundle's policies key at the start of a line, in
+// raw text. It is deliberately a last resort: YAML that parses is always probed
+// by walking its nodes, and this runs only for a document the parser rejected
+// outright, where no structure is available to walk.
+var unparsedBundleKey = regexp.MustCompile(`^` + yamlKeyPattern(bundlePoliciesKey) + `[ \t]*:`)
 
 // yamlKeyPattern returns a regexp fragment matching a YAML mapping key in each
 // of the three ways a document can spell it: bare, single-quoted, and
@@ -173,8 +173,30 @@ func yamlKeyPattern(key string) string {
 // writesBundleKey reports whether raw text writes the bundle's policies key at
 // the top level, which is how a document the YAML parser rejected is still
 // recognized as an authored bundle with a syntax error in it.
+//
+// A root key may be indented, as long as the whole document is: YAML fixes a
+// mapping's indentation at its first key, so nothing above a root key is less
+// indented than it. That is what tells an indented bundle apart from a nested
+// policies key, and from the raw CEL where the same spelling is a map literal
+// keyed inside an expression that started further left.
 func writesBundleKey(data []byte) bool {
-	return unparsedBundleKey.Match(data)
+	rootIndent := -1
+	for line := range strings.Lines(string(data)) {
+		body := strings.TrimLeft(line, " \t")
+		// A blank line carries no indentation, and a comment may sit at any, so
+		// neither says where the document's keys begin.
+		if strings.TrimSpace(body) == "" || strings.HasPrefix(body, "#") {
+			continue
+		}
+		indent := len(line) - len(body)
+		if rootIndent < 0 || indent < rootIndent {
+			rootIndent = indent
+		}
+		if indent == rootIndent && unparsedBundleKey.MatchString(body) {
+			return true
+		}
+	}
+	return false
 }
 
 // hasMappingKey reports whether a YAML mapping node carries a key, whatever its

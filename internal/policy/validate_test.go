@@ -1040,8 +1040,35 @@ func TestLooksLikeStructuredBundle(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "an indented bundle key preceding a syntax error",
+			data: "  policies:\n    - name: broken\n      rules: [\n",
+			want: true,
+		},
+		{
+			name: "an indented bundle key below a comment, preceding a syntax error",
+			data: "# a bundle\n  policies:\n    - name: broken\n      rules: [\n",
+			want: true,
+		},
+		{
+			name: "an indented bundle key in a document that parses",
+			data: "  policies:\n    - name: p\n      rules:\n        - when: \"true\"\n          action: deny\n          reason: r\n",
+			want: true,
+		},
+		{
 			name: "a document whose unparsed key only starts with the bundle key",
 			data: "policiesx:\n  - name: broken\n    rules: [\n",
+		},
+		{
+			name: "a nested policies key in a document that does not parse",
+			data: "wrapper:\n  policies:\n    - name: broken\n      rules: [\n",
+		},
+		{
+			name: "raw CEL whose map literal keys the bundle key",
+			data: "// policy: legacy\npkg.name in {\"policies\": [\"left-pad\"]}.policies\n  ? [{\"action\": \"deny\"}]\n  : []\n",
+		},
+		{
+			name: "raw CEL whose map literal keys the bundle key on its own line",
+			data: "// policy: legacy\nsize(request.x) > 0 && {\n  \"policies\": [\"left-pad\"]\n}.policies.size() > 0\n  ? [{\"action\": \"deny\"}]\n  : []\n",
 		},
 		{
 			name: "a document that quotes a key the bundle does not have",
