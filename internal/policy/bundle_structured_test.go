@@ -80,6 +80,61 @@ func TestOrderedVarsRejectDuplicateNames(t *testing.T) {
 	}
 }
 
+// TestLoaderNormalizesVarNames pins that the loader reads a variable name the
+// way validation and CEL do, with surrounding whitespace trimmed. CEL binds
+// " blocked " and "blocked" as the one identifier, so a bundle declaring both
+// shadows one with the other; validation calls that a duplicate, and a loader
+// that compared the raw spellings would compile a bundle the linter rejects.
+func TestLoaderNormalizesVarNames(t *testing.T) {
+	cases := []struct {
+		name       string
+		vars       string
+		wantErr    string
+		wantInBody string
+	}{
+		{
+			name:       "a padded name binds the trimmed identifier",
+			vars:       "      \" blocked \": '[\"left-pad\"]'\n",
+			wantInBody: ".map(blocked,",
+		},
+		{
+			name:    "a padded name duplicating a bare one is rejected",
+			vars:    "      blocked: '[\"left-pad\"]'\n      \" blocked \": '[\"right-pad\"]'\n",
+			wantErr: `duplicate var name "blocked"`,
+		},
+		{
+			name:    "a name that is only whitespace is rejected",
+			vars:    "      \"  \": '1'\n",
+			wantErr: "vars must have non-empty names",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := "policies:\n  - name: vars\n    vars:\n" + tc.vars +
+				"    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n"
+			sources, err := ParseStructuredSources([]byte(bundle), "bundle.yaml")
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got sources %+v", tc.wantErr, sources)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error %q missing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseStructuredSources: %v", err)
+			}
+			if len(sources) != 1 {
+				t.Fatalf("expected one source, got %d", len(sources))
+			}
+			if !strings.Contains(sources[0].Body, tc.wantInBody) {
+				t.Fatalf("body %q missing %q", sources[0].Body, tc.wantInBody)
+			}
+		})
+	}
+}
+
 // TestStructuredPolicyValidatesActionVocabulary pins that a rule action outside
 // the allow/deny/warn vocabulary is a load-time error, and that casing and
 // surrounding whitespace are normalized rather than rejected.

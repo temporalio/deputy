@@ -714,6 +714,20 @@ policies:
 `,
 		},
 		{
+			name: "var names that differ only by surrounding whitespace",
+			bundle: `
+policies:
+  - name: padded-var-names
+    vars:
+      blocked: '["left-pad"]'
+      " blocked ": '["right-pad"]'
+    rules:
+      - when: "pkg.name in blocked"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
 			name: "a policies list supplied by a root merge key",
 			bundle: `
 defaults: &defaults
@@ -905,6 +919,19 @@ policies:
     rules:
       - when: "true"
         action: warn
+        reason: "r"
+`,
+		},
+		{
+			name: "a var name padded with whitespace",
+			bundle: `
+policies:
+  - name: padded-var-name
+    vars:
+      " blocked ": '["left-pad"]'
+    rules:
+      - when: "pkg.name in blocked"
+        action: deny
         reason: "r"
 `,
 		},

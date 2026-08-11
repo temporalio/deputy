@@ -475,7 +475,7 @@ func validateVars(item *yaml.Node) []Issue {
 	seen := map[string]struct{}{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := node.Content[i]
-		name := strings.TrimSpace(key.Value)
+		name := normalizeVarName(key.Value)
 		if key.Kind != yaml.ScalarNode || name == "" {
 			issues = append(issues, issueAt(key, IssueError, "empty-var-name", "vars must have non-empty names"))
 			continue
@@ -680,8 +680,10 @@ func DeclaredVarNames(policyNode *yaml.Node) []string {
 	}
 	for i := 0; i+1 < len(varsNode.Content); i += 2 {
 		k := varsNode.Content[i]
-		if k.Kind == yaml.ScalarNode && !isMergeKey(k) && strings.TrimSpace(k.Value) != "" {
-			names = append(names, k.Value)
+		if k.Kind == yaml.ScalarNode && !isMergeKey(k) && normalizeVarName(k.Value) != "" {
+			// The name is normalized because the expansion binds the normalized
+			// spelling, and a condition is compiled against the names it can use.
+			names = append(names, normalizeVarName(k.Value))
 		}
 	}
 	return names

@@ -57,8 +57,19 @@ func (kv varKV) exprString() string {
 	return string(b)
 }
 
+// normalizeVarName trims surrounding whitespace from a variable name, so that
+// "blocked" and " blocked " are the one name they read as. A var name becomes a
+// CEL identifier, and CEL reads the padded spelling as the bare one, so the two
+// bind the same variable and the second shadows the first. Validation reports
+// that as a duplicate, so every reader has to fold them together or a bundle the
+// linter rejects would still compile.
+func normalizeVarName(name string) string {
+	return strings.TrimSpace(name)
+}
+
 // UnmarshalYAML implements the yaml.Unmarshaler interface to decode a mapping
-// into an ordered list of key-value pairs.
+// into an ordered list of key-value pairs. Variable names are normalized as they
+// are read, so every reader of a bundle sees the name CEL will bind.
 func (o *orderedVars) UnmarshalYAML(node *yaml.Node) error {
 	if node == nil {
 		return nil
@@ -77,6 +88,7 @@ func (o *orderedVars) UnmarshalYAML(node *yaml.Node) error {
 		if err := k.Decode(&kv.Name); err != nil {
 			return err
 		}
+		kv.Name = normalizeVarName(kv.Name)
 		// Detect string vs other scalars/collections
 		if v.Kind == yaml.ScalarNode && v.Tag == "!!str" {
 			if err := v.Decode(&kv.Value); err != nil {
@@ -111,7 +123,7 @@ func (o *orderedVars) UnmarshalJSON(data []byte) error {
 	for _, k := range keys {
 		val := m[k]
 		_, isString := val.(string)
-		out = append(out, varKV{Name: k, Value: val, IsString: isString})
+		out = append(out, varKV{Name: normalizeVarName(k), Value: val, IsString: isString})
 	}
 	*o = out
 	return nil
