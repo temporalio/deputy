@@ -9,6 +9,7 @@ import (
 
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	"github.com/temporalio/deputy/internal/proto/descriptorset"
+	"github.com/temporalio/deputy/internal/purlx"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -271,6 +272,70 @@ func TestCanonicalizeIdentityFields(t *testing.T) {
 			want:    map[string]any{"pkg": map[string]any{"ecosystem": "go", "name": "k8s.io/ingress-nginx", "version": "(devel)"}},
 		},
 		{
+			name: "cargo purl name folds with the package name",
+			payload: map[string]any{"pkg": map[string]any{
+				"ecosystem": "crates.io", "name": "serde-json", "version": "1.0.0",
+				"purl": "pkg:cargo/serde-json@1.0.0",
+			}},
+			want: map[string]any{"pkg": map[string]any{
+				"ecosystem": "cargo", "name": "serde_json", "version": "1.0.0",
+				"purl": "pkg:cargo/serde_json@1.0.0",
+			}},
+		},
+		{
+			name: "go purl version gains the v prefix with the package version",
+			payload: map[string]any{"pkg": map[string]any{
+				"ecosystem": "Go", "name": "github.com/aws/aws-sdk-go", "version": "1.44.0",
+				"purl": "pkg:golang/github.com/aws/aws-sdk-go@1.44.0",
+			}},
+			want: map[string]any{"pkg": map[string]any{
+				"ecosystem": "go", "name": "github.com/aws/aws-sdk-go", "version": "v1.44.0",
+				"purl": "pkg:golang/github.com/aws/aws-sdk-go@v1.44.0",
+			}},
+		},
+		{
+			name: "purl qualifiers and subpath survive the rewrite",
+			payload: map[string]any{"pkg": map[string]any{
+				"ecosystem": "Go", "name": "github.com/foo/bar", "version": "1.0.0",
+				"purl": "pkg:golang/github.com/foo/bar@1.0.0?repository_url=proxy.golang.org#subpkg",
+			}},
+			want: map[string]any{"pkg": map[string]any{
+				"ecosystem": "go", "name": "github.com/foo/bar", "version": "v1.0.0",
+				"purl": "pkg:golang/github.com/foo/bar@v1.0.0?repository_url=proxy.golang.org#subpkg",
+			}},
+		},
+		{
+			name: "purl of another type than the ecosystem is left alone",
+			payload: map[string]any{"pkg": map[string]any{
+				"ecosystem": "crates.io", "name": "serde-json",
+				"purl": "pkg:github/Acme/Serde-Json@v1",
+			}},
+			want: map[string]any{"pkg": map[string]any{
+				"ecosystem": "cargo", "name": "serde_json",
+				"purl": "pkg:github/Acme/Serde-Json@v1",
+			}},
+		},
+		{
+			name: "unparseable purl is left alone",
+			payload: map[string]any{"pkg": map[string]any{
+				"ecosystem": "crates.io", "name": "serde-json", "purl": "not a purl",
+			}},
+			want: map[string]any{"pkg": map[string]any{
+				"ecosystem": "cargo", "name": "serde_json", "purl": "not a purl",
+			}},
+		},
+		{
+			name: "npm purl needs no folding and keeps its scope encoding",
+			payload: map[string]any{"pkg": map[string]any{
+				"ecosystem": "npm", "name": "@types/node", "version": "20.0.0",
+				"purl": "pkg:npm/%40types/node@20.0.0",
+			}},
+			want: map[string]any{"pkg": map[string]any{
+				"ecosystem": "npm", "name": "@types/node", "version": "20.0.0",
+				"purl": "pkg:npm/%40types/node@20.0.0",
+			}},
+		},
+		{
 			name: "advisory fixed versions inherit the finding's package ecosystem",
 			payload: map[string]any{"vulnerability": map[string]any{
 				"advisory_id": "GHSA-x",
@@ -404,6 +469,19 @@ func TestCanonicalizeLeavesCallerDataAlone(t *testing.T) {
 				"ecosystem":  "go",
 				"version":    "v1.0.0",
 				"provenance": map[string]any{"version": "1.0.0", "ecosystem": "Customer_Success"},
+			}},
+		},
+		{
+			name: "a free-form entry named purl survives",
+			payload: map[string]any{"node": map[string]any{
+				"ecosystem":  "crates.io",
+				"purl":       "pkg:cargo/serde-json@1.0.0",
+				"provenance": map[string]any{"purl": "pkg:cargo/serde-json@1.0.0"},
+			}},
+			want: map[string]any{"node": map[string]any{
+				"ecosystem":  "cargo",
+				"purl":       "pkg:cargo/serde_json@1.0.0",
+				"provenance": map[string]any{"purl": "pkg:cargo/serde-json@1.0.0"},
 			}},
 		},
 		{
@@ -710,7 +788,6 @@ func TestScalibrEcosystemGuardMatchesScannerSpelling(t *testing.T) {
 var notPackageIdentity = map[string]string{
 	"advisory":      "an advisory identifier attributed to a subject, not a package name",
 	"ecosystem":     "the ecosystem itself, canonicalized before the identity fields",
-	"purl":          "a complete package URL, not a bare name or version",
 	"id":            "an advisory identifier",
 	"aliases":       "advisory identifiers",
 	"artifact":      "an advisory coverage subject, not a resolved package",
@@ -733,10 +810,10 @@ var notPackageIdentity = map[string]string{
 
 // TestIdentityKeysCoverSchema derives the check from the proto descriptors:
 // every string field on a message that declares an ecosystem must be classified
-// as a package name, a package version, or explicitly not part of a package
-// identity. The descriptor set covers all of Deputy's protos, not just the ones
-// linked into this test binary, so a new field cannot hide in an unimported
-// package.
+// as a package name, a package version, a package URL, or explicitly not part
+// of a package identity. The descriptor set covers all of Deputy's protos, not
+// just the ones linked into this test binary, so a new field cannot hide in an
+// unimported package.
 func TestIdentityKeysCoverSchema(t *testing.T) {
 	versionKeys := append(slices.Clone(packageVersionKeys), "fixed_versions")
 
@@ -760,13 +837,13 @@ func TestIdentityKeysCoverSchema(t *testing.T) {
 					continue
 				}
 				name := string(f.Name())
-				if slices.Contains(packageNameKeys, name) || slices.Contains(versionKeys, name) {
+				if slices.Contains(packageNameKeys, name) || slices.Contains(versionKeys, name) || slices.Contains(packagePURLKeys, name) {
 					continue
 				}
 				if _, known := notPackageIdentity[name]; known {
 					continue
 				}
-				t.Errorf("%s.%s is a string field on a message that declares an ecosystem but is not classified: add it to packageNameKeys or packageVersionKeys if it holds a package identity, or to notPackageIdentity with the reason it does not", md.FullName(), name)
+				t.Errorf("%s.%s is a string field on a message that declares an ecosystem but is not classified: add it to packageNameKeys, packageVersionKeys, or packagePURLKeys if it holds a package identity, or to notPackageIdentity with the reason it does not", md.FullName(), name)
 			}
 		})
 		return true
@@ -829,6 +906,91 @@ func TestPayloadNamesCollapseEquivalentSpellings(t *testing.T) {
 				if got := pkg["name"]; got != tt.want {
 					t.Errorf("name %q canonicalized to %v, want %q", spelling, got, tt.want)
 				}
+			}
+		})
+	}
+}
+
+// TestPURLAgreesWithIdentityFields pins the invariant the PURL rewrite exists
+// for: after canonicalization, the package a policy reads through
+// purl(pkg.purl) is the package it reads through pkg.name and pkg.version. The
+// PURL is parsed with the same library the purl() CEL helper uses, and its
+// namespace is rejoined with its name because a PURL splits an identity that
+// the name field carries whole (pkg:golang/github.com/aws + aws-sdk-go).
+// Before the rewrite, a Cargo PURL kept the unfolded "serde-json" and a Go PURL
+// kept an unprefixed version, so an exact-match rule matched or missed
+// depending only on which representation it read.
+func TestPURLAgreesWithIdentityFields(t *testing.T) {
+	tests := []struct {
+		name      string
+		ecosystem string
+		pkgName   string
+		version   string
+		purl      string
+	}{
+		{
+			name:      "cargo name folds",
+			ecosystem: "crates.io",
+			pkgName:   "serde-json",
+			version:   "1.0.0",
+			purl:      "pkg:cargo/serde-json@1.0.0",
+		},
+		{
+			name:      "go version gains its prefix",
+			ecosystem: "Go",
+			pkgName:   "github.com/aws/aws-sdk-go",
+			version:   "1.44.0",
+			purl:      "pkg:golang/github.com/aws/aws-sdk-go@1.44.0",
+		},
+		{
+			name:      "pypi name folds",
+			ecosystem: "PyPI",
+			pkgName:   "Flask_SQLAlchemy",
+			version:   "3.1.1",
+			purl:      "pkg:pypi/Flask_SQLAlchemy@3.1.1",
+		},
+		{
+			name:      "npm scope survives",
+			ecosystem: "npm",
+			pkgName:   "@types/node",
+			version:   "20.0.0",
+			purl:      "pkg:npm/%40types/node@20.0.0",
+		},
+		{
+			name:      "maven coordinates survive",
+			ecosystem: "Maven",
+			pkgName:   "org.apache/commons",
+			version:   "1.0",
+			purl:      "pkg:maven/org.apache/commons@1.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := map[string]any{"pkg": map[string]any{
+				"ecosystem": tt.ecosystem,
+				"name":      tt.pkgName,
+				"version":   tt.version,
+				"purl":      tt.purl,
+			}}
+			canonicalizeEcosystemPayload(payload)
+			pkg, ok := payload["pkg"].(map[string]any)
+			if !ok {
+				t.Fatalf("pkg is %T, want map", payload["pkg"])
+			}
+			parsed, err := purlx.ParseLoose(pkg["purl"].(string))
+			if err != nil {
+				t.Fatalf("canonicalized purl %q no longer parses: %v", pkg["purl"], err)
+			}
+			purlName := parsed.Name
+			if parsed.Namespace != "" {
+				purlName = parsed.Namespace + "/" + parsed.Name
+			}
+			if want := pkg["name"]; purlName != want && "@"+purlName != want {
+				t.Errorf("purl names %q but the package names %q", purlName, want)
+			}
+			if want := pkg["version"]; parsed.Version != want {
+				t.Errorf("purl version %q, package version %q", parsed.Version, want)
 			}
 		})
 	}
