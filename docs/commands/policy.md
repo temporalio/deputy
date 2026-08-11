@@ -69,7 +69,8 @@ policy that lints clean is a policy the editor considers clean:
 
 - `action` values outside `allow|deny|warn`
 - unknown `entrypoints` and `commands`
-- duplicate policy names, compared with surrounding whitespace trimmed
+- duplicate policy names and duplicate var names, compared with surrounding
+  whitespace trimmed, since that is the name CEL binds and loading reads
 - a `policies` key that is missing, empty, or not a list
 - rules missing `when` or `action`, and `deny`/`warn` rules with no `reason`
 - invalid `mode`, malformed `vars`, and conditions that do not compile
@@ -86,8 +87,16 @@ independent defect so a file is fixed once instead of a lint at a time. Each
 policy is walked and expanded on its own, so nothing about one policy withholds
 another policy's diagnostics: a field only the decoder refuses, such as a rule
 `status` written as a string, and an anchor written anywhere in the document
-are both reported alongside the rest of the bundle. What a defect does suppress
-is that one policy's expanded CEL, whose failure would only restate it.
+are both reported alongside the rest of the bundle, as are the bundle-level
+fields that belong to no single policy.
+
+What a defect suppresses is narrow. A policy the walk already reported is not
+expanded as a whole, since that failure would only restate the defect in
+generated CEL, but its vars are still compiled because they are wrong or right
+on their own. And a policy is skipped only where lint cannot read it: an alias
+or a merge key puts part of the policy somewhere else, while an anchor
+definition says what it says where it is written, so the policy around it is
+checked like any other.
 
 An optional field written as an explicit null (`mode:`, `mode: null`, `mode:
 ~`) is read as unset, exactly as loading the bundle reads it.

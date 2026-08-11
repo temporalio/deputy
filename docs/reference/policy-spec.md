@@ -94,6 +94,9 @@ Canonical entrypoints (snake_case):
 ### Validation
 - Empty `policies` or missing `rules` is invalid; each policy must have at least one rule.
 - Policy names must be unique within a bundle.
+- Policy names and var names are read with surrounding whitespace trimmed, so
+  `blocked` and `" blocked "` are one name and declaring both is a duplicate. A
+  var name is a CEL identifier, which is why the two spellings cannot differ.
 - String vars are CEL expressions; non-string values are treated as literals. Rules must include `action` and `when`.
 - `action` must be `allow`, `deny`, or `warn`.
 - `mode`, if set, must be `enforce` or `advisory`.
@@ -109,8 +112,15 @@ line and the alternatives. That includes a bundle whose `policies` key is not
 written directly but arrives through a top-level merge key. A refused anchor
 does not stop the rest of the checks: lint reports it alongside any unrelated
 defect in the policies written plainly, including the CEL those policies expand
-into. Removing the anchor is not a prerequisite for seeing the rest of the
-report.
+into and the bundle-level fields around them. Removing the anchor is not a
+prerequisite for seeing the rest of the report.
+
+What lint does skip is only what it cannot read. An alias, and a mapping that
+merges another one in, say part of what they mean somewhere else, so lint has
+nothing at hand to describe and reports the construct alone. An anchor
+definition (`description: &text foo`) is not that: the value is written where a
+reader looks for it, so it is refused and everything around it is still
+checked.
 
 This is closed for now, not closed forever. Nothing prevents Deputy from
 resolving these constructs, and the decision can be revisited if a real need
