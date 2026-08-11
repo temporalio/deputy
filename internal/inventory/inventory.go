@@ -496,18 +496,28 @@ func filterExternalEcosystems(names []string) []string {
 // plugin group names that upstream plugin resolution understands (cargo ->
 // rust, npm -> javascript, pypi -> python, maven -> java). Deputy's canonical
 // vocabulary is what every surface emits (purl types, finding ecosystems, CLI
-// help), so filters must accept it; a name the registry does not recognize
-// passes through verbatim so raw SCALIBR group names (haskell, r, cpp) and
-// exact plugin names keep working.
+// help), so filters must accept it; a name Deputy does not recognize at all
+// passes through verbatim so exact SCALIBR plugin names keep working.
+//
+// Resolution goes through [ecosystem.Canonical], not [ecosystem.Parse], because
+// a token outside the capability registry is still a Deputy ecosystem with a
+// SCALIBR group of its own: Parse does not know "hackage", so a caller that
+// canonicalized "haskell" first got its own token handed to SCALIBR, which has
+// no plugin by that name and failed the scan. A name Canonical does not
+// recognize is passed on exactly as it arrived, never in its normalized form,
+// so a plugin name Deputy has no opinion about is not reshaped on the way
+// through.
 func scalibrEcosystemNames(names []string) []string {
 	if names == nil {
 		return nil
 	}
 	out := make([]string, 0, len(names))
 	for _, name := range names {
-		if prefixes := ecosystem.Parse(name).ScalibrPrefixes(); len(prefixes) > 0 {
-			out = append(out, prefixes...)
-			continue
+		if token, known := ecosystem.Canonical(name); known {
+			if prefixes := ecosystem.Ecosystem(token).ScalibrPrefixes(); len(prefixes) > 0 {
+				out = append(out, prefixes...)
+				continue
+			}
 		}
 		out = append(out, name)
 	}

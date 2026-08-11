@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/plugin"
+
 	"github.com/temporalio/deputy/internal/ecosystem"
 )
 
@@ -61,6 +62,59 @@ func TestResolvePluginsAcceptsCanonicalEcosystemNames(t *testing.T) {
 			}
 			if len(plugins) == 0 {
 				t.Fatalf("resolvePlugins(%q) returned no plugins", eco)
+			}
+		})
+	}
+}
+
+// TestEveryCanonicalEcosystemResolvesToPlugins derives the filter contract from
+// the canonical vocabulary instead of restating part of it: every name Deputy
+// accepts as an ecosystem has to reach a scanner, whether it gets there through
+// a SCALIBR plugin group or through one of Deputy's own extractors.
+//
+// The listed form of this test could not have caught the defect it now guards.
+// Callers that canonicalize before filtering (every MCP tool does) turned
+// "haskell", "r", and "cpp" into "hackage", "cran", and "conancenter", which
+// are the right Deputy tokens and not SCALIBR plugin groups, so a scan filtered
+// to any of them failed with unknown plugin instead of scanning.
+func TestEveryCanonicalEcosystemResolvesToPlugins(t *testing.T) {
+	cap := &plugin.Capabilities{OS: plugin.OSLinux}
+	for _, token := range ecosystem.CanonicalEcosystems() {
+		t.Run(token, func(t *testing.T) {
+			plugins, err := resolvePlugins(ScanOptions{Ecosystems: []string{token}}, cap)
+			if err != nil {
+				t.Fatalf("resolvePlugins(%q): %v", token, err)
+			}
+			if len(plugins) == 0 {
+				t.Fatalf("resolvePlugins(%q) returned no plugins", token)
+			}
+		})
+	}
+}
+
+// TestScalibrGroupNamesSurviveCanonicalization pins the round trip that broke:
+// a raw SCALIBR group name that is also an ecosystem alias must still select
+// that group's plugins after canonicalization, because the two spellings name
+// one thing and a caller may send either.
+func TestScalibrGroupNamesSurviveCanonicalization(t *testing.T) {
+	tests := []struct {
+		name      string
+		spellings []string
+		want      []string
+	}{
+		{name: "haskell", spellings: []string{"haskell", "hackage", "Hackage", "cabal", "stack"}, want: []string{"haskell"}},
+		{name: "r", spellings: []string{"r", "cran", "CRAN", "renv"}, want: []string{"r"}},
+		{name: "cpp", spellings: []string{"cpp", "c++", "conan", "conancenter", "ConanCenter"}, want: []string{"cpp"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, spelling := range tt.spellings {
+				canonical := ecosystem.CanonicalOrRaw(spelling)
+				got := scalibrEcosystemNames([]string{canonical})
+				if !slices.Equal(got, tt.want) {
+					t.Errorf("scalibrEcosystemNames(Canonical(%q)=%q) = %v, want %v", spelling, canonical, got, tt.want)
+				}
 			}
 		})
 	}
