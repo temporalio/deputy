@@ -833,7 +833,7 @@ An object that does not name an ecosystem of its own belongs to the one that con
 
 Free-form key/value maps are never rewritten. `jwt.custom_claims`, container image `labels`, `target.provenance`, and an advisory's `database_specific` hold caller- or source-supplied data, so an entry that happens to be named `ecosystem` or `version` reaches a policy exactly as it arrived.
 
-The `<unknown>` sentinel described below is never normalized.
+The `<unknown>` sentinel described below is never normalized, and neither is a string that is not a version: an unstamped Go binary reports its main module as `(devel)`, so `pkg.version == "(devel)"` still matches.
 
 ## Proxy version semantics
 

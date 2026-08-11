@@ -266,6 +266,11 @@ func TestCanonicalizeIdentityFields(t *testing.T) {
 			want:    map[string]any{"request": map[string]any{"ecosystem": "go", "name": "example.com/m", "version": UnknownVersion, "has_version": false}},
 		},
 		{
+			name:    "go development-build sentinel survives",
+			payload: map[string]any{"pkg": map[string]any{"ecosystem": "Go", "name": "k8s.io/ingress-nginx", "version": "(devel)"}},
+			want:    map[string]any{"pkg": map[string]any{"ecosystem": "go", "name": "k8s.io/ingress-nginx", "version": "(devel)"}},
+		},
+		{
 			name: "advisory fixed versions inherit the finding's package ecosystem",
 			payload: map[string]any{"vulnerability": map[string]any{
 				"advisory_id": "GHSA-x",

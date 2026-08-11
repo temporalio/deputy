@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	pb "deps.dev/api/v3"
+	"golang.org/x/mod/semver"
 )
 
 // Ecosystem represents a supported package ecosystem.
@@ -130,12 +131,18 @@ func (e Ecosystem) WantsLicenseLookup() bool {
 
 // NormalizeVersion applies ecosystem-specific version normalization.
 // For Go, it ensures versions have a "v" prefix.
+//
+// The prefix is only added to a string that is a Go version once prefixed.
+// Scanners report unversioned builds with non-version sentinels, SCALIBR's
+// gobinary extractor emitting the literal "(devel)" for an unstamped main
+// module, and "v(devel)" is neither a version nor the sentinel a policy or a
+// comparison matches on.
 func (e Ecosystem) NormalizeVersion(version string) string {
 	v := strings.TrimSpace(version)
 	if v == "" {
 		return ""
 	}
-	if e == Go && !strings.HasPrefix(v, "v") {
+	if e == Go && !strings.HasPrefix(v, "v") && semver.IsValid("v"+v) {
 		return "v" + v
 	}
 	return v
