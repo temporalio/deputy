@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"path"
 	"strings"
 
@@ -27,6 +28,60 @@ var manifestDirectDepParsers = map[string]func([]byte) map[string]bool{
 	"Cargo.toml":       getCargoDirectDeps,
 	"pyproject.toml":   getPyprojectDirectDeps,
 	"requirements.txt": getRequirementsDirectDeps,
+}
+
+// manifestWorkspaceAliasParsers maps manifest basenames to the parser that
+// extracts the renames a workspace declares for its members to inherit, keyed
+// by the name a member inherits them under. A workspace dependency table is a
+// menu, not a dependency list, so nothing in it is direct until a member takes
+// it; a member's own manifest records that. What a member's manifest cannot
+// spell is a rename, because it names the alias and the workspace names the
+// crate, so the renames are carried to the end of the walk and applied to the
+// aliases members actually took. Ecosystems with no inheritance mechanism have
+// no entry here.
+var manifestWorkspaceAliasParsers = map[string]func([]byte) map[string]string{
+	"Cargo.toml": getCargoWorkspaceAliases,
+}
+
+// collectManifestDependencies applies whichever parsers are registered for a
+// manifest's basename to its contents, accumulating direct dependencies and
+// workspace aliases. Both collection paths go through it so the workspace walk
+// and the commit-tree walk cannot drift in coverage. The contents are read
+// through read only once a parser wants them, and a file that fails to read is
+// skipped best-effort.
+func collectManifestDependencies(name string, read func() ([]byte, error), direct map[string]bool, aliases map[string]string) {
+	base := path.Base(name)
+	parseDeps, hasDeps := manifestDirectDepParsers[base]
+	parseAliases, hasAliases := manifestWorkspaceAliasParsers[base]
+	if !hasDeps && !hasAliases {
+		return
+	}
+	if isVendoredManifestPath(name) {
+		return
+	}
+	data, err := read()
+	if err != nil {
+		return
+	}
+	if hasDeps {
+		mergeDirectDependencies(direct, parseDeps(data))
+	}
+	if hasAliases {
+		maps.Copy(aliases, parseAliases(data))
+	}
+}
+
+// resolveWorkspaceAliases records the crate behind every workspace rename a
+// member actually inherited. An alias no member names stays out of the direct
+// set, which is the whole point: a version declared centrally for inheritance
+// is not by itself a dependency of anything, and counting it as one marks a
+// transitive lockfile package direct in the SBOM and in pkg.direct.
+func resolveWorkspaceAliases(direct map[string]bool, aliases map[string]string) {
+	for alias, crate := range aliases {
+		if direct[alias] {
+			direct[crate] = true
+		}
+	}
 }
 
 // isVendoredManifestPath reports whether a slash-separated manifest path lies
@@ -71,6 +126,7 @@ func CollectDirectDependenciesFromWorkspace(ws workspace.FS) map[string]bool {
 
 	// Start with Go direct dependencies (handles stdlib specially)
 	direct := CollectGoDirectModulesFromWorkspace(ws)
+	aliases := make(map[string]string)
 
 	// Walk workspace looking for other ecosystem manifests
 	_ = fs.WalkDir(ws, ".", func(p string, d fs.DirEntry, err error) error {
@@ -84,17 +140,13 @@ func CollectDirectDependenciesFromWorkspace(ws workspace.FS) map[string]bool {
 			}
 			return nil
 		}
-		parse, ok := manifestDirectDepParsers[path.Base(p)]
-		if !ok || isVendoredManifestPath(p) {
-			return nil
-		}
-		data, err := ws.ReadFile(p)
-		if err != nil {
-			return nil
-		}
-		mergeDirectDependencies(direct, parse(data))
+		collectManifestDependencies(p, func() ([]byte, error) { return ws.ReadFile(p) }, direct, aliases)
 		return nil
 	})
+
+	// A workspace rename resolves only once the whole tree has been seen: the
+	// member that inherits the alias and the root that defines it are two files.
+	resolveWorkspaceAliases(direct, aliases)
 
 	return direct
 }
@@ -122,21 +174,21 @@ func CollectDirectDependenciesFromCommit(repo *git.Repository, hash plumbing.Has
 	if err != nil {
 		return nil, fmt.Errorf("getting tree for commit %s: %w", hash, err)
 	}
+	aliases := make(map[string]string)
 	err = tree.Files().ForEach(func(f *object.File) error {
-		parse, ok := manifestDirectDepParsers[path.Base(f.Name)]
-		if !ok || isVendoredManifestPath(f.Name) {
-			return nil
-		}
-		contents, err := f.Contents()
-		if err != nil {
-			return nil
-		}
-		mergeDirectDependencies(direct, parse([]byte(contents)))
+		collectManifestDependencies(f.Name, func() ([]byte, error) {
+			contents, err := f.Contents()
+			if err != nil {
+				return nil, err
+			}
+			return []byte(contents), nil
+		}, direct, aliases)
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("walking commit tree: %w", err)
 	}
+	resolveWorkspaceAliases(direct, aliases)
 	return direct, nil
 }
 
@@ -209,11 +261,14 @@ func (t cargoDependencyTables) tables() []map[string]any {
 	return []map[string]any{t.Dependencies, t.DevDependencies, t.BuildDependencies}
 }
 
-// cargoManifest is the slice of Cargo.toml that declares dependencies: the
-// package's own tables, the per-target tables a platform-conditional
-// dependency lives in, and the workspace tables a root manifest shares with
-// its members. Every one of them is a place a project declares a dependency
-// itself, so every one of them is direct.
+// cargoManifest is the slice of Cargo.toml that bears on direct dependencies:
+// the package's own tables, the per-target tables a platform-conditional
+// dependency lives in, and the workspace tables a root manifest offers its
+// members. The first two are places a project declares a dependency itself, so
+// they are direct. The workspace tables are not: an entry there is a version
+// available for inheritance, and a member has to reference it with
+// "workspace = true" before anything depends on it. See
+// [getCargoWorkspaceAliases].
 type cargoManifest struct {
 	cargoDependencyTables
 	Target    map[string]cargoDependencyTables `toml:"target"`
@@ -231,7 +286,7 @@ func getCargoDirectDeps(data []byte) map[string]bool {
 		return deps
 	}
 
-	sections := []cargoDependencyTables{manifest.cargoDependencyTables, manifest.Workspace}
+	sections := []cargoDependencyTables{manifest.cargoDependencyTables}
 	for _, target := range manifest.Target {
 		sections = append(sections, target)
 	}
@@ -244,6 +299,41 @@ func getCargoDirectDeps(data []byte) map[string]bool {
 	}
 
 	return deps
+}
+
+// getCargoWorkspaceAliases returns the crate each [workspace.dependencies]
+// entry renames, keyed by the name a member inherits it under. Only renamed
+// entries are returned: a member that writes "serde.workspace = true" records
+// "serde" from its own manifest already, while one that writes
+// "my-serde.workspace = true" records a key crates.io has never heard of, and
+// only the workspace manifest knows it means "serde".
+//
+// The entries themselves are deliberately not dependencies. Including the whole
+// table marked a crate direct because its version happened to be declared
+// centrally, even when no member inherited it and the lockfile only carries it
+// as somebody else's transitive dependency.
+func getCargoWorkspaceAliases(data []byte) map[string]string {
+	var manifest cargoManifest
+	if err := toml.Unmarshal(data, &manifest); err != nil {
+		return nil
+	}
+	aliases := make(map[string]string)
+	for _, table := range manifest.Workspace.tables() {
+		for name, entry := range table {
+			details, isTable := entry.(map[string]any)
+			if !isTable {
+				continue
+			}
+			renamed, _ := details["package"].(string)
+			alias := ecosystem.Cargo.NameEquivalenceKey(name)
+			crate := ecosystem.Cargo.NameEquivalenceKey(renamed)
+			if alias == "" || crate == "" || alias == crate {
+				continue
+			}
+			aliases[alias] = crate
+		}
+	}
+	return aliases
 }
 
 // recordCargoDependency records the crate names a single Cargo.toml dependency
