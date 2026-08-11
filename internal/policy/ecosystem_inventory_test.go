@@ -112,11 +112,10 @@ func TestShippedPolicyFiresOnRealDiffPath(t *testing.T) {
 	targetPkgs := scanGoModule(t, "module example.com/demo\n\ngo 1.24\n\nrequire github.com/aws/aws-sdk-go v1.44.0\n")
 
 	changes := compare.ComparePackages(basePkgs, targetPkgs, nil, nil, nil)
-	protoChanges := internalproto.PackageChangesToProto(changes)
-	if len(protoChanges) != 1 {
-		t.Fatalf("expected exactly one dependency change, got %d: %v", len(protoChanges), changes)
+	if len(changes) != 1 {
+		t.Fatalf("expected exactly one dependency change, got %d: %v", len(changes), changes)
 	}
-	change := protoChanges[0]
+	change := changes[0]
 	if got := change.GetPackage().GetEcosystem(); got != "Go" {
 		t.Fatalf("fixture precondition: raw ecosystem = %q, want the display form %q", got, "Go")
 	}
