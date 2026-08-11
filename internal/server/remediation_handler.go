@@ -791,10 +791,11 @@ const (
 // without executing or mutating anything. Prediction is the entire point of a
 // dry run, so it performs the same non-mutating validation the real path does,
 // in the same order: manifest path containment against workDir (stepExecDir),
-// the platform refusal, then command parsing and the manager executable
-// allowlist (remediation.ExecArgs). Without that, a step whose manifest path
-// escapes the work directory, or whose manager and command disagree, would be
-// reported as runnable and then fail for real.
+// the platform refusal, command parsing and the manager executable allowlist
+// (remediation.ExecArgs), then resolution of that executable on this host
+// (resolveExecutable). Without that, a step whose manifest path escapes the
+// work directory, whose manager and command disagree, or whose executable this
+// host does not have would be reported as runnable and then fail for real.
 //
 // Deputy-internal commands are applied in process rather than executed, so
 // ExecArgs does not apply to them. They go through remediation's own preflight
@@ -841,11 +842,19 @@ func dryRunStep(position, total int, workDir string, step *remediationv1.Step, t
 		return reject(errProcessTreeUnbounded)
 	}
 
-	if _, err := remediation.ExecArgs(remediation.Command{
+	args, err := remediation.ExecArgs(remediation.Command{
 		Manager:    step.GetManager(),
 		Command:    cmd,
 		Executable: step.GetExecutable(),
-	}); err != nil {
+	})
+	if err != nil {
+		return reject(err)
+	}
+
+	// Predict the refusal to start: an allowed executable that this host cannot
+	// resolve never runs, so reporting the step as runnable would promise work
+	// the run would refuse before it began.
+	if _, err := resolveExecutable(args[0]); err != nil {
 		return reject(err)
 	}
 
@@ -928,6 +937,44 @@ func stepExecDir(workDir string, step *remediationv1.Step) (string, error) {
 	return candidate, nil
 }
 
+// resolveExecutable resolves the executable a step's command names to a path on
+// this host, and refuses the step when it cannot. Execution and dry run both
+// resolve through here, so a preview cannot report a step as runnable that
+// execution would refuse to start, and both report the refusal identically.
+//
+// Without it, the resolution happens inside exec.CommandContext, which defers
+// the failure to the moment the command is started: too late for a dry run,
+// which has by then counted the step as one that would execute and satisfied
+// every step depending on it. Minimal CI images and isolated agent containers
+// routinely lack a package manager the plan's allowlist permits, so this is the
+// ordinary case, not a corner one.
+//
+// Resolving here buys agreement, not prediction. PATH and the filesystem are
+// free to change between a preview and the run it describes, so a step this
+// accepts can still fail to start later; what it rules out is the preview and
+// the run disagreeing about the same host at the same moment.
+//
+// The check belongs here rather than in remediation.ExecArgs because it asks a
+// question about this host: the sandboxed executor validates the same command
+// against the same allowlist and then runs it inside another filesystem, where
+// this process's PATH answers nothing.
+//
+// Only a bare name is searched, because that is the only case exec.Command
+// searches. A name carrying a separator is executed as written, relative to the
+// command's own directory rather than this process's, so resolving it here would
+// refuse a wrapper a real run would have found: ./gradlew in a subproject is the
+// standard way to invoke that manager.
+func resolveExecutable(name string) (string, error) {
+	if filepath.Base(name) != name {
+		return name, nil
+	}
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve executable %q: %w", name, err)
+	}
+	return path, nil
+}
+
 // executeStep runs a single remediation step and returns output.
 func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) (string, error) {
 	// Both execution paths must respect cancellation: exec.CommandContext
@@ -983,7 +1030,15 @@ func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) 
 	if err != nil {
 		return "", err
 	}
-	execCmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	execPath, err := resolveExecutable(args[0])
+	if err != nil {
+		return "", err
+	}
+	execCmd := exec.CommandContext(ctx, execPath, args[1:]...)
+	// exec.CommandContext would resolve the bare name itself and leave argv[0]
+	// as written; passing the resolved path skips the second lookup, so restore
+	// the name a tool inspecting its own argv would otherwise have seen.
+	execCmd.Args[0] = args[0]
 	execCmd.Dir = execDir
 
 	// Bound the whole process tree by the context, not just the direct child:

@@ -878,6 +878,116 @@ func TestExecutePlanStopOnErrorDryRunParity(t *testing.T) {
 	}
 }
 
+// TestResolveExecutableMatchesExecCommand pins that resolving a step's
+// executable answers the question exec.Command would answer, since predicting
+// its verdict is the only reason the dry run resolves at all. A bare name comes
+// from PATH and is refused when PATH does not have it; a name carrying a
+// separator is left as written, because exec.Command does not search for one
+// and runs it relative to the command's directory, which is not this process's.
+func TestResolveExecutableMatchesExecCommand(t *testing.T) {
+	// A directory holding one executable, reachable only through PATH, so the
+	// rows say exactly which lookup they exercise.
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "widgetpm"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		executable string
+		path       string // PATH for the row
+		wantPath   string // expected resolution; empty means "expect a refusal"
+	}{
+		{
+			name:       "bare name found on PATH resolves to its absolute path",
+			executable: "widgetpm",
+			path:       binDir,
+			wantPath:   filepath.Join(binDir, "widgetpm"),
+		},
+		{
+			name:       "bare name absent from PATH is refused",
+			executable: "widgetpm",
+			path:       t.TempDir(),
+		},
+		{
+			name:       "relative wrapper is left for the command's own directory",
+			executable: "./gradlew",
+			path:       t.TempDir(),
+			wantPath:   "./gradlew",
+		},
+		{
+			name:       "absolute path is left as written",
+			executable: filepath.Join(binDir, "widgetpm"),
+			path:       t.TempDir(),
+			wantPath:   filepath.Join(binDir, "widgetpm"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PATH", tt.path)
+			got, err := resolveExecutable(tt.executable)
+			if tt.wantPath == "" {
+				if err == nil {
+					t.Fatalf("resolveExecutable(%q) = %q, want a refusal", tt.executable, got)
+				}
+				if !strings.Contains(err.Error(), tt.executable) {
+					t.Errorf("refusal %v does not name the executable %q", err, tt.executable)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveExecutable(%q) failed: %v", tt.executable, err)
+			}
+			if got != tt.wantPath {
+				t.Errorf("resolveExecutable(%q) = %q, want %q", tt.executable, got, tt.wantPath)
+			}
+		})
+	}
+}
+
+// TestExecuteStepRunsRelativeWrapper is the behavioral half of the rule above:
+// a step invoking a wrapper checked into the subproject it edits still runs, and
+// the dry run still predicts that it would. Resolving the executable through
+// PATH unconditionally would refuse both, which is agreement on the wrong
+// answer.
+func TestExecuteStepRunsRelativeWrapper(t *testing.T) {
+	if !processTreeTerminationSupported {
+		t.Skip("this platform refuses external commands")
+	}
+	workDir := t.TempDir()
+	subproject := filepath.Join(workDir, "services", "api")
+	if err := os.MkdirAll(subproject, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subproject, "gradlew"), []byte("#!/bin/sh\necho wrapper ran\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile gradlew: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subproject, "build.gradle"), []byte("plugins {}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile build.gradle: %v", err)
+	}
+	step := &remediationv1.Step{
+		Id: "step-1", Title: "refresh dependencies",
+		Command: "./gradlew dependencies", Manager: "gradle", Executable: true,
+		ManifestPath: "services/api/build.gradle",
+	}
+
+	// An empty PATH proves the wrapper is not being found through it.
+	t.Setenv("PATH", t.TempDir())
+
+	message, outcome, rejectErr := dryRunStep(1, 1, workDir, step, processTreeTerminationSupported)
+	if outcome != dryRunWouldRun {
+		t.Fatalf("dry run outcome = %v (%q, %v), want dryRunWouldRun", outcome, message, rejectErr)
+	}
+	output, err := executeStep(t.Context(), workDir, step)
+	if err != nil {
+		t.Fatalf("executeStep failed: %v (output %q)", err, output)
+	}
+	if !strings.Contains(output, "wrapper ran") {
+		t.Fatalf("output %q does not show the wrapper ran", output)
+	}
+}
+
 // TestDryRunMatchesExecutionRejection pins that preflight and execution refuse
 // the same step for the same reason, with the same precedence. A dry run whose
 // verdict disagrees with the run it predicts is worse than no dry run: it
@@ -899,6 +1009,10 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 		// rows whose step must get past the check that its execution
 		// directory exists to reach the check under test.
 		dirs []string
+		// emptyPath runs the row with a PATH holding nothing, which is what a
+		// minimal CI image or an isolated agent container looks like to a step
+		// naming a package manager that was never installed.
+		emptyPath bool
 	}{
 		{
 			name:       "manifest path escaping the work directory",
@@ -928,6 +1042,13 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			wantReason: `manifest path "notadir/go.mod" does not name a directory`,
 		},
 		{
+			name:             "allowed executable that this host cannot resolve",
+			step:             &remediationv1.Step{Id: "step-1", Title: "tidy", Command: "go mod tidy", Manager: "go", Executable: true},
+			wantReason:       `cannot resolve executable "go"`,
+			needsProcessTree: true,
+			emptyPath:        true,
+		},
+		{
 			name:       "deputy command target escaping the work directory",
 			step:       &remediationv1.Step{Id: "step-1", Title: "pin elsewhere", Command: "deputy:action:update ../outside/ci.yml actions/checkout v4", Executable: true},
 			wantReason: `path traversal detected: ../outside/ci.yml escapes base directory`,
@@ -943,6 +1064,9 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.needsProcessTree && !processTreeTerminationSupported {
 				t.Skip("this platform refuses external commands before the check under test")
+			}
+			if tt.emptyPath {
+				t.Setenv("PATH", t.TempDir())
 			}
 			workDir := t.TempDir()
 			for _, dir := range tt.dirs {
