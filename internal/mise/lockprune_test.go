@@ -215,6 +215,79 @@ version = "20.11.0"
 	}
 }
 
+// TestPruneLockedVersionsReadsVersionLikeTheParser pins that the pruner reads a
+// lock entry's version the way [ParseLock] does. The two must agree: the plan
+// carries the version inventory reported, which came from the parser, so a
+// pruner that compares the raw bytes of an escaped token leaves the stale entry
+// behind and the next scan reports the freshly fixed config at the old version.
+//
+// A token the pruner cannot decode is a version it cannot call stale, so the
+// whole edit is refused rather than guessed at, even under a predicate that
+// calls every other version stale.
+func TestPruneLockedVersionsReadsVersionLikeTheParser(t *testing.T) {
+	tests := []struct {
+		name string
+		// token is the text following `version = ` in the entry.
+		token string
+		// want is the version ParseLock decodes from token, or "" when the
+		// lockfile does not parse at all.
+		want string
+		// prunable says whether the pruner may act on the entry.
+		prunable bool
+	}{
+		{name: "basic string", token: `"1.22.12"`, want: "1.22.12", prunable: true},
+		{name: "unicode escapes", token: `"1.22.\u0031\u0032"`, want: "1.22.12", prunable: true},
+		{name: "short escape", token: `"1.22.1\x32"`, want: "1.22.12", prunable: true},
+		{name: "literal string", token: `'1.22.12'`, want: "1.22.12", prunable: true},
+		{name: "multi-line basic string", token: `"""1.22.12"""`, want: "1.22.12", prunable: true},
+		{name: "multi-line literal string", token: `'''1.22.12'''`, want: "1.22.12", prunable: true},
+		{name: "trailing comment", token: `"1.22.12" # pinned`, want: "1.22.12", prunable: true},
+		// Undefined escapes make the file unreadable to the parser too, so
+		// there is nothing here the pruner is entitled to delete.
+		{name: "undefined escape", token: `"1.22.\q12"`, want: "", prunable: false},
+		// The value continues on a line the pruner has not gathered, so it has
+		// not seen the version and must not act on the entry.
+		{name: "value spanning lines", token: "\"\"\"\n1.22.12\"\"\"", want: "1.22.12", prunable: false},
+		{name: "unterminated string", token: `"1.22.12`, want: "", prunable: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lock := "[[tools.go]]\nversion = " + tt.token + "\nbackend = \"core:go\"\n"
+			if tt.want != "" {
+				lf, err := ParseLock("mise.lock", []byte(lock))
+				if err != nil {
+					t.Fatalf("ParseLock: %v", err)
+				}
+				if got := lf.Tools["go"][0].Version; got != tt.want {
+					t.Fatalf("ParseLock version = %q, want %q", got, tt.want)
+				}
+			}
+
+			got, changed := PruneLockedVersions([]byte(lock), []string{"go"}, func(v string) bool {
+				return v == tt.want
+			})
+			if changed != tt.prunable {
+				t.Fatalf("prune of %s: changed = %v, want %v\n%s", tt.want, changed, tt.prunable, got)
+			}
+			if changed && strings.Contains(string(got), "core:go") {
+				t.Errorf("stale entry survived:\n%s", got)
+			}
+
+			// The remediation path with no known current versions calls every
+			// version but the new one stale. An unreadable version must still
+			// not be deleted on that predicate.
+			got, changed = PruneLockedVersions([]byte(lock), []string{"go"}, func(string) bool { return true })
+			if changed != tt.prunable {
+				t.Fatalf("catch-all prune: changed = %v, want %v\n%s", changed, tt.prunable, got)
+			}
+			if !changed && string(got) != lock {
+				t.Errorf("content modified despite changed=false:\n%s", got)
+			}
+		})
+	}
+}
+
 func TestSplitKeyPath(t *testing.T) {
 	tests := []struct {
 		key  string

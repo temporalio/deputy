@@ -334,7 +334,7 @@ func replaceVersionInValueTargeting(value string, currents []string, pinned stri
 // leading whitespace, its value token, and the trailing whitespace and
 // comment, so the token can be swapped while the layout around it survives.
 //
-// The token is read with tomlStringEnd rather than matched as a quote pair,
+// The token is read with [mise.TOMLStringEnd] rather than matched as a quote pair,
 // because TOML has four string forms and mise resolves all of them: a
 // quote-pair reading of `go = """1.22.12"""` sees an empty string followed by
 // junk, so a fix the config can take is refused, and its multi-line spelling
@@ -348,7 +348,7 @@ func splitScalarValue(value string) (lead, token, trail string, ok bool) {
 	}
 	end := start
 	if c := value[start]; c == '"' || c == '\'' {
-		stringEnd, terminated := tomlStringEnd(value, start)
+		stringEnd, terminated := mise.TOMLStringEnd(value, start)
 		if !terminated {
 			return "", "", "", false
 		}
@@ -362,86 +362,6 @@ func splitScalarValue(value string) (lead, token, trail string, ok bool) {
 		return "", "", "", false
 	}
 	return value[:start], value[start:end], value[end:], true
-}
-
-// tomlStringEnd returns the offset just past the TOML string token that opens
-// at s[i], which must be a quote character. It covers all four of TOML's
-// string forms: the single-line basic and literal strings, which end at their
-// first unescaped closing quote and never span a line, and their multi-line
-// counterparts, which may. ok is false when the token is unterminated, which
-// is how a caller learns that the value continues on a line it has not
-// gathered yet or that the file is malformed.
-//
-// Every scanner in this file goes through it, so "where does this string end"
-// is answered once. Tracking quote state with a boolean toggle instead cannot
-// see a multi-line string at all: three quotes toggle it back to "inside", so
-// the scanner reads the string's contents as TOML and the delimiters as
-// nothing.
-func tomlStringEnd(s string, i int) (end int, ok bool) {
-	if i >= len(s) {
-		return 0, false
-	}
-	quote := s[i]
-	if quote != '"' && quote != '\'' {
-		return 0, false
-	}
-	if mise.IsMultilineStringOpener(s, i) {
-		return multilineStringEnd(s, i)
-	}
-	for j := i + 1; j < len(s); j++ {
-		switch s[j] {
-		case '\\':
-			if quote == '"' {
-				// A basic string's escape covers the next character, so an
-				// escaped quote does not close it. A literal string has no
-				// escapes, and its backslash is ordinary content.
-				j++
-			}
-		case '\n':
-			return 0, false
-		case quote:
-			return j + 1, true
-		}
-	}
-	return 0, false
-}
-
-// multilineStringEnd returns the offset just past the closing delimiter of the
-// multi-line TOML string whose opener sits at s[i].
-//
-// TOML lets one or two adjacent quote characters stand as content inside a
-// multi-line string, so the terminator is a run of three to five of them and
-// the delimiter is the last three of that run; a longer run has to be escaped
-// and is malformed here. Inside the basic form a backslash escapes the
-// character after it, so a run it introduces terminates nothing. ok is false
-// when no terminator is found, which for the gatherer means the value carries
-// on past the text it has read so far.
-func multilineStringEnd(s string, i int) (end int, ok bool) {
-	quote := s[i]
-	for j := i + 3; j < len(s); {
-		switch {
-		case quote == '"' && s[j] == '\\':
-			j += 2
-		case s[j] != quote:
-			j++
-		default:
-			run := 0
-			for j+run < len(s) && s[j+run] == quote {
-				run++
-			}
-			if run < 3 {
-				j += run
-				continue
-			}
-			if run > 5 {
-				// Three or more adjacent quotes must be escaped; this is not
-				// a string any TOML parser accepts.
-				return 0, false
-			}
-			return j + run, true
-		}
-	}
-	return 0, false
 }
 
 // isTomlSpace reports whether c is whitespace between TOML tokens. Newlines
@@ -659,7 +579,7 @@ func tomlDelimitersBalanced(s string) bool {
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; {
 		case c == '"' || c == '\'':
-			end, ok := tomlStringEnd(s, i)
+			end, ok := mise.TOMLStringEnd(s, i)
 			if !ok {
 				return !mise.IsMultilineStringOpener(s, i) && depth <= 0
 			}
@@ -869,7 +789,7 @@ func tomlValueSpan(s string, i int) int {
 		case c == '"' || c == '\'':
 			// A delimiter inside a string closes nothing, so skip the whole
 			// token. An unterminated one swallows the rest of the text.
-			end, ok := tomlStringEnd(s, j)
+			end, ok := mise.TOMLStringEnd(s, j)
 			if !ok {
 				return len(s)
 			}
@@ -936,7 +856,7 @@ func tomlValueEnd(s string, i int) int {
 	}
 	switch s[i] {
 	case '\'', '"':
-		if end, ok := tomlStringEnd(s, i); ok {
+		if end, ok := mise.TOMLStringEnd(s, i); ok {
 			return end
 		}
 		// An unterminated string swallows the rest of the text; there is no
@@ -1059,7 +979,7 @@ func splitTomlComment(s string) (before, comment string) {
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; {
 		case c == '"' || c == '\'':
-			end, ok := tomlStringEnd(s, i)
+			end, ok := mise.TOMLStringEnd(s, i)
 			if !ok {
 				return s, ""
 			}

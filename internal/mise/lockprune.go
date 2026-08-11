@@ -56,6 +56,7 @@ func PruneLockedVersions(content []byte, toolKeys []string, stale func(version s
 		// [tools.<key>...] headers attached to the preceding entry).
 		end := i + 1
 		version := ""
+		sawVersion := false
 		sawSubHeader := false
 		for end < len(lines) {
 			if segs2, isArr2, ok2 := lockHeaderPath(lines[end]); ok2 {
@@ -63,8 +64,20 @@ func PruneLockedVersions(content []byte, toolKeys []string, stale func(version s
 					break
 				}
 				sawSubHeader = true
-			} else if !sawSubHeader && version == "" {
-				version = lockEntryVersion(lines[end])
+			} else if !sawSubHeader && !sawVersion {
+				v, readable := lockEntryVersion(lines[end])
+				if !readable {
+					// A version this cannot decode is a version it cannot call
+					// stale, and a value that runs past this line leaves the
+					// entry's extent unknown too. Deleting on either guess
+					// would discard integrity metadata for something Deputy
+					// never identified, so the whole edit is abandoned and the
+					// caller reports no change rather than a wrong one.
+					return content, false
+				}
+				if v != "" {
+					version, sawVersion = v, true
+				}
 			}
 			end++
 		}
@@ -136,27 +149,136 @@ func lockHeaderPath(line string) (segs []string, isArray bool, ok bool) {
 }
 
 // lockEntryVersion extracts the version value from a `version = "..."` line at
-// the top level of a lock entry, or "" when the line declares something else.
-func lockEntryVersion(line string) string {
+// the top level of a lock entry. It returns "" for a line that declares
+// something else, and ok is false when the line declares a version this reader
+// cannot decode: an undefined escape, an unterminated token, or a multi-line
+// value that carries on past this line.
+//
+// A quoted value is decoded, not copied. [ParseLock] and inventory read
+// `version = "1.22.12"` as 1.22.12, and the plan the pruner is given
+// carries that decoded version, so comparing the raw bytes never matches: the
+// stale entry survives, lock resolution serves it back, and the config the fix
+// just edited is reported at the vulnerable version again. All four of TOML's
+// string forms are read, because a lockfile may spell a version with any of
+// them and mise resolves them all the same way.
+func lockEntryVersion(line string) (version string, ok bool) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-		return ""
+		return "", true
 	}
 	eq := strings.IndexByte(trimmed, '=')
 	if eq < 0 || strings.TrimSpace(trimmed[:eq]) != "version" {
-		return ""
+		return "", true
 	}
 	val := strings.TrimSpace(trimmed[eq+1:])
-	if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') {
-		if end := strings.IndexByte(val[1:], val[0]); end >= 0 {
-			return val[1 : 1+end]
-		}
-		return ""
+	if val == "" {
+		return "", false
 	}
+	if val[0] == '"' || val[0] == '\'' {
+		end, terminated := TOMLStringEnd(val, 0)
+		if !terminated {
+			return "", false
+		}
+		if rest := strings.TrimSpace(val[end:]); rest != "" && !strings.HasPrefix(rest, "#") {
+			return "", false
+		}
+		token := val[:end]
+		// [UnquoteTOMLString] hands back a token it cannot read unchanged. A
+		// decoded value is always shorter than its token, which still carries
+		// its delimiters, so equality is how this learns the decode failed.
+		decoded := UnquoteTOMLString(token)
+		if decoded == token {
+			return "", false
+		}
+		return decoded, true
+	}
+	// A bare token is not a TOML string at all, so there is nothing to decode;
+	// it is compared as written, the way it always was.
 	if idx := strings.IndexAny(val, " \t#"); idx >= 0 {
 		val = val[:idx]
 	}
-	return val
+	return val, true
+}
+
+// TOMLStringEnd returns the offset just past the TOML string token that opens
+// at s[i], which must be a quote character. It covers all four of TOML's
+// string forms: the single-line basic and literal strings, which end at their
+// first unescaped closing quote and never span a line, and their multi-line
+// counterparts, which may. ok is false when the token is unterminated, which
+// is how a caller learns that the value continues on a line it has not
+// gathered yet or that the file is malformed.
+//
+// Every scanner that has to step over a TOML string goes through it, the
+// config rewriter's value gatherer and span scanners and the lockfile pruner
+// alike, so "where does this string end" is answered once. Tracking quote
+// state with a boolean toggle instead cannot see a multi-line string at all:
+// three quotes toggle it back to "inside", so the scanner reads the string's
+// contents as TOML and the delimiters as nothing.
+func TOMLStringEnd(s string, i int) (end int, ok bool) {
+	if i < 0 || i >= len(s) {
+		return 0, false
+	}
+	quote := s[i]
+	if quote != '"' && quote != '\'' {
+		return 0, false
+	}
+	if IsMultilineStringOpener(s, i) {
+		return multilineStringEnd(s, i)
+	}
+	for j := i + 1; j < len(s); j++ {
+		switch s[j] {
+		case '\\':
+			if quote == '"' {
+				// A basic string's escape covers the next character, so an
+				// escaped quote does not close it. A literal string has no
+				// escapes, and its backslash is ordinary content.
+				j++
+			}
+		case '\n':
+			return 0, false
+		case quote:
+			return j + 1, true
+		}
+	}
+	return 0, false
+}
+
+// multilineStringEnd returns the offset just past the closing delimiter of the
+// multi-line TOML string whose opener sits at s[i].
+//
+// TOML lets one or two adjacent quote characters stand as content inside a
+// multi-line string, so the terminator is a run of three to five of them and
+// the delimiter is the last three of that run; a longer run has to be escaped
+// and is malformed here. Inside the basic form a backslash escapes the
+// character after it, so a run it introduces terminates nothing. ok is false
+// when no terminator is found, which for a gatherer means the value carries
+// on past the text it has read so far.
+func multilineStringEnd(s string, i int) (end int, ok bool) {
+	quote := s[i]
+	for j := i + 3; j < len(s); {
+		switch {
+		case quote == '"' && s[j] == '\\':
+			j += 2
+		case s[j] != quote:
+			j++
+		default:
+			run := 0
+			for j+run < len(s) && s[j+run] == quote {
+				run++
+			}
+			if run < 3 {
+				j += run
+				continue
+			}
+			if run > 5 {
+				// Three or more adjacent quotes must be escaped; this is not
+				// a string any TOML parser accepts.
+				return 0, false
+			}
+			return j + run, true
+		}
+	}
+	return 0, false
 }
 
 // SplitKeyPath splits a TOML key path into its dotted segments, unquoting
