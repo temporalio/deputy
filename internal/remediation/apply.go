@@ -397,7 +397,7 @@ func applyMiseUpdate(repoDir, configRel, tool string, currentVersions []string, 
 // and `node`), and pruning a contested name would discard integrity metadata
 // for a declaration that was never edited.
 //
-// Ownership is the claimant count from [mise.NameClaims], nothing else. In
+// Ownership is the claimant count from [mise.LockClaims], nothing else. In
 // particular, an entry under the exact key does not make a legacy entry under
 // the short name someone else's: with a single declaration, [mise.Lockfile.Lookup]
 // borrows the short-name entry through its sole-entry fallback once the exact
@@ -416,23 +416,27 @@ func miseLockKeys(root *os.Root, configRelPath, tool string) []string {
 	return []string{tool, name}
 }
 
-// shortNameContested reports whether more than one declaration in the config
-// could be the owner of a legacy lock entry keyed by the short name. It asks
-// mise.NameClaims, the same count that decides whether inventory may enrich
+// shortNameContested reports whether more than one declaration could be the
+// owner of a legacy lock entry keyed by the short name. It asks
+// [mise.LockClaims], the same count that decides whether inventory may enrich
 // from such an entry, so pruning and enrichment cannot disagree about who owns
 // a name: an entry left in place here because it is ambiguous must also be
-// refused there. An unreadable or unparsable config counts as contested, so an
-// ambiguous case never widens lock pruning.
+// refused there.
+//
+// The count spans every config sharing the lockfile, not just the one being
+// edited. The lockfile is shared: a mise directory's config.toml and all of
+// its conf.d drop-ins write to one mise.lock, so a name uncontested within one
+// fragment can still be claimed by a declaration in another, and pruning it
+// would discard integrity metadata for a tool this fix never touched.
+//
+// A config that cannot be read or parsed counts as contested, so an ambiguous
+// case never widens lock pruning.
 func shortNameContested(root *os.Root, relPath, name string) bool {
-	data, err := fs.ReadFile(root.FS(), relPath)
+	claims, err := mise.LockClaims(root.FS(), relPath)
 	if err != nil {
 		return true
 	}
-	cfg, err := mise.Parse(relPath, data)
-	if err != nil {
-		return true
-	}
-	return mise.NameClaims(cfg.Tools)[name] > 1
+	return claims[name] > 1
 }
 
 // pruneStaleMiseLock removes lock entries for the replaced versions from the

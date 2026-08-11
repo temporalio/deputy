@@ -1296,7 +1296,13 @@ func lockedVersionAfterFix(t *testing.T, dir, tool, version string) string {
 	if err != nil {
 		t.Fatalf("parse lock: %v", err)
 	}
-	claims := mise.NameClaims(cfg.Tools)
+	// The same claim count inventory uses, over every config sharing the
+	// lockfile, so the helper cannot pass a fix that the real extractor would
+	// still see as vulnerable.
+	claims, err := mise.LockClaims(os.DirFS(dir), "mise.toml")
+	if err != nil {
+		t.Fatalf("lock claims: %v", err)
+	}
 	for _, spec := range cfg.Tools {
 		if spec.Key != tool {
 			continue
@@ -1887,5 +1893,150 @@ func TestReplaceFileAtomicallyConcurrent(t *testing.T) {
 		if strings.HasPrefix(entry.Name(), ".mise.lock.deputy-") {
 			t.Errorf("temporary file left behind: %s", entry.Name())
 		}
+	}
+}
+
+// TestApplyMiseUpdateSharedConfdLock pins ownership of a lock entry shared by
+// several config fragments. A mise directory's conf.d drop-ins all write to
+// one mise.lock (mise 2026.7.3 names ".config/mise/mise.lock" as the lock
+// target for a tool declared only in a drop-in), so a legacy short-name entry
+// in it may belong to a fragment this fix never opened. Counting claimants in
+// the edited fragment alone reads such an entry as unowned and deletes another
+// declaration's integrity metadata.
+//
+// Pruning and enrichment are checked together, because they have to give the
+// same answer: an entry left in place as contested must also be refused by the
+// extractor, or the fixed tool comes back reporting its old version.
+func TestApplyMiseUpdateSharedConfdLock(t *testing.T) {
+	t.Parallel()
+
+	const legacyLock = `[[tools.foo]]
+version = "1.0.0"
+backend = "ubi:foo"
+
+[tools.foo.platforms.linux-x64]
+checksum = "sha256:legacyfoo"
+`
+	tests := []struct {
+		name     string
+		files    map[string]string
+		wantGone []string
+		wantKept []string
+	}{
+		{
+			// b.toml shares the lockfile and strips to the same short name, so
+			// the legacy entry may be its own.
+			name: "a sibling drop-in contests the short name",
+			files: map[string]string{
+				".config/mise/conf.d/a.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				".config/mise/conf.d/b.toml": "[tools]\n\"ubi:foo\" = \"1.0.0\"\n",
+			},
+			wantKept: []string{"sha256:legacyfoo"},
+		},
+		{
+			// The directory's own config.toml shares the lockfile too.
+			name: "the directory config contests the short name",
+			files: map[string]string{
+				".config/mise/conf.d/a.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				".config/mise/config.toml":   "[tools]\nfoo = \"1.0.0\"\n",
+			},
+			wantKept: []string{"sha256:legacyfoo"},
+		},
+		{
+			// Nothing else claims foo, so the stale entry is the edited tool's
+			// and has to go, or lock resolution hands it its old version back.
+			name: "a lone drop-in owns the short name",
+			files: map[string]string{
+				".config/mise/conf.d/a.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+			},
+			wantGone: []string{"sha256:legacyfoo"},
+		},
+		{
+			// A fragment sharing the lockfile that will not parse is exactly
+			// the one that might have claimed the name.
+			name: "an unparsable sibling is contested, not absent",
+			files: map[string]string{
+				".config/mise/conf.d/a.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				".config/mise/conf.d/b.toml": "[tools\nbroken\n",
+			},
+			wantKept: []string{"sha256:legacyfoo"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			write := func(rel, content string) {
+				t.Helper()
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, content := range tt.files {
+				write(rel, content)
+			}
+			write(".config/mise/mise.lock", legacyLock)
+
+			const configRel = ".config/mise/conf.d/a.toml"
+			cmd := `deputy:mise:update ` + configRel + ` "npm:foo" 1.0.1 1.0.0`
+			if err := ApplyDeputyCommand(dir, cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			lock, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(".config/mise/mise.lock")))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, marker := range tt.wantGone {
+				if strings.Contains(string(lock), marker) {
+					t.Errorf("expected %q to be pruned:\n%s", marker, lock)
+				}
+			}
+			for _, marker := range tt.wantKept {
+				if !strings.Contains(string(lock), marker) {
+					t.Errorf("expected %q to survive:\n%s", marker, lock)
+				}
+			}
+
+			// What the next scan sees. A surviving entry that enrichment still
+			// borrows would report the fixed tool at its old version, which is
+			// the failure pruning was widened to avoid in the first place.
+			fsys := fstest.MapFS{}
+			for rel := range tt.files {
+				data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				fsys[rel] = &fstest.MapFile{Data: data}
+			}
+			fsys[".config/mise/mise.lock"] = &fstest.MapFile{Data: lock}
+			f, err := fsys.Open(configRel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv, err := misex.New().Extract(t.Context(), &filesystem.ScanInput{
+				Path:   configRel,
+				Reader: f,
+				FS:     fsys,
+			})
+			if err != nil {
+				t.Fatalf("Extract: %v", err)
+			}
+			var got string
+			for _, pkg := range inv.Packages {
+				if pkg.Name == "npm:foo" {
+					got = pkg.Version
+				}
+			}
+			if got != "1.0.1" {
+				t.Errorf("extractor reports npm:foo %q after fix, want 1.0.1\nlock:\n%s", got, lock)
+			}
+		})
 	}
 }

@@ -77,9 +77,22 @@ func (Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (inve
 		slog.WarnContext(ctx, "mise lockfile load error", "path", mise.LockfilePath(input.Path), "error", err)
 	}
 
-	// Which names the config's declarations claim, so lock lookup does not
-	// lend one declaration's entry to another whose short name collides.
-	claims := mise.NameClaims(cfg.Tools)
+	// Which names are claimed across every config sharing this lockfile, so
+	// lock lookup does not lend one declaration's entry to another whose short
+	// name collides. The scope is the lockfile's, not this file's: a mise
+	// directory's config.toml and its conf.d drop-ins all write to one
+	// mise.lock, and a name with a single claimant here may have another in a
+	// fragment beside it. Without the count nothing is provably this config's,
+	// so enrichment is dropped rather than guessed at. Only a loaded lockfile
+	// has entries to own, so the question is only asked when there is one.
+	var claims map[string]int
+	if lock != nil {
+		claims, err = mise.LockClaims(input.FS, input.Path)
+		if err != nil {
+			slog.WarnContext(ctx, "mise lock ownership unresolved, skipping lockfile enrichment", "path", input.Path, "error", err)
+			lock = nil
+		}
+	}
 
 	var pkgs []*extractor.Package
 	for _, tool := range cfg.Tools {

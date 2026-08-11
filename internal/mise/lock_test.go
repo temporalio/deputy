@@ -1,6 +1,12 @@
 package mise
 
-import "testing"
+import (
+	"io/fs"
+	"maps"
+	"slices"
+	"testing"
+	"testing/fstest"
+)
 
 const sampleLock = `
 [[tools.node]]
@@ -147,5 +153,159 @@ version = "3.12.3"
 	}
 	if got := lf.Sole("python"); got != nil {
 		t.Fatalf("Sole(python) = %+v, want nil for multiple entries", got)
+	}
+}
+
+// TestConfigsSharingLock pins which configs mise merges into one lockfile.
+// mise 2026.7.3 reports ".config/mise/mise.lock" as the lock target for a tool
+// declared only in ".config/mise/conf.d/b.toml", so a mise directory's
+// config.toml and every drop-in beside it share one file, while an
+// environment-specific config next to them locks somewhere else.
+func TestConfigsSharingLock(t *testing.T) {
+	const decl = "[tools]\ngo = \"1.22.12\"\n"
+	files := fstest.MapFS{
+		".config/mise/config.toml":            {Data: []byte(decl)},
+		".config/mise/config.production.toml": {Data: []byte(decl)},
+		".config/mise/conf.d/a.toml":          {Data: []byte(decl)},
+		".config/mise/conf.d/b.toml":          {Data: []byte(decl)},
+		".config/mise/notes.md":               {Data: []byte("not a config")},
+		"repo/mise.toml":                      {Data: []byte(decl)},
+		"repo/.mise.toml":                     {Data: []byte(decl)},
+		"repo/mise.staging.toml":              {Data: []byte(decl)},
+		"repo/pyproject.toml":                 {Data: []byte("[project]\n")},
+		"repo/.tool-versions":                 {Data: []byte("golang 1.22.12\n")},
+	}
+	tests := []struct {
+		name       string
+		configPath string
+		want       []string
+	}{
+		{
+			name:       "a drop-in shares with its siblings and the directory config",
+			configPath: ".config/mise/conf.d/a.toml",
+			want: []string{
+				".config/mise/conf.d/a.toml",
+				".config/mise/conf.d/b.toml",
+				".config/mise/config.toml",
+			},
+		},
+		{
+			name:       "the directory config shares with its drop-ins",
+			configPath: ".config/mise/config.toml",
+			want: []string{
+				".config/mise/conf.d/a.toml",
+				".config/mise/conf.d/b.toml",
+				".config/mise/config.toml",
+			},
+		},
+		{
+			// config.production.toml locks to mise.production.lock, so the
+			// drop-ins are not its business.
+			name:       "an environment config keeps its own lockfile",
+			configPath: ".config/mise/config.production.toml",
+			want:       []string{".config/mise/config.production.toml"},
+		},
+		{
+			// Both spellings of the flat config name the same mise.lock.
+			name:       "the dotted and undotted flat configs share",
+			configPath: "repo/mise.toml",
+			want:       []string{"repo/.mise.toml", "repo/mise.toml"},
+		},
+		{
+			name:       "a non-TOML config has no lockfile",
+			configPath: "repo/.tool-versions",
+			want:       nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ConfigsSharingLock(files, tt.configPath)
+			if err != nil {
+				t.Fatalf("ConfigsSharingLock: %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("ConfigsSharingLock(%q) = %q, want %q", tt.configPath, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestLockClaims pins that ownership of a shared lock entry is counted over
+// every config sharing the lockfile. Counting only the fragment being read
+// makes a name look uncontested when a fragment beside it claims it too, and
+// the entry then gets lent to one declaration and pruned while fixing another.
+func TestLockClaims(t *testing.T) {
+	tests := []struct {
+		name    string
+		files   fstest.MapFS
+		config  string
+		want    map[string]int
+		wantErr bool
+	}{
+		{
+			name: "claims from a sibling drop-in contest the short name",
+			files: fstest.MapFS{
+				".config/mise/conf.d/a.toml": {Data: []byte("[tools]\n\"npm:foo\" = \"1.0.0\"\n")},
+				".config/mise/conf.d/b.toml": {Data: []byte("[tools]\n\"ubi:foo\" = \"2.0.0\"\n")},
+			},
+			config: ".config/mise/conf.d/a.toml",
+			want:   map[string]int{"npm:foo": 1, "ubi:foo": 1, "foo": 2},
+		},
+		{
+			name: "claims from the directory config contest the short name",
+			files: fstest.MapFS{
+				".config/mise/config.toml":   {Data: []byte("[tools]\nfoo = \"2.0.0\"\n")},
+				".config/mise/conf.d/a.toml": {Data: []byte("[tools]\n\"npm:foo\" = \"1.0.0\"\n")},
+			},
+			config: ".config/mise/conf.d/a.toml",
+			want:   map[string]int{"npm:foo": 1, "foo": 2},
+		},
+		{
+			name: "a lone drop-in owns its short name",
+			files: fstest.MapFS{
+				".config/mise/conf.d/a.toml": {Data: []byte("[tools]\n\"npm:foo\" = \"1.0.0\"\n")},
+			},
+			config: ".config/mise/conf.d/a.toml",
+			want:   map[string]int{"npm:foo": 1, "foo": 1},
+		},
+		{
+			// A config that will not parse is exactly the one whose
+			// declarations might have contested the name, so its absence from
+			// the count is not a reason to treat the name as owned.
+			name: "an unparsable sharing config is an error",
+			files: fstest.MapFS{
+				".config/mise/conf.d/a.toml": {Data: []byte("[tools]\n\"npm:foo\" = \"1.0.0\"\n")},
+				".config/mise/conf.d/b.toml": {Data: []byte("[tools\nbroken\n")},
+			},
+			config:  ".config/mise/conf.d/a.toml",
+			wantErr: true,
+		},
+		{
+			name:    "no filesystem is an error, not an empty count",
+			files:   nil,
+			config:  ".config/mise/conf.d/a.toml",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fsys fs.FS
+			if tt.files != nil {
+				fsys = tt.files
+			}
+			got, err := LockClaims(fsys, tt.config)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("LockClaims(%q) = %v, want an error", tt.config, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LockClaims: %v", err)
+			}
+			if !maps.Equal(got, tt.want) {
+				t.Errorf("LockClaims(%q) = %v, want %v", tt.config, got, tt.want)
+			}
+		})
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -205,6 +207,109 @@ func NameClaims(tools []ToolSpec) map[string]int {
 		}
 	}
 	return claims
+}
+
+// ConfigsSharingLock returns every mise config that locks into the same
+// lockfile as configPath, configPath included, in lexical order. A mise
+// directory's config.toml and all of its conf.d drop-ins write to one
+// mise.lock: verified against mise 2026.7.3, which reports
+// ".config/mise/mise.lock" as the lock target for a tool declared only in
+// ".config/mise/conf.d/b.toml".
+//
+// The set is derived from [LockfilePath] rather than listed here, so a change
+// to mise's lockfile naming moves the sharing rule with it. Only two
+// directories can hold a config for a given lockfile, the lockfile's own and
+// the conf.d beside it, and a candidate joins the set when [LockfilePath]
+// sends it to the same file. That keeps a sibling with a different target,
+// such as config.production.toml, out of it.
+//
+// An empty result means configPath has no lockfile at all (a .tool-versions
+// file, say). A read error other than a missing conf.d is returned, because a
+// config that cannot be listed is a config whose declarations cannot be
+// counted.
+func ConfigsSharingLock(fsys fs.FS, configPath string) ([]string, error) {
+	lockPath := LockfilePath(configPath)
+	if lockPath == "" {
+		return nil, nil
+	}
+	if fsys == nil {
+		return nil, fmt.Errorf("mise: no filesystem to resolve the configs sharing %s", lockPath)
+	}
+	lockDir := path.Dir(lockPath)
+	seen := make(map[string]struct{})
+	var shared []string
+	for _, dir := range [...]string{lockDir, path.Join(lockDir, "conf.d")} {
+		entries, err := fs.ReadDir(fsys, dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("listing %s: %w", dir, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			candidate := path.Join(dir, entry.Name())
+			if _, ok := IsConfigPath(candidate); !ok {
+				continue
+			}
+			if LockfilePath(candidate) != lockPath {
+				continue
+			}
+			if _, dup := seen[candidate]; dup {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			shared = append(shared, candidate)
+		}
+	}
+	// configPath itself belongs in the set even when the walk above missed it,
+	// so a caller never decides ownership without the config it is editing.
+	if clean := path.Clean(configPath); len(shared) > 0 {
+		if _, ok := seen[clean]; !ok {
+			shared = append(shared, clean)
+		}
+	}
+	slices.Sort(shared)
+	return shared, nil
+}
+
+// LockClaims counts, over every config that shares configPath's lockfile, how
+// many declarations could own a lock entry keyed by a given name. It is
+// [NameClaims] widened to the scope the lockfile actually has.
+//
+// Counting one fragment is not enough. With ".config/mise/conf.d/a.toml"
+// declaring "npm:foo", "b.toml" beside it declaring "ubi:foo", and a legacy
+// [[tools.foo]] entry in the mise.lock they share, a.toml alone shows a single
+// claimant for foo. Enrichment then lends that entry to npm:foo and to ubi:foo
+// both, and remediation prunes it while fixing either one, discarding
+// integrity metadata for a declaration nobody edited.
+//
+// An error means ownership could not be established, and a caller must then
+// treat every name as contested: prune nothing beyond the exact key, enrich
+// from nothing. An unparsable sharing config is such an error, because its
+// declarations are exactly the ones that would have contested a name.
+func LockClaims(fsys fs.FS, configPath string) (map[string]int, error) {
+	shared, err := ConfigsSharingLock(fsys, configPath)
+	if err != nil {
+		return nil, err
+	}
+	claims := make(map[string]int)
+	for _, cfgPath := range shared {
+		data, err := fs.ReadFile(fsys, cfgPath)
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", cfgPath, err)
+		}
+		cfg, err := Parse(cfgPath, data)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", cfgPath, err)
+		}
+		for name, n := range NameClaims(cfg.Tools) {
+			claims[name] += n
+		}
+	}
+	return claims, nil
 }
 
 // Lookup finds the locked entry that best matches a parsed tool spec at a
