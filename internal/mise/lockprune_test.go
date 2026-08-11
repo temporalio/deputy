@@ -288,6 +288,65 @@ func TestPruneLockedVersionsReadsVersionLikeTheParser(t *testing.T) {
 	}
 }
 
+// TestPruneLockedVersionsReadsVersionKeyLikeTheParser pins that the pruner
+// identifies the version assignment by the key a TOML parser reads, not by the
+// bytes before the `=`. TOML lets a bare key be spelled as a quoted one, and
+// [ParseLock] decodes `"version" = "1.22.12"` to 1.22.12 like any other
+// spelling. A literal comparison reads that line as unrelated, which fails in
+// both directions: with known current versions the entry is never called stale
+// and survives to be served back after the fix, and with the catch-all
+// predicate remediation uses when no current version is known, the entry is
+// deleted on a version the pruner never read.
+func TestPruneLockedVersionsReadsVersionKeyLikeTheParser(t *testing.T) {
+	tests := []struct {
+		name string
+		// key is the text before `=` in the entry's version assignment.
+		key string
+		// wantVersion is the version the pruner must hand its predicate, which
+		// is the one ParseLock decodes. It is "" when the line does not
+		// declare the entry's version at all.
+		wantVersion string
+	}{
+		{name: "bare key", key: `version`, wantVersion: "1.22.12"},
+		{name: "basic-string key", key: `"version"`, wantVersion: "1.22.12"},
+		{name: "literal-string key", key: `'version'`, wantVersion: "1.22.12"},
+		{name: "escaped key", key: `"\u0076ersion"`, wantVersion: "1.22.12"},
+		{name: "padded key", key: "  version\t", wantVersion: "1.22.12"},
+		// Keys that are not the entry's version must stay unread, or an
+		// unrelated field decides whether integrity metadata is deleted.
+		{name: "another key", key: `versions`},
+		{name: "dotted key", key: `platforms.version`},
+		{name: "quoted key holding an equals sign", key: `"ver=sion"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lock := "[[tools.go]]\n" + tt.key + " = \"1.22.12\"\nbackend = \"core:go\"\n"
+			if tt.wantVersion != "" {
+				lf, err := ParseLock("mise.lock", []byte(lock))
+				if err != nil {
+					t.Fatalf("ParseLock: %v", err)
+				}
+				if got := lf.Tools["go"][0].Version; got != tt.wantVersion {
+					t.Fatalf("ParseLock version = %q, want %q", got, tt.wantVersion)
+				}
+			}
+
+			var seen []string
+			_, changed := PruneLockedVersions([]byte(lock), []string{"go"}, func(v string) bool {
+				seen = append(seen, v)
+				return v == "1.22.12"
+			})
+			if want := []string{tt.wantVersion}; !slices.Equal(seen, want) {
+				t.Errorf("predicate saw %q, want %q", seen, want)
+			}
+			if wantPruned := tt.wantVersion == "1.22.12"; changed != wantPruned {
+				t.Errorf("changed = %v, want %v", changed, wantPruned)
+			}
+		})
+	}
+}
+
 func TestSplitKeyPath(t *testing.T) {
 	tests := []struct {
 		key  string

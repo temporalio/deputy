@@ -154,6 +154,10 @@ func lockHeaderPath(line string) (segs []string, isArray bool, ok bool) {
 // cannot decode: an undefined escape, an unterminated token, or a multi-line
 // value that carries on past this line.
 //
+// Both halves of the assignment are read as a TOML parser reads them. The key
+// goes through [SplitKeyPath], so a quoted `"version"` names the same field as
+// a bare one, exactly as [ParseLock] decodes it.
+//
 // A quoted value is decoded, not copied. [ParseLock] and inventory read
 // `version = "1.22.12"` as 1.22.12, and the plan the pruner is given
 // carries that decoded version, so comparing the raw bytes never matches: the
@@ -167,7 +171,16 @@ func lockEntryVersion(line string) (version string, ok bool) {
 		return "", true
 	}
 	eq := strings.IndexByte(trimmed, '=')
-	if eq < 0 || strings.TrimSpace(trimmed[:eq]) != "version" {
+	if eq < 0 {
+		return "", true
+	}
+	// The key is read the way a TOML parser reads it, not compared as written:
+	// TOML lets a bare key be spelled as a quoted one, so `"version"` names the
+	// same field as `version` and [ParseLock] decodes both. Matching the raw
+	// bytes misses the quoted spelling, and the entry then goes to the stale
+	// predicate with no version at all, which either keeps a stale entry alive
+	// or deletes an entry on a version this never read.
+	if segs := SplitKeyPath(strings.TrimSpace(trimmed[:eq])); len(segs) != 1 || segs[0] != "version" {
 		return "", true
 	}
 	val := strings.TrimSpace(trimmed[eq+1:])
