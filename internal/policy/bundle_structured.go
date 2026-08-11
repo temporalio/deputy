@@ -183,9 +183,10 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 	if IsCompiledBundle(data) {
 		return nil, false, nil
 	}
-	// The decoder would resolve anchors silently, so refuse them here: loading
-	// and validating a bundle must agree on what the format accepts.
-	if err := bundleAnchorError(data, path); err != nil {
+	// The decoder would resolve anchors, and read a tagged scalar as something
+	// other than its text, without saying so; refuse both here, since loading and
+	// validating a bundle must agree on what the format accepts.
+	if err := bundleRefusalError(data, path); err != nil {
 		return nil, false, err
 	}
 	return decodeStructuredBundle(data, path)

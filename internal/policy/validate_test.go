@@ -1700,3 +1700,202 @@ func TestBundleKeyMatchesStructTag(t *testing.T) {
 		t.Fatalf("bundlePoliciesKey = %q but the yaml tag is %q", bundlePoliciesKey, tag)
 	}
 }
+
+// TestRewritingTagsRejectedAtEveryPosition pins the refusal of a YAML tag that
+// makes a scalar's value differ from its written text, in each field where the
+// two readers of a bundle would otherwise disagree about it. The walk judges the
+// text and the decoder reads the value, so before this an `action: !!binary
+// ZGVueQ==` linted as an invalid action and compiled as deny.
+//
+// Each case asserts both readers, since a construct only one of them refuses is
+// the divergence this closes.
+func TestRewritingTagsRejectedAtEveryPosition(t *testing.T) {
+	cases := []struct {
+		name   string
+		bundle string
+	}{
+		{
+			name: "a rule action",
+			bundle: `
+policies:
+  - name: tagged-action
+    rules:
+      - when: "true"
+        action: !!binary ZGVueQ==
+        reason: "r"
+`,
+		},
+		{
+			name: "a rule condition",
+			bundle: `
+policies:
+  - name: tagged-when
+    rules:
+      - when: !!binary MTwy
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "the execution mode",
+			bundle: `
+policies:
+  - name: tagged-mode
+    mode: !!binary YWR2aXNvcnk=
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "an entrypoint list item",
+			bundle: `
+policies:
+  - name: tagged-entrypoint
+    entrypoints: [!!binary c2Nhbl92dWxuZXJhYmlsaXR5]
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "the policy name",
+			bundle: `
+policies:
+  - name: !!binary dGFnZ2VkLW5hbWU=
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "a var name",
+			bundle: `
+policies:
+  - name: tagged-var-name
+    vars:
+      ? !!binary YmxvY2tlZA==
+      : '["left-pad"]'
+    rules:
+      - when: "pkg.name in blocked"
+        action: deny
+        reason: "r"
+`,
+		},
+		{
+			name: "a rule reason",
+			bundle: `
+policies:
+  - name: tagged-reason
+    rules:
+      - when: "true"
+        action: deny
+        reason: !!binary cg==
+`,
+		},
+		{
+			name:   "the policies key itself",
+			bundle: "!!binary cG9saWNpZXM=:\n  - name: tagged-key\n    rules:\n      - when: \"true\"\n        action: deny\n        reason: \"r\"\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{Source: "bundle.yaml"})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			var codes []string
+			for _, issue := range issues {
+				codes = append(codes, issue.Code)
+			}
+			if !slices.Contains(codes, "yaml-opaque-scalar") {
+				t.Fatalf("expected issue code %q, got %v: %v", "yaml-opaque-scalar", codes, issues)
+			}
+			for _, issue := range issues {
+				if issue.Line <= 0 {
+					t.Fatalf("issue %v should name the line the construct is on", issue)
+				}
+			}
+
+			// The loader has to refuse the same document, or a bundle that lints as
+			// broken would still compile, which is how a tagged action got in.
+			_, loadErr := ParseStructuredSources([]byte(tc.bundle), "bundle.yaml")
+			if loadErr == nil {
+				t.Fatal("expected the loader to reject the bundle too")
+			}
+			if !strings.Contains(loadErr.Error(), opaqueScalarNotSupported) {
+				t.Fatalf("loader error %q should refuse the construct by name", loadErr)
+			}
+		})
+	}
+}
+
+// TestPlainScalarSpellingsStayAccepted pins the other side of the tag refusal:
+// it keys off a scalar whose value is not its text, not off a tag, so every way
+// an author writes a value plainly still loads. Quoting is the alternative the
+// refusal points at, so quoting must not itself be refused.
+func TestPlainScalarSpellingsStayAccepted(t *testing.T) {
+	cases := []struct {
+		name   string
+		bundle string
+	}{
+		{
+			name: "plain, quoted, and block scalars",
+			bundle: `
+policies:
+  - name: plain-spellings
+    description: >-
+      folded
+    mode: 'advisory'
+    rules:
+      - when: "true"
+        action: "deny"
+        reason: |
+          multi
+          line
+`,
+		},
+		{
+			name: "a tag that leaves the text alone",
+			bundle: `
+policies:
+  - name: explicit-str
+    rules:
+      - when: "true"
+        action: !!str deny
+        reason: "r"
+`,
+		},
+		{
+			name: "an explicitly null optional field",
+			bundle: `
+policies:
+  - name: null-mode
+    mode: ~
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{Source: "bundle.yaml"})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			for _, issue := range issues {
+				if issue.Severity != IssueHint {
+					t.Fatalf("expected no problems, got %v", issue)
+				}
+			}
+			if _, err := ParseStructuredSources([]byte(tc.bundle), "bundle.yaml"); err != nil {
+				t.Fatalf("loader rejected a plainly written bundle: %v", err)
+			}
+		})
+	}
+}

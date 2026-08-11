@@ -261,15 +261,15 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	if doc.Kind != yaml.MappingNode {
 		return append(issues, issueAt(doc, IssueError, "root-not-mapping", "root must be a mapping")), nil
 	}
-	// Anchors are reported before anything else reads the document, so the rest of
-	// validation, and every other reader of a bundle, sees only plain nodes. The
-	// scan comes before the policies lookup because a root merge key can supply
-	// the whole list, which would otherwise read as a missing key. It stops none
-	// of the checks that follow: a refused anchor must not hide an unrelated typo,
-	// or an uncompilable var, and cost the author a second lint run. What a later
-	// check does skip is the node it cannot read, which is a reference and not
-	// every node an anchor names (see resolvesElsewhere).
-	issues = append(issues, anchorIssues(root)...)
+	// The refused constructs are reported before anything else reads the document,
+	// so the rest of validation, and every other reader of a bundle, sees only
+	// plain nodes. The scan comes before the policies lookup because a root merge
+	// key can supply the whole list, which would otherwise read as a missing key.
+	// It stops none of the checks that follow: a refused construct must not hide
+	// an unrelated typo, or an uncompilable var, and cost the author a second lint
+	// run. What a later check does skip is the node it cannot read, which is a
+	// reference and not every node an anchor names (see resolvesElsewhere).
+	issues = append(issues, refusedConstructIssues(root)...)
 	policiesNode := MappingValue(doc, bundlePoliciesKey)
 	if policiesNode == nil {
 		// A root merge key supplies the whole list, so a document carrying one is
@@ -785,8 +785,9 @@ func DeclaredVarNames(policyNode *yaml.Node) []string {
 // MappingValue returns the value node for a key inside a YAML mapping node, or
 // nil when the node is not a mapping, the key is absent, or the key is present
 // with an explicitly null value. It reads only what the document says: anchors,
-// aliases, and merge keys are rejected (see anchorIssues) and the nodes carrying
-// them are skipped, so no reader has to resolve them.
+// aliases, merge keys, and rewriting tags are rejected (see
+// refusedConstructIssues) and the nodes carrying a reference are skipped, so no
+// reader has to resolve them.
 func MappingValue(mapNode *yaml.Node, key string) *yaml.Node {
 	if mapNode == nil || mapNode.Kind != yaml.MappingNode {
 		return nil
@@ -837,30 +838,64 @@ func isMergeKey(key *yaml.Node) bool {
 	return key.Tag == "!!merge" || key.Value == "<<"
 }
 
-// Messages for the YAML constructs a policy bundle does not accept. Both name
-// the alternative, since the author is trying to avoid repeating themselves and
-// deserves to be told how.
+// Messages for the YAML constructs a policy bundle does not accept. Each names
+// the alternative, since the author is reaching for the construct to say
+// something and deserves to be told how to say it plainly.
 const (
 	anchorNotSupported = "policy bundles do not support YAML anchors and aliases; " +
 		"share rules with a separate --policy file or reuse expressions with vars:"
 	mergeKeyNotSupported = "policy bundles do not support YAML merge keys; " +
 		"share rules with a separate --policy file or reuse expressions with vars:"
+	opaqueScalarNotSupported = "policy bundles do not support YAML tags that rewrite a scalar; " +
+		"write the value the policy means"
 )
 
-// anchorIssues reports every YAML anchor, alias, and merge key in a bundle.
+// nullTag is YAML's resolved tag for every spelling of null.
+const nullTag = "!!null"
+
+// rewritesItsText reports whether a scalar's value is not the text the document
+// writes for it. A YAML tag can arrange exactly that: `action: !!binary ZGVueQ==`
+// is written as base64 and read as "deny", so the walk judging the written text
+// and the decoder reading the value disagree about the same field.
+//
+// The test is the divergence itself rather than a list of tags, so a tag nobody
+// thought of cannot reopen the gap. Null is excluded because it is the one
+// rewrite every reader of a bundle already models the same way: the decoder
+// leaves the field at its zero value and the walk reads the key as unset (see
+// isNullNode).
+func rewritesItsText(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.ScalarNode || node.Tag == nullTag {
+		return false
+	}
+	var text string
+	// A scalar the decoder cannot read as a string rewrites nothing: it fails the
+	// same way for the loader, which is a disagreement neither reader can hide.
+	if err := node.Decode(&text); err != nil {
+		return false
+	}
+	return text != node.Value
+}
+
+// refusedConstructIssues reports every YAML construct a policy bundle does not
+// accept: anchors, aliases, merge keys, and tags that rewrite a scalar. It is
+// the one definition of that vocabulary, which is what keeps the linter and the
+// loader refusing the same documents; both reach it, validation directly and
+// loading through bundleRefusalError.
 //
 // Supporting them is closed for now rather than closed forever: nothing stops
 // Deputy from resolving them, and this can be revisited if a real need appears.
 // Two reasons to say no today. A policy bundle is a security control whose job
 // is to state plainly what it blocks, and an aliased policy means the text a
 // reviewer reads is not the policy that runs, while merge-key precedence adds a
-// rule the reviewer has to know before they can tell what a policy does. And
-// every YAML feature the format allows has to be implemented identically by
-// every reader of a bundle, of which there are already several walking nodes
-// directly; that divergence is what let an aliased bundle load fine and lint as
-// broken. The sharing these constructs offer is already served by repeatable
-// --policy files across bundles and by vars: within one.
-func anchorIssues(node *yaml.Node) []Issue {
+// rule the reviewer has to know before they can tell what a policy does. A
+// rewriting tag is the same defect spelled shorter: `action: !!binary ZGVueQ==`
+// reviews as base64 and denies. And every YAML feature the format allows has to
+// be implemented identically by every reader of a bundle, of which there are
+// already several walking nodes directly; that divergence is what let an aliased
+// bundle load fine and lint as broken, and what made a tagged action lint as
+// invalid and compile as deny. The sharing these constructs offer is already
+// served by repeatable --policy files across bundles and by vars: within one.
+func refusedConstructIssues(node *yaml.Node) []Issue {
 	if node == nil {
 		return nil
 	}
@@ -872,6 +907,9 @@ func anchorIssues(node *yaml.Node) []Issue {
 	if node.Anchor != "" {
 		issues = append(issues, issueAt(node, IssueError, "yaml-anchor", anchorNotSupported))
 	}
+	if rewritesItsText(node) {
+		issues = append(issues, issueAt(node, IssueError, "yaml-opaque-scalar", opaqueScalarNotSupported))
+	}
 	for i := 0; i < len(node.Content); i++ {
 		child := node.Content[i]
 		// A mapping's content alternates key, value. A merge key names the
@@ -882,7 +920,7 @@ func anchorIssues(node *yaml.Node) []Issue {
 			i++
 			continue
 		}
-		issues = append(issues, anchorIssues(child)...)
+		issues = append(issues, refusedConstructIssues(child)...)
 	}
 	return issues
 }
@@ -890,7 +928,7 @@ func anchorIssues(node *yaml.Node) []Issue {
 // resolvesElsewhere reports whether a node says part of what it means somewhere
 // other than where it is written: a YAML alias, whose value lives at the anchor
 // it names, or a merge key, which pulls another mapping's entries in. Deputy
-// refuses both (see anchorIssues), so no reader resolves them, and a walk that
+// refuses both (see refusedConstructIssues), so no reader resolves them, and a walk that
 // cannot follow them can only describe the reference rather than the value.
 // Nodes carrying one are therefore skipped by the checks that read a document's
 // values.
@@ -917,15 +955,18 @@ func resolvesElsewhere(node *yaml.Node) bool {
 	return false
 }
 
-// bundleAnchorError reports the first anchor, alias, or merge key in data as an
-// error naming the file and line, for callers that load a bundle rather than
-// validate it. It returns nil for a document that is not a policy bundle, and
-// for one that uses none of those constructs, which is every bundle Deputy
-// ships. It gates on the same shape probe the linter uses rather than on a
-// well-formed policies list, so a bundle whose list is itself an alias, or whose
-// policies key arrives through a root merge key, is refused instead of quietly
-// resolved by the decoder.
-func bundleAnchorError(data []byte, path string) error {
+// bundleRefusalError reports the first construct in data that a policy bundle
+// does not accept as an error naming the file and line, for callers that load a
+// bundle rather than validate it. It returns nil for a document that is not a
+// policy bundle, and for one that uses none of those constructs, which is every
+// bundle Deputy ships. It gates on the same shape probe the linter uses rather
+// than on a well-formed policies list, so a bundle whose list is itself an
+// alias, or whose policies key arrives through a root merge key, is refused
+// instead of quietly resolved by the decoder.
+//
+// It shares refusedConstructIssues with validation rather than restating the
+// vocabulary, so the loader cannot come to accept a document the linter rejects.
+func bundleRefusalError(data []byte, path string) error {
 	if !LooksLikeStructuredBundle(data) {
 		return nil
 	}
@@ -933,7 +974,7 @@ func bundleAnchorError(data []byte, path string) error {
 	if err := yaml.Unmarshal(data, root); err != nil || len(root.Content) == 0 {
 		return nil
 	}
-	issues := anchorIssues(root)
+	issues := refusedConstructIssues(root)
 	if len(issues) == 0 {
 		return nil
 	}
