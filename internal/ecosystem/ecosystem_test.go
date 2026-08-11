@@ -205,10 +205,13 @@ func TestNormalizeName(t *testing.T) {
 		{PyPI, "Flask-SQLAlchemy", "flask-sqlalchemy"},
 		{PyPI, "zope..interface", "zope-interface"},
 		{PyPI, "ruamel_-.yaml", "ruamel-yaml"},
-		// crates.io treats "-" and "_" as the same character in a crate name.
-		{Cargo, "serde-json", "serde_json"},
+		// A crate keeps the spelling it was published under. crates.io folds
+		// "-" and "_" to decide two names are one crate, but the crate is still
+		// named "async-trait" on crates.io, in Cargo.toml, in its purl, and in
+		// OSV. That fold is [Ecosystem.NameEquivalenceKey]'s job.
+		{Cargo, "async-trait", "async-trait"},
 		{Cargo, "serde_json", "serde_json"},
-		{Cargo, "Serde-JSON", "serde_json"},
+		{Cargo, "Serde-JSON", "Serde-JSON"},
 		// Ecosystems with case-sensitive, separator-significant names keep
 		// every character.
 		{NPM, "@types/Node", "@types/Node"},
@@ -223,6 +226,58 @@ func TestNormalizeName(t *testing.T) {
 				t.Errorf("%s.NormalizeName(%q) = %q, want %q", tt.eco, tt.name, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestNameEquivalenceKey pins the half of package identity that decides two
+// spellings are one package. Cargo is the case that separates it from
+// [Ecosystem.NormalizeName]: the crate keeps its published hyphen, and only the
+// key folds. An ecosystem with no rule of its own must key by the name it
+// normalizes to, so a lookup there stays exact.
+func TestNameEquivalenceKey(t *testing.T) {
+	tests := []struct {
+		eco  Ecosystem
+		name string
+		want string
+	}{
+		// crates.io treats "-" and "_" as the same character and ignores case,
+		// so every spelling of one crate keys the same.
+		{Cargo, "async-trait", "async_trait"},
+		{Cargo, "async_trait", "async_trait"},
+		{Cargo, "Serde-JSON", "serde_json"},
+		{Cargo, "  rand-core  ", "rand_core"},
+		{Cargo, "", ""},
+		// PyPI's equivalence and its identity are the same PEP 503 form.
+		{PyPI, "Flask_SQLAlchemy", "flask-sqlalchemy"},
+		{PyPI, "zope.interface", "zope-interface"},
+		// No rule: the key is the name, so matching is exact.
+		{NPM, "@types/Node", "@types/Node"},
+		{Go, "github.com/Foo/Bar", "github.com/Foo/Bar"},
+		{Maven, "com.example:My_Artifact", "com.example:My_Artifact"},
+		{Unknown, "Some.Thing", "Some.Thing"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.eco)+"/"+tt.name, func(t *testing.T) {
+			got := tt.eco.NameEquivalenceKey(tt.name)
+			if got != tt.want {
+				t.Errorf("%s.NameEquivalenceKey(%q) = %q, want %q", tt.eco, tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCargoIdentityIsNotTheEquivalenceKey states the distinction directly so a
+// future change cannot quietly collapse the two calls back into one: a crate
+// name survives normalization byte for byte while two spellings of it still
+// match.
+func TestCargoIdentityIsNotTheEquivalenceKey(t *testing.T) {
+	const published = "async-trait"
+	if got := Cargo.NormalizeName(published); got != published {
+		t.Errorf("Cargo.NormalizeName(%q) = %q, want the published spelling", published, got)
+	}
+	if a, b := Cargo.NameEquivalenceKey(published), Cargo.NameEquivalenceKey("async_trait"); a != b {
+		t.Errorf("equivalence keys differ: %q vs %q", a, b)
 	}
 }
 

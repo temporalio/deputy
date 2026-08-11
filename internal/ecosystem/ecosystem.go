@@ -148,30 +148,72 @@ func (e Ecosystem) NormalizeVersion(version string) string {
 	return v
 }
 
-// NormalizeName folds a package name into the single spelling this ecosystem
-// considers one package, so two records of the same dependency compare equal no
-// matter which manifest, registry, or advisory they came from. It is the one
-// implementation of that rule: the comparison pipeline and the policy boundary
-// both call it, which is what keeps an exact-match policy from missing a
-// package that inventory already treats as the same one.
+// NormalizeName returns the name this ecosystem itself gives the package: the
+// published spelling, folded only where the ecosystem defines a normalized form
+// and publishes packages under it. This answers identity, not equivalence. It
+// is the one implementation of that rule, so the name a policy reads is the
+// name inventory, the SBOM, and a purl carry.
+//
+// Whether two spellings name one package is a different question, answered by
+// [Ecosystem.NameEquivalenceKey]. Do not fold a name here to make a comparison
+// work: rewriting an identity to make two records match invents a spelling that
+// the registry, the manifest, and the advisory database have never heard of.
+//
+// PyPI is the one ecosystem folded here, because for PyPI the folded form is
+// the identity: PEP 503 defines the normalized distribution name, the purl spec
+// normalizes pypi names that way, and PyPI serves that form. Cargo looks like
+// the same case and is not, so the asymmetry between them is deliberate.
+// crates.io folds a crate name for lookup and uniqueness, but it does not
+// rename the crate: "async-trait" is what crates.io publishes, what Cargo.toml
+// declares, what OSV indexes, and what its purl spells, because the purl spec
+// defines no normalization for the cargo type at all.
 //
 // Ecosystems whose names are case-sensitive and separator-significant (npm, Go,
-// Maven, and everything Deputy has no rule for) get the name back unchanged
-// apart from surrounding whitespace, because folding there would merge distinct
-// packages.
+// Maven, Cargo, and everything Deputy has no rule for) get the name back
+// unchanged apart from surrounding whitespace.
 func (e Ecosystem) NormalizeName(name string) string {
 	n := strings.TrimSpace(name)
 	if n == "" {
 		return ""
 	}
-	switch e {
-	case PyPI:
+	if e == PyPI {
 		return normalizePyPIName(n)
-	case Cargo:
-		return normalizeCargoName(n)
-	default:
-		return n
 	}
+	return n
+}
+
+// NameEquivalenceKey returns the key under which this ecosystem considers two
+// names to be the same package, for matching one name against another. Unlike
+// [Ecosystem.NormalizeName] it does not return a name: the key is not a
+// spelling of anything and must never be emitted, stored, or displayed. It
+// exists so a comparison can be case- or separator-insensitive without either
+// side of the comparison being rewritten.
+//
+// Cargo is why the two are separate calls. crates.io compares crate names
+// case-insensitively with "-" and "_" interchangeable, so "async-trait" and
+// "async_trait" resolve to one crate and a second crate cannot claim the other
+// spelling. That makes the fold correct for deciding a manifest entry and a
+// lockfile entry are the same dependency, and wrong for naming the crate.
+//
+// An ecosystem with no equivalence rule of its own keys by its normalized name,
+// so matching there is exact.
+func (e Ecosystem) NameEquivalenceKey(name string) string {
+	n := strings.TrimSpace(name)
+	if n == "" {
+		return ""
+	}
+	if e == Cargo {
+		return foldCargoName(n)
+	}
+	return e.NormalizeName(n)
+}
+
+// foldCargoName applies the fold crates.io uses to decide two crate names name
+// one crate: case-insensitive, with "-" and "_" interchangeable. The underscore
+// side is an arbitrary choice of representative, which is safe precisely
+// because the result is a key and never a name.
+func foldCargoName(name string) string {
+	return strings.ReplaceAll(strings.ToLower(name), "-", "_")
 }
 
 // normalizePyPIName applies PEP 503: a distribution name is lowercase, and any
@@ -195,14 +237,6 @@ func normalizePyPIName(name string) string {
 		inSeparator = false
 	}
 	return out.String()
-}
-
-// normalizeCargoName folds a crate name the way crates.io does: names are
-// case-insensitive and "-" and "_" are interchangeable, so a crate cannot be
-// registered under both spellings. Deputy normalizes to the underscore form
-// because that is how a crate is named in Rust source.
-func normalizeCargoName(name string) string {
-	return strings.ReplaceAll(strings.ToLower(name), "-", "_")
 }
 
 // IsSupported returns true if this is a known, supported ecosystem.
