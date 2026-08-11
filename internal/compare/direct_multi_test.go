@@ -172,6 +172,17 @@ serde_json = "1.0"
 			},
 		},
 		{
+			name: "hyphenated crate folds to the underscore spelling",
+			input: `[dependencies]
+serde-json = "1.0"
+Async-Trait = "0.1"
+`,
+			expected: map[string]bool{
+				"serde_json":  true,
+				"async_trait": true,
+			},
+		},
+		{
 			name:     "empty Cargo.toml",
 			input:    `[package]`,
 			expected: map[string]bool{},
@@ -230,8 +241,8 @@ Flask-SQLAlchemy = "^3.0"
 google-cloud-storage = "^2.0"
 `,
 			expected: map[string]bool{
-				"flask_sqlalchemy":     true,
-				"google_cloud_storage": true,
+				"flask-sqlalchemy":     true,
+				"google-cloud-storage": true,
 			},
 		},
 		{
@@ -253,6 +264,27 @@ dependencies = ["requests[security]>=2.0", "boto3[crt]"]
 			expected: map[string]bool{
 				"requests": true,
 				"boto3":    true,
+			},
+		},
+		{
+			name: "Poetry dotted distribution",
+			input: `[tool.poetry.dependencies]
+zope.interface = "^5.4"
+"backports.zoneinfo" = "^0.2"
+`,
+			expected: map[string]bool{
+				"zope-interface":     true,
+				"backports-zoneinfo": true,
+			},
+		},
+		{
+			name: "PEP 621 direct reference",
+			input: `[project]
+dependencies = ["my-pkg @ git+https://example.com/my-pkg.git", "requests"]
+`,
+			expected: map[string]bool{
+				"my-pkg":   true,
+				"requests": true,
 			},
 		},
 		{
@@ -347,8 +379,8 @@ pytest
 google-cloud-bigquery
 `,
 			expected: map[string]bool{
-				"flask_restful":         true,
-				"google_cloud_bigquery": true,
+				"flask-restful":         true,
+				"google-cloud-bigquery": true,
 			},
 		},
 		{
@@ -379,7 +411,7 @@ normal-package==1.0.0
 `,
 			expected: map[string]bool{
 				"package":        true,
-				"normal_package": true,
+				"normal-package": true,
 			},
 		},
 		{
