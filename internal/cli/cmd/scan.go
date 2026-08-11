@@ -31,7 +31,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	cliflags "github.com/temporalio/deputy/internal/cli/flags"
@@ -703,7 +702,7 @@ func runScanRepository(c *services.Clients, cmd *cobra.Command, repoArg string) 
 		// Convert filtered result back to proto for consistent JSON output
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		// Add client-side policy actions
-		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
 		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
 		return outputSARIF(out.Writer, resultOut, policyFindings)
@@ -813,7 +812,7 @@ func runScanDir(c *services.Clients, cmd *cobra.Command, args []string) error {
 		// Convert filtered result back to proto for consistent JSON output
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		// Add client-side policy actions
-		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
 		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
 		return outputSARIF(out.Writer, resultOut, policyFindings)
@@ -910,7 +909,7 @@ func runScanVMImage(c *services.Clients, cmd *cobra.Command, target string) erro
 		return nil
 	case FormatJSON:
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
-		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
 		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
 		return outputSARIF(out.Writer, resultOut, policyFindings)
@@ -1095,7 +1094,7 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 		// Convert filtered result back to proto for consistent JSON output
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		// Add client-side policy actions
-		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
 		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
 		return outputSARIF(out.Writer, resultOut, policyFindings)
@@ -1183,7 +1182,7 @@ func runScanPURL(c *services.Clients, cmd *cobra.Command, args []string) error {
 		// Convert filtered result back to proto for consistent JSON output
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		// Add client-side policy actions
-		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
 		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
 		return outputSARIF(out.Writer, resultOut, policyFindings)
@@ -1290,7 +1289,7 @@ func runScanImageWithOptions(c *services.Clients, cmd *cobra.Command, input, sou
 		// Convert filtered result back to proto for consistent JSON output
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		// Add client-side policy actions
-		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
 		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
 		return outputSARIF(out.Writer, resultOut, policyFindings)
@@ -1454,33 +1453,6 @@ func outputProtoJSON(w io.Writer, resp *scanv1.ScanResponse) error {
 	// Add trailing newline for consistency
 	_, err = w.Write([]byte("\n"))
 	return err
-}
-
-// policyActionsToProto converts internal policy actions to proto format.
-func policyActionsToProto(actions []policy.Action) []*policyv1.Action {
-	if len(actions) == 0 {
-		return nil
-	}
-	out := make([]*policyv1.Action, len(actions))
-	for i, a := range actions {
-		var actionType policyv1.ActionType
-		if policy.ActionTypeIs(a.Type, policy.ActionAllow) {
-			actionType = policyv1.ActionType_ACTION_TYPE_ALLOW
-		} else if policy.ActionTypeIs(a.Type, policy.ActionDeny) {
-			actionType = policyv1.ActionType_ACTION_TYPE_DENY
-		} else if policy.ActionTypeIs(a.Type, policy.ActionWarn) {
-			actionType = policyv1.ActionType_ACTION_TYPE_WARN
-		} else {
-			actionType = policyv1.ActionType_ACTION_TYPE_UNSPECIFIED
-		}
-		out[i] = &policyv1.Action{
-			Type:        actionType,
-			PolicyName:  a.Source, // Source is the policy name in internal types
-			Reason:      a.Reason,
-			Remediation: a.Remediation,
-		}
-	}
-	return out
 }
 
 // outputSARIF writes the scan results in SARIF format for GitHub Security tab integration.

@@ -6,6 +6,7 @@ import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "deputy/target/v1/target.proto";
 import "deputy/dependency/v1/dependency.proto";
+import "deputy/policy/v1/policy.proto";
 import "deputy/vulnerability/v1/vulnerability.proto";
 import "deputy/container/v1/container.proto";
 import "deputy/scan/v1/service.proto";
@@ -206,6 +207,19 @@ message DiffVulnerabilitiesResponse {
 
   // Warnings contains non-fatal issues encountered.
   repeated string warnings = 8;
+
+  // Changes lists all dependency changes between the targets. This is the
+  // same change set the human-readable report renders, so structured
+  // consumers (CI comment renderers, gates) never parse rendered text.
+  repeated PackageChange changes = 9;
+
+  // ChangeStats summarizes the dependency changes.
+  DiffStats change_stats = 10;
+
+  // PolicyActions are the policy evaluation results for this diff, including
+  // per-change and per-vulnerability results attributed to their subjects.
+  // Mirrors deputy.scan.v1.ScanResponse.policy_actions.
+  repeated deputy.policy.v1.Action policy_actions = 11;
 }
 
 // VulnerabilityDiffStats summarizes vulnerability differences.

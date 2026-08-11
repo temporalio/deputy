@@ -22,19 +22,55 @@ enum ActionType {
 }
 
 // Action captures a single policy evaluation result.
+//
+// Action is the surface-crossing shape for policy outcomes: scan and diff
+// carry it in their `--format json` output contracts, and CLI sections, CI
+// renderers, and MCP tools all consume the same message rather than scraping
+// rendered text.
 message Action {
   // Type is the action type (allow, deny, warn).
   ActionType type = 1;
-  // PolicyName is the name of the policy that triggered this action.
+  // PolicyName is the policy source that triggered this action,
+  // typically the bundle file path (e.g., "policy/ci/pr-review.yaml").
   string policy_name = 2;
-  // RuleName is the name of the specific rule within the policy.
+  // RuleName is the name of the specific rule within the policy
+  // (e.g., "pr-license-check").
   string rule_name = 3;
   // Reason explains why this action was triggered.
   string reason = 4;
   // Remediation suggests how to resolve the issue.
   string remediation = 5;
-  // Entrypoint is the policy entrypoint that evaluated this action.
+  // Entrypoint is the policy entrypoint that evaluated this action
+  // (e.g., "diff_dependency_change").
   string entrypoint = 6;
+  // Message provides optional additional context from the rule beyond reason.
+  string message = 7;
+  // Code is an optional machine-readable identifier for the finding type.
+  string code = 8;
+  // Subject identifies what the rule evaluated, when the entrypoint is
+  // subject-scoped (per-package, per-vulnerability). Report-level results
+  // leave it unset. Without a subject, a warning like "no license detected"
+  // is not actionable; with one, consumers can group, deduplicate, and point
+  // at the offending package.
+  Subject subject = 9;
+}
+
+// Subject identifies the item a policy rule evaluated.
+//
+// Fields are flat and optional so the message stays within MCP client schema
+// constraints (no oneof); consumers treat an empty field as not applicable.
+message Subject {
+  // Package is the evaluated package name (e.g., "google.golang.org/grpc").
+  string package = 1;
+  // Version is the evaluated package version.
+  string version = 2;
+  // Ecosystem is the package ecosystem (e.g., "go", "npm").
+  string ecosystem = 3;
+  // Purl is the Package URL for the evaluated package, when known.
+  string purl = 4;
+  // Advisory is the advisory ID when the subject is a vulnerability finding
+  // (e.g., "GHSA-xxxx-xxxx-xxxx", "CVE-2026-1234").
+  string advisory = 5;
 }
 
 // Environment provides context about the execution environment.
