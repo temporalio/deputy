@@ -208,6 +208,40 @@ func (r *rateLimiter) Wait(ctx context.Context) error {
 	return nil
 }
 
+// upstreamErrorCode narrows a provider-supplied error string down to a
+// machine-readable code, substituting a fixed phrase when the value does not
+// have that shape. Verification results are rendered into reports, logs and
+// SARIF, so text a remote endpoint controls must not reach them verbatim: a
+// hostile, spoofed or misconfigured host can reflect the credential itself
+// back in an error field. Constraining the value to a short lowercase
+// snake_case token keeps the diagnostic worth of documented codes such as
+// invalid_auth while denying the field the capacity to carry arbitrary
+// upstream content. The credential is passed in so a reflection of it is
+// rejected even when it happens to fit that shape.
+func upstreamErrorCode(raw, secret string) string {
+	const (
+		maxCodeLen   = 40
+		unspecified  = "upstream reported an unspecified error"
+		unrecognized = "upstream reported an unrecognized error code"
+	)
+
+	if raw == "" {
+		return unspecified
+	}
+	if len(raw) > maxCodeLen {
+		return unrecognized
+	}
+	if secret != "" && strings.Contains(raw, secret) {
+		return unrecognized
+	}
+	for _, r := range raw {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return unrecognized
+		}
+	}
+	return raw
+}
+
 // =============================================================================
 // GitHub Token Verifier
 // =============================================================================
@@ -415,7 +449,7 @@ func (v *slackVerifier) Verify(ctx context.Context, secret string, _ SecretType)
 	return VerificationResult{
 		Status:  StatusError,
 		Service: "slack",
-		Error:   result.Error,
+		Error:   upstreamErrorCode(result.Error, secret),
 	}
 }
 
