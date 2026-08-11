@@ -16,6 +16,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -345,29 +346,49 @@ func hasAnyPrefix(s string, prefixes []string) bool {
 	return slices.ContainsFunc(prefixes, func(p string) bool { return strings.HasPrefix(s, p) })
 }
 
-// DeclaredVersion reduces a declared mise version request to the version it
-// constrains, looking through the wrappers mise resolves at install time
-// ("prefix:20" and "sub-1:20" both constrain resolution to the 20 line). ok is
-// false when the request names no version at all: a channel or alias
+// DeclaredVersion reduces a declared mise version request to the version line
+// it constrains, looking through the wrappers mise resolves at install time.
+// "prefix:20" constrains resolution to the 20 line exactly as "20" does; a
+// subtraction moves the request off the line it names and onto a lower one, so
+// "sub-1:20" constrains the 19 line, not the 20 line (see subtractSelector).
+//
+// ok is false when the request names no version at all: a channel or alias
 // ("latest", "lts", "system"), a git ref or checkout ("ref:main",
-// "path:/opt/go"), or an empty token. Such a request may resolve to any
-// release, so its text rules nothing out; one that does carry a version can
-// only resolve to that version or, when it is partial, to a release beneath
-// it.
+// "path:/opt/go"), an empty token, or a subtraction Deputy cannot evaluate
+// without resolving its base first ("sub-2:lts"). Such a request may resolve
+// to any release, so its text rules nothing out; one that does carry a version
+// can only resolve to that version or, when it is partial, to a release
+// beneath it.
 //
 // This is the discriminator remediation needs before overwriting a
 // declaration a stale plan no longer describes. "Starts with a digit" is not
 // it: mise's Java versions are vendor-prefixed exact releases
 // ("temurin-21.0.6+7"), and reading those as floating selectors lets an old
-// plan replace a newer toolchain with an older one.
+// plan replace a newer toolchain with an older one. Nor is "strip the wrapper
+// and keep the base": that reads "sub-1:20" as governing the 20 line, so a
+// plan built for 20.11.0 overwrites a declaration that installs 19.9.0, while
+// the plan that does describe it is refused.
 func DeclaredVersion(request string) (version string, ok bool) {
 	s := strings.TrimSpace(request)
 	for {
-		base, wrapped := trimSelectorWrapper(s)
+		base, sub, wrapped := trimSelectorWrapper(s)
 		if !wrapped {
 			break
 		}
 		s = strings.TrimSpace(base)
+		if sub == "" {
+			continue
+		}
+		derived, derivedOK := subtractSelector(s, sub)
+		if !derivedOK {
+			return "", false
+		}
+		s = derived
+	}
+	// A wrapper the loop could not strip is a request mise itself refuses, so
+	// its text names no release to reason about.
+	if hasAnyPrefix(s, selectorWrapperPrefixes) {
+		return "", false
 	}
 	if _, floating := fuzzyChannels[strings.ToLower(s)]; floating {
 		return "", false
@@ -425,11 +446,16 @@ func trimVersionV(s string) string {
 }
 
 // trimSelectorWrapper strips one leading mise selector wrapper from a version
-// request and returns the request it wraps, so "prefix:20" yields "20" and
-// "sub-1:lts" yields "lts". ok is false when no wrapper is present or the
-// wrapper has nothing to wrap, in which case the request is classified as
-// written.
-func trimSelectorWrapper(s string) (base string, ok bool) {
+// request, returning the request it wraps and, for a "sub-" wrapper, the
+// subtrahend it carries: "prefix:20" yields base "20" with no subtrahend, and
+// "sub-1:lts" yields base "lts" with subtrahend "1". sub is empty exactly when
+// the wrapper does not subtract, so a caller can tell "prefix:20" from a
+// malformed "sub-:20" without re-reading the prefix.
+//
+// ok is false when no wrapper is present, the wrapper has nothing to wrap, or
+// a "sub-" wrapper carries no subtrahend. The request is then classified as
+// written, and DeclaredVersion refuses one that still begins with a wrapper.
+func trimSelectorWrapper(s string) (base, sub string, ok bool) {
 	for _, prefix := range selectorWrapperPrefixes {
 		if !strings.HasPrefix(s, prefix) {
 			continue
@@ -438,12 +464,87 @@ func trimSelectorWrapper(s string) (base string, ok bool) {
 		if prefix == "sub-" {
 			// "sub-<n>:<base>": the count belongs to the wrapper, not to the
 			// request being wrapped.
-			_, rest, _ = strings.Cut(rest, ":")
+			count, wrapped, found := strings.Cut(rest, ":")
+			if !found || strings.TrimSpace(count) == "" {
+				return "", "", false
+			}
+			sub, rest = strings.TrimSpace(count), wrapped
 		}
 		if rest == "" {
-			return "", false
+			return "", "", false
 		}
-		return rest, true
+		return rest, sub, true
 	}
-	return "", false
+	return "", "", false
+}
+
+// subtractSelector applies a mise "sub-" subtrahend to the base request it
+// wraps, returning the version line the wrapped request actually resolves
+// under.
+//
+// mise subtracts component-wise from the base as written, keeping only as many
+// components as the subtrahend has, so "sub-1:20.11" governs the 19 line and
+// not a nonexistent 19.11. A subtrahend longer than the base is truncated to
+// the base, leaving "sub-0.1:20" governing the same line as plain "20".
+// Subtracting past zero floors there. Verified against mise 2026.7.3 by
+// resolving real configs and reading `mise ls --current`:
+//
+//	sub-1:20        -> 19.9.0     sub-0.1:20.11   -> 20.10.0
+//	sub-1:20.11     -> 19.9.0     sub-0.1:20.11.1 -> 20.10.0
+//	sub-1:20.11.1   -> 19.9.0     sub-0.1:20      -> 20.20.2
+//	sub-2:24        -> 22.23.2    sub-0.0.1:20    -> 20.20.2
+//	sub-30:20       -> 0.12.18    sub-0.0.1:20.11 -> 20.11.1
+//
+// ok is false when either side is not a plain dotted numeric run. The base may
+// be a channel ("sub-2:lts") or a vendor-prefixed release, and mise resolves
+// those before subtracting, which cannot be done from the config text alone;
+// such a request rules no release out, which is what the caller reports.
+func subtractSelector(base, sub string) (derived string, ok bool) {
+	baseParts, baseOK := dottedNumbers(base)
+	if !baseOK {
+		return "", false
+	}
+	subParts, subOK := dottedNumbers(sub)
+	if !subOK {
+		return "", false
+	}
+	parts := make([]string, min(len(subParts), len(baseParts)))
+	for i := range parts {
+		parts[i] = strconv.Itoa(max(baseParts[i]-subParts[i], 0))
+	}
+	return strings.Join(parts, "."), true
+}
+
+// maxVersionComponentDigits bounds a single version component so an absurdly
+// long numeric run in a user-authored request cannot overflow the conversion.
+// Real components are a few digits at most.
+const maxVersionComponentDigits = 9
+
+// dottedNumbers parses a plain dotted numeric run ("20.11") into its
+// components. ok is false for anything else: an empty string, a vendor prefix
+// or prerelease suffix, a sign, or a component too long to be a real one. A
+// request that cannot be reduced to numbers exactly is reported as unreadable
+// rather than reduced approximately, because an approximate reading is what
+// lets remediation rewrite a declaration it does not describe.
+func dottedNumbers(s string) (components []int, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, false
+	}
+	for part := range strings.SplitSeq(s, ".") {
+		if part == "" || len(part) > maxVersionComponentDigits {
+			return nil, false
+		}
+		for i := range len(part) {
+			if part[i] < '0' || part[i] > '9' {
+				return nil, false
+			}
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, false
+		}
+		components = append(components, n)
+	}
+	return components, true
 }

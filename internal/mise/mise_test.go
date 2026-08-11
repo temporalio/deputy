@@ -524,13 +524,47 @@ func TestDeclaredVersion(t *testing.T) {
 		{"temurin-21", "temurin-21", true},
 		{"  1.24.3  ", "1.24.3", true},
 		{"prefix:20", "20", true},
-		{"sub-1:20.11", "20.11", true},
+		// A sub- request resolves below the line it names, so the version it
+		// constrains is the subtracted one, not the base. Each row below is
+		// what mise 2026.7.3 installs for the request, read from
+		// `mise ls --current` over a real config:
+		//   sub-1:20        -> 19.9.0    (the 19 line)
+		//   sub-1:20.11     -> 19.9.0    (the 19 line)
+		//   sub-1:20.11.1   -> 19.9.0    (the 19 line)
+		//   sub-0.1:20.11   -> 20.10.0   (the 20.10 line)
+		//   sub-0.1:20.11.1 -> 20.10.0   (the 20.10 line)
+		//   sub-2:24        -> 22.23.2   (the 22 line)
+		// The subtrahend is applied component-wise to the base as written and
+		// truncated to its own length, which is why sub-1:20.11 governs 19 and
+		// not 19.11.
+		{"sub-1:20", "19", true},
+		{"sub-1:20.11", "19", true},
+		{"sub-1:20.11.1", "19", true},
+		{"sub-0.1:20.11", "20.10", true},
+		{"sub-0.1:20.11.1", "20.10", true},
+		{"sub-2:24", "22", true},
+		// A subtrahend longer than the base is truncated to the base's
+		// components, so it constrains exactly what the base does:
+		//   sub-0.1:20   -> 20.20.2  (the 20 line, same as "20")
+		//   sub-0.0.1:20 -> 20.20.2
+		{"sub-0.1:20", "20", true},
+		{"sub-0.0.1:20", "20", true},
+		// Subtracting past zero floors there rather than wrapping:
+		//   sub-30:20 -> 0.12.18 (the 0 line)
+		{"sub-30:20", "0", true},
 		{"latest", "", false},
 		{"lts", "", false},
 		{"stable", "", false},
 		{"system", "", false},
 		{"", "", false},
+		// The subtracted line is only computable when the base names one.
+		// Over a channel or a vendor-prefixed release there is nothing to
+		// subtract from without resolving it first, so the request rules
+		// nothing out and stays rewritable.
 		{"sub-2:lts", "", false},
+		{"sub-1:temurin-21", "", false},
+		{"sub-:20", "", false},
+		{"sub-x:20", "", false},
 		{"prefix:latest", "", false},
 		{"ref:main", "", false},
 		{"ref:v1.2.3", "", false},

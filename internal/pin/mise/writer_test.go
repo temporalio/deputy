@@ -223,7 +223,12 @@ func TestSelectorTargetsCurrent(t *testing.T) {
 		{"latest channel", "latest", []string{"20.11.0"}, true},
 		{"stable channel", "stable", []string{"20.11.0"}, true},
 		{"subtracted channel", "sub-2:lts", []string{"20.11.0"}, true},
-		{"subtracted selector on the current line", "sub-1:20", []string{"20.11.0"}, true},
+		// A sub- request governs the line it resolves to, which is below the
+		// one it names: mise 2026.7.3 installs 19.9.0 for `node = "sub-1:20"`
+		// and 20.10.0 for `node = "sub-0.1:20.11"`, both read from
+		// `mise ls --current` over a real config.
+		{"subtracted selector on the line it resolves to", "sub-1:20", []string{"19.9.0"}, true},
+		{"subtracted minor selector on the line it resolves to", "sub-0.1:20.11", []string{"20.10.0"}, true},
 		{"explicit prefix selector", "prefix:20", []string{"20.11.0"}, true},
 		{"git ref", "ref:main", []string{"20.11.0"}, true},
 		{"registry alias", "gallium", []string{"20.11.0"}, true},
@@ -247,6 +252,12 @@ func TestSelectorTargetsCurrent(t *testing.T) {
 		{"another vendor at the same version", "zulu-21.0.6+7", []string{"temurin-21.0.6+7"}, false},
 		{"explicit prefix for another line", "prefix:22", []string{"20.11.0"}, false},
 		{"subtracted selector on another line", "sub-1:22", []string{"20.11.0"}, false},
+		// The base line is not the resolved line. Reading sub-1:20 as if it
+		// governed 20.x lets a plan built for 20.11.0 overwrite a declaration
+		// that installs 19.9.0, and refuses the plan that actually describes
+		// it.
+		{"subtracted selector on its unsubtracted base line", "sub-1:20", []string{"20.11.0"}, false},
+		{"subtracted minor selector on its unsubtracted base line", "sub-0.1:20.11", []string{"20.11.1"}, false},
 		{"selector off by one character", "20.2", []string{"20.11.0"}, false},
 		{"declaration more precise than the current version", "20.11.0", []string{"20.11"}, false},
 		// The permissive misreading: a leading-character rule would let
