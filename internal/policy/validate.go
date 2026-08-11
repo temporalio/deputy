@@ -239,14 +239,15 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	if doc.Kind != yaml.MappingNode {
 		return append(issues, issueAt(doc, IssueError, "root-not-mapping", "root must be a mapping")), nil
 	}
-	// Anchors are reported before anything else reads the document, so the rest
-	// of validation, and every other reader of a bundle, sees only plain nodes.
-	// The scan comes before the policies lookup because a root merge key can
-	// supply the whole list, which would otherwise read as a missing key. It does
-	// not stop the checks that follow: a refused anchor must not hide an unrelated
-	// typo, or an uncompilable var, and cost the author a second lint run.
-	anchors := anchorIssues(root)
-	issues = append(issues, anchors...)
+	// Anchors are reported before anything else reads the document, so the rest of
+	// validation, and every other reader of a bundle, sees only plain nodes. The
+	// scan comes before the policies lookup because a root merge key can supply
+	// the whole list, which would otherwise read as a missing key. It stops none
+	// of the checks that follow: a refused anchor must not hide an unrelated typo,
+	// or an uncompilable var, and cost the author a second lint run. What a later
+	// check does skip is the node it cannot read, which is a reference and not
+	// every node an anchor names (see resolvesElsewhere).
+	issues = append(issues, anchorIssues(root)...)
 	policiesNode := MappingValue(doc, bundlePoliciesKey)
 	if policiesNode == nil {
 		// A root merge key supplies the whole list, so a document carrying one is
@@ -297,14 +298,16 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 		}
 		issues = append(issues, expandedPolicyIssues(item, source, opts.ExtraVars, located)...)
 	}
-	// Loading the whole bundle is the last backstop, for the shapes that belong to
-	// no single policy, such as bundle metadata of the wrong type. It stops at its
-	// first failure, which is why it runs after every policy has been expanded on
-	// its own and adds only what is not already reported. A document carrying an
-	// anchor skips it outright: the loader stops at the first one, which the scan
-	// above already located.
-	if len(anchors) == 0 {
-		if _, err := ParseStructuredSources([]byte(text), source); err != nil {
+	// Decoding the whole bundle is the last backstop, for the shapes that belong
+	// to no single policy, such as bundle metadata of the wrong type. It stops at
+	// its first failure, which is why it runs after every policy has been expanded
+	// on its own and adds only what is not already reported. It is the decode
+	// alone: routing it through the loader would stop at the loader's refusal of
+	// an anchor this run has already located and named a line for, and hide the
+	// bundle-level shape behind it. A document that says part of itself elsewhere
+	// is skipped, since the decoder would resolve what no reader of a bundle may.
+	if !resolvesElsewhere(root) {
+		if _, _, err := decodeStructuredBundle([]byte(text), source); err != nil {
 			issues = append(issues, backstopIssue(err, source, doc, issues)...)
 		}
 	}

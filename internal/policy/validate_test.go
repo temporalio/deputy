@@ -1388,6 +1388,22 @@ policies: none
 			wantCodes: []string{"yaml-anchor", "policies-not-list"},
 		},
 		{
+			name: "an unused anchor beside bundle metadata of the wrong type",
+			bundle: `
+unused: &u 1
+
+metadata: []
+
+policies:
+  - name: plain
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`,
+			wantCodes: []string{"yaml-anchor", "bundle-error"},
+		},
+		{
 			name: "an unused anchor in a document with no policies key",
 			bundle: `
 unused: &u
