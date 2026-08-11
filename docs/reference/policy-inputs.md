@@ -1085,7 +1085,7 @@ Scan vulnerability (simplified):
       "id": "GO-2024-1234",
       "severity": {"level": "SEVERITY_LEVEL_MEDIUM"}
     },
-    "package": {"name": "example.com/pkg", "version": "1.0.0", "ecosystem": "go"}
+    "package": {"name": "example.com/pkg", "version": "v1.0.0", "ecosystem": "go"}
   },
   "env": {"command": "scan", "entrypoint": "scan_vulnerability"}
 }
