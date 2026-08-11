@@ -75,6 +75,14 @@ The second is why this is a table of four rather than a note on one. `oci.go` re
 
 **Rule:** conform to the foreign contract, and treat each extension family as a projection of its own domain message. One message per family, not one for the prefix.
 
+### Where configuration fits
+
+Configuration is an ergonomic projection, kind 2, with one difference worth stating plainly: its root is not proto. `internal/config.Config` is a Go struct carrying `yaml` and `json` tags, and the file schema, the `DEPUTY_*` environment variables, and the tables in [`docs/reference/configuration.md`](../reference/configuration.md) are three hand-maintained projections of it. That it did not obviously belong to any of the four kinds is part of why it drifted: no category meant no rule, no derivation mechanism, and no correspondence test.
+
+Nothing currently ties the reference to the struct. No test reads `configuration.md`, which is how it came to document an entire `sbom` section (`sbom.format`, `sbom.enrich_licenses`, `sbom.license_source`) with no config field behind it; the only SBOM knob that exists is `performance.sbom_enrich_concurrency`.
+
+**Rule:** the same as any other ergonomic projection. The struct is the contract until the contract moves to proto, so derive the reference tables and the environment variable list from it and add a correspondence test that fails when a documented key has no field, or a field no documented key. Adding a setting should be one edit, not three.
+
 ## Why this matters, empirically
 
 Auditing every surface split it cleanly by direction, if not by outcome. Every derived surface was faithful to its source. Most hand-maintained ones had drifted. Faithful is not the same as correct, and the difference is the whole point of the next section:
@@ -148,7 +156,8 @@ Ecosystem-specific name and version normalization still has to happen before the
 3. Decide the ergonomic affordance for the CLI deliberately, and add the correspondence test.
 4. For the DSL, derive the vocabulary. Apply the admission test before adding a helper.
 5. If it crosses the proxy, decide what the extension band says.
-6. Add the contract test at the root, not only at the leaves.
+6. If it is configurable, add the field to `internal/config.Config` and let the reference and the environment variable list follow from it, rather than editing the struct, the loader, and the docs separately.
+7. Add the contract test at the root, not only at the leaves.
 
 If a capability has to be typed into more than one place, that is the signal something should be derived that is not.
 
@@ -157,4 +166,5 @@ If a capability has to be typed into more than one place, that is the signal som
 - **Runtime protoreflect and the embedded descriptor set** for anything needing proto comments at runtime: MCP descriptions, LSP hovers, generated docs. Note that `protoc-gen-go` strips `SourceCodeInfo`, which is why [`descriptorset.binpb`](../../internal/proto/descriptorset) exists.
 - **A Go generator that imports the registry and reads the descriptor set** when the output joins proto data with something only Go knows. Per-entrypoint CEL environment declarations are the strongest candidate: generating them from binding profiles plus descriptors turns unbound variables into compile errors. It has to be a Go generator rather than a protoc plugin, because a plugin receives only descriptors and options, and `BindingProfiles` is a Go map in [`internal/policy/bindings.go`](../../internal/policy/bindings.go). A protoc plugin would have to parse repository Go source to see it, which keeps the second source of truth rather than removing it. `internal/docsgen` already works this way and is the precedent to copy.
 - **A custom protoc plugin** only once the metadata it needs lives in proto. Moving entrypoint bindings into proto options would make one possible here, and would be the cleaner end state, but that is a prerequisite rather than a detail.
+- **Reflection over the Go struct** for the configuration reference, since that struct is the contract today. The `yaml` and `json` tags already name every key, so the reference tables and the `DEPUTY_*` list can be rendered from them the way `internal/docsgen` renders the entrypoint reference, with the same drift test holding the edge. If configuration ever moves into proto, this becomes an ordinary direct projection and the mechanism above applies instead.
 - **Neither** for the ergonomic layer. Generate the contract, hand-write the affordance, and let a drift test hold the edge.
