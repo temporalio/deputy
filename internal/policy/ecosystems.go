@@ -102,14 +102,21 @@ func validateEcosystems(ecosystems []string) ([]string, error) {
 //   - "ecosystem": a single name (pkg, request, node, change, component, ...)
 //   - "ecosystems": a list of names (scan/diff/graph request options)
 //   - "ecosystems": a map keyed by ecosystem (graph and SBOM stats counts)
+//
+// A package URL is a fourth shape, and it answers a different question, so it
+// gets a second pass. Rewriting an ecosystem or a name needs to know which
+// ecosystem's rules apply, and only a schema that declares one can say; a
+// package URL says so itself. See [canonicalizePackageReferences].
 func canonicalizeEcosystemPayload(payload map[string]any) {
 	for name, value := range payload {
-		if !variableCarriesEcosystem(name) {
-			continue
+		if variableCarriesEcosystem(name) {
+			// Each top-level variable is its own object; nothing outside it
+			// can name its ecosystem, so the walk starts with none inherited.
+			canonicalizeEcosystemValue(value, "")
 		}
-		// Each top-level variable is its own object; nothing outside it can
-		// name its ecosystem, so the walk starts with none inherited.
-		canonicalizeEcosystemValue(value, "")
+		if !isCallerExtendedVariable(name) {
+			canonicalizePackageReferences(value)
+		}
 	}
 }
 
@@ -129,13 +136,40 @@ func isFreeFormMap(key string) bool {
 	return descriptorset.IsScalarMapField(key)
 }
 
-// variableCarriesEcosystem reports whether a top-level policy variable may hold
-// an ecosystem, so canonicalization stays on schema-defined paths. Variables
-// with a proto-typed schema are answered from their descriptor, which keeps
-// caller-controlled payloads such as jwt out of the walk without a hand-written
-// exclusion list. Variables whose payload is untyped ("object" in the variable
-// metadata, for example a scan report) are walked, since their shape is only
-// known at runtime.
+// callerExtendedVariables names the top-level payload variables whose schema
+// stops describing their payload before evaluation, with the reason it stops.
+// [flattenJWTCustomClaims] promotes a token's custom_claims onto the jwt object,
+// so any key there is a claim the token's issuer chose: a claim named
+// "ecosystem" is somebody's data, and rewriting "Customer_Success" to
+// "customer-success" silently stopped an exact-match deny rule from firing.
+//
+// Nothing else in a payload needs naming here. A nested free-form map is
+// recognized from the descriptors by [isFreeFormMap], and a variable with no
+// proto type is a schema-described report Deputy itself builds. The entry is
+// keyed to the flattening it describes so a second flattener has one obvious
+// place to declare itself.
+var callerExtendedVariables = map[string]string{
+	"jwt": "flattenJWTCustomClaims promotes issuer-chosen claims onto the jwt object",
+}
+
+// isCallerExtendedVariable reports whether a top-level policy variable carries
+// keys its proto schema does not describe, which is the one case the
+// canonicalization walk must stay out of entirely.
+//
+// Everything else is walked. Gating instead on "does this variable's schema
+// mention an ecosystem" read as the safer rule and was not: graph edges name
+// their endpoints by package URL and declare no ecosystem, so the gate kept the
+// walk out of them and left "edge.to" spelling a package differently from the
+// node it points at.
+func isCallerExtendedVariable(name string) bool {
+	_, extended := callerExtendedVariables[name]
+	return extended
+}
+
+// variableCarriesEcosystem reports whether a top-level policy variable's schema
+// declares an ecosystem anywhere in it, so a variable that arrives beside a
+// package rather than inside one (env, target, jwt) can be told apart from one
+// that carries package identities.
 func variableCarriesEcosystem(name string) bool {
 	meta, known := VariableInfo(name)
 	if !known {
@@ -221,6 +255,74 @@ func canonicalizeEcosystemValue(value any, inherited ecosystem.Ecosystem) {
 			canonicalizeEcosystemValue(elem, inherited)
 		}
 	}
+}
+
+// canonicalizePackageReferences rewrites the package URLs a payload carries as
+// references to a package rather than as one package's own identity. Graph data
+// is full of them: an edge names its endpoints by purl, the roots list names the
+// direct dependencies by purl, and a finding's path is a chain of them. None of
+// those objects declares an ecosystem, so the ecosystem walk never reaches them,
+// and a node whose purl gained a "v" prefix stopped matching the roots entry and
+// the edge that pointed at it. A rule as ordinary as "node.purl in roots" then
+// reads two identities where there is one.
+//
+// This pass asks a different question from the ecosystem walk and so runs under
+// a different rule. Rewriting an ecosystem, a name, or a version needs to know
+// which ecosystem's rules apply, and only a schema that declares one can say. A
+// package URL says so itself, so a reference needs no schema support at all,
+// only a value that parses. What it does need is to stay off payload data
+// Deputy did not put there, which is why it skips free-form maps and the
+// variables a caller extends.
+//
+// The "purl" field is left to [normalizeIdentityFields]: it spells the identity
+// of the object that carries it, and that object's own ecosystem decides how to
+// fold it, which is the stricter rule. A package whose ecosystem is Cargo but
+// whose purl is a pkg:github reference must come back untouched.
+func canonicalizePackageReferences(value any) {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, child := range v {
+			if isFreeFormMap(key) || slices.Contains(packagePURLKeys, key) {
+				continue
+			}
+			if raw, isString := child.(string); isString {
+				v[key] = canonicalizePackageReference(raw)
+				continue
+			}
+			canonicalizePackageReferences(child)
+		}
+	case []any:
+		for i, elem := range v {
+			if raw, isString := elem.(string); isString {
+				v[i] = canonicalizePackageReference(raw)
+				continue
+			}
+			canonicalizePackageReferences(elem)
+		}
+	}
+}
+
+// canonicalizePackageReference canonicalizes one package URL against the
+// ecosystem the URL itself names. Resolving the ecosystem through
+// [ecosystem.FromPURLType] is what makes this safe to apply to any string
+// instead of to a list of field names that would go stale the next time a
+// message grows one: a value is only rewritten when it parses as a package URL
+// whose type a registration claims, and it is then folded by that ecosystem's
+// own rules rather than by an inherited guess. Everything else, including a
+// package URL of a type Deputy has no rules for, comes back byte for byte.
+func canonicalizePackageReference(raw string) string {
+	if !strings.HasPrefix(raw, "pkg:") {
+		return raw
+	}
+	parsed, err := purlx.ParseLoose(raw)
+	if err != nil {
+		return raw
+	}
+	eco, known := ecosystem.FromPURLType(parsed.Type)
+	if !known {
+		return raw
+	}
+	return canonicalizePURL(raw, eco)
 }
 
 // canonicalizeOwnEcosystem rewrites a map's own "ecosystem" field to its

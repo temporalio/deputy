@@ -138,6 +138,37 @@ func PURLType(eco Ecosystem) string {
 	return ""
 }
 
+// FromPURLType resolves the ecosystem a package-url type identifies, the
+// inverse of [PURLType] over the same registrations. A package URL is
+// self-describing: "pkg:golang/example.com/mod@v1.2.3" names its ecosystem in
+// its type, so a reference that carries no ecosystem field of its own (a graph
+// edge, a roots list, a dependency chain) can still be handled by the right
+// ecosystem's rules without a second table mapping types back to names.
+//
+// Types no registration claims return ok=false. Deputy has no normalization
+// rules for them, and picking an ecosystem anyway would apply the wrong fold to
+// somebody else's identifier. Comparison is case-insensitive because the purl
+// spec lowercases the type.
+func FromPURLType(purlType string) (eco Ecosystem, ok bool) {
+	purlType = strings.ToLower(strings.TrimSpace(purlType))
+	if purlType == "" {
+		return "", false
+	}
+	// Registered ecosystems answer first so a runtime registration cannot be
+	// shadowed by one of the registry-less tokens below.
+	for _, reg := range Default().All() {
+		if reg.PURLType != "" && strings.EqualFold(reg.PURLType, purlType) {
+			return reg.Ecosystem, true
+		}
+	}
+	for _, reg := range extraCanonicalEcosystems {
+		if reg.PURLType != "" && strings.EqualFold(reg.PURLType, purlType) {
+			return reg.Ecosystem, true
+		}
+	}
+	return "", false
+}
+
 // Canonical resolves raw into the single spelling of an ecosystem that Deputy
 // compares against: a lowercase, hyphenated token such as "go", "npm", "pypi",
 // or "github-actions". It is the contract every policy sees; display forms

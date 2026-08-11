@@ -857,7 +857,7 @@ var notPackageIdentity = map[string]string{
 	"operation":                         "the proxy operation being requested",
 	"os":                                "an image platform OS",
 	"os_version":                        "an image platform OS version, not a package version",
-	"path":                              "a file path, an import path, or a dependency chain, not a package name",
+	"path":                              "a file path, an import path, or a dependency chain; a chain of package URLs is canonicalized as references, not as one object's name",
 	"published":                         "a timestamp",
 	"raw":                               "a severity score as its source published it",
 	"raw_type":                          "a severity scoring system",
@@ -1159,6 +1159,150 @@ func TestPURLAgreesWithIdentityFields(t *testing.T) {
 			}
 			if want := pkg["version"]; parsed.Version != want {
 				t.Errorf("purl version %q, package version %q", parsed.Version, want)
+			}
+		})
+	}
+}
+
+// TestGraphReferencesSpellTheNodeTheyName pins the graph identity contract: a
+// node, the roots list, and both ends of every edge must spell one package one
+// way. Only the node declares an ecosystem, so canonicalizing on that alone
+// moved node.purl to "pkg:golang/example.com/mod@v1.2.3" and left roots and
+// edge.to on the unprefixed spelling, which quietly made "node.purl in roots"
+// and "edge.to == to_node.purl" false for every Go package.
+func TestGraphReferencesSpellTheNodeTheyName(t *testing.T) {
+	const (
+		rawRoot  = "pkg:golang/example.com/root@1.0.0"
+		rawDep   = "pkg:golang/example.com/mod@1.2.3"
+		wantRoot = "pkg:golang/example.com/root@v1.0.0"
+		wantDep  = "pkg:golang/example.com/mod@v1.2.3"
+	)
+	payload := map[string]any{
+		"nodes": []any{
+			map[string]any{"purl": rawRoot, "name": "example.com/root", "version": "1.0.0", "ecosystem": "Go"},
+			map[string]any{"purl": rawDep, "name": "example.com/mod", "version": "1.2.3", "ecosystem": "Go"},
+		},
+		"edges":   []any{map[string]any{"from": rawRoot, "to": rawDep, "constraint": "^1.2.0"}},
+		"roots":   []any{rawRoot},
+		"node":    map[string]any{"purl": rawDep, "ecosystem": "Go", "version": "1.2.3"},
+		"to_node": map[string]any{"purl": rawDep, "ecosystem": "Go", "version": "1.2.3"},
+		"edge":    map[string]any{"from": rawRoot, "to": rawDep},
+		"graph":   map[string]any{"roots": []any{rawRoot}},
+		"vulnerability": map[string]any{
+			"package": map[string]any{"ecosystem": "Go", "version": "1.2.3"},
+			"path":    []any{rawRoot, rawDep},
+		},
+	}
+	canonicalizeEcosystemPayload(payload)
+
+	edge := payload["edge"].(map[string]any)
+	reported := []struct {
+		what string
+		got  any
+		want string
+	}{
+		{"nodes[0].purl", payload["nodes"].([]any)[0].(map[string]any)["purl"], wantRoot},
+		{"nodes[1].purl", payload["nodes"].([]any)[1].(map[string]any)["purl"], wantDep},
+		{"roots[0]", payload["roots"].([]any)[0], wantRoot},
+		{"graph.roots[0]", payload["graph"].(map[string]any)["roots"].([]any)[0], wantRoot},
+		{"edges[0].from", payload["edges"].([]any)[0].(map[string]any)["from"], wantRoot},
+		{"edges[0].to", payload["edges"].([]any)[0].(map[string]any)["to"], wantDep},
+		{"edges[0].constraint", payload["edges"].([]any)[0].(map[string]any)["constraint"], "^1.2.0"},
+		{"edge.from", edge["from"], wantRoot},
+		{"edge.to", edge["to"], wantDep},
+		{"to_node.purl", payload["to_node"].(map[string]any)["purl"], wantDep},
+		{"vulnerability.path[0]", payload["vulnerability"].(map[string]any)["path"].([]any)[0], wantRoot},
+		{"vulnerability.path[1]", payload["vulnerability"].(map[string]any)["path"].([]any)[1], wantDep},
+	}
+	for _, r := range reported {
+		if r.got != r.want {
+			t.Errorf("%s = %v, want %q", r.what, r.got, r.want)
+		}
+	}
+}
+
+// TestPackageReferencesLeaveEverythingElseAlone pins the blast radius of the
+// reference pass, which is the half that widens the walk. It rewrites a string
+// only when the string is a package URL of a type a registration claims, so
+// caller data, prose, and package URLs of unknown types come back byte for byte
+// even when they sit in a payload full of Go packages.
+func TestPackageReferencesLeaveEverythingElseAlone(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload map[string]any
+		want    map[string]any
+	}{
+		{
+			name:    "a jwt claim holding a package url survives",
+			payload: map[string]any{"jwt": map[string]any{"sub": "pkg:pypi/Flask_SQLAlchemy@3.1.1"}},
+			want:    map[string]any{"jwt": map[string]any{"sub": "pkg:pypi/Flask_SQLAlchemy@3.1.1"}},
+		},
+		{
+			name: "a free-form map holding a package url survives",
+			payload: map[string]any{"node": map[string]any{
+				"ecosystem":  "PyPI",
+				"provenance": map[string]any{"origin": "pkg:pypi/zope.interface@6.4"},
+			}},
+			want: map[string]any{"node": map[string]any{
+				"ecosystem":  "pypi",
+				"provenance": map[string]any{"origin": "pkg:pypi/zope.interface@6.4"},
+			}},
+		},
+		{
+			name: "a package url of an unclaimed type survives",
+			payload: map[string]any{"edge": map[string]any{
+				"from": "pkg:github/Masterminds/semver@v3.2.1",
+				"to":   "pkg:generic/Some_Thing@1.0",
+			}},
+			want: map[string]any{"edge": map[string]any{
+				"from": "pkg:github/Masterminds/semver@v3.2.1",
+				"to":   "pkg:generic/Some_Thing@1.0",
+			}},
+		},
+		{
+			name: "strings that are not package urls survive",
+			payload: map[string]any{"edge": map[string]any{
+				"from":       "example.com/Root",
+				"to":         "https://example.com/pkg:pypi/Flask_SQLAlchemy",
+				"constraint": ">=1.0.0",
+			}},
+			want: map[string]any{"edge": map[string]any{
+				"from":       "example.com/Root",
+				"to":         "https://example.com/pkg:pypi/Flask_SQLAlchemy",
+				"constraint": ">=1.0.0",
+			}},
+		},
+		{
+			name: "target paths survive",
+			payload: map[string]any{"target": map[string]any{
+				"local_path": "/tmp/pkg:pypi",
+				"origin_url": "https://github.com/temporalio/deputy",
+			}},
+			want: map[string]any{"target": map[string]any{
+				"local_path": "/tmp/pkg:pypi",
+				"origin_url": "https://github.com/temporalio/deputy",
+			}},
+		},
+		{
+			name: "a mismatched purl field still belongs to its own object",
+			payload: map[string]any{"pkg": map[string]any{
+				"ecosystem": "crates.io",
+				"name":      "async-trait",
+				"purl":      "pkg:pypi/Flask_SQLAlchemy@3.1.1",
+			}},
+			want: map[string]any{"pkg": map[string]any{
+				"ecosystem": "cargo",
+				"name":      "async-trait",
+				"purl":      "pkg:pypi/Flask_SQLAlchemy@3.1.1",
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			canonicalizeEcosystemPayload(tt.payload)
+			if !reflect.DeepEqual(tt.payload, tt.want) {
+				t.Errorf("canonicalizeEcosystemPayload() = %#v, want %#v", tt.payload, tt.want)
 			}
 		})
 	}

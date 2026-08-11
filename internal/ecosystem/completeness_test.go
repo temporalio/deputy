@@ -2,6 +2,7 @@ package ecosystem
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -122,6 +123,42 @@ func TestPURLTypeIsDefinedForEveryToken(t *testing.T) {
 		t.Run(token, func(t *testing.T) {
 			if PURLType(Ecosystem(token)) == "" {
 				t.Errorf("PURLType(%q) is empty", token)
+			}
+		})
+	}
+}
+
+// TestPURLTypeRoundTripsThroughItsEcosystem pins [FromPURLType] as the exact
+// inverse of [PURLType] over the whole canonical vocabulary. A self-describing
+// package reference is resolved through it, so a type that resolves to the
+// wrong ecosystem, or to none, would fold a reference by another ecosystem's
+// rules or leave it alone while its sibling fields were canonicalized.
+func TestPURLTypeRoundTripsThroughItsEcosystem(t *testing.T) {
+	for _, token := range CanonicalEcosystems() {
+		t.Run(token, func(t *testing.T) {
+			purlType := PURLType(Ecosystem(token))
+			eco, ok := FromPURLType(purlType)
+			if !ok {
+				t.Fatalf("FromPURLType(%q) does not resolve, but it is the purl type of %q", purlType, token)
+			}
+			if string(eco) != token {
+				t.Errorf("FromPURLType(%q) = %q, want %q", purlType, eco, token)
+			}
+			if upper, upperOK := FromPURLType(strings.ToUpper(purlType)); !upperOK || upper != eco {
+				t.Errorf("FromPURLType(%q) = (%q, %t), want (%q, true)", strings.ToUpper(purlType), upper, upperOK, eco)
+			}
+		})
+	}
+}
+
+// TestFromPURLTypeRejectsUnclaimedTypes pins the negative half: a purl type no
+// registration claims must not resolve, because Deputy has no folding rules for
+// it and guessing would rewrite somebody else's identifier.
+func TestFromPURLTypeRejectsUnclaimedTypes(t *testing.T) {
+	for _, purlType := range []string{"", "  ", "generic", "github", "huggingface", "not-a-type"} {
+		t.Run("type="+purlType, func(t *testing.T) {
+			if eco, ok := FromPURLType(purlType); ok {
+				t.Errorf("FromPURLType(%q) = (%q, true), want ok=false", purlType, eco)
 			}
 		})
 	}
