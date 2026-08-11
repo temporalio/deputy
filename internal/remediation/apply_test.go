@@ -1321,59 +1321,148 @@ func lockedVersionAfterFix(t *testing.T, dir, tool, version string) string {
 // failure leaves the config edited and the lock stale; re-running the same
 // command must recognize the config edit as already applied and finish the
 // pruning rather than failing with "could not rewrite".
+//
+// What blocks the lockfile is a parameter, not the point. The first fault is
+// deterministic and holds for any user, so the recovery path keeps its
+// coverage where the suite runs as root; the second is the read-only directory
+// an operator is likeliest to actually hit, which only blocks anyone whose
+// privileges do not bypass mode bits.
 func TestApplyMiseUpdateRetryAfterLockFailure(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "mise.toml")
-	lockPath := filepath.Join(dir, "mise.lock")
 	const lockBody = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
-	if err := os.WriteFile(configPath, []byte("[tools]\ngo = \"1.22.12\"\n"), 0o644); err != nil {
-		t.Fatal(err)
+
+	tests := []struct {
+		name string
+		// block makes the lockfile replacement fail; repair undoes it, as an
+		// operator would before retrying.
+		block  func(t *testing.T, dir, lockPath string)
+		repair func(t *testing.T, dir, lockPath string)
+	}{
+		{
+			// The lockfile resolves out of the repository, which os.Root
+			// refuses to follow. Reads through the repository root fail while
+			// the config, an ordinary file, is still rewritten in place.
+			name: "lockfile escaping the repository",
+			block: func(t *testing.T, dir, lockPath string) {
+				t.Helper()
+				outside := filepath.Join(t.TempDir(), "shared.lock")
+				if err := os.WriteFile(outside, []byte(lockBody), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Remove(lockPath); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, lockPath); err != nil {
+					t.Fatal(err)
+				}
+			},
+			repair: func(t *testing.T, dir, lockPath string) {
+				t.Helper()
+				if err := os.Remove(lockPath); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(lockPath, []byte(lockBody), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			// A read-only directory blocks the lockfile replacement (its
+			// temporary sibling cannot be created) while still allowing the
+			// in-place config rewrite.
+			name: "read-only directory",
+			block: func(t *testing.T, dir, lockPath string) {
+				t.Helper()
+				makeDirUnwritable(t, dir)
+			},
+			repair: func(t *testing.T, dir, lockPath string) {
+				t.Helper()
+				if err := os.Chmod(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
 	}
-	if err := os.WriteFile(lockPath, []byte(lockBody), 0o644); err != nil {
-		t.Fatal(err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "mise.toml")
+			lockPath := filepath.Join(dir, "mise.lock")
+			if err := os.WriteFile(configPath, []byte("[tools]\ngo = \"1.22.12\"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(lockPath, []byte(lockBody), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			tt.block(t, dir, lockPath)
+
+			const cmd = "deputy:mise:update mise.toml go 1.24.3 1.22.12"
+			if err := ApplyDeputyCommand(dir, cmd); err == nil {
+				t.Fatal("expected the blocked lockfile to fail the apply")
+			}
+			config, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(config), "1.24.3") {
+				t.Fatalf("config should already carry the fix:\n%s", config)
+			}
+			// The failure must leave the lockfile exactly as it was, never
+			// truncated.
+			if got, err := os.ReadFile(lockPath); err != nil {
+				t.Fatal(err)
+			} else if string(got) != lockBody {
+				t.Errorf("failed apply damaged the lockfile:\n--- got ---\n%s\n--- want ---\n%s", got, lockBody)
+			}
+
+			// The operator fixes whatever blocked the lockfile write and
+			// retries.
+			tt.repair(t, dir, lockPath)
+			if err := ApplyDeputyCommand(dir, cmd); err != nil {
+				t.Fatalf("retry after partial failure: %v", err)
+			}
+			lock, err := os.ReadFile(lockPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(lock), "1.22.12") {
+				t.Errorf("retry did not prune the stale lock entry:\n%s", lock)
+			}
+		})
 	}
-	// A read-only directory blocks the lockfile replacement (its temporary
-	// sibling cannot be created) while still allowing the in-place config
-	// rewrite, which is exactly the partial-apply state to recover from.
+}
+
+// makeDirUnwritable strips the write bit from dir for the rest of the test,
+// restoring it afterwards, and skips the test when the caller can create files
+// there anyway.
+//
+// Mode bits do not bind a process holding CAP_DAC_OVERRIDE, which is every
+// process in the root-by-default containers that CI and isolated agents run
+// in. A test that chmods a directory to 0555 and then asserts a write failed
+// is asserting something untrue there, and fails for a reason that has nothing
+// to do with the code under test. The probe measures whether the bits bind on
+// this host instead of guessing from the UID, so a capability set that grants
+// the bypass some other way is caught too.
+func makeDirUnwritable(t *testing.T, dir string) {
+	t.Helper()
+
 	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
-	const cmd = "deputy:mise:update mise.toml go 1.24.3 1.22.12"
-	if err := ApplyDeputyCommand(dir, cmd); err == nil {
-		t.Fatal("expected the unwritable directory to fail the apply")
-	}
-	config, err := os.ReadFile(configPath)
+	probe := filepath.Join(dir, ".deputy-writability-probe")
+	f, err := os.OpenFile(probe, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		t.Fatal(err)
+		return // the bits bind: the directory really is unwritable
 	}
-	if !strings.Contains(string(config), "1.24.3") {
-		t.Fatalf("config should already carry the fix:\n%s", config)
-	}
-	// The failure must leave the lockfile exactly as it was, never truncated.
-	if got, err := os.ReadFile(lockPath); err != nil {
-		t.Fatal(err)
-	} else if string(got) != lockBody {
-		t.Errorf("failed apply damaged the lockfile:\n--- got ---\n%s\n--- want ---\n%s", got, lockBody)
-	}
-
-	// The operator fixes whatever blocked the lockfile write and retries.
-	if err := os.Chmod(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := ApplyDeputyCommand(dir, cmd); err != nil {
-		t.Fatalf("retry after partial failure: %v", err)
-	}
-	lock, err := os.ReadFile(lockPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(lock), "1.22.12") {
-		t.Errorf("retry did not prune the stale lock entry:\n%s", lock)
-	}
+	_ = f.Close()
+	_ = os.Remove(probe)
+	t.Skip("this process writes to a 0555 directory, so mode bits cannot block the write under test")
 }
 
 func TestApplyDeputyCommand(t *testing.T) {
@@ -1722,10 +1811,7 @@ func TestReplaceFileAtomically(t *testing.T) {
 			name: "unwritable directory leaves the original intact",
 			setup: func(t *testing.T, dir string) {
 				t.Helper()
-				if err := os.Chmod(dir, 0o555); err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+				makeDirUnwritable(t, dir)
 			},
 			wantErr:   true,
 			wantAfter: original,
