@@ -28,6 +28,12 @@ type deputyCommandSpec struct {
 	// opcode's own branch, so an opcode cannot be applied through a position
 	// preflight did not check.
 	pathArg int
+	// validateArgs checks the arguments only this opcode understands, against
+	// the same rule the code that applies them enforces. Arity says a
+	// deputy:action:pin command carries a SHA and a tag; only this says the
+	// SHA has to be one. A nil hook means the opcode's apply path asks nothing
+	// of its arguments beyond their count, so there is nothing to share.
+	validateArgs func(parts []string) error
 }
 
 // deputyCommandSpecs is the single source of truth for which deputy-internal
@@ -35,9 +41,25 @@ type deputyCommandSpec struct {
 // file they edit. Validation, preflight, and application all read it, so a
 // dry run cannot approve a command the apply path would reject.
 var deputyCommandSpecs = map[string]deputyCommandSpec{
-	"deputy:action:update":     {arity: 4, pathArg: 1}, // deputy:action:update <file> <owner/repo> <new-version>
-	"deputy:action:pin":        {arity: 5, pathArg: 1}, // deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
-	"deputy:dockerfile:update": {arity: 4, pathArg: 1}, // deputy:dockerfile:update <file> <image> <new-version>
+	"deputy:action:update":     {arity: 4, pathArg: 1},                                  // deputy:action:update <file> <owner/repo> <new-version>
+	"deputy:action:pin":        {arity: 5, pathArg: 1, validateArgs: validateActionPin}, // deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
+	"deputy:dockerfile:update": {arity: 4, pathArg: 1},                                  // deputy:dockerfile:update <file> <image> <new-version>
+}
+
+// actionPinUpdate builds the rewrite a deputy:action:pin command asks for from
+// its tokens. Validation and application both go through it, so the arguments
+// preflight judges are the arguments the rewrite receives.
+func actionPinUpdate(parts []string) pin.Update {
+	return pin.Update{Name: parts[2], PinnedValue: parts[3], VersionTag: parts[4]}
+}
+
+// validateActionPin checks a deputy:action:pin command's action reference, SHA,
+// and version tag against the rule githubactions.RewriteWorkflow enforces on the
+// same three values. It borrows that package's validator rather than restating
+// it, because a second copy of "what counts as a SHA" is what would let a dry
+// run accept a pin the rewrite refuses.
+func validateActionPin(parts []string) error {
+	return githubactions.ValidateUpdate(actionPinUpdate(parts))
 }
 
 // ValidateDeputyCommand checks that a deputy-internal command parses, names a
@@ -63,11 +85,17 @@ func ValidateDeputyCommand(cmd string) ([]string, error) {
 
 // PreflightDeputyCommand reports whether ApplyDeputyCommand would accept a
 // command, without applying it. It runs every check the apply path runs before
-// it touches a file: parsing, the opcode vocabulary, arity, containment of the
-// target path within repoDir, and that the target is a file the apply path could
-// edit. A dry run that skipped the containment check would report a step naming
-// ../outside/ci.yml as applicable and then watch execution refuse it, so the two
-// share one implementation and one message.
+// it writes: parsing, the opcode vocabulary, arity, containment of the target
+// path within repoDir, that the target is a file the apply path could edit, and
+// the arguments only that opcode understands. A dry run that skipped the
+// containment check would report a step naming ../outside/ci.yml as applicable
+// and then watch execution refuse it, so the two share one implementation and
+// one message.
+//
+// What it still cannot predict is whether the edit would match anything: every
+// opcode reports "no matches found" from the content it reads, and preflight
+// reads no content. A step this accepts can therefore still fail on a file that
+// no longer names the action or image the plan expected.
 func PreflightDeputyCommand(repoDir, cmd string) error {
 	_, _, err := resolveDeputyCommand(repoDir, cmd)
 	return err
@@ -78,6 +106,11 @@ func PreflightDeputyCommand(repoDir, cmd string) error {
 // absolute path. It is the one place that knows where a command's target path
 // lives, so preflight and application cannot disagree about which path is
 // checked or how a refusal reads.
+//
+// The opcode's own argument check runs last, in the position the apply path
+// reaches it: containment and the target's kind are decided before any argument
+// is read there too, so a command that both escapes the repository and carries a
+// malformed SHA is refused for the escape, which is the refusal worth reporting.
 func resolveDeputyCommand(repoDir, cmd string) ([]string, string, error) {
 	parts, err := ValidateDeputyCommand(cmd)
 	if err != nil {
@@ -90,6 +123,11 @@ func resolveDeputyCommand(repoDir, cmd string) ([]string, string, error) {
 	}
 	if err := requireEditableFile(file); err != nil {
 		return nil, "", err
+	}
+	if spec.validateArgs != nil {
+		if err := spec.validateArgs(parts); err != nil {
+			return nil, "", fmt.Errorf("invalid %s command: %w", parts[0], err)
+		}
 	}
 	return parts, file, nil
 }
@@ -153,10 +191,7 @@ func ApplyDeputyCommand(ctx context.Context, repoDir, cmd string) error {
 
 	case "deputy:action:pin":
 		// Format: deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
-		actionRef := parts[2]
-		sha := parts[3]
-		tag := parts[4]
-		return applyActionPin(ctx, repoDir, file, actionRef, sha, tag)
+		return applyActionPin(ctx, repoDir, file, actionPinUpdate(parts))
 
 	case "deputy:dockerfile:update":
 		// Format: deputy:dockerfile:update <file> <image> <new-version>
@@ -467,7 +502,7 @@ func applyDockerfileUpdate(ctx context.Context, filePath, image, newVersion stri
 // between the check and the write is therefore wider than the other two. It
 // stays bounded because the rewrite reads and writes one already-resolved
 // regular file, which resolveDeputyCommand has already required.
-func applyActionPin(ctx context.Context, repoDir, filePath, actionRef, sha, tag string) error {
+func applyActionPin(ctx context.Context, repoDir, filePath string, update pin.Update) error {
 	if err := ensureLive(ctx, "rewriting", filePath); err != nil {
 		return err
 	}
@@ -488,10 +523,8 @@ func applyActionPin(ctx context.Context, repoDir, filePath, actionRef, sha, tag 
 		return fmt.Errorf("computing relative path: %w", err)
 	}
 
-	if err := githubactions.RewriteWorkflow(root, filepath.ToSlash(relPath), []pin.Update{
-		{Name: actionRef, PinnedValue: sha, VersionTag: tag},
-	}); err != nil {
-		return fmt.Errorf("pinning %s in %s: %w", actionRef, filePath, err)
+	if err := githubactions.RewriteWorkflow(root, filepath.ToSlash(relPath), []pin.Update{update}); err != nil {
+		return fmt.Errorf("pinning %s in %s: %w", update.Name, filePath, err)
 	}
 	return nil
 }

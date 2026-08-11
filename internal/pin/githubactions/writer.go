@@ -38,7 +38,7 @@ func RewriteWorkflow(root *os.Root, relPath string, updates []pin.Update) error 
 	modified := false
 
 	for _, u := range updates {
-		if err := validateUpdate(u); err != nil {
+		if err := ValidateUpdate(u); err != nil {
 			return err
 		}
 
@@ -99,9 +99,15 @@ func RewriteWorkflow(root *os.Root, relPath string, updates []pin.Update) error 
 	return writeErr
 }
 
-// validateUpdate checks that an Update has valid fields to prevent injection
+// ValidateUpdate checks that an Update has valid fields to prevent injection
 // via crafted version tags or pinned values.
-func validateUpdate(u pin.Update) error {
+//
+// It is exported because it is the only description of what RewriteWorkflow
+// accepts, and a caller that predicts the rewrite's verdict before running it
+// has to ask the same question. Deputy's remediation preflight validates a
+// deputy:action:pin step through here, so a dry run cannot report an edit as
+// one that would apply and then watch the rewrite refuse the same arguments.
+func ValidateUpdate(u pin.Update) error {
 	if u.Name == "" {
 		return fmt.Errorf("empty action name in update")
 	}

@@ -449,7 +449,7 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			name:    "dry run accepts a well formed deputy internal step",
 			options: &remediationv1.ExecutionOptions{DryRun: true},
 			extraSteps: []*remediationv1.Step{
-				{Id: "step-3", Title: "pin action", Command: "deputy:action:pin .github/workflows/ci.yml actions/checkout abc123 v4", Executable: true},
+				{Id: "step-3", Title: "pin action", Command: "deputy:action:pin .github/workflows/ci.yml actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4", Executable: true},
 			},
 			files:        []string{".github/workflows/ci.yml"},
 			wantExecuted: nil,
@@ -746,7 +746,7 @@ func TestStepFailureCode(t *testing.T) {
 // regardless of the host running the test.
 func TestDryRunStepPlatformRefusal(t *testing.T) {
 	external := &remediationv1.Step{Id: "step-1", Title: "bump", Command: "go get example.com/widget@v1.5.0", Manager: "go", Executable: true}
-	internal := &remediationv1.Step{Id: "step-2", Title: "pin", Command: "deputy:action:pin .github/workflows/ci.yml actions/checkout abc123 v4", Executable: true}
+	internal := &remediationv1.Step{Id: "step-2", Title: "pin", Command: "deputy:action:pin .github/workflows/ci.yml actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4", Executable: true}
 
 	tests := []struct {
 		name        string
@@ -1028,7 +1028,7 @@ func TestDryRunSkipCountMatchesExecution(t *testing.T) {
 	// no process group to bound.
 	const workflow = ".github/workflows/ci.yml"
 	runnable := func(id string) *remediationv1.Step {
-		return &remediationv1.Step{Id: id, Title: "pin action", Command: "deputy:action:pin " + workflow + " actions/checkout abc123 v4", Executable: true}
+		return &remediationv1.Step{Id: id, Title: "pin action", Command: "deputy:action:pin " + workflow + " actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4", Executable: true}
 	}
 
 	tests := []struct {

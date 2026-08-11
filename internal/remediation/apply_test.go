@@ -1124,3 +1124,94 @@ func TestDeputyCommandRefusesMissingTarget(t *testing.T) {
 		})
 	}
 }
+
+// TestDeputyCommandRefusesInvalidArguments pins that preflight judges the
+// arguments only one opcode understands, not merely how many there are. A
+// deputy:action:pin command carrying something that is not a SHA is refused by
+// the rewrite that applies it, so a preview that accepted it would report the
+// edit as one that would apply, count the step as satisfied, and describe its
+// dependents running against a plan the run cannot carry out.
+//
+// Every row exists on disk, so nothing here can pass on the missing-target
+// check instead of the one under test, and the last row proves the opcode is
+// still applicable when its arguments are sound.
+func TestDeputyCommandRefusesInvalidArguments(t *testing.T) {
+	const (
+		workflow = ".github/workflows/ci.yml"
+		sha      = "11bd71901bbe5b1630ceea73d27597364c9af683"
+	)
+
+	tests := []struct {
+		name    string
+		cmd     string
+		wantErr string // substring both paths must report; empty means both must accept
+	}{
+		{
+			name:    "pinned value that is not a SHA",
+			cmd:     "deputy:action:pin " + workflow + " actions/checkout not-a-sha v4",
+			wantErr: `pinned value "not-a-sha" for actions/checkout is not a valid SHA`,
+		},
+		{
+			name:    "pinned value that is a short SHA",
+			cmd:     "deputy:action:pin " + workflow + " actions/checkout abc123 v4",
+			wantErr: `pinned value "abc123" for actions/checkout is not a valid SHA`,
+		},
+		{
+			name:    "pinned value of SHA length that is not hexadecimal",
+			cmd:     "deputy:action:pin " + workflow + " actions/checkout " + strings.Repeat("z", 40) + " v4",
+			wantErr: "is not a valid SHA",
+		},
+		{
+			name: "well formed pin",
+			cmd:  "deputy:action:pin " + workflow + " actions/checkout " + sha + " v4.2.2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, workflow)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatalf("MkdirAll failed: %v", err)
+			}
+			if err := os.WriteFile(target, []byte("jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"), 0o644); err != nil {
+				t.Fatalf("WriteFile failed: %v", err)
+			}
+
+			preflight := PreflightDeputyCommand(dir, tt.cmd)
+			apply := ApplyDeputyCommand(t.Context(), dir, tt.cmd)
+
+			if tt.wantErr == "" {
+				if preflight != nil {
+					t.Fatalf("PreflightDeputyCommand(%q) = %v, want acceptance", tt.cmd, preflight)
+				}
+				if apply != nil {
+					t.Fatalf("ApplyDeputyCommand(%q) = %v, want acceptance", tt.cmd, apply)
+				}
+				return
+			}
+			if preflight == nil {
+				t.Fatalf("PreflightDeputyCommand(%q) accepted arguments the rewrite refuses", tt.cmd)
+			}
+			if apply == nil {
+				t.Fatalf("ApplyDeputyCommand(%q) accepted arguments the rewrite refuses", tt.cmd)
+			}
+			if !strings.Contains(preflight.Error(), tt.wantErr) {
+				t.Errorf("preflight refusal %v does not contain %q", preflight, tt.wantErr)
+			}
+			if !strings.Contains(apply.Error(), tt.wantErr) {
+				t.Errorf("apply refusal %v does not contain %q", apply, tt.wantErr)
+			}
+
+			// A refused command must leave the workspace alone, since the
+			// preview promised no edit would be made.
+			after, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatalf("ReadFile failed: %v", err)
+			}
+			if strings.Contains(string(after), "@"+sha) {
+				t.Errorf("refused command still rewrote %s to %q", workflow, string(after))
+			}
+		})
+	}
+}
