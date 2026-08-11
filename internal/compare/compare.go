@@ -577,9 +577,9 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 	normalizedEcos := normalizeEcosystemForComparison(ecos)
 	switch {
 	case isPyPIEcosystem(normalizedEcos):
-		name = normalizePyPIName(name)
+		name = pypiComparisonKey(name)
 	case isCargoEcosystem(normalizedEcos):
-		name = normalizeCargoName(name)
+		name = cargoComparisonKey(name)
 	}
 	meta.canonical = name
 	if ecos == "" {
@@ -617,18 +617,22 @@ func isCargoEcosystem(eco string) bool {
 	return false
 }
 
-// normalizePyPIName folds a PyPI distribution name to the PEP 503 form. The
-// rule lives in [ecosystem.Ecosystem.NormalizeName] so the comparison key and
-// the identity a policy sees are produced by the same code.
-func normalizePyPIName(name string) string {
-	return ecosystem.PyPI.NormalizeName(name)
+// pypiComparisonKey returns the key two spellings of one PyPI distribution
+// share. The rule lives in [ecosystem.Ecosystem.NameEquivalenceKey] so the
+// comparison key here and the one the directness lookup builds are produced by
+// the same code.
+func pypiComparisonKey(name string) string {
+	return ecosystem.PyPI.NameEquivalenceKey(name)
 }
 
-// normalizeCargoName folds a crate name the way crates.io does. The rule lives
-// in [ecosystem.Ecosystem.NormalizeName] for the same reason as
-// [normalizePyPIName].
-func normalizeCargoName(name string) string {
-	return ecosystem.Cargo.NormalizeName(name)
+// cargoComparisonKey returns the key two spellings of one crate share, folded
+// the way crates.io folds a name to resolve it. It keys the comparison only:
+// every name this package reports comes from the package itself, so a crate
+// published as "async-trait" is still reported with its hyphen. The rule lives
+// in [ecosystem.Ecosystem.NameEquivalenceKey] for the same reason as
+// [pypiComparisonKey].
+func cargoComparisonKey(name string) string {
+	return ecosystem.Cargo.NameEquivalenceKey(name)
 }
 
 // CompareOptions configures package comparison behavior.

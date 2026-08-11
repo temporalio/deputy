@@ -142,6 +142,133 @@ func TestShippedPolicyFiresOnRealDiffPath(t *testing.T) {
 	}
 }
 
+// TestCratePolicyReadsThePublishedName drives the real construction path for a
+// Rust project (Cargo.lock extraction -> proto conversion -> policy payload)
+// and pins crate identity: a policy names a crate the way crates.io publishes
+// it, hyphen and all. Folding the name into "async_trait" to make a comparison
+// work would hand a policy author a spelling that appears on no registry, in no
+// Cargo.toml, and in no advisory, so the folded rule must not match.
+//
+// The classification the fold used to serve is checked alongside it: the
+// renamed entry (my-serde = { package = "serde" }) still resolves to a direct
+// serde, which is the behavior that would regress if equivalence had been
+// dropped rather than moved.
+func TestCratePolicyReadsThePublishedName(t *testing.T) {
+	pkgs := scanCargoProject(t)
+
+	tests := []struct {
+		name      string
+		crateName string
+		wantMatch bool
+	}{
+		{name: "published spelling matches", crateName: "async-trait", wantMatch: true},
+		{name: "folded spelling does not", crateName: "async_trait", wantMatch: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pkg := findPackageByName(pkgs, "async-trait")
+			if pkg == nil {
+				t.Fatalf("fixture produced no async-trait package (got %v)", namesOf(pkgs))
+			}
+
+			sources, err := policy.ParseStructuredSources([]byte(`policies:
+  - name: crate-identity
+    rules:
+      - action: deny
+        when: pkg.ecosystem == "cargo" && pkg.name == "`+tt.crateName+`"
+        reason: matched
+`), "crate.yaml")
+			if err != nil {
+				t.Fatalf("ParseStructuredSources: %v", err)
+			}
+
+			actions, err := policy.EvaluateMap(t.Context(), sources, map[string]any{"pkg": pkg})
+			if err != nil {
+				t.Fatalf("EvaluateMap: %v", err)
+			}
+			if matched := len(actions) == 1; matched != tt.wantMatch {
+				t.Errorf("policy on %q matched=%v, want %v (policy saw name %q)",
+					tt.crateName, matched, tt.wantMatch, pkg.GetName())
+			}
+		})
+	}
+
+	serde := findPackageByName(pkgs, "serde")
+	if serde == nil {
+		t.Fatalf("fixture produced no serde package (got %v)", namesOf(pkgs))
+	}
+	if !serde.GetDirect() {
+		t.Error("serde is not direct: the renamed manifest entry stopped resolving to the crate it names")
+	}
+}
+
+// scanCargoProject inventories a temporary Rust project whose manifest renames
+// one dependency (my-serde = { package = "serde" }) and declares another under
+// a published hyphenated name, with a lockfile that spells both the way Cargo
+// records them.
+func scanCargoProject(t *testing.T) []*dependencyPackage {
+	t.Helper()
+
+	dir := t.TempDir()
+	writeFixture(t, filepath.Join(dir, "Cargo.toml"), `[package]
+name = "fixture"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+my-serde = { package = "serde", version = "1.0.203" }
+async-trait = "0.1.80"
+`)
+	writeFixture(t, filepath.Join(dir, "Cargo.lock"), `version = 3
+
+[[package]]
+name = "serde"
+version = "1.0.203"
+
+[[package]]
+name = "async-trait"
+version = "0.1.80"
+`)
+
+	ws, err := workspace.NewDir(dir)
+	if err != nil {
+		t.Fatalf("workspace.NewDir: %v", err)
+	}
+	t.Cleanup(func() { _ = ws.Close() })
+
+	extracted, err := inventory.ScanPackagesWorking(t.Context(), ws, inventory.ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanPackagesWorking: %v", err)
+	}
+	direct := compare.CollectDirectDependenciesFromWorkspace(ws)
+	pkgs := internalproto.ExtractorPackagesToProto(extracted, direct)
+	if len(pkgs) == 0 {
+		t.Fatal("cargo fixture produced no packages")
+	}
+	return pkgs
+}
+
+// findPackageByName returns the first package reported under name exactly, so a
+// test can assert on the spelling inventory really emits.
+func findPackageByName(pkgs []*dependencyPackage, name string) *dependencyPackage {
+	for _, pkg := range pkgs {
+		if pkg.GetName() == name {
+			return pkg
+		}
+	}
+	return nil
+}
+
+// namesOf lists the package names in pkgs for failure messages.
+func namesOf(pkgs []*dependencyPackage) []string {
+	out := make([]string, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		out = append(out, pkg.GetName())
+	}
+	return out
+}
+
 // scanGoModule inventories a temporary module with the given go.mod contents.
 func scanGoModule(t *testing.T, gomod string) []*extractor.Package {
 	t.Helper()

@@ -42,11 +42,12 @@ func ecosystemFromPURLType(purlType string) string {
 // ExtractorPackageIsDirect reports whether pkg should be treated as a direct
 // dependency using the same rules as ExtractorPackageToProto.
 //
-// The key it builds from the scanned package is folded by
-// [ecosystem.Ecosystem.NormalizeName], the same call
+// The key it builds from the scanned package comes from
+// [ecosystem.Ecosystem.NameEquivalenceKey], the same call
 // compare.CollectDirectDependenciesFromWorkspace makes when it reads the
 // manifest. Both sides run one rule, so a Cargo crate a manifest spells
-// "serde-json" and a lockfile spells "serde_json" is one key, not two.
+// "serde-json" and a lockfile spells "serde_json" is one key, not two. The key
+// decides the lookup only; the package keeps the name it reported.
 func ExtractorPackageIsDirect(pkg *extractor.Package, direct map[string]bool) bool {
 	if pkg == nil {
 		return false
@@ -94,9 +95,9 @@ func ExtractorPackageIsDirect(pkg *extractor.Package, direct map[string]bool) bo
 		// npm: check package name (may include scope like @types/node).
 		return direct[purlx.NPMPackageName(purl.Namespace, purl.Name)]
 	case "cargo":
-		return direct[ecosystem.Cargo.NormalizeName(purl.Name)]
+		return direct[ecosystem.Cargo.NameEquivalenceKey(purl.Name)]
 	case "pypi":
-		return direct[ecosystem.PyPI.NormalizeName(purl.Name)]
+		return direct[ecosystem.PyPI.NameEquivalenceKey(purl.Name)]
 	default:
 		return direct[purl.String()]
 	}
@@ -227,6 +228,12 @@ func ExtractorPackagesFromProto(pkgs []*dependencyv1.Package) ([]*extractor.Pack
 	return out, direct
 }
 
+// recordProtoPackageDirectness records every key a package's directness can be
+// looked up under when the reconstructed extractor.Package is converted back.
+// [ExtractorPackageIsDirect] performs that lookup, so the ecosystem-specific
+// keys built here are the ones it builds: an equivalence key for Cargo and
+// PyPI, whose two spellings of a name have to meet on one key, and the reported
+// name elsewhere.
 func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Package) {
 	if pkg == nil {
 		return
@@ -258,9 +265,9 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 	case "npm":
 		recordDirectKey(direct, purlx.NPMPackageName(parsed.Namespace, parsed.Name), isDirect)
 	case "cargo":
-		recordDirectKey(direct, ecosystem.Cargo.NormalizeName(parsed.Name), isDirect)
+		recordDirectKey(direct, ecosystem.Cargo.NameEquivalenceKey(parsed.Name), isDirect)
 	case "pypi":
-		recordDirectKey(direct, ecosystem.PyPI.NormalizeName(parsed.Name), isDirect)
+		recordDirectKey(direct, ecosystem.PyPI.NameEquivalenceKey(parsed.Name), isDirect)
 	default:
 		recordDirectKey(direct, packageName, isDirect)
 	}

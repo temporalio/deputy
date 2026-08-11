@@ -414,6 +414,29 @@ func TestExtractorPackagesFromProto(t *testing.T) {
 			t.Fatal("expected nested module to remain indirect after reconversion")
 		}
 	})
+
+	// The map this returns is fed straight back to ExtractorPackageIsDirect, so
+	// it has to be keyed the way that lookup keys. A crate published with a
+	// hyphen is the case that catches a recorder keyed by identity instead of
+	// by equivalence: the lookup would ask for the folded spelling and find
+	// nothing, silently demoting a direct dependency to transitive.
+	t.Run("preserves directness for names their ecosystem folds", func(t *testing.T) {
+		protoPkgs := []*dependencyv1.Package{
+			{Name: "async-trait", Version: "0.1.80", Purl: "pkg:cargo/async-trait@0.1.80", Direct: true},
+			{Name: "zope.interface", Version: "6.4", Purl: "pkg:pypi/zope.interface@6.4", Direct: true},
+		}
+
+		pkgs, direct := ExtractorPackagesFromProto(protoPkgs)
+		roundTripped := ExtractorPackagesToProto(pkgs, direct)
+		for i, pkg := range roundTripped {
+			if !pkg.Direct {
+				t.Errorf("package %d (%s) lost its directness in the round trip", i, pkg.Name)
+			}
+		}
+		if got := roundTripped[0].Name; got != "async-trait" {
+			t.Errorf("crate round-tripped as %q, want its published spelling", got)
+		}
+	})
 }
 
 func TestEcosystemFromPURLType(t *testing.T) {

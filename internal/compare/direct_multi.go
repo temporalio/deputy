@@ -49,11 +49,12 @@ func isVendoredManifestPath(p string) bool {
 // keyed by the name a package goes by in its own ecosystem: a module path for
 // Go, a scoped package name for npm, a crate name for Cargo, and a
 // distribution name for PyPI. Cargo and PyPI keys are folded by
-// [ecosystem.Ecosystem.NormalizeName], because a manifest and a lockfile are
-// free to spell one package two ways. Values indicate if the dependency is
-// direct (true) or indirect (false). Lookups go through
-// proto.ExtractorPackageIsDirect, which runs the same normalizer on the
-// scanned package, so both sides build one key.
+// [ecosystem.Ecosystem.NameEquivalenceKey], because a manifest and a lockfile
+// are free to spell one package two ways; the map is a lookup table, so a
+// folded key never becomes a name anyone reads. Values indicate if the
+// dependency is direct (true) or indirect (false). Lookups go through
+// proto.ExtractorPackageIsDirect, which keys the scanned package the same way,
+// so both sides build one key.
 //
 // Supported ecosystems:
 //   - Go (go.mod)
@@ -251,7 +252,7 @@ func getCargoDirectDeps(data []byte) map[string]bool {
 // (my-serde = { package = "serde" }) adds the crate it actually names, which is
 // what Cargo.lock records and what crates.io and OSV know it as.
 func recordCargoDependency(deps map[string]bool, name string, entry any) {
-	if key := ecosystem.Cargo.NormalizeName(name); key != "" {
+	if key := ecosystem.Cargo.NameEquivalenceKey(name); key != "" {
 		deps[key] = true
 	}
 	table, ok := entry.(map[string]any)
@@ -259,7 +260,7 @@ func recordCargoDependency(deps map[string]bool, name string, entry any) {
 		return
 	}
 	renamed, _ := table["package"].(string)
-	if key := ecosystem.Cargo.NormalizeName(renamed); key != "" {
+	if key := ecosystem.Cargo.NameEquivalenceKey(renamed); key != "" {
 		deps[key] = true
 	}
 }
@@ -361,14 +362,15 @@ func pyPIRequirementName(entry string) string {
 	return strings.TrimSpace(pkgName)
 }
 
-// recordPyPIDirectDep records a declared distribution under the one spelling
-// PyPI considers it. The rule is [ecosystem.Ecosystem.NormalizeName], the same
-// call the directness lookup makes on the scanned package's PURL name, so a
-// manifest that writes "Flask-SQLAlchemy" and an extractor that reports
-// "flask_sqlalchemy" agree on one key.
+// recordPyPIDirectDep records a declared distribution under the one key PyPI
+// resolves its spellings to. The rule is
+// [ecosystem.Ecosystem.NameEquivalenceKey], the same call the directness lookup
+// makes on the scanned package's PURL name, so a manifest that writes
+// "Flask-SQLAlchemy" and an extractor that reports "flask_sqlalchemy" agree on
+// one key.
 func recordPyPIDirectDep(deps map[string]bool, name string) {
-	if normalized := ecosystem.PyPI.NormalizeName(name); normalized != "" {
-		deps[normalized] = true
+	if key := ecosystem.PyPI.NameEquivalenceKey(name); key != "" {
+		deps[key] = true
 	}
 }
 

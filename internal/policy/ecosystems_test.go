@@ -274,14 +274,31 @@ func TestCanonicalizeIdentityFields(t *testing.T) {
 			want:    map[string]any{"pkg": map[string]any{"ecosystem": "go", "name": "k8s.io/ingress-nginx", "version": "(devel)"}},
 		},
 		{
-			name: "cargo purl name folds with the package name",
+			// The purl library folds a pypi name halfway (lowercase and "_" to
+			// "-"), so a dotted distribution is where the rewrite still has
+			// work to do and where name and purl would otherwise disagree.
+			name: "pypi purl name folds with the package name",
 			payload: map[string]any{"pkg": map[string]any{
-				"ecosystem": "crates.io", "name": "serde-json", "version": "1.0.0",
-				"purl": "pkg:cargo/serde-json@1.0.0",
+				"ecosystem": "PyPI", "name": "zope.interface", "version": "6.4",
+				"purl": "pkg:pypi/zope.interface@6.4",
 			}},
 			want: map[string]any{"pkg": map[string]any{
-				"ecosystem": "cargo", "name": "serde_json", "version": "1.0.0",
-				"purl": "pkg:cargo/serde_json@1.0.0",
+				"ecosystem": "pypi", "name": "zope-interface", "version": "6.4",
+				"purl": "pkg:pypi/zope-interface@6.4",
+			}},
+		},
+		{
+			// A crate is published, declared, and indexed with the hyphen it
+			// was registered under, and the purl spec defines no normalization
+			// for the cargo type, so neither the name nor the purl is rewritten.
+			name: "cargo name and purl keep the published spelling",
+			payload: map[string]any{"pkg": map[string]any{
+				"ecosystem": "crates.io", "name": "async-trait", "version": "0.1.80",
+				"purl": "pkg:cargo/async-trait@0.1.80",
+			}},
+			want: map[string]any{"pkg": map[string]any{
+				"ecosystem": "cargo", "name": "async-trait", "version": "0.1.80",
+				"purl": "pkg:cargo/async-trait@0.1.80",
 			}},
 		},
 		{
@@ -307,23 +324,25 @@ func TestCanonicalizeIdentityFields(t *testing.T) {
 			}},
 		},
 		{
+			// The name still folds, which is what shows the purl was skipped
+			// for its type rather than skipped altogether.
 			name: "purl of another type than the ecosystem is left alone",
 			payload: map[string]any{"pkg": map[string]any{
-				"ecosystem": "crates.io", "name": "serde-json",
-				"purl": "pkg:github/Acme/Serde-Json@v1",
+				"ecosystem": "PyPI", "name": "Flask_SQLAlchemy",
+				"purl": "pkg:github/Acme/Flask_SQLAlchemy@v1",
 			}},
 			want: map[string]any{"pkg": map[string]any{
-				"ecosystem": "cargo", "name": "serde_json",
-				"purl": "pkg:github/Acme/Serde-Json@v1",
+				"ecosystem": "pypi", "name": "flask-sqlalchemy",
+				"purl": "pkg:github/Acme/Flask_SQLAlchemy@v1",
 			}},
 		},
 		{
 			name: "unparseable purl is left alone",
 			payload: map[string]any{"pkg": map[string]any{
-				"ecosystem": "crates.io", "name": "serde-json", "purl": "not a purl",
+				"ecosystem": "PyPI", "name": "Flask_SQLAlchemy", "purl": "not a purl",
 			}},
 			want: map[string]any{"pkg": map[string]any{
-				"ecosystem": "cargo", "name": "serde_json", "purl": "not a purl",
+				"ecosystem": "pypi", "name": "flask-sqlalchemy", "purl": "not a purl",
 			}},
 		},
 		{
@@ -476,14 +495,14 @@ func TestCanonicalizeLeavesCallerDataAlone(t *testing.T) {
 		{
 			name: "a free-form entry named purl survives",
 			payload: map[string]any{"node": map[string]any{
-				"ecosystem":  "crates.io",
-				"purl":       "pkg:cargo/serde-json@1.0.0",
-				"provenance": map[string]any{"purl": "pkg:cargo/serde-json@1.0.0"},
+				"ecosystem":  "PyPI",
+				"purl":       "pkg:pypi/zope.interface@6.4",
+				"provenance": map[string]any{"purl": "pkg:pypi/zope.interface@6.4"},
 			}},
 			want: map[string]any{"node": map[string]any{
-				"ecosystem":  "cargo",
-				"purl":       "pkg:cargo/serde_json@1.0.0",
-				"provenance": map[string]any{"purl": "pkg:cargo/serde-json@1.0.0"},
+				"ecosystem":  "pypi",
+				"purl":       "pkg:pypi/zope-interface@6.4",
+				"provenance": map[string]any{"purl": "pkg:pypi/zope.interface@6.4"},
 			}},
 		},
 		{
@@ -875,10 +894,13 @@ func TestPayloadNamesCollapseEquivalentSpellings(t *testing.T) {
 			want:      "flask-sqlalchemy",
 		},
 		{
-			name:      "cargo hyphen and underscore",
+			// crates.io folds "-" and "_" to resolve a crate, but it publishes
+			// the crate under the spelling it was registered with, so identity
+			// is what a policy reads and the fold stays at the comparison.
+			name:      "cargo crate keeps its published spelling",
 			ecosystem: "crates.io",
-			spellings: []string{"serde-json", "serde_json", "Serde-JSON"},
-			want:      "serde_json",
+			spellings: []string{"async-trait"},
+			want:      "async-trait",
 		},
 		{
 			name:      "npm names stay verbatim",
@@ -931,11 +953,11 @@ func TestPURLAgreesWithIdentityFields(t *testing.T) {
 		purl      string
 	}{
 		{
-			name:      "cargo name folds",
+			name:      "cargo name and purl keep their hyphen together",
 			ecosystem: "crates.io",
-			pkgName:   "serde-json",
-			version:   "1.0.0",
-			purl:      "pkg:cargo/serde-json@1.0.0",
+			pkgName:   "async-trait",
+			version:   "0.1.80",
+			purl:      "pkg:cargo/async-trait@0.1.80",
 		},
 		{
 			name:      "go version gains its prefix",
@@ -950,6 +972,15 @@ func TestPURLAgreesWithIdentityFields(t *testing.T) {
 			pkgName:   "Flask_SQLAlchemy",
 			version:   "3.1.1",
 			purl:      "pkg:pypi/Flask_SQLAlchemy@3.1.1",
+		},
+		{
+			// The purl library does not collapse a dot, so this is the pypi
+			// spelling where only Deputy's own fold makes the two agree.
+			name:      "dotted pypi name folds",
+			ecosystem: "PyPI",
+			pkgName:   "zope.interface",
+			version:   "6.4",
+			purl:      "pkg:pypi/zope.interface@6.4",
 		},
 		{
 			name:      "npm scope survives",
