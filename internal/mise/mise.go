@@ -387,20 +387,31 @@ func DeclaredVersion(request string) (version string, ok bool) {
 // release, which is the question behind "could this declaration still be
 // resolving to the version the finding names".
 //
-// mise matches a partial request against candidate release strings by leading
-// characters, with no notion of a version component. Verified against mise
-// 2026.7.3: `mise ls-remote node@20.1` lists all 25 releases from 20.1.0
-// through 20.19.6, `mise latest node@20.1` answers 20.19.6, `node@2` reaches
-// 26.7.0, and `java@temurin-21.0` lists temurin-21.0.12+8.0.LTS. An exact
-// request is just the case where the prefix runs to the end. A leading "v" on
-// either side is ignored so "v20" still selects "20.11.0".
+// A partial request governs the line beneath it, matching a version it equals
+// or whose dot-separated components it is a leading run of. Verified against
+// mise 2026.7.3 by resolving real configs, since that is what a declaration
+// does: `node = "20.1"` reports 20.1.0 under `mise ls --current` and locks as
+// node@20.1.0 under `mise lock --dry-run`, `node = "20.11"` reports 20.11.1,
+// `node = "20"` reports 20.20.2, and `node = "2"` resolves to nothing at all
+// and stays missing.
 //
-// Reading a partial request as a dot-separated component selector instead
-// refuses precisely the requests mise resolves loosest. "20.1" really does
-// resolve to 20.19.6, so a remediation gate that calls it a mismatch reports
-// "could not rewrite" and leaves the vulnerable toolchain declared.
+// `mise ls-remote` is not this rule and must not be cited as it. It is a loose
+// listing filter: `ls-remote node@20.1` prints all 25 releases from 20.1.0
+// through 20.19.6, but a config declaring 20.1 installs 20.1.0. Reading the
+// listing filter as the resolution rule makes the match leading-character and
+// therefore too permissive, letting remediation rewrite a declaration that
+// does not govern the reported version at all.
+//
+// A leading "v" on either side is ignored so "v20" still selects "20.11.0".
 func SelectorMatches(request, version string) bool {
-	return strings.HasPrefix(trimVersionV(strings.TrimSpace(version)), trimVersionV(strings.TrimSpace(request)))
+	request = trimVersionV(strings.TrimSpace(request))
+	version = trimVersionV(strings.TrimSpace(version))
+	if request == version {
+		return true
+	}
+	return len(version) > len(request) &&
+		strings.HasPrefix(version, request) &&
+		version[len(request)] == '.'
 }
 
 // trimVersionV drops a leading "v" or "V" from a version token when a digit

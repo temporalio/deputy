@@ -1049,15 +1049,24 @@ func isPrerelease(version string) bool {
 // versionMatchesPrefix reports whether a candidate release satisfies a fuzzy
 // request, which is what narrows a release list before the newest survivor is
 // pinned. An empty request and "latest" name no version and so admit every
-// candidate; everything else defers to [misecfg.SelectorMatches], the one
+// candidate; the version line itself is [misecfg.SelectorMatches], the one
 // reading of mise's matching rule, so the release Deputy pins is the release
 // mise would install.
+//
+// Only the prerelease boundary is local: a release list may carry qualifiers
+// such as "1.22-rc1" that a request for 1.22 still selects, and filtering a
+// candidate list is not the same job as deciding whether a declaration has
+// gone stale.
 func versionMatchesPrefix(version, prefix string) bool {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" || strings.EqualFold(prefix, "latest") {
 		return true
 	}
-	return misecfg.SelectorMatches(prefix, version)
+	if misecfg.SelectorMatches(prefix, version) {
+		return true
+	}
+	v := strings.TrimPrefix(strings.TrimSpace(version), "v")
+	return strings.HasPrefix(v, strings.TrimPrefix(prefix, "v")+"-")
 }
 
 // newestRelease selects the newest release matching a mise selector from a

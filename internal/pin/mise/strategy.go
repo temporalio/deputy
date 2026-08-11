@@ -357,10 +357,10 @@ func lockedVersionSatisfiesRequest(locked, request string) bool {
 
 // versionHasPrefix reports whether a fuzzy request selects a concrete version,
 // deferring to [mise.SelectorMatches] so this answers the question the same way
-// the remediation staleness gate and the release filter do. A rule spelled out
-// here as well was a second answer waiting to disagree with them, and it did:
-// it read "1.9" as selecting only 1.9.x, while mise resolves it to the newest
-// release whose text starts with "1.9".
+// the remediation staleness gate and the release filter do. The rule was
+// spelled out here as well, and a second copy of a rule is a second answer
+// waiting to disagree with the first; they happened to agree, and now they
+// cannot do otherwise.
 //
 // The one thing it adds is the Go toolchain's "go" prefix, which mise selectors
 // carry and release strings do not.

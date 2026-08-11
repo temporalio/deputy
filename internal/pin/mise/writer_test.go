@@ -230,14 +230,12 @@ func TestSelectorTargetsCurrent(t *testing.T) {
 		{"vendor-prefixed current version", "temurin-21.0.6+7", []string{"temurin-21.0.6+7"}, true},
 		{"vendor-prefixed major selector", "temurin-21", []string{"temurin-21.0.6+7"}, true},
 		{"no known currents", "temurin-22.0.2+9", nil, true},
-		// mise matches a partial request by leading characters, not by
-		// version component: node@20.1 really does resolve to 20.19.6 and
-		// node@2 to 26.7.0 (mise 2026.7.3). Refusing those leaves a live
-		// vulnerable declaration in place.
-		{"partial selector across a component boundary", "20.1", []string{"20.19.6"}, true},
-		{"single-digit selector", "2", []string{"26.7.0"}, true},
-		{"vendor-prefixed partial across a boundary", "temurin-21.0", []string{"temurin-21.0.12+8.0.LTS"}, true},
-		{"exact request naming a prerelease of itself", "20.11.0", []string{"20.11.0-rc1"}, true},
+		// A partial request governs its own line and no other. Verified by
+		// resolving real configs on mise 2026.7.3: node = "20.1" installs
+		// 20.1.0, and node = "20.11" installs 20.11.1.
+		{"partial selector on its own line", "20.1", []string{"20.1.0"}, true},
+		{"minor selector on its own line", "20.11", []string{"20.11.1"}, true},
+		{"vendor-prefixed partial", "temurin-21.0", []string{"temurin-21.0.12+8.0.LTS"}, true},
 
 		// Refused: the declaration names a version the plan does not describe,
 		// so the config has moved on and rewriting it is a downgrade.
@@ -251,6 +249,11 @@ func TestSelectorTargetsCurrent(t *testing.T) {
 		{"subtracted selector on another line", "sub-1:22", []string{"20.11.0"}, false},
 		{"selector off by one character", "20.2", []string{"20.11.0"}, false},
 		{"declaration more precise than the current version", "20.11.0", []string{"20.11"}, false},
+		// The permissive misreading: a leading-character rule would let
+		// "20.1" claim 20.19.6, which it does not govern, and rewrite a
+		// declaration the finding does not describe.
+		{"partial selector reaching past its line", "20.1", []string{"20.19.6"}, false},
+		{"selector that resolves to nothing", "2", []string{"26.7.0"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

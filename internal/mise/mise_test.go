@@ -548,11 +548,12 @@ func TestDeclaredVersion(t *testing.T) {
 	}
 }
 
-// TestSelectorMatches pins mise's matching rule against what mise 2026.7.3
-// actually does. Every "true" row below is a pair `mise ls-remote <tool>@<req>`
-// lists, and every "false" row is one it does not. The rows that matter most
-// are the ones a dot-separated component reading gets wrong: `node@20.1` lists
-// all 25 releases from 20.1.0 through 20.19.6, and `node@2` reaches 26.7.0.
+// TestSelectorMatches pins mise's matching rule against what a declaration
+// actually resolves to. Every row cites `mise ls --current` over a real config
+// on mise 2026.7.3, not `mise ls-remote`: ls-remote is a loose listing filter
+// that prints 25 releases for node@20.1, while a config declaring 20.1
+// installs 20.1.0. Resolution is what remediation is reasoning about, so
+// resolution is what this table records.
 func TestSelectorMatches(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -560,26 +561,33 @@ func TestSelectorMatches(t *testing.T) {
 		version string
 		want    bool
 	}{
+		// node = "20.1" -> ls --current 20.1.0; lock --dry-run node@20.1.0.
+		{"partial governs its own line", "20.1", "20.1.0", true},
+		{"partial does not reach a longer neighbour", "20.1", "20.19.6", false},
+		// node = "20.11" -> ls --current 20.11.1.
+		{"minor selector", "20.11", "20.11.1", true},
+		{"minor selector stops at its line", "20.11", "20.19.6", false},
+		// node = "20" -> ls --current 20.20.2.
+		{"major selector", "20", "20.20.2", true},
+		// node = "2" -> ls --current reports "2", unresolved and missing.
+		{"a selector that resolves to nothing", "2", "26.7.0", false},
+
 		{"exact", "20.11.0", "20.11.0", true},
-		{"major selector", "20", "20.11.0", true},
-		{"minor selector", "20.11", "20.11.0", true},
-		{"partial across a component boundary", "20.1", "20.19.6", true},
-		{"single digit", "2", "26.7.0", true},
 		{"vendor-prefixed exact", "temurin-21.0.6+7", "temurin-21.0.6+7", true},
-		{"vendor-prefixed partial", "temurin-21.0", "temurin-21.0.12+8.0.LTS", true},
-		{"prerelease under an exact request", "20.11.0", "20.11.0-rc1", true},
+		{"vendor-prefixed partial", "temurin-21", "temurin-21.0.6+7", true},
 		{"v-prefixed request", "v20", "20.11.0", true},
 		{"v-prefixed version", "20", "v20.11.0", true},
 		{"surrounding space", " 20 ", "20.11.0", true},
-		{"empty request selects anything", "", "20.11.0", true},
 
 		{"different line", "22", "20.11.0", false},
-		{"off by one character", "20.2", "20.11.0", false},
 		{"stale exact version", "1.25.1", "1.22.12", false},
 		{"request longer than the version", "20.11.0", "20.11", false},
 		{"another vendor", "zulu-21.0.6+7", "temurin-21.0.6+7", false},
 		{"vendor-prefixed on another line", "temurin-22", "temurin-21.0.6+7", false},
 		{"a v that is not a version prefix", "vault", "1.0.0", false},
+		// An empty request is not a licence to match; callers that mean
+		// "no version named" go through DeclaredVersion first.
+		{"empty request", "", "20.11.0", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

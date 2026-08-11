@@ -64,10 +64,10 @@ deputy pin check --ecosystems mise                # CI gate: no mise binary requ
 
 Pinning rewrites fuzzy versions (channels like `latest`/`lts`, partial versions
 like `20`, and scopes like `prefix:1.20` / `sub-0.1:latest`) to exact,
-reproducible versions. A partial version selects releases the way mise selects
-them, by leading characters rather than by version component, so `20.1` covers
-everything from `20.1.0` through `20.19.6` and resolves to the newest of them,
-matching `mise latest node@20.1`. For `mise.toml`, plain `deputy pin` first prefers a
+reproducible versions. A partial version governs its own line and no other, the
+way mise resolves it: `node = "20.1"` installs `20.1.0`, `node = "20.11"`
+installs `20.11.1`, and `node = "20"` installs the newest `20.x`. For
+`mise.toml`, plain `deputy pin` first prefers a
 compatible exact version from the sibling `mise.lock` so it preserves the tool
 version already resolved by Mise. If the lock entry is absent, ambiguous, or
 stale relative to the source selector, Deputy resolves from native upstream
