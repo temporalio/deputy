@@ -53,33 +53,52 @@ func LoadSources(paths []string) ([]Source, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read policy %q: %w", path, err)
 		}
-		// Try JSON bundle format first (compiled bundles)
-		if bundle, ok := tryParseBundle(data); ok {
-			for _, p := range bundle.Policies {
-				name := p.Name
-				if name == "" {
-					name = filepath.Base(path)
-				}
-				sources = append(sources, Source{
-					Name: fmt.Sprintf("%s::%s", path, name),
-					Body: p.Source,
-				})
-			}
-			continue
-		}
-		// Try structured YAML format (human-authored policies)
-		s, ok, err := tryParseStructuredBundle(data, path)
+		s, err := LoadSourcesFromBytes(data, path)
 		if err != nil {
 			return nil, err
 		}
-		if ok {
-			sources = append(sources, s...)
-			continue
-		}
-		// Neither format matched - provide helpful error
-		return nil, fmt.Errorf("%s: unrecognized policy format; expected YAML with 'policies:' key or JSON bundle with 'schemaVersion' field", path)
+		sources = append(sources, s...)
 	}
 	return sources, nil
+}
+
+// LoadSourcesFromBytes returns the policy sources data holds, trying the
+// compiled bundle format first and the authored one second, exactly as
+// LoadSources does; it is the implementation LoadSources reads files for.
+//
+// It exists for a caller that already has the bytes and no file to reread, such
+// as lint reading stdin. Sharing it is what keeps a policy supplied on stdin
+// loading the same way as the identical file, rather than each caller deciding
+// the format for itself.
+//
+// path names the source in errors and in generated source names; a caller
+// without a file may pass any label.
+func LoadSourcesFromBytes(data []byte, path string) ([]Source, error) {
+	// Try JSON bundle format first (compiled bundles)
+	if bundle, ok := tryParseBundle(data); ok {
+		sources := make([]Source, 0, len(bundle.Policies))
+		for _, p := range bundle.Policies {
+			name := p.Name
+			if name == "" {
+				name = filepath.Base(path)
+			}
+			sources = append(sources, Source{
+				Name: fmt.Sprintf("%s::%s", path, name),
+				Body: p.Source,
+			})
+		}
+		return sources, nil
+	}
+	// Try structured YAML format (human-authored policies)
+	sources, ok, err := tryParseStructuredBundle(data, path)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return sources, nil
+	}
+	// Neither format matched - provide helpful error
+	return nil, fmt.Errorf("%s: unrecognized policy format; expected YAML with 'policies:' key or JSON bundle with 'schemaVersion' field", path)
 }
 
 // BuildBundle compiles all provided policy sources and returns a bundle structure.

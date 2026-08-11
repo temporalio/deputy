@@ -76,8 +76,9 @@ policy that lints clean is a policy the editor considers clean:
 - invalid `mode`, malformed `vars`, and conditions that do not compile
 - vars that break the CEL a policy expands into, which no single condition
   reveals, so a bundle that lints clean is one `deputy policy bundle` compiles
-- YAML anchors, aliases, and merge keys, which bundles do not support (see
-  [policy-spec](../reference/policy-spec.md#yaml-anchors-are-not-supported))
+- YAML anchors, aliases, merge keys, and tags that rewrite a scalar, which
+  bundles do not support (see
+  [policy-spec](../reference/policy-spec.md#yaml-anchors-and-rewriting-tags-are-not-supported))
 - YAML that does not parse, reported with the offending line rather than as an
   unrecognized file, for any document that writes a top-level `policies` key,
   bare or quoted (`policies:`, `"policies":`, `'policies':`)
@@ -103,6 +104,16 @@ An optional field written as an explicit null (`mode:`, `mode: null`, `mode:
 
 ```
 deputy policy lint <policy.yaml> [policy2.yaml ...]
+```
+
+A path of `-` reads the policy from stdin. The format is chosen from the bytes,
+not from how they arrived, so a bundle piped in is validated exactly as the
+identical file is; raw CEL on stdin is still compiled as the one expression it
+is.
+
+```console
+$ deputy policy lint - < policies/deny-critical.yaml
+stdin OK
 ```
 
 ### Flags

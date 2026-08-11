@@ -381,3 +381,155 @@ func TestPolicyLintReportsYAMLSyntaxErrors(t *testing.T) {
 		})
 	}
 }
+
+// lintStdin pipes a policy to `lint -` and returns the output plus whether the
+// run failed, so a document can be linted the way a pipeline supplies it.
+func lintStdin(t *testing.T, document string) (string, error) {
+	t.Helper()
+	root := &cobra.Command{Use: "deputy"}
+	root.AddCommand(newPolicyLintCommand())
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetIn(strings.NewReader(document))
+	root.SetArgs([]string{"lint", "-"})
+	err := root.Execute()
+	return out.String(), err
+}
+
+// TestPolicyLintReadsStdinAsTheFormatItIs pins that lint picks a format from the
+// bytes rather than from how they arrived. Before this, `lint -` compiled
+// whatever it read as raw CEL, so piping a bundle failed on its first key while
+// the identical file linted clean.
+func TestPolicyLintReadsStdinAsTheFormatItIs(t *testing.T) {
+	cases := []struct {
+		name     string
+		document string
+		wantFail bool
+		wantText []string
+	}{
+		{
+			name: "an authored bundle is validated, not compiled as CEL",
+			document: `policies:
+  - name: ok
+    rules:
+      - when: "true"
+        action: deny
+        reason: "always"
+`,
+			wantText: []string{"OK"},
+		},
+		{
+			name: "an authored bundle's defects are reported with their lines",
+			document: `policies:
+  - name: broken
+    entrypoints: ["nope_entrypoint"]
+    rules:
+      - when: "true"
+        action: dney
+        reason: "r"
+`,
+			wantFail: true,
+			wantText: []string{
+				`invalid entrypoint "nope_entrypoint"`,
+				`invalid action "dney"`,
+			},
+		},
+		{
+			name: "a refused construct is refused on stdin too",
+			document: `policies:
+  - name: tagged
+    rules:
+      - when: "true"
+        action: !!binary ZGVueQ==
+        reason: "r"
+`,
+			wantFail: true,
+			wantText: []string{"do not support YAML tags that rewrite a scalar"},
+		},
+		{
+			name:     "raw CEL is still compiled as the one expression it is",
+			document: `pkg.name == "left-pad"`,
+			wantText: []string{"OK"},
+		},
+		{
+			name:     "raw CEL that does not compile still fails",
+			document: `pkg.name ==`,
+			wantFail: true,
+			wantText: []string{"Syntax error"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := lintStdin(t, tc.document)
+			combined := out
+			if err != nil {
+				combined += "\n" + err.Error()
+			}
+			if tc.wantFail && err == nil {
+				t.Fatalf("expected lint to fail, got output %q", combined)
+			}
+			if !tc.wantFail && err != nil {
+				t.Fatalf("expected lint to pass, got %v with output %q", err, combined)
+			}
+			for _, want := range tc.wantText {
+				if !strings.Contains(combined, want) {
+					t.Fatalf("output %q should contain %q", combined, want)
+				}
+			}
+		})
+	}
+}
+
+// TestPolicyLintAgreesAcrossStdinAndPath pins the equivalence directly: the same
+// bytes have to produce the same verdict whether they are piped or named, since
+// a pipeline and a file are the same policy.
+func TestPolicyLintAgreesAcrossStdinAndPath(t *testing.T) {
+	cases := []struct {
+		name     string
+		document string
+	}{
+		{
+			name: "a clean bundle",
+			document: `policies:
+  - name: ok
+    rules:
+      - when: "true"
+        action: deny
+        reason: "always"
+`,
+		},
+		{
+			name: "a bundle with a bad action",
+			document: `policies:
+  - name: broken
+    rules:
+      - when: "true"
+        action: dney
+        reason: "r"
+`,
+		},
+		{
+			name: "a bundle missing its rules",
+			document: `policies:
+  - name: ruleless
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pathOut, pathErr := runPolicyLint(t, tc.document)
+			stdinOut, stdinErr := lintStdin(t, tc.document)
+			if (pathErr == nil) != (stdinErr == nil) {
+				t.Fatalf("verdicts differ: path err=%v out=%q, stdin err=%v out=%q", pathErr, pathOut, stdinErr, stdinOut)
+			}
+			// The two name their source differently and are otherwise the same
+			// report, so compare with the source label removed.
+			wantBody := strings.ReplaceAll(pathOut, "POLICY", "")
+			gotBody := strings.ReplaceAll(stdinOut, "stdin", "")
+			if wantBody != gotBody {
+				t.Fatalf("reports differ:\n path: %q\nstdin: %q", wantBody, gotBody)
+			}
+		})
+	}
+}

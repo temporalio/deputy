@@ -323,21 +323,16 @@ func newPolicyLintCommand() *cobra.Command {
 			stdinUsed := false
 			failures := 0
 			for _, path := range args {
-				if path == "-" {
-					data, err := readPathOrStdinOnce(cmd.InOrStdin(), path, &stdinUsed)
-					if err != nil {
-						return fmt.Errorf("read %q: %w", path, err)
-					}
-					if err := policy.Compile(string(data), extraVars); err != nil {
-						known := append(policy.DefaultVariableNames(), extraVars...)
-						return fmt.Errorf("%s: %s", path, formatCelCompileError(err, string(data), known))
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
-					continue
+				data, err := readPathOrStdinOnce(cmd.InOrStdin(), path, &stdinUsed)
+				if err != nil {
+					return fmt.Errorf("read %q: %w", path, err)
 				}
 				// Prefer structured lint for YAML bundles: it validates the whole
-				// bundle, not just the CEL, and reports clearer errors.
-				handled, problems, err := lintStructuredBundle(path, extraVars, cmd.OutOrStdout())
+				// bundle, not just the CEL, and reports clearer errors. The choice is
+				// made from the bytes, so a bundle reaches the same checks however it
+				// is supplied; deciding it from the path used to lint a piped bundle
+				// as raw CEL and fail on its first key.
+				handled, problems, err := lintStructuredBundle(data, path, extraVars, cmd.OutOrStdout())
 				if err != nil {
 					return err
 				}
@@ -345,15 +340,37 @@ func newPolicyLintCommand() *cobra.Command {
 					failures += problems
 					continue
 				}
+				// A compiled bundle holds its policies as compiled CEL, so it is loaded
+				// as the policies it carries rather than compiled as one expression.
+				// Loading it from the bytes is what makes stdin behave as the
+				// identical file does, since stdin has no path to reread.
+				if policy.IsCompiledBundle(data) {
+					sources, err := policy.LoadSourcesFromBytes(data, path)
+					if err != nil {
+						return err
+					}
+					if err := compileSources(sources, extraVars); err != nil {
+						return err
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
+					continue
+				}
+				// Raw CEL. Stdin is compiled as the one source it is, while a file is
+				// loaded, since it may hold several.
+				if path == "-" {
+					if err := policy.Compile(string(data), extraVars); err != nil {
+						known := append(policy.DefaultVariableNames(), extraVars...)
+						return fmt.Errorf("%s: %s", path, formatCelCompileError(err, string(data), known))
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
+					continue
+				}
 				sources, err := policy.LoadSources([]string{path})
 				if err != nil {
 					return err
 				}
-				for _, src := range sources {
-					if err := policy.Compile(src.Body, extraVars); err != nil {
-						known := append(policy.DefaultVariableNames(), extraVars...)
-						return fmt.Errorf("%s: %s", src.Name, formatCelCompileError(err, src.Body, known))
-					}
+				if err := compileSources(sources, extraVars); err != nil {
+					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
 			}
@@ -367,16 +384,29 @@ func newPolicyLintCommand() *cobra.Command {
 	return cmd
 }
 
+// compileSources compiles every source a policy file loaded into, stopping at
+// the first that does not compile and rendering it with the caret snippet lint
+// uses for a condition. A file may hold several policies, and a compiled bundle
+// holds one source per policy it was built from.
+func compileSources(sources []policy.Source, extraVars []string) error {
+	for _, src := range sources {
+		if err := policy.Compile(src.Body, extraVars); err != nil {
+			known := append(policy.DefaultVariableNames(), extraVars...)
+			return fmt.Errorf("%s: %s", src.Name, formatCelCompileError(err, src.Body, known))
+		}
+	}
+	return nil
+}
+
 // lintStructuredBundle validates a YAML structured bundle with the same checks
 // the editor runs, printing every issue it finds instead of stopping at the
-// first. It reports handled=false when the file is not a structured bundle so
+// first. It reports handled=false when the data is not a structured bundle so
 // the caller can fall back to compiling it as raw CEL, and returns the number of
 // issues serious enough to fail the run (hints are advice, not failures).
-func lintStructuredBundle(path string, extraVars []string, out io.Writer) (handled bool, problems int, err error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, 0, fmt.Errorf("read %q: %w", path, err)
-	}
+//
+// It takes the bytes rather than reading them, so stdin and a file are linted
+// the same way; path only names the source in the issues it prints.
+func lintStructuredBundle(data []byte, path string, extraVars []string, out io.Writer) (handled bool, problems int, err error) {
 	// Gate on the bundle's shape, not on whether it decodes: a policy with a
 	// mistyped field must reach validation and be told which field is wrong,
 	// rather than falling through to the generic unrecognized-format error.
