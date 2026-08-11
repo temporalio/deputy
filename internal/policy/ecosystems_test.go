@@ -1029,6 +1029,141 @@ func TestPURLAgreesWithIdentityFields(t *testing.T) {
 	}
 }
 
+// TestPURLStringSpellsTheCanonicalName pins the purl as a policy reads it,
+// which is a string, rather than as it re-parses. The two differ: the purl
+// library folds a pypi name on its own at parse time, so comparing parsed
+// components let "pkg:pypi/Flask_SQLAlchemy@3.1.1" sit beside the name
+// "flask-sqlalchemy" and call it agreement. A rule doing string equality on
+// pkg.purl saw the spelling nothing else in the payload used.
+//
+// The cases the rewrite must not touch are pinned here too, because the
+// rewrite is the risk: the purl library lowercases a golang namespace at parse,
+// and Go import paths are case-sensitive, so re-encoding a purl whose
+// components Deputy does not fold would trade this bug for the same bug in
+// another ecosystem.
+func TestPURLStringSpellsTheCanonicalName(t *testing.T) {
+	tests := []struct {
+		name      string
+		ecosystem string
+		pkgName   string
+		version   string
+		purl      string
+		wantName  string
+		wantPURL  string
+	}{
+		{
+			name:      "underscored pypi name reaches the purl string",
+			ecosystem: "PyPI",
+			pkgName:   "Flask_SQLAlchemy",
+			version:   "3.1.1",
+			purl:      "pkg:pypi/Flask_SQLAlchemy@3.1.1",
+			wantName:  "flask-sqlalchemy",
+			wantPURL:  "pkg:pypi/flask-sqlalchemy@3.1.1",
+		},
+		{
+			name:      "dotted pypi name reaches the purl string",
+			ecosystem: "PyPI",
+			pkgName:   "flask.sqlalchemy",
+			version:   "3.1.1",
+			purl:      "pkg:pypi/flask.sqlalchemy@3.1.1",
+			wantName:  "flask-sqlalchemy",
+			wantPURL:  "pkg:pypi/flask-sqlalchemy@3.1.1",
+		},
+		{
+			name:      "pypi qualifiers survive the rewrite",
+			ecosystem: "PyPI",
+			pkgName:   "Flask_SQLAlchemy",
+			version:   "3.1.1",
+			purl:      "pkg:pypi/Flask_SQLAlchemy@3.1.1?file_name=x.whl",
+			wantName:  "flask-sqlalchemy",
+			wantPURL:  "pkg:pypi/flask-sqlalchemy@3.1.1?file_name=x.whl",
+		},
+		{
+			name:      "cargo keeps the published spelling",
+			ecosystem: "crates.io",
+			pkgName:   "async-trait",
+			version:   "0.1.80",
+			purl:      "pkg:cargo/async-trait@0.1.80",
+			wantName:  "async-trait",
+			wantPURL:  "pkg:cargo/async-trait@0.1.80",
+		},
+		{
+			name:      "go version gains its prefix in the string",
+			ecosystem: "Go",
+			pkgName:   "github.com/aws/aws-sdk-go",
+			version:   "1.44.0",
+			purl:      "pkg:golang/github.com/aws/aws-sdk-go@1.44.0",
+			wantName:  "github.com/aws/aws-sdk-go",
+			wantPURL:  "pkg:golang/github.com/aws/aws-sdk-go@v1.44.0",
+		},
+		{
+			name:      "case-sensitive go namespace survives",
+			ecosystem: "Go",
+			pkgName:   "github.com/Masterminds/semver",
+			version:   "v1.0.0",
+			purl:      "pkg:golang/github.com/Masterminds/semver@v1.0.0",
+			wantName:  "github.com/Masterminds/semver",
+			wantPURL:  "pkg:golang/github.com/Masterminds/semver@v1.0.0",
+		},
+		{
+			// When a Go PURL is rewritten it comes back with the namespace the
+			// purl spec mandates for the golang type, which is lowercase, so
+			// the string cannot carry a case-sensitive import path and be a
+			// canonical PURL at the same time. Re-parsing either spelling
+			// yields this same package, which is the agreement
+			// [TestPURLAgreesWithIdentityFields] checks; the case above pins
+			// that a PURL needing no rewrite is not put through this at all.
+			name:      "rewritten go purl takes the spec's namespace casing",
+			ecosystem: "Go",
+			pkgName:   "github.com/Masterminds/semver",
+			version:   "1.0.0",
+			purl:      "pkg:golang/github.com/Masterminds/semver@1.0.0",
+			wantName:  "github.com/Masterminds/semver",
+			wantPURL:  "pkg:golang/github.com/masterminds/semver@v1.0.0",
+		},
+		{
+			name:      "go qualifiers and subpath survive",
+			ecosystem: "Go",
+			pkgName:   "github.com/foo/bar",
+			version:   "1.0.0",
+			purl:      "pkg:golang/github.com/foo/bar@1.0.0?repository_url=proxy.golang.org#subpkg",
+			wantName:  "github.com/foo/bar",
+			wantPURL:  "pkg:golang/github.com/foo/bar@v1.0.0?repository_url=proxy.golang.org#subpkg",
+		},
+		{
+			name:      "npm scope encoding survives",
+			ecosystem: "npm",
+			pkgName:   "@types/node",
+			version:   "20.0.0",
+			purl:      "pkg:npm/%40types/node@20.0.0",
+			wantName:  "@types/node",
+			wantPURL:  "pkg:npm/%40types/node@20.0.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := map[string]any{"pkg": map[string]any{
+				"ecosystem": tt.ecosystem,
+				"name":      tt.pkgName,
+				"version":   tt.version,
+				"purl":      tt.purl,
+			}}
+			canonicalizeEcosystemPayload(payload)
+			pkg, ok := payload["pkg"].(map[string]any)
+			if !ok {
+				t.Fatalf("pkg is %T, want map", payload["pkg"])
+			}
+			if got := pkg["name"]; got != tt.wantName {
+				t.Errorf("name = %v, want %q", got, tt.wantName)
+			}
+			if got := pkg["purl"]; got != tt.wantPURL {
+				t.Errorf("purl = %v, want %q", got, tt.wantPURL)
+			}
+		})
+	}
+}
+
 // policyInputsDoc is the reference whose payload samples document what a policy
 // receives.
 const policyInputsDoc = "../../docs/reference/policy-inputs.md"

@@ -182,6 +182,29 @@ func (e Ecosystem) NormalizeName(name string) string {
 	return n
 }
 
+// nameNormalizationProbe carries every character class a name fold could act
+// on: upper case and all three separators. [Ecosystem.NormalizesNames] folds it
+// to decide whether an ecosystem has a rule at all, so a rule that changes any
+// of them is detected without anyone listing which ecosystems have one.
+const nameNormalizationProbe = "A_b.C-d"
+
+// NormalizesNames reports whether this ecosystem defines a name normalization,
+// that is, whether [Ecosystem.NormalizeName] is anything but the identity. The
+// answer is derived by folding a probe rather than by listing the ecosystems
+// that have a rule, so an ecosystem that gains one is covered by adding the
+// rule and nothing else.
+//
+// A caller needs this to know whether some other normalizer's opinion about a
+// name can be adopted. Where Deputy defines a fold, PyPI today, an outside
+// implementation of the same published rule agrees with Deputy and its output
+// is usable. Where Deputy defines none, a name is whatever its source spelled,
+// and a library that lowercases it (the purl spec does exactly that to a golang
+// namespace, though Go import paths are case-sensitive) is discarding identity
+// rather than canonicalizing it.
+func (e Ecosystem) NormalizesNames() bool {
+	return e.NormalizeName(nameNormalizationProbe) != nameNormalizationProbe
+}
+
 // NameEquivalenceKey returns the key under which this ecosystem considers two
 // names to be the same package, for matching one name against another. Unlike
 // [Ecosystem.NormalizeName] it does not return a name: the key is not a
