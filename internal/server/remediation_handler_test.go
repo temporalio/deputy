@@ -144,7 +144,20 @@ func newRemediationTestClient(t *testing.T, h *RemediationHandler) remediationv1
 // created there too, for plans carrying a deputy-internal step: that step's
 // target has to exist the same way, since a plan is generated from the files it
 // names.
-func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.ExecutionOptions, dirs, files []string, extraSteps ...*remediationv1.Step) ([]*remediationv1.ExecutionEvent, error) {
+// workflowUsingCheckout is a workflow that really uses actions/checkout, for
+// the rows whose deputy-internal step names that action. Preflight refuses a
+// step whose target holds nothing the edit would change, so a placeholder file
+// would make such a row pass on that refusal rather than on what it is about.
+const workflowUsingCheckout = `name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+`
+
+func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.ExecutionOptions, dirs []string, files map[string]string, extraSteps ...*remediationv1.Step) ([]*remediationv1.ExecutionEvent, error) {
 	t.Helper()
 
 	handler := NewRemediationHandler(WithRemediationLocalMode())
@@ -157,12 +170,12 @@ func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.
 			t.Fatalf("MkdirAll %q: %v", dir, err)
 		}
 	}
-	for _, file := range files {
+	for file, content := range files {
 		path := filepath.Join(targetPath, file)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("MkdirAll %q: %v", filepath.Dir(file), err)
 		}
-		if err := os.WriteFile(path, []byte("placeholder\n"), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("WriteFile %q: %v", file, err)
 		}
 	}
@@ -199,10 +212,10 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 		name           string
 		options        *remediationv1.ExecutionOptions
 		extraSteps     []*remediationv1.Step
-		dirs           []string     // directories to create under the target path before the run
-		files          []string     // files to create under the target path before the run
-		failSteps      []string     // step IDs the recorder reports as failed
-		wantCode       connect.Code // zero means the stream must succeed
+		dirs           []string          // directories to create under the target path before the run
+		files          map[string]string // files (path -> content) to create under the target path before the run
+		failSteps      []string          // step IDs the recorder reports as failed
+		wantCode       connect.Code      // zero means the stream must succeed
 		wantExecuted   []string
 		wantMessages   []string                     // substrings that must appear across event messages
 		wantMissing    []string                     // substrings that must NOT appear in any event message
@@ -483,7 +496,7 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			extraSteps: []*remediationv1.Step{
 				{Id: "step-3", Title: "pin action", Command: "deputy:action:pin .github/workflows/ci.yml actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4", Executable: true},
 			},
-			files:        []string{".github/workflows/ci.yml"},
+			files:        map[string]string{".github/workflows/ci.yml": workflowUsingCheckout},
 			wantExecuted: nil,
 			wantMessages: []string{
 				"[dry run] Step 3/3 would apply: deputy:action:pin",
@@ -813,14 +826,17 @@ func TestDryRunStepPlatformRefusal(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// The deputy-internal row edits a workflow file, and preflight
-			// refuses a target that is not there, so give the work directory
-			// the file the plan names.
+			// refuses a target that is not there or that the edit would not
+			// match, so give the work directory a workflow that really uses
+			// the action the plan names. A placeholder would make the row
+			// pass on a refusal instead of on the platform question it is
+			// about.
 			workDir := t.TempDir()
 			workflow := filepath.Join(workDir, ".github", "workflows", "ci.yml")
 			if err := os.MkdirAll(filepath.Dir(workflow), 0o755); err != nil {
 				t.Fatalf("MkdirAll failed: %v", err)
 			}
-			if err := os.WriteFile(workflow, []byte("placeholder\n"), 0o644); err != nil {
+			if err := os.WriteFile(workflow, []byte(workflowUsingCheckout), 0o644); err != nil {
 				t.Fatalf("WriteFile failed: %v", err)
 			}
 

@@ -34,6 +34,12 @@ type deputyCommandSpec struct {
 	// SHA has to be one. A nil hook means the opcode's apply path asks nothing
 	// of its arguments beyond their count, so there is nothing to share.
 	validateArgs func(parts []string) error
+	// matchTarget answers, from the target's current bytes, whether the edit
+	// would find anything to change, using the same matching the apply path
+	// uses. It is what stops a preview from promising an edit against a file
+	// that has moved on since the plan was written. filePath names the target
+	// in the refusal only; nothing here writes.
+	matchTarget func(parts []string, filePath string, content []byte) error
 }
 
 // deputyCommandSpecs is the single source of truth for which deputy-internal
@@ -41,9 +47,48 @@ type deputyCommandSpec struct {
 // file they edit. Validation, preflight, and application all read it, so a
 // dry run cannot approve a command the apply path would reject.
 var deputyCommandSpecs = map[string]deputyCommandSpec{
-	"deputy:action:update":     {arity: 4, pathArg: 1},                                  // deputy:action:update <file> <owner/repo> <new-version>
-	"deputy:action:pin":        {arity: 5, pathArg: 1, validateArgs: validateActionPin}, // deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
-	"deputy:dockerfile:update": {arity: 4, pathArg: 1},                                  // deputy:dockerfile:update <file> <image> <new-version>
+	// deputy:action:update <file> <owner/repo> <new-version>
+	"deputy:action:update": {arity: 4, pathArg: 1, matchTarget: matchActionUpdate},
+	// deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
+	"deputy:action:pin": {arity: 5, pathArg: 1, validateArgs: validateActionPin, matchTarget: matchActionPin},
+	// deputy:dockerfile:update <file> <image> <new-version>
+	"deputy:dockerfile:update": {arity: 4, pathArg: 1, matchTarget: matchDockerfileUpdate},
+}
+
+// matchActionUpdate reports whether a deputy:action:update command has an edit
+// to make, by computing the very rewrite the apply path computes and throwing
+// the result away. Running the real thing is what makes the two verdicts
+// identical rather than merely similar.
+func matchActionUpdate(parts []string, filePath string, content []byte) error {
+	_, err := planActionUpdate(filePath, content, parts[2], parts[3])
+	return err
+}
+
+// matchDockerfileUpdate is matchActionUpdate for deputy:dockerfile:update.
+func matchDockerfileUpdate(parts []string, filePath string, content []byte) error {
+	_, err := planDockerfileUpdate(filePath, content, parts[2], parts[3])
+	return err
+}
+
+// matchActionPin refuses a deputy:action:pin command whose workflow does not
+// use the action at all.
+//
+// This opcode needs its own check rather than a dry rewrite, because
+// githubactions.RewriteWorkflow is deliberately silent when it changes
+// nothing: that is what keeps re-pinning an already-pinned workflow a success.
+// The silence covers both "already done" and "the action is not here", and
+// only the second is a step that cannot be applied. Left unasked, the step
+// reported as completed while the workflow kept its unpinned reference.
+func matchActionPin(parts []string, filePath string, content []byte) error {
+	actionRef := parts[2]
+	referenced, err := githubactions.ReferencesAction(content, actionRef)
+	if err != nil {
+		return err
+	}
+	if !referenced {
+		return fmt.Errorf("no matches found for action %s in %s", actionRef, filePath)
+	}
+	return nil
 }
 
 // actionPinUpdate builds the rewrite a deputy:action:pin command asks for from
@@ -86,16 +131,18 @@ func ValidateDeputyCommand(cmd string) ([]string, error) {
 // PreflightDeputyCommand reports whether ApplyDeputyCommand would accept a
 // command, without applying it. It runs every check the apply path runs before
 // it writes: parsing, the opcode vocabulary, arity, containment of the target
-// path within repoDir, that the target is a file the apply path could edit, and
-// the arguments only that opcode understands. A dry run that skipped the
+// path within repoDir, that the target is a file the apply path could edit, the
+// arguments only that opcode understands, and whether the target's current
+// content holds anything the edit would change. A dry run that skipped the
 // containment check would report a step naming ../outside/ci.yml as applicable
 // and then watch execution refuse it, so the two share one implementation and
 // one message.
 //
-// What it still cannot predict is whether the edit would match anything: every
-// opcode reports "no matches found" from the content it reads, and preflight
-// reads no content. A step this accepts can therefore still fail on a file that
-// no longer names the action or image the plan expected.
+// The content check is what a plan needs most, because a plan outlives the tree
+// it was built against: someone bumps the action by hand or drops the build
+// stage, and the stored step still names what used to be there. It reads the
+// target and writes nothing, running the opcode's own rewrite and discarding
+// the result, so preflight cannot reach a different verdict from the run.
 func PreflightDeputyCommand(repoDir, cmd string) error {
 	_, _, err := resolveDeputyCommand(repoDir, cmd)
 	return err
@@ -127,6 +174,19 @@ func resolveDeputyCommand(repoDir, cmd string) ([]string, string, error) {
 	if spec.validateArgs != nil {
 		if err := spec.validateArgs(parts); err != nil {
 			return nil, "", fmt.Errorf("invalid %s command: %w", parts[0], err)
+		}
+	}
+	// Last, because it is the only check that reads the file: everything a
+	// refusal can be decided from the command alone is decided first, so a
+	// command that is malformed and also aimed at the wrong file is refused
+	// for being malformed.
+	if spec.matchTarget != nil {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			return nil, "", fmt.Errorf("reading %s: %w", file, err)
+		}
+		if err := spec.matchTarget(parts, file, content); err != nil {
+			return nil, "", err
 		}
 	}
 	return parts, file, nil
@@ -317,6 +377,30 @@ func applyActionUpdate(ctx context.Context, filePath, actionRef, newVersion stri
 		return fmt.Errorf("reading %s: %w", filePath, err)
 	}
 
+	updated, err := planActionUpdate(filePath, content, actionRef, newVersion)
+	if err != nil {
+		return err
+	}
+
+	// Write back
+	if err := ensureLive(ctx, "writing", filePath); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filePath, updated, 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", filePath, err)
+	}
+
+	return nil
+}
+
+// planActionUpdate computes the rewritten workflow for a deputy:action:update
+// command, returning an error when the content holds nothing the update would
+// change. It touches no files, so preflight can run it to learn the verdict
+// the apply path will reach without reaching it.
+//
+// filePath names the target in the error only. Preflight and application both
+// report the refusal this produces, so the two say the same thing.
+func planActionUpdate(filePath string, content []byte, actionRef, newVersion string) ([]byte, error) {
 	escapedRef := regexp.QuoteMeta(actionRef)
 	contentStr := string(content)
 	modified := false
@@ -331,7 +415,7 @@ func applyActionUpdate(ctx context.Context, filePath, actionRef, newVersion stri
 	)
 	shaWithCommentRe, err := regexp.Compile(shaWithCommentPattern)
 	if err != nil {
-		return fmt.Errorf("compiling SHA+comment regex: %w", err)
+		return nil, fmt.Errorf("compiling SHA+comment regex: %w", err)
 	}
 
 	if shaWithCommentRe.MatchString(contentStr) {
@@ -349,7 +433,7 @@ func applyActionUpdate(ctx context.Context, filePath, actionRef, newVersion stri
 		pattern := fmt.Sprintf(`(uses:\s*["']?)(%s)@([^"'\s#]+)(["']?)`, escapedRef)
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			return fmt.Errorf("compiling regex: %w", err)
+			return nil, fmt.Errorf("compiling regex: %w", err)
 		}
 
 		replacement := fmt.Sprintf("${1}${2}@%s${4}", newVersion)
@@ -361,18 +445,9 @@ func applyActionUpdate(ctx context.Context, filePath, actionRef, newVersion stri
 	}
 
 	if !modified {
-		return fmt.Errorf("no matches found for action %s in %s", actionRef, filePath)
+		return nil, fmt.Errorf("no matches found for action %s in %s", actionRef, filePath)
 	}
-
-	// Write back
-	if err := ensureLive(ctx, "writing", filePath); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filePath, []byte(contentStr), 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", filePath, err)
-	}
-
-	return nil
+	return []byte(contentStr), nil
 }
 
 // applyDockerfileUpdate updates a FROM instruction in a Dockerfile.
@@ -397,6 +472,27 @@ func applyDockerfileUpdate(ctx context.Context, filePath, image, newVersion stri
 		return fmt.Errorf("reading %s: %w", filePath, err)
 	}
 
+	updated, err := planDockerfileUpdate(filePath, content, image, newVersion)
+	if err != nil {
+		return err
+	}
+
+	if err := ensureLive(ctx, "writing", filePath); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filePath, updated, 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", filePath, err)
+	}
+
+	return nil
+}
+
+// planDockerfileUpdate computes the rewritten Dockerfile for a
+// deputy:dockerfile:update command, returning an error when no FROM
+// instruction names the image. Like planActionUpdate it touches no files, so
+// preflight reaches the apply path's verdict without reaching its write, and
+// filePath appears only in the error both of them report.
+func planDockerfileUpdate(filePath string, content []byte, image, newVersion string) ([]byte, error) {
 	escapedImage := regexp.QuoteMeta(image)
 	lines := strings.Split(string(content), "\n")
 	modified := false
@@ -467,20 +563,11 @@ func applyDockerfileUpdate(ctx context.Context, filePath, image, newVersion stri
 	}
 
 	if !modified {
-		return fmt.Errorf("no FROM %s found in %s", image, filePath)
+		return nil, fmt.Errorf("no FROM %s found in %s", image, filePath)
 	}
 
-	// Write back, preserving original line endings
-	output := strings.Join(lines, "\n")
-
-	if err := ensureLive(ctx, "writing", filePath); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filePath, []byte(output), 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", filePath, err)
-	}
-
-	return nil
+	// Preserve the original line endings.
+	return []byte(strings.Join(lines, "\n")), nil
 }
 
 // applyActionPin rewrites a GitHub Action reference to a SHA-pinned format

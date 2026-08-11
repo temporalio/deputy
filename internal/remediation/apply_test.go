@@ -1165,6 +1165,130 @@ func TestDeputyCommandRefusesMissingTarget(t *testing.T) {
 	}
 }
 
+// TestDeputyCommandRefusesUnmatchedTarget pins the last way a dry run could
+// promise an edit the run cannot make: the target exists and the arguments are
+// sound, but the file no longer contains the action or image the plan names.
+// Every opcode refuses that at apply time, so a preview that accepted it would
+// report the step as one that would execute, count it satisfied, and describe
+// its dependents running, when the real run fails the step and skips them.
+//
+// A plan outlives the tree it was built against, which is exactly when this
+// happens: someone bumps the action by hand, or deletes the build stage, and
+// the stored plan still names what used to be there.
+//
+// The final row of each opcode is a file that does contain the target, so the
+// check cannot pass by refusing everything.
+func TestDeputyCommandRefusesUnmatchedTarget(t *testing.T) {
+	const (
+		workflow   = ".github/workflows/ci.yml"
+		dockerfile = "Dockerfile"
+	)
+
+	tests := []struct {
+		name      string
+		file      string
+		content   string
+		cmd       string
+		wantMatch bool // whether the file contains what the command names
+	}{
+		{
+			name:    "action update against a workflow without the action",
+			file:    workflow,
+			content: "jobs:\n  build:\n    steps:\n      - uses: actions/setup-go@v5\n",
+			cmd:     "deputy:action:update " + workflow + " actions/checkout v5",
+		},
+		{
+			name:    "action pin against a workflow without the action",
+			file:    workflow,
+			content: "jobs:\n  build:\n    steps:\n      - uses: actions/setup-go@v5\n",
+			cmd:     "deputy:action:pin " + workflow + " actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4.2.2",
+		},
+		{
+			name:    "dockerfile update against a Dockerfile without the image",
+			file:    dockerfile,
+			content: "FROM debian:bookworm\nRUN true\n",
+			cmd:     "deputy:dockerfile:update " + dockerfile + " alpine 3.19",
+		},
+		{
+			name:      "action update against a workflow that has the action",
+			file:      workflow,
+			content:   "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
+			cmd:       "deputy:action:update " + workflow + " actions/checkout v5",
+			wantMatch: true,
+		},
+		{
+			name:      "action pin against a workflow that has the action",
+			file:      workflow,
+			content:   "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
+			cmd:       "deputy:action:pin " + workflow + " actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4.2.2",
+			wantMatch: true,
+		},
+		{
+			name:      "dockerfile update against a Dockerfile that has the image",
+			file:      dockerfile,
+			content:   "FROM alpine:3.18\nRUN true\n",
+			cmd:       "deputy:dockerfile:update " + dockerfile + " alpine 3.19",
+			wantMatch: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// One tree for both, so the refusals can be compared verbatim:
+			// they name the resolved target path, which differs between two
+			// temporary directories for reasons that have nothing to do with
+			// the verdict.
+			dir := t.TempDir()
+			writeTestFile(t, dir, tt.file, tt.content)
+
+			// Preflight runs first and must leave the target alone.
+			preflight := PreflightDeputyCommand(dir, tt.cmd)
+			afterPreflight, err := os.ReadFile(filepath.Join(dir, tt.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(afterPreflight) != tt.content {
+				t.Errorf("preflight modified the target:\n--- got ---\n%s\n--- want ---\n%s", afterPreflight, tt.content)
+			}
+
+			apply := ApplyDeputyCommand(t.Context(), dir, tt.cmd)
+
+			if tt.wantMatch {
+				if preflight != nil {
+					t.Errorf("preflight refused an applicable command: %v", preflight)
+				}
+				if apply != nil {
+					t.Errorf("apply refused an applicable command: %v", apply)
+				}
+				return
+			}
+			if apply == nil {
+				t.Fatalf("ApplyDeputyCommand(%q) accepted a target it does not match", tt.cmd)
+			}
+			if preflight == nil {
+				t.Fatalf("PreflightDeputyCommand(%q) accepted a target the apply path refuses with: %v", tt.cmd, apply)
+			}
+			if preflight.Error() != apply.Error() {
+				t.Errorf("dry run and execution refused differently:\npreflight: %v\napply:     %v", preflight, apply)
+			}
+		})
+	}
+}
+
+// writeTestFile writes content to name under dir, creating parent
+// directories, so a table row can name a nested path without repeating the
+// setup.
+func writeTestFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	full := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestDeputyCommandRefusesInvalidArguments pins that preflight judges the
 // arguments only one opcode understands, not merely how many there are. A
 // deputy:action:pin command carrying something that is not a SHA is refused by

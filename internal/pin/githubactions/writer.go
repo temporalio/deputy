@@ -51,20 +51,7 @@ func RewriteWorkflow(ctx context.Context, root *os.Root, relPath string, updates
 			return err
 		}
 
-		escapedRef := regexp.QuoteMeta(u.Name)
-
-		// Match: uses: <optional-quote><action-ref>@<old-ref><optional-quote><optional-comment>
-		// Captures:
-		//   1: prefix including "uses:" and optional quote
-		//   2: the action ref (owner/repo or owner/repo/subpath)
-		//   3: the old version/SHA ref (full token)
-		//   4: optional trailing quote
-		//   5: everything after the ref on the same line (comment, etc.)
-		pattern := fmt.Sprintf(
-			`(uses:\s*["']?)(%s)@([^\s"'#]+)(["']?)(\s*#[^\n]*)?`,
-			escapedRef,
-		)
-		re, err := regexp.Compile(pattern)
+		re, err := actionReferenceRe(u.Name)
 		if err != nil {
 			return fmt.Errorf("compiling regex for %s: %w", u.Name, err)
 		}
@@ -113,6 +100,45 @@ func RewriteWorkflow(ctx context.Context, root *os.Root, relPath string, updates
 		writeErr = closeErr
 	}
 	return writeErr
+}
+
+// actionReferenceRe compiles the pattern matching a workflow's `uses:`
+// reference to one action. It is the single description of what counts as a
+// reference to an action, so the rewrite that edits one and the check that
+// asks whether one is present cannot disagree.
+//
+// Captures:
+//
+//	1: prefix including "uses:" and optional quote
+//	2: the action ref (owner/repo or owner/repo/subpath)
+//	3: the old version/SHA ref (full token)
+//	4: optional trailing quote
+//	5: everything after the ref on the same line (comment, etc.)
+func actionReferenceRe(actionRef string) (*regexp.Regexp, error) {
+	return regexp.Compile(fmt.Sprintf(
+		`(uses:\s*["']?)(%s)@([^\s"'#]+)(["']?)(\s*#[^\n]*)?`,
+		regexp.QuoteMeta(actionRef),
+	))
+}
+
+// ReferencesAction reports whether content uses actionRef at least once.
+//
+// It exists so a caller can predict whether [RewriteWorkflow] has anything to
+// rewrite before running it. The rewrite is deliberately silent when it finds
+// no match, which keeps re-pinning an already-pinned workflow a success; that
+// same silence would let a remediation step whose workflow no longer mentions
+// the action report as applied while changing nothing. Asking here separates
+// "nothing to do because it is already done" from "nothing to do because the
+// plan describes a file that has moved on".
+//
+// The question is answered with the rewrite's own pattern, so an actionRef
+// spelling one accepts is one the other accepts.
+func ReferencesAction(content []byte, actionRef string) (bool, error) {
+	re, err := actionReferenceRe(actionRef)
+	if err != nil {
+		return false, fmt.Errorf("compiling regex for %s: %w", actionRef, err)
+	}
+	return re.Match(content), nil
 }
 
 // ValidateUpdate checks that an Update has valid fields to prevent injection
