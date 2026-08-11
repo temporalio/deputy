@@ -2,7 +2,6 @@ package remediation
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,10 +63,11 @@ func ValidateDeputyCommand(cmd string) ([]string, error) {
 
 // PreflightDeputyCommand reports whether ApplyDeputyCommand would accept a
 // command, without applying it. It runs every check the apply path runs before
-// it touches a file: parsing, the opcode vocabulary, arity, and containment of
-// the target path within repoDir. A dry run that skipped the containment check
-// would report a step naming ../outside/ci.yml as applicable and then watch
-// execution refuse it, so the two share one implementation and one message.
+// it touches a file: parsing, the opcode vocabulary, arity, containment of the
+// target path within repoDir, and that the target is a file the apply path could
+// edit. A dry run that skipped the containment check would report a step naming
+// ../outside/ci.yml as applicable and then watch execution refuse it, so the two
+// share one implementation and one message.
 func PreflightDeputyCommand(repoDir, cmd string) error {
 	_, _, err := resolveDeputyCommand(repoDir, cmd)
 	return err
@@ -88,33 +88,40 @@ func resolveDeputyCommand(repoDir, cmd string) ([]string, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid file path: %w", err)
 	}
-	if err := requireRegularFile(file); err != nil {
+	if err := requireEditableFile(file); err != nil {
 		return nil, "", err
 	}
 	return parts, file, nil
 }
 
-// requireRegularFile refuses a deputy-internal command whose target exists but
-// is not a regular file.
+// requireEditableFile refuses a deputy-internal command whose target the apply
+// path could not edit: one that does not exist, and one that exists but is not
+// a regular file.
 //
-// Every opcode reads its target whole and writes it back, and neither operation
-// is interruptible once it has begun: opening a FIFO that has no writer blocks
+// Existence is checked here, rather than left to the opcode's own read, because
+// preflight and application have to agree. Every opcode opens its target as its
+// first act, so a command naming a file that is not there fails immediately;
+// leaving that to the read meant a dry run reported the edit as one that would
+// apply, counted the step as satisfied, and let its dependents be previewed
+// against a plan that cannot be applied at all. Plans name paths a generator
+// inferred from a scan, so a stale or renamed target is a mistake worth catching
+// in the preview rather than the run.
+//
+// The regular-file requirement is about the execution timeout. Every opcode
+// reads its target whole and writes it back, and neither operation is
+// interruptible once it has begun: opening a FIFO that has no writer blocks
 // until one appears, and a context cannot cancel a read already blocked in the
 // kernel. A plan naming a FIFO would therefore hold its step, and the RPC
-// serving it, past the execution timeout no matter how carefully the apply path
-// checks its deadline. Refusing up front is what keeps that timeout meaningful.
+// serving it, past the timeout no matter how carefully the apply path checks its
+// deadline. Refusing up front is what keeps that timeout meaningful.
 //
-// Workflow files, action manifests, and Dockerfiles are regular files, so this
-// rejects nothing a real plan asks for. A target that does not exist is left
-// alone: the opcode reports it with the path it tried to read, which says more
-// than a generic refusal would.
-func requireRegularFile(path string) error {
+// Workflow files, action manifests, and Dockerfiles are regular files that a
+// plan was generated from, so this rejects nothing a current plan asks for. The
+// refusal names the path it could not use, so it says what the read would have.
+func requireEditableFile(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("checking %s: %w", path, err)
+		return fmt.Errorf("cannot edit %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("%s is not a regular file", path)

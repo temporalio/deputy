@@ -140,8 +140,11 @@ func newRemediationTestClient(t *testing.T, h *RemediationHandler) remediationv1
 // two-step plan (plus any extra steps) and returns the streamed events and
 // the terminal error. dirs are created under the target path first, for plans
 // whose steps carry a manifest path: a step's execution directory has to exist
-// the way it would in the repository the plan was generated from.
-func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.ExecutionOptions, dirs []string, extraSteps ...*remediationv1.Step) ([]*remediationv1.ExecutionEvent, error) {
+// the way it would in the repository the plan was generated from. files are
+// created there too, for plans carrying a deputy-internal step: that step's
+// target has to exist the same way, since a plan is generated from the files it
+// names.
+func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.ExecutionOptions, dirs, files []string, extraSteps ...*remediationv1.Step) ([]*remediationv1.ExecutionEvent, error) {
 	t.Helper()
 
 	handler := NewRemediationHandler(WithRemediationLocalMode())
@@ -152,6 +155,15 @@ func executePlanForTest(t *testing.T, rec *stepRecorder, options *remediationv1.
 	for _, dir := range dirs {
 		if err := os.MkdirAll(filepath.Join(targetPath, dir), 0o755); err != nil {
 			t.Fatalf("MkdirAll %q: %v", dir, err)
+		}
+	}
+	for _, file := range files {
+		path := filepath.Join(targetPath, file)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll %q: %v", filepath.Dir(file), err)
+		}
+		if err := os.WriteFile(path, []byte("placeholder\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile %q: %v", file, err)
 		}
 	}
 
@@ -188,6 +200,7 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 		options        *remediationv1.ExecutionOptions
 		extraSteps     []*remediationv1.Step
 		dirs           []string     // directories to create under the target path before the run
+		files          []string     // files to create under the target path before the run
 		failSteps      []string     // step IDs the recorder reports as failed
 		wantCode       connect.Code // zero means the stream must succeed
 		wantExecuted   []string
@@ -438,6 +451,7 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			extraSteps: []*remediationv1.Step{
 				{Id: "step-3", Title: "pin action", Command: "deputy:action:pin .github/workflows/ci.yml actions/checkout abc123 v4", Executable: true},
 			},
+			files:        []string{".github/workflows/ci.yml"},
 			wantExecuted: nil,
 			wantMessages: []string{
 				"[dry run] Step 3/3 would apply: deputy:action:pin",
@@ -543,7 +557,7 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := &stepRecorder{failSteps: tt.failSteps}
-			events, err := executePlanForTest(t, rec, tt.options, tt.dirs, tt.extraSteps...)
+			events, err := executePlanForTest(t, rec, tt.options, tt.dirs, tt.files, tt.extraSteps...)
 
 			if got := rec.executedSteps(); !slices.Equal(got, tt.wantExecuted) {
 				t.Fatalf("executed steps = %v, want %v", got, tt.wantExecuted)
@@ -590,7 +604,7 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 // field at zero.
 func TestExecutePlanReportsProgress(t *testing.T) {
 	rec := &stepRecorder{}
-	events, err := executePlanForTest(t, rec, nil, nil)
+	events, err := executePlanForTest(t, rec, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("ExecutePlan failed: %v", err)
 	}
@@ -630,7 +644,7 @@ func TestExecutePlanTimeout(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := &stepRecorder{}
-			if _, err := executePlanForTest(t, rec, tt.options, nil); err != nil {
+			if _, err := executePlanForTest(t, rec, tt.options, nil, nil); err != nil {
 				t.Fatalf("ExecutePlan failed: %v", err)
 			}
 			if rec.hadDeadline != tt.wantDeadline {
@@ -766,7 +780,19 @@ func TestDryRunStepPlatformRefusal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg, got, rejectErr := dryRunStep(1, 1, t.TempDir(), tt.step, tt.treeBounded)
+			// The deputy-internal row edits a workflow file, and preflight
+			// refuses a target that is not there, so give the work directory
+			// the file the plan names.
+			workDir := t.TempDir()
+			workflow := filepath.Join(workDir, ".github", "workflows", "ci.yml")
+			if err := os.MkdirAll(filepath.Dir(workflow), 0o755); err != nil {
+				t.Fatalf("MkdirAll failed: %v", err)
+			}
+			if err := os.WriteFile(workflow, []byte("placeholder\n"), 0o644); err != nil {
+				t.Fatalf("WriteFile failed: %v", err)
+			}
+
+			msg, got, rejectErr := dryRunStep(1, 1, workDir, tt.step, tt.treeBounded)
 			if got != tt.want {
 				t.Fatalf("outcome = %v, want %v (message %q)", got, tt.want, msg)
 			}
@@ -1052,6 +1078,11 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			name:       "deputy command target escaping the work directory",
 			step:       &remediationv1.Step{Id: "step-1", Title: "pin elsewhere", Command: "deputy:action:update ../outside/ci.yml actions/checkout v4", Executable: true},
 			wantReason: `path traversal detected: ../outside/ci.yml escapes base directory`,
+		},
+		{
+			name:       "deputy command target that does not exist",
+			step:       &remediationv1.Step{Id: "step-1", Title: "pin a workflow that is gone", Command: "deputy:action:update .github/workflows/ci.yml actions/checkout v4", Executable: true},
+			wantReason: "cannot edit",
 		},
 		{
 			name:       "deputy command target reached through a traversal",

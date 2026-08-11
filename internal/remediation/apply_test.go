@@ -1050,3 +1050,77 @@ func TestDeputyCommandRefusesIrregularTarget(t *testing.T) {
 		})
 	}
 }
+
+// TestDeputyCommandRefusesMissingTarget pins that preflight refuses a command
+// whose target is not there, on the same terms and in the same words as the
+// apply path. Reporting the edit as one that would apply, and then failing on
+// the first read, is the disagreement a dry run exists to prevent: the preview
+// counts the step as satisfied and goes on to describe its dependents running
+// against a plan that cannot be applied.
+func TestDeputyCommandRefusesMissingTarget(t *testing.T) {
+	commands := []struct {
+		name string
+		file string
+		cmd  string
+	}{
+		{
+			name: "action update",
+			file: ".github/workflows/ci.yml",
+			cmd:  "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+		},
+		{
+			name: "action pin",
+			file: ".github/workflows/ci.yml",
+			cmd:  "deputy:action:pin .github/workflows/ci.yml actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4.2.2",
+		},
+		{
+			name: "dockerfile update",
+			file: "Dockerfile",
+			cmd:  "deputy:dockerfile:update Dockerfile alpine 3.19",
+		},
+	}
+
+	// A plan can name a path whose parent directory is gone as easily as one
+	// whose file alone is gone, and the two reach the check by different
+	// routes through symlink resolution, so both are exercised.
+	layouts := []struct {
+		name       string
+		makeParent bool
+	}{
+		{name: "target missing", makeParent: true},
+		{name: "parent directory missing", makeParent: false},
+	}
+
+	for _, tc := range commands {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, layout := range layouts {
+				t.Run(layout.name, func(t *testing.T) {
+					dir := t.TempDir()
+					if layout.makeParent {
+						if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, tc.file)), 0o755); err != nil {
+							t.Fatalf("MkdirAll failed: %v", err)
+						}
+					}
+
+					preflight := PreflightDeputyCommand(dir, tc.cmd)
+					if preflight == nil {
+						t.Fatalf("PreflightDeputyCommand(%q) accepted a missing target", tc.cmd)
+					}
+					apply := ApplyDeputyCommand(t.Context(), dir, tc.cmd)
+					if apply == nil {
+						t.Fatalf("ApplyDeputyCommand(%q) accepted a missing target", tc.cmd)
+					}
+					if preflight.Error() != apply.Error() {
+						t.Errorf("dry run and execution refused differently:\npreflight: %v\napply:     %v", preflight, apply)
+					}
+					if !errors.Is(preflight, os.ErrNotExist) {
+						t.Errorf("refusal %v does not report a missing file", preflight)
+					}
+					if !strings.Contains(preflight.Error(), tc.file) {
+						t.Errorf("refusal %v does not name the target %q", preflight, tc.file)
+					}
+				})
+			}
+		})
+	}
+}
