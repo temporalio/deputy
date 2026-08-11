@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
-	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/policy"
 )
 
@@ -50,9 +51,9 @@ func TestRunDiffPolicies_AttributesSubjects(t *testing.T) {
 		Repo:      "example.com/repo",
 		BaseRef:   "main",
 		TargetRef: "feature",
-		Changes: []compare.Change{
-			{Name: "golang.org/x/text", Ecosystem: "go", BaseVersion: "0.37.0", TargetVersion: "0.39.0", ChangeType: compare.Upgraded, IsDirect: true},
-			{Name: "golang.org/x/crypto", Ecosystem: "go", BaseVersion: "0.52.0", TargetVersion: "0.53.0", ChangeType: compare.Upgraded, IsDirect: true},
+		Changes: []*diffv1.PackageChange{
+			{Package: &dependencyv1.Package{Name: "golang.org/x/text", Version: "0.39.0", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_UPGRADED, BaseVersion: "0.37.0", TargetVersion: "0.39.0", IsDirect: true},
+			{Package: &dependencyv1.Package{Name: "golang.org/x/crypto", Version: "0.53.0", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_UPGRADED, BaseVersion: "0.52.0", TargetVersion: "0.53.0", IsDirect: true},
 		},
 	}
 
@@ -101,9 +102,9 @@ func TestRunDiffPolicies_DenyGatesAfterCollection(t *testing.T) {
 		Repo:      "example.com/repo",
 		BaseRef:   "main",
 		TargetRef: "feature",
-		Changes: []compare.Change{
-			{Name: "example.com/forbidden", Ecosystem: "go", TargetVersion: "1.0.0", ChangeType: compare.Added},
-			{Name: "example.com/fine", Ecosystem: "go", TargetVersion: "1.0.0", ChangeType: compare.Added},
+		Changes: []*diffv1.PackageChange{
+			{Package: &dependencyv1.Package{Name: "example.com/forbidden", Version: "1.0.0", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_ADDED, TargetVersion: "1.0.0"},
+			{Package: &dependencyv1.Package{Name: "example.com/fine", Version: "1.0.0", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_ADDED, TargetVersion: "1.0.0"},
 		},
 	}
 
@@ -144,9 +145,9 @@ func TestRunDiffPolicies_LicenseDataReachesPolicies(t *testing.T) {
 		Repo:      "example.com/repo",
 		BaseRef:   "main",
 		TargetRef: "feature",
-		Changes: []compare.Change{
-			{Name: "golang.org/x/crypto", Ecosystem: "go", BaseVersion: "0.52.0", TargetVersion: "0.53.0", ChangeType: compare.Upgraded, Licenses: []string{"BSD-3-Clause"}},
-			{Name: "example.com/unlicensed", Ecosystem: "go", TargetVersion: "1.0.0", ChangeType: compare.Added},
+		Changes: []*diffv1.PackageChange{
+			{Package: &dependencyv1.Package{Name: "golang.org/x/crypto", Version: "0.53.0", Ecosystem: "go", Licenses: []string{"BSD-3-Clause"}}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_UPGRADED, BaseVersion: "0.52.0", TargetVersion: "0.53.0"},
+			{Package: &dependencyv1.Package{Name: "example.com/unlicensed", Version: "1.0.0", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_ADDED, TargetVersion: "1.0.0"},
 		},
 	}
 

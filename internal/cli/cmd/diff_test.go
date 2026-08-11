@@ -5,7 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/temporalio/deputy/internal/compare"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	"github.com/temporalio/deputy/internal/report"
 )
 
@@ -73,37 +74,37 @@ func TestReclassifyUnchangedVulns(t *testing.T) {
 func TestBaseQueryPackages(t *testing.T) {
 	tests := []struct {
 		name    string
-		changes []compare.Change
+		changes []*diffv1.PackageChange
 		want    []string // "name@version/ecosystem"
 	}{
 		{
 			name: "updated upgraded downgraded qualify",
-			changes: []compare.Change{
-				{Name: "a", BaseVersion: "1.0.0", TargetVersion: "1.1.0", ChangeType: compare.Updated, Ecosystem: "go"},
-				{Name: "b", BaseVersion: "2.0.0", TargetVersion: "3.0.0", ChangeType: compare.Upgraded, Ecosystem: "npm"},
-				{Name: "c", BaseVersion: "5.0.0", TargetVersion: "4.0.0", ChangeType: compare.Downgraded, Ecosystem: "go"},
+			changes: []*diffv1.PackageChange{
+				{Package: &dependencyv1.Package{Name: "a", Version: "1.1.0", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_UPDATED, BaseVersion: "1.0.0", TargetVersion: "1.1.0"},
+				{Package: &dependencyv1.Package{Name: "b", Version: "3.0.0", Ecosystem: "npm"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_UPGRADED, BaseVersion: "2.0.0", TargetVersion: "3.0.0"},
+				{Package: &dependencyv1.Package{Name: "c", Version: "4.0.0", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED, BaseVersion: "5.0.0", TargetVersion: "4.0.0"},
 			},
 			want: []string{"a@1.0.0/go", "b@2.0.0/npm", "c@5.0.0/go"},
 		},
 		{
 			name: "added and removed never query",
-			changes: []compare.Change{
-				{Name: "new", TargetVersion: "1.0.0", ChangeType: compare.Added, Ecosystem: "go"},
-				{Name: "gone", BaseVersion: "1.0.0", ChangeType: compare.Removed, Ecosystem: "go"},
+			changes: []*diffv1.PackageChange{
+				{Package: &dependencyv1.Package{Name: "new", Version: "1.0.0", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_ADDED, TargetVersion: "1.0.0"},
+				{Package: &dependencyv1.Package{Name: "gone", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_REMOVED, BaseVersion: "1.0.0"},
 			},
 			want: nil,
 		},
 		{
 			name: "missing base version is skipped",
-			changes: []compare.Change{
-				{Name: "a", TargetVersion: "1.1.0", ChangeType: compare.Updated, Ecosystem: "go"},
+			changes: []*diffv1.PackageChange{
+				{Package: &dependencyv1.Package{Name: "a", Version: "1.1.0", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_UPDATED, TargetVersion: "1.1.0"},
 			},
 			want: nil,
 		},
 		{
 			name: "renamed package queries under its base name",
-			changes: []compare.Change{
-				{Name: "new/name", OldName: "old/name", BaseVersion: "1.0.0", TargetVersion: "1.1.0", ChangeType: compare.Updated, Ecosystem: "go"},
+			changes: []*diffv1.PackageChange{
+				{Package: &dependencyv1.Package{Name: "new/name", Version: "1.1.0", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_UPDATED, OldName: "old/name", BaseVersion: "1.0.0", TargetVersion: "1.1.0"},
 			},
 			want: []string{"old/name@1.0.0/go"},
 		},

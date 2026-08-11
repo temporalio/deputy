@@ -290,11 +290,11 @@ func TestAnalyzeLayerDiff(t *testing.T) {
 func TestCalculateImageDiffSummary(t *testing.T) {
 	report := &ImageDiffReport{
 		PackageChanges: []ImagePackageChange{
-			{Change: Change{ChangeType: Added}},
-			{Change: Change{ChangeType: Added}},
-			{Change: Change{ChangeType: Removed}},
-			{Change: Change{ChangeType: Upgraded}},
-			{Change: Change{ChangeType: Downgraded}},
+			{ChangeType: Added},
+			{ChangeType: Added},
+			{ChangeType: Removed},
+			{ChangeType: Upgraded},
+			{ChangeType: Downgraded},
 		},
 		VulnerabilityChanges: []VulnerabilityChange{
 			{ChangeType: VulnAdded},

@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/inventory"
@@ -29,7 +30,6 @@ func getTerminalWidth() int {
 	}
 	return 80 // sensible default
 }
-
 
 // truncatePath shortens a path to fit within maxLen, preserving the filename.
 func truncatePath(path string, maxLen int) string {
@@ -85,11 +85,11 @@ var dependencyManifests = map[string]string{
 	"Gemfile":      "rubygems",
 	"Gemfile.lock": "rubygems",
 	// Java / Maven / Gradle
-	"pom.xml":           "maven",
-	"build.gradle":      "maven",
-	"build.gradle.kts":  "maven",
-	"gradle.lockfile":   "maven",
-	"settings.gradle":   "maven",
+	"pom.xml":          "maven",
+	"build.gradle":     "maven",
+	"build.gradle.kts": "maven",
+	"gradle.lockfile":  "maven",
+	"settings.gradle":  "maven",
 	// .NET / NuGet
 	"*.csproj":        "nuget",
 	"packages.config": "nuget",
@@ -118,9 +118,9 @@ func isDependencyManifest(path string) (ecosystem string, ok bool) {
 
 // DependencyDiff represents the semantic difference in dependencies.
 type DependencyDiff struct {
-	Ecosystems map[string]bool    // ecosystems with changes
-	Changes    []compare.Change   // semantic dependency changes
-	Error      error              // error during diff (non-fatal)
+	Ecosystems map[string]bool         // ecosystems with changes
+	Changes    []*diffv1.PackageChange // semantic dependency changes
+	Error      error                   // error during diff (non-fatal)
 }
 
 // hasDependencyChanges checks if any file changes affect dependency manifests.
@@ -177,8 +177,8 @@ func computeDependencyDiff(ctx context.Context, originalPath, isolatedPath strin
 
 	// Track which ecosystems have changes
 	for _, change := range changes {
-		if change.Ecosystem != "" {
-			result.Ecosystems[change.Ecosystem] = true
+		if change.GetPackage().GetEcosystem() != "" {
+			result.Ecosystems[change.GetPackage().GetEcosystem()] = true
 		}
 	}
 
@@ -209,14 +209,14 @@ func renderDependencyDiff(out io.Writer, diff *DependencyDiff, termWidth int) {
 	// Count by type
 	var added, removed, upgraded, downgraded int
 	for _, c := range diff.Changes {
-		switch c.ChangeType {
-		case compare.Added:
+		switch c.GetChangeKind() {
+		case diffv1.ChangeKind_CHANGE_KIND_ADDED:
 			added++
-		case compare.Removed:
+		case diffv1.ChangeKind_CHANGE_KIND_REMOVED:
 			removed++
-		case compare.Upgraded:
+		case diffv1.ChangeKind_CHANGE_KIND_UPGRADED:
 			upgraded++
-		case compare.Downgraded:
+		case diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED:
 			downgraded++
 		}
 	}
@@ -273,36 +273,36 @@ func renderDependencyDiff(out io.Writer, diff *DependencyDiff, termWidth int) {
 }
 
 // renderDependencyChange displays a single dependency change.
-func renderDependencyChange(out io.Writer, change compare.Change, termWidth int) {
+func renderDependencyChange(out io.Writer, change *diffv1.PackageChange, termWidth int) {
 	var prefix string
 	var style lipgloss.Style
 	var versionInfo string
 
-	switch change.ChangeType {
-	case compare.Added:
+	switch change.GetChangeKind() {
+	case diffv1.ChangeKind_CHANGE_KIND_ADDED:
 		prefix = "+"
 		style = ui.StyleAdded
-		versionInfo = change.TargetVersion
-	case compare.Removed:
+		versionInfo = change.GetTargetVersion()
+	case diffv1.ChangeKind_CHANGE_KIND_REMOVED:
 		prefix = "-"
 		style = ui.StyleRemoved
-		versionInfo = change.BaseVersion
-	case compare.Upgraded:
+		versionInfo = change.GetBaseVersion()
+	case diffv1.ChangeKind_CHANGE_KIND_UPGRADED:
 		prefix = "↑"
 		style = ui.StyleUpgraded
-		versionInfo = fmt.Sprintf("%s → %s", change.BaseVersion, change.TargetVersion)
-	case compare.Downgraded:
+		versionInfo = fmt.Sprintf("%s → %s", change.GetBaseVersion(), change.GetTargetVersion())
+	case diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED:
 		prefix = "↓"
 		style = ui.StyleDowngraded
-		versionInfo = fmt.Sprintf("%s → %s", change.BaseVersion, change.TargetVersion)
+		versionInfo = fmt.Sprintf("%s → %s", change.GetBaseVersion(), change.GetTargetVersion())
 	default:
 		prefix = "~"
 		style = ui.StyleDim
-		versionInfo = fmt.Sprintf("%s → %s", change.BaseVersion, change.TargetVersion)
+		versionInfo = fmt.Sprintf("%s → %s", change.GetBaseVersion(), change.GetTargetVersion())
 	}
 
 	// Truncate package name if needed
-	name := change.Name
+	name := change.GetPackage().GetName()
 	maxNameWidth := termWidth - 30 // Leave room for version info
 	if len(name) > maxNameWidth {
 		name = "..." + name[len(name)-maxNameWidth+3:]
@@ -310,7 +310,7 @@ func renderDependencyChange(out io.Writer, change compare.Change, termWidth int)
 
 	// Direct/indirect indicator
 	directIndicator := ""
-	if change.IsDirect {
+	if change.GetIsDirect() {
 		directIndicator = ui.StyleDirect.Render(" [direct]")
 	}
 
@@ -642,15 +642,15 @@ func suggestValidChoice(input string) string {
 		"sync":   "Did you mean 'a' for accept?",
 		"s":      "Did you mean 'a' for accept?",
 		// Reject variations
-		"reject": "Did you mean 'r' for reject?",
+		"reject":  "Did you mean 'r' for reject?",
 		"discard": "Did you mean 'r' for reject?",
-		"cancel": "Did you mean 'r' for reject or 'q' for quit?",
-		"c":      "Did you mean 'r' for reject?",
-		"x":      "Did you mean 'r' for reject?",
+		"cancel":  "Did you mean 'r' for reject or 'q' for quit?",
+		"c":       "Did you mean 'r' for reject?",
+		"x":       "Did you mean 'r' for reject?",
 		// Diff variations
-		"diff":  "Did you mean 'd' for diff?",
-		"show":  "Did you mean 'd' for diff?",
-		"f":     "Did you mean 'd' for diff (file)?",
+		"diff": "Did you mean 'd' for diff?",
+		"show": "Did you mean 'd' for diff?",
+		"f":    "Did you mean 'd' for diff (file)?",
 		// View variations
 		"view":  "Did you mean 'v' for view?",
 		"open":  "Did you mean 'v' for view?",
@@ -658,10 +658,10 @@ func suggestValidChoice(input string) string {
 		"p":     "Did you mean 'v' for view?",
 		"less":  "Did you mean 'v' for view?",
 		// Quit variations
-		"quit":   "Did you mean 'q' for quit?",
-		"exit":   "Did you mean 'q' for quit?",
-		"abort":  "Did you mean 'q' for quit?",
-		"e":      "Did you mean 'q' for quit (exit)?",
+		"quit":  "Did you mean 'q' for quit?",
+		"exit":  "Did you mean 'q' for quit?",
+		"abort": "Did you mean 'q' for quit?",
+		"e":     "Did you mean 'q' for quit (exit)?",
 		// Help
 		"help": "Options: a (accept), r (reject), d (diff), v (view), q (quit)",
 		"h":    "Options: a (accept), r (reject), d (diff), v (view), q (quit)",

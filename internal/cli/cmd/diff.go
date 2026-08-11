@@ -333,11 +333,11 @@ PERFORMANCE TIPS:
 
 // DiffPolicyReport captures the full context of a diff operation for policy evaluation.
 type DiffPolicyReport struct {
-	Repo            string                 `json:"repo"`
-	BaseRef         string                 `json:"baseRef"`
-	TargetRef       string                 `json:"targetRef"`
-	Changes         []compare.Change       `json:"changes"`
-	Vulnerabilities []report.Vulnerability `json:"vulnerabilities"`
+	Repo            string                  `json:"repo"`
+	BaseRef         string                  `json:"baseRef"`
+	TargetRef       string                  `json:"targetRef"`
+	Changes         []*diffv1.PackageChange `json:"changes"`
+	Vulnerabilities []report.Vulnerability  `json:"vulnerabilities"`
 }
 
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
@@ -815,7 +815,7 @@ func licenseScanConcurrency(total int) int {
 // renderer: license data comes from Change.Licenses, populated by
 // enrichChangeLicenses before policy evaluation and output conversion, so
 // every surface shows the same licenses.
-func displayDetailedDependencyChanges(changes []compare.Change, outW io.Writer) {
+func displayDetailedDependencyChanges(changes []*diffv1.PackageChange, outW io.Writer) {
 	if len(changes) == 0 {
 		return
 	}
@@ -826,12 +826,12 @@ func displayDetailedDependencyChanges(changes []compare.Change, outW io.Writer) 
 	var addedN, removedN, updatedN, upgradedN, downgradedN int
 
 	for _, c := range changes {
-		licenses := c.Licenses
+		licenses := c.GetPackage().GetLicenses()
 
 		// Format the combined license and direct/indirect annotation
 		var licAndDepStr string
 		var directnessStr string
-		if c.IsDirect {
+		if c.GetIsDirect() {
 			directnessStr = ui.StyleDirect.Render("[direct]")
 		} else {
 			directnessStr = ui.StyleIndirect.Render("[indirect]")
@@ -845,45 +845,45 @@ func displayDetailedDependencyChanges(changes []compare.Change, outW io.Writer) 
 			licAndDepStr = directnessStr
 		}
 
-		switch c.ChangeType {
-		case compare.Added:
-			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleAdded.Render("+"), ui.StyleAdded.Render(c.Name), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
+		switch c.GetChangeKind() {
+		case diffv1.ChangeKind_CHANGE_KIND_ADDED:
+			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleAdded.Render("+"), ui.StyleAdded.Render(c.GetPackage().GetName()), ui.StyleVersion.Render(c.GetTargetVersion()), licAndDepStr)
 			addedN++
-		case compare.Removed:
+		case diffv1.ChangeKind_CHANGE_KIND_REMOVED:
 			// For removed dependencies, we don't have target version license info, so just show directness
 			var removedDirectnessStr string
-			if c.IsDirect {
+			if c.GetIsDirect() {
 				removedDirectnessStr = ui.StyleDirect.Render("[direct]")
 			} else {
 				removedDirectnessStr = ui.StyleIndirect.Render("[indirect]")
 			}
-			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleRemoved.Render("-"), ui.StyleRemoved.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), removedDirectnessStr)
+			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleRemoved.Render("-"), ui.StyleRemoved.Render(c.GetPackage().GetName()), ui.StyleVersion.Render(c.GetBaseVersion()), removedDirectnessStr)
 			removedN++
-		case compare.Upgraded:
+		case diffv1.ChangeKind_CHANGE_KIND_UPGRADED:
 			updatedN++
 			upgradedN++
 			oldNamePart := ""
-			if c.OldName != "" && c.OldName != c.Name {
-				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleUpdateArrow.Render("→ ")
+			if c.GetOldName() != "" && c.GetOldName() != c.GetPackage().GetName() {
+				oldNamePart = ui.StyleDim.Render(c.GetOldName()) + " " + ui.StyleUpdateArrow.Render("→ ")
 			}
-			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleUpgraded.Render("↑"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleUpdateArrow.Render("→"), ui.StyleVersionNew.Render(c.TargetVersion), licAndDepStr)
-		case compare.Downgraded:
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleUpgraded.Render("↑"), oldNamePart, ui.StyleBold.Render(c.GetPackage().GetName()), ui.StyleVersion.Render(c.GetBaseVersion()), ui.StyleUpdateArrow.Render("→"), ui.StyleVersionNew.Render(c.GetTargetVersion()), licAndDepStr)
+		case diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED:
 			updatedN++
 			downgradedN++
 			oldNamePart := ""
-			if c.OldName != "" && c.OldName != c.Name {
-				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleDowngradeArrow.Render("→ ")
+			if c.GetOldName() != "" && c.GetOldName() != c.GetPackage().GetName() {
+				oldNamePart = ui.StyleDim.Render(c.GetOldName()) + " " + ui.StyleDowngradeArrow.Render("→ ")
 			}
-			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleDowngraded.Render("↓"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleDowngradeArrow.Render("→"), ui.StyleVersionNew.Render(c.TargetVersion), licAndDepStr)
-		case compare.Updated:
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleDowngraded.Render("↓"), oldNamePart, ui.StyleBold.Render(c.GetPackage().GetName()), ui.StyleVersion.Render(c.GetBaseVersion()), ui.StyleDowngradeArrow.Render("→"), ui.StyleVersionNew.Render(c.GetTargetVersion()), licAndDepStr)
+		case diffv1.ChangeKind_CHANGE_KIND_UPDATED:
 			updatedN++
 			arrowStyle := ui.StyleUpdateArrow
 			symbol := ui.StyleNeutral.Render("~")
 			oldNamePart := ""
-			if c.OldName != "" && c.OldName != c.Name {
-				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + arrowStyle.Render("→ ")
+			if c.GetOldName() != "" && c.GetOldName() != c.GetPackage().GetName() {
+				oldNamePart = ui.StyleDim.Render(c.GetOldName()) + " " + arrowStyle.Render("→ ")
 			}
-			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", symbol, oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), arrowStyle.Render("→"), ui.StyleVersionNew.Render(c.TargetVersion), licAndDepStr)
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", symbol, oldNamePart, ui.StyleBold.Render(c.GetPackage().GetName()), ui.StyleVersion.Render(c.GetBaseVersion()), arrowStyle.Render("→"), ui.StyleVersionNew.Render(c.GetTargetVersion()), licAndDepStr)
 		}
 	}
 
@@ -913,19 +913,19 @@ func displayDetailedDependencyChanges(changes []compare.Change, outW io.Writer) 
 // dependencies versus those in unchanged modules. Changes marked as Added,
 // Updated, Upgraded, or Downgraded are treated as "changed" for classification
 // purposes.
-func splitVulnsByChange(vulns []report.Vulnerability, changes []compare.Change) (changed, unchanged []report.Vulnerability) {
+func splitVulnsByChange(vulns []report.Vulnerability, changes []*diffv1.PackageChange) (changed, unchanged []report.Vulnerability) {
 	if len(vulns) == 0 {
 		return nil, nil
 	}
 	changedSet := map[string]bool{}
 	for _, c := range changes {
-		switch c.ChangeType {
-		case compare.Added, compare.Updated, compare.Upgraded, compare.Downgraded:
+		switch c.GetChangeKind() {
+		case diffv1.ChangeKind_CHANGE_KIND_ADDED, diffv1.ChangeKind_CHANGE_KIND_UPDATED, diffv1.ChangeKind_CHANGE_KIND_UPGRADED, diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED:
 			// treat as changed
 		default:
 			continue
 		}
-		info := compare.ParseGoPackage(&extractor.Package{Name: c.Name})
+		info := compare.ParseGoPackage(&extractor.Package{Name: c.GetPackage().GetName()})
 		changedSet[info.CanonicalName] = true
 	}
 	for _, v := range vulns {
@@ -944,7 +944,7 @@ func splitVulnsByChange(vulns []report.Vulnerability, changes []compare.Change) 
 // (including aliases) that already affected the base version. A lookup failure
 // degrades to nil with a warning: the caller then treats every changed-package
 // advisory as newly introduced, failing toward reporting rather than hiding.
-func baseVersionAdvisories(ctx context.Context, changes []compare.Change, errW io.Writer) map[string]map[string]bool {
+func baseVersionAdvisories(ctx context.Context, changes []*diffv1.PackageChange, errW io.Writer) map[string]map[string]bool {
 	basePkgs := baseQueryPackages(changes)
 	if len(basePkgs) == 0 {
 		return nil
@@ -982,25 +982,25 @@ func baseVersionAdvisories(ctx context.Context, changes []compare.Change, errW i
 // known base version, queried under the base name when the package was
 // renamed. Added packages have no base to pre-date and removed packages have
 // no changed vulnerabilities to reclassify.
-func baseQueryPackages(changes []compare.Change) []*dependencyv1.Package {
+func baseQueryPackages(changes []*diffv1.PackageChange) []*dependencyv1.Package {
 	var basePkgs []*dependencyv1.Package
 	for _, c := range changes {
-		switch c.ChangeType {
-		case compare.Updated, compare.Upgraded, compare.Downgraded:
+		switch c.GetChangeKind() {
+		case diffv1.ChangeKind_CHANGE_KIND_UPDATED, diffv1.ChangeKind_CHANGE_KIND_UPGRADED, diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED:
 		default:
 			continue
 		}
-		if c.BaseVersion == "" {
+		if c.GetBaseVersion() == "" {
 			continue
 		}
-		name := c.OldName
+		name := c.GetOldName()
 		if name == "" {
-			name = c.Name
+			name = c.GetPackage().GetName()
 		}
 		basePkgs = append(basePkgs, &dependencyv1.Package{
 			Name:      name,
-			Version:   c.BaseVersion,
-			Ecosystem: c.Ecosystem,
+			Version:   c.GetBaseVersion(),
+			Ecosystem: c.GetPackage().GetEcosystem(),
 		})
 	}
 	return basePkgs
@@ -1128,8 +1128,8 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 		return nil, err
 	}
 
-	// Convert to proto types for CEL evaluation
-	protoChanges := internalproto.PackageChangesToProto(diffReport.Changes)
+	// Changes are already proto; findings convert for CEL evaluation.
+	protoChanges := diffReport.Changes
 	protoFindings := report.VulnerabilitiesToFindings(diffReport.Vulnerabilities)
 
 	var results []*policyv1.Action

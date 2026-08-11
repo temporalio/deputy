@@ -78,9 +78,17 @@ type ImageDiffSummary struct {
 }
 
 // ImagePackageChange represents a package difference between two images.
-// Extends the base Change type with container-specific layer information.
+// The identity fields are inlined (not the deputy.diff.v1.PackageChange
+// proto) because container comparisons key on flat name/ecosystem pairs and
+// this type only crosses surfaces via explicit proto conversion.
 type ImagePackageChange struct {
-	Change
+	Name          string     `json:"name"`
+	OldName       string     `json:"oldName"`
+	TargetVersion string     `json:"targetVersion"`
+	BaseVersion   string     `json:"baseVersion"`
+	ChangeType    ChangeType `json:"changeType"`
+	Ecosystem     string     `json:"ecosystem"`
+	IsDirect      bool       `json:"isDirect"`
 
 	// BaseLayerDetails indicates which layer the package was in the base image.
 	// Nil if the package was not in the base image (added).

@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
-	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/license"
 )
 
@@ -42,7 +42,7 @@ func licenseEcosystem(raw string) string {
 // output, and the rendered report all see the same license data. Lookup
 // failures degrade to an empty license list for that package, which policy
 // reads as "no license declared" rather than as a license.
-func enrichChangeLicenses(ctx context.Context, changes []compare.Change, licenseSource string) []compare.Change {
+func enrichChangeLicenses(ctx context.Context, changes []*diffv1.PackageChange, licenseSource string) []*diffv1.PackageChange {
 	if len(changes) == 0 {
 		return changes
 	}
@@ -53,10 +53,10 @@ func enrichChangeLicenses(ctx context.Context, changes []compare.Change, license
 	// Unique lookup targets: removed changes have no target version to license.
 	targets := make(map[licensePkgKey]struct{})
 	for _, c := range changes {
-		if c.ChangeType == compare.Removed || c.TargetVersion == "" {
+		if c.GetChangeKind() == diffv1.ChangeKind_CHANGE_KIND_REMOVED || c.GetTargetVersion() == "" {
 			continue
 		}
-		targets[licensePkgKey{ecosystem: licenseEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}] = struct{}{}
+		targets[licensePkgKey{ecosystem: licenseEcosystem(c.GetPackage().GetEcosystem()), name: c.GetPackage().GetName(), version: c.GetTargetVersion()}] = struct{}{}
 	}
 	if len(targets) == 0 {
 		return changes
@@ -102,14 +102,11 @@ func enrichChangeLicenses(ctx context.Context, changes []compare.Change, license
 		_ = g.Wait()
 	}
 
-	out := make([]compare.Change, len(changes))
-	copy(out, changes)
-	for i := range out {
-		c := &out[i]
-		if c.ChangeType == compare.Removed || c.TargetVersion == "" {
+	for _, c := range changes {
+		if c.GetChangeKind() == diffv1.ChangeKind_CHANGE_KIND_REMOVED || c.GetTargetVersion() == "" || c.GetPackage() == nil {
 			continue
 		}
-		pk := licensePkgKey{ecosystem: licenseEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
+		pk := licensePkgKey{ecosystem: licenseEcosystem(c.GetPackage().GetEcosystem()), name: c.GetPackage().GetName(), version: c.GetTargetVersion()}
 		licenses := depsDevLicenses[pk]
 		if useScan {
 			// Only package-specific lookups may populate a dependency's
@@ -124,9 +121,9 @@ func enrichChangeLicenses(ctx context.Context, changes []compare.Change, license
 				licenses = license.MergeLicenseSources(licenses, rl)
 			}
 		}
-		c.Licenses = normalizeLicenseList(licenses)
+		c.Package.Licenses = normalizeLicenseList(licenses)
 	}
-	return out
+	return changes
 }
 
 // normalizeLicenseList drops placeholder entries so unknown licenses stay an
