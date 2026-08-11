@@ -951,14 +951,12 @@ func splitTomlComment(s string) (before, comment string) {
 	return s, ""
 }
 
-// unquoteKey strips surrounding single or double quotes from a TOML key.
+// unquoteKey reads a quoted TOML token as the text a TOML parser produces for
+// it, escapes and all. It defers to [mise.UnquoteTOMLString] so the version
+// tokens compared here are read exactly as the parser behind mise.Parse read
+// the versions they are compared against.
 func unquoteKey(k string) string {
-	if len(k) >= 2 {
-		if (k[0] == '"' && k[len(k)-1] == '"') || (k[0] == '\'' && k[len(k)-1] == '\'') {
-			return k[1 : len(k)-1]
-		}
-	}
-	return k
+	return mise.UnquoteTOMLString(k)
 }
 
 func unappliedUpdatesError(relPath string, want map[string]string, applied map[string]bool) error {

@@ -3,9 +3,11 @@ package mise
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/pin"
 )
 
@@ -1069,6 +1071,102 @@ node = "20.11.1"
 			}
 			if string(got) != tt.input {
 				t.Errorf("config changed on a no-op rewrite:\n--- got ---\n%s\n--- want ---\n%s", got, tt.input)
+			}
+		})
+	}
+}
+
+// TestRewriteMatchesInventoryOnExoticSyntax pins the contract that binds the
+// reader to the writer: a declaration mise.Parse inventories is a declaration
+// RewriteToolVersion can rewrite. When only the reader understands a shape, a
+// fix Deputy itself offered comes back as "could not rewrite", so both halves
+// are driven from the same inputs here rather than tested apart. Every input
+// is a config mise 2026.7.3 loads.
+func TestRewriteMatchesInventoryOnExoticSyntax(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		tool    string
+		current string
+		pinned  string
+		want    string
+	}{
+		{
+			// A basic-string key is decoded by the parser, so the tool is
+			// inventoried as "go" and the rewriter has to find it under a key
+			// that does not spell "go" literally.
+			name: "escaped key",
+			input: `[tools]
+"\u0067o" = "1.22.12"
+`,
+			tool: "go", current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+"\u0067o" = "1.24.3"
+`,
+		},
+		{
+			name: "escaped inline table field key",
+			input: `[tools]
+go = { "vers\u0069on" = "1.22.12" }
+`,
+			tool: "go", current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+go = { "vers\u0069on" = "1.24.3" }
+`,
+		},
+		{
+			// An escaped quote is part of the key, not its terminator.
+			name: "escaped quote in key",
+			input: `[tools]
+"ubi:a\"b" = "1.22.12"
+`,
+			tool: `ubi:a"b`, current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+"ubi:a\"b" = "1.24.3"
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := mise.Parse("mise.toml", []byte(tt.input))
+			if err != nil {
+				t.Fatalf("mise.Parse: %v", err)
+			}
+			if !slices.ContainsFunc(cfg.Tools, func(s mise.ToolSpec) bool {
+				return s.Key == tt.tool && slices.Contains(s.Versions, tt.current)
+			}) {
+				t.Fatalf("inventory does not report %s@%s, so this case proves nothing: %+v", tt.tool, tt.current, cfg.Tools)
+			}
+
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "mise.toml"), []byte(tt.input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			if err := RewriteToolVersion(root, "mise.toml", tt.tool, []string{tt.current}, tt.pinned); err != nil {
+				t.Fatalf("rewrite: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("rewrite mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+			after, err := mise.Parse("mise.toml", got)
+			if err != nil {
+				t.Fatalf("rewritten config no longer parses: %v", err)
+			}
+			if !slices.ContainsFunc(after.Tools, func(s mise.ToolSpec) bool {
+				return s.Key == tt.tool && slices.Contains(s.Versions, tt.pinned)
+			}) {
+				t.Errorf("rewritten config does not declare %s@%s: %+v", tt.tool, tt.pinned, after.Tools)
 			}
 		})
 	}

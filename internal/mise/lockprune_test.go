@@ -230,11 +230,59 @@ func TestSplitKeyPath(t *testing.T) {
 		{"", nil},
 		{"tools..go", nil},
 		{`tools."unterminated`, nil},
+		// Basic strings are decoded, the way the TOML parser behind Parse
+		// decodes them, so an escaped key names the same tool it inventories.
+		{`tools."go"`, []string{"tools", "go"}},
+		{`tools."g\U0000006f".version`, []string{"tools", "go", "version"}},
+		{`tools."g\x6f"`, []string{"tools", "go"}},
+		{`tools."npm:lodash".version`, []string{"tools", "npm:lodash", "version"}},
+		{`"tools".go`, []string{"tools", "go"}},
+		// An escaped quote belongs to the segment; it does not end it.
+		{`tools."a\"b".version`, []string{"tools", `a"b`, "version"}},
+		{`tools."a\\".version`, []string{"tools", `a\`, "version"}},
+		// Literal strings carry no escapes.
+		{`tools.'go'`, []string{"tools", `go`}},
+		// Escapes TOML does not define, and truncated ones, are refused
+		// rather than matched as raw bytes.
+		{`tools."a\/b"`, nil},
+		{`tools."a\q"`, nil},
+		{`tools."a\u00"`, nil},
+		{`tools."a\uD800"`, nil},
+		{`tools."a\`, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
 			if got := SplitKeyPath(tt.key); !slices.Equal(got, tt.want) {
 				t.Errorf("SplitKeyPath(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnquoteTOMLString(t *testing.T) {
+	tests := []struct {
+		token string
+		want  string
+	}{
+		{`"1.22.12"`, "1.22.12"},
+		{`'1.22.12'`, "1.22.12"},
+		{"1.22.12", "1.22.12"},
+		{`"1.22.12"`, "1.22.12"},
+		{`"a\"b"`, `a"b`},
+		{`'ab'`, `ab`},
+		{"", ""},
+		{`"`, `"`},
+		// Unterminated, trailing junk, and undefined escapes leave the token
+		// as written so nothing is matched on a half-decoded value.
+		{`"unterminated`, `"unterminated`},
+		{`"a" trailing`, `"a" trailing`},
+		{`"a\/b"`, `"a\/b"`},
+		{`'a'b'`, `'a'b'`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.token, func(t *testing.T) {
+			if got := UnquoteTOMLString(tt.token); got != tt.want {
+				t.Errorf("UnquoteTOMLString(%q) = %q, want %q", tt.token, got, tt.want)
 			}
 		})
 	}

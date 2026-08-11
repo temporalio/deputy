@@ -1,6 +1,10 @@
 package mise
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+	"unicode/utf8"
+)
 
 // PruneLockedVersions removes mise.lock entries for a tool whose locked
 // version stale reports true, along with their attached platform sub-tables,
@@ -158,6 +162,13 @@ func lockEntryVersion(line string) string {
 // [tools npm:lodash version]. It returns nil for anything that is not a
 // well-formed key path. Both the mise.lock pruner and the config rewriter use
 // it to interpret keys the same way mise's TOML parser does.
+//
+// A basic-string segment is decoded, not copied: TOML reads `"go"` as the
+// key go, so returning the raw bytes would hide a declaration the parser in
+// [Parse] does inventory, and the rewriter would then refuse a fix for a tool
+// Deputy itself reported. An escape TOML does not define yields nil, because a
+// key Deputy cannot read exactly as the parser does must not be matched
+// approximately.
 func SplitKeyPath(key string) []string {
 	var segs []string
 	i := 0
@@ -168,7 +179,14 @@ func SplitKeyPath(key string) []string {
 		}
 		var seg string
 		switch q := key[i]; q {
-		case '"', '\'':
+		case '"':
+			decoded, next, ok := decodeBasicString(key, i)
+			if !ok {
+				return nil
+			}
+			seg, i = decoded, next
+		case '\'':
+			// Literal strings carry no escapes; the first quote ends them.
 			end := strings.IndexByte(key[i+1:], q)
 			if end < 0 {
 				return nil
@@ -195,6 +213,117 @@ func SplitKeyPath(key string) []string {
 		}
 	}
 	return segs
+}
+
+// UnquoteTOMLString decodes a quoted TOML string token to the text a TOML
+// parser produces for it, so `"1.22.12"` reads as 1.22.12 and `'a\b'`
+// keeps its backslash. A token that is not quoted, is unterminated, or carries
+// an undefined escape is returned unchanged, leaving the caller comparing the
+// text as written.
+//
+// Deputy compares declared version tokens against versions that came out of
+// [Parse], which decoded them. Comparing an undecoded token against a decoded
+// one silently fails to match, and a fix the config can take is reported as
+// unrewritable, so both sides read the token the same way.
+func UnquoteTOMLString(token string) string {
+	if len(token) < 2 {
+		return token
+	}
+	switch token[0] {
+	case '"':
+		decoded, next, ok := decodeBasicString(token, 0)
+		if !ok || next != len(token) {
+			return token
+		}
+		return decoded
+	case '\'':
+		if token[len(token)-1] != '\'' {
+			return token
+		}
+		if strings.IndexByte(token[1:len(token)-1], '\'') >= 0 {
+			return token
+		}
+		return token[1 : len(token)-1]
+	}
+	return token
+}
+
+// decodeBasicString reads the TOML basic string whose opening quote sits at
+// index i, returning its decoded text and the offset just past the closing
+// quote. ok is false when the string is unterminated or holds an escape TOML
+// does not define, both of which the parser in [Parse] rejects outright.
+//
+// The escape set mirrors that parser rather than a hand-copied subset, so a
+// key it accepts is one this reads and a key it refuses is one this refuses.
+func decodeBasicString(s string, i int) (value string, next int, ok bool) {
+	if i >= len(s) || s[i] != '"' {
+		return "", 0, false
+	}
+	var b strings.Builder
+	for j := i + 1; j < len(s); {
+		switch c := s[j]; c {
+		case '"':
+			return b.String(), j + 1, true
+		case '\\':
+			decoded, after, escOK := decodeStringEscape(s, j)
+			if !escOK {
+				return "", 0, false
+			}
+			b.WriteString(decoded)
+			j = after
+		case '\n', '\r':
+			// A basic string never spans lines; an unterminated one is not a
+			// key path.
+			return "", 0, false
+		default:
+			b.WriteByte(c)
+			j++
+		}
+	}
+	return "", 0, false
+}
+
+// decodeStringEscape decodes the TOML escape sequence beginning with the
+// backslash at index i and returns the text it stands for plus the offset just
+// past the sequence. ok is false for an undefined escape, a truncated one, or
+// a code point that is not a valid scalar value.
+func decodeStringEscape(s string, i int) (value string, next int, ok bool) {
+	if i+1 >= len(s) {
+		return "", 0, false
+	}
+	switch c := s[i+1]; c {
+	case 'b':
+		return "\b", i + 2, true
+	case 't':
+		return "\t", i + 2, true
+	case 'n':
+		return "\n", i + 2, true
+	case 'f':
+		return "\f", i + 2, true
+	case 'r':
+		return "\r", i + 2, true
+	case 'e':
+		return "\x1b", i + 2, true
+	case '"':
+		return `"`, i + 2, true
+	case '\\':
+		return `\`, i + 2, true
+	case 'x', 'u', 'U':
+		digits := map[byte]int{'x': 2, 'u': 4, 'U': 8}[c]
+		end := i + 2 + digits
+		if end > len(s) {
+			return "", 0, false
+		}
+		r, err := strconv.ParseUint(s[i+2:end], 16, 32)
+		if err != nil {
+			return "", 0, false
+		}
+		if !utf8.ValidRune(rune(r)) {
+			return "", 0, false
+		}
+		return string(rune(r)), end, true
+	}
+	return "", 0, false
 }
 
 // skipKeySpaces returns the first offset at or after i that is not a space or
