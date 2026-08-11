@@ -41,8 +41,12 @@ const (
 // but no capability [Registration]. Deputy identifies packages in all three but
 // resolves their capabilities elsewhere (a Deputy extractor plugin for
 // Dockerfiles and workflows, a proxy handler for OCI), so they are not in the
-// registry. Keeping their token, display name, and aliases here means no
-// surface has to spell them out for itself.
+// registry. Keeping their token, display name, aliases, and projections here
+// means no surface has to spell them out for itself. Hackage, CRAN, and
+// ConanCenter carry a SCALIBR prefix because OSV-SCALIBR does inventory them,
+// under group names ("haskell", "r", "cpp") that are not their canonical
+// tokens: a filter that canonicalizes before it resolves plugins has to get
+// back to the group name from the token.
 var extraCanonicalEcosystems = []Registration{
 	{
 		Ecosystem:   Docker,
@@ -66,25 +70,28 @@ var extraCanonicalEcosystems = []Registration{
 		PURLType:    packageurl.TypeOCI,
 	},
 	{
-		Ecosystem:   Hackage,
-		DisplayName: "Hackage",
-		Description: "Haskell packages, inventoried through OSV-SCALIBR (cabal, stack)",
-		Aliases:     []string{"haskell", "cabal", "stack"},
-		PURLType:    packageurl.TypeHackage,
+		Ecosystem:       Hackage,
+		DisplayName:     "Hackage",
+		Description:     "Haskell packages, inventoried through OSV-SCALIBR (cabal, stack)",
+		Aliases:         []string{"haskell", "cabal", "stack"},
+		ScalibrPrefixes: []string{"haskell"},
+		PURLType:        packageurl.TypeHackage,
 	},
 	{
-		Ecosystem:   CRAN,
-		DisplayName: "CRAN",
-		Description: "R packages, inventoried through OSV-SCALIBR (renv)",
-		Aliases:     []string{"r", "renv"},
-		PURLType:    packageurl.TypeCran,
+		Ecosystem:       CRAN,
+		DisplayName:     "CRAN",
+		Description:     "R packages, inventoried through OSV-SCALIBR (renv)",
+		Aliases:         []string{"r", "renv"},
+		ScalibrPrefixes: []string{"r"},
+		PURLType:        packageurl.TypeCran,
 	},
 	{
-		Ecosystem:   ConanCenter,
-		DisplayName: "ConanCenter",
-		Description: "C/C++ packages, inventoried through OSV-SCALIBR (conan)",
-		Aliases:     []string{"cpp", "c++", "conan"},
-		PURLType:    packageurl.TypeConan,
+		Ecosystem:       ConanCenter,
+		DisplayName:     "ConanCenter",
+		Description:     "C/C++ packages, inventoried through OSV-SCALIBR (conan)",
+		Aliases:         []string{"cpp", "c++", "conan"},
+		ScalibrPrefixes: []string{"cpp"},
+		PURLType:        packageurl.TypeConan,
 	},
 }
 

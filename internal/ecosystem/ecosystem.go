@@ -280,10 +280,22 @@ func All() []Ecosystem {
 // etc. This method returns the first path segment(s) that identify extractors for
 // this ecosystem.
 //
+// The registry-less canonical tokens are covered too (see
+// [extraCanonicalEcosystems]), because OSV-SCALIBR inventories some of them
+// under a group name that is not their token: "hackage" is the group "haskell".
+// A filter that canonicalizes a caller's name before resolving plugins has to
+// be able to get back to the group name, or it hands SCALIBR a token nothing
+// there is called.
+//
 // Returns nil for Unknown or ecosystems without SCALIBR support.
 func (e Ecosystem) ScalibrPrefixes() []string {
 	if reg := Default().Get(e); reg != nil {
 		return reg.ScalibrPrefixes
+	}
+	for _, reg := range extraCanonicalEcosystems {
+		if reg.Ecosystem == e {
+			return reg.ScalibrPrefixes
+		}
 	}
 	return nil
 }

@@ -345,11 +345,24 @@ func (r *Registry) AllScalibrPrefixes() []string {
 		}
 	}
 
-	// Additional prefixes for ecosystems Deputy supports via other mechanisms:
-	// - github: GitHub Actions (Deputy's custom plugin)
-	// - haskell, r, cpp: Ecosystems supported by OSV-SCALIBR
+	// The canonical tokens with no capability registration declare their SCALIBR
+	// group the same way a registered ecosystem does, so Hackage, CRAN, and
+	// ConanCenter contribute haskell, r, and cpp from their own registration
+	// rather than from a copy of them kept here.
+	for _, reg := range extraCanonicalEcosystems {
+		for _, prefix := range reg.ScalibrPrefixes {
+			if _, ok := seen[prefix]; !ok {
+				seen[prefix] = struct{}{}
+				prefixes = append(prefixes, prefix)
+			}
+		}
+	}
+
+	// Prefixes that belong to no single ecosystem:
+	// - github: GitHub Actions (Deputy's custom plugin, whose group name is not
+	//   the ecosystem's purl type)
 	// - os: OS-level package managers for container image scanning
-	extras := []string{"github", "haskell", "r", "cpp", "os", "mise", "asdf"}
+	extras := []string{"github", "os"}
 	for _, extra := range extras {
 		if _, ok := seen[extra]; !ok {
 			seen[extra] = struct{}{}
