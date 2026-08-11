@@ -267,6 +267,49 @@ func TestNameEquivalenceKey(t *testing.T) {
 	}
 }
 
+// TestNormalizesNames pins the predicate that tells a caller whether an outside
+// normalizer's opinion about a name can be adopted. It is derived from
+// NormalizeName, so the two cannot disagree; the table is here to state the
+// answer for each ecosystem out loud.
+func TestNormalizesNames(t *testing.T) {
+	tests := []struct {
+		eco  Ecosystem
+		want bool
+	}{
+		{PyPI, true},
+		{Cargo, false},
+		{Go, false},
+		{NPM, false},
+		{Maven, false},
+		{Unknown, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.eco), func(t *testing.T) {
+			if got := tt.eco.NormalizesNames(); got != tt.want {
+				t.Errorf("%s.NormalizesNames() = %v, want %v", tt.eco, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNormalizesNamesFollowsTheNormalizer checks the derivation rather than the
+// answer: every ecosystem that reports no name rule must really leave a name
+// with mixed case and all three separators alone, and every one that reports a
+// rule must really change it. A hand-maintained predicate would drift from
+// NormalizeName here.
+func TestNormalizesNamesFollowsTheNormalizer(t *testing.T) {
+	for _, eco := range append(All(), Unknown, GitHubActions) {
+		t.Run(string(eco), func(t *testing.T) {
+			changed := eco.NormalizeName(nameNormalizationProbe) != nameNormalizationProbe
+			if got := eco.NormalizesNames(); got != changed {
+				t.Errorf("%s.NormalizesNames() = %v but NormalizeName(%q) changed = %v",
+					eco, got, nameNormalizationProbe, changed)
+			}
+		})
+	}
+}
+
 // TestCargoIdentityIsNotTheEquivalenceKey states the distinction directly so a
 // future change cannot quietly collapse the two calls back into one: a crate
 // name survives normalization byte for byte while two spellings of it still

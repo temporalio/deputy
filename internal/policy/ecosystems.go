@@ -338,9 +338,31 @@ func versionsAreConcrete(m map[string]any) bool {
 // ecosystem projects to ([ecosystem.PURLType]), which is what keeps the wrong
 // ecosystem's folding rules off a PURL that names something else: a package
 // whose ecosystem is Cargo but whose PURL is a pkg:github reference is left
-// exactly as it arrived, as is a PURL Deputy cannot parse. A PURL whose
-// components need no folding keeps its original string byte for byte, so
-// re-encoding never becomes a rewrite of its own.
+// exactly as it arrived, as is a PURL Deputy cannot parse. A PURL that is
+// already canonical keeps its original string byte for byte, so re-encoding
+// never becomes a rewrite of its own.
+//
+// What a policy reads is the string, so the decision to rewrite compares
+// strings. Comparing parsed components instead was the subtle version of this
+// bug: the purl library folds a pypi name itself while parsing, so the
+// components of "pkg:pypi/Flask_SQLAlchemy@3.1.1" already read
+// "flask-sqlalchemy", the comparison found nothing to do, and the string kept a
+// spelling no other field in the payload used.
+//
+// Adopting the library's re-encoding is only safe where Deputy defines a fold
+// of its own ([ecosystem.Ecosystem.NormalizesNames]), because there the library
+// implements the same published rule. Everywhere else its parse is lossy in a
+// direction Deputy rejects: it lowercases a golang namespace, and Go import
+// paths are case-sensitive, so re-encoding a Go PURL that needed no
+// canonicalization would replace this bug with the same bug in another
+// ecosystem. Those keep their bytes unless canonicalization actually changed a
+// component.
+//
+// A Go PURL that does get rewritten, because its version gained the prefix,
+// comes back with the lowercase namespace the purl spec mandates for the golang
+// type. No string is both a canonical PURL and a case-sensitive import path
+// there, so the two spellings are reconciled by parsing rather than by
+// inventing a PURL the spec does not describe.
 func canonicalizePURL(raw string, eco ecosystem.Ecosystem) string {
 	purlType := ecosystem.PURLType(eco)
 	if purlType == "" {
@@ -352,12 +374,17 @@ func canonicalizePURL(raw string, eco ecosystem.Ecosystem) string {
 	}
 	name := eco.NormalizeName(parsed.Name)
 	version := normalizePayloadVersion(eco, parsed.Version)
-	if name == parsed.Name && version == parsed.Version {
-		return raw
-	}
+	componentsChanged := name != parsed.Name || version != parsed.Version
 	parsed.Name = name
 	parsed.Version = version
-	return parsed.ToString()
+	canonical := parsed.ToString()
+	if canonical == raw {
+		return raw
+	}
+	if componentsChanged || eco.NormalizesNames() {
+		return canonical
+	}
+	return raw
 }
 
 // normalizePayloadVersion applies the ecosystem's version normalization,
