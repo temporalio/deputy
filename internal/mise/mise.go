@@ -435,6 +435,26 @@ func SelectorMatches(request, version string) bool {
 		version[len(request)] == '.'
 }
 
+// SameVersion reports whether two version tokens name the same release,
+// ignoring a leading "v" on either side.
+//
+// The two sides reach this comparison from different vocabularies. Deputy
+// reports the Go runtime with the module convention it is published under
+// ("v1.22.12"), while a mise config and its lockfile write the release as mise
+// installs it ("1.22.12"). A byte-for-byte comparison makes those disagree, so
+// remediation refuses to rewrite an array element the finding does describe
+// and, worse, leaves the sibling lock entry in place: lock resolution then
+// substitutes the version the fix just removed, and the next scan reports the
+// vulnerability again against a config that no longer declares it.
+//
+// This is equality, not selection. "20" and "20.11.0" are different tokens
+// here even though the first request resolves to the second; deciding whether
+// a declaration governs a release is [SelectorMatches]'s job, and using it for
+// equality would let a partial selector stand in for an exact version.
+func SameVersion(a, b string) bool {
+	return trimVersionV(strings.TrimSpace(a)) == trimVersionV(strings.TrimSpace(b))
+}
+
 // trimVersionV drops a leading "v" or "V" from a version token when a digit
 // follows it, so "v1.24.3" and "1.24.3" compare equal while a tool named
 // "vault" keeps its name.

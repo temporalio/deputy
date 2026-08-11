@@ -1316,6 +1316,87 @@ func lockedVersionAfterFix(t *testing.T, dir, tool, version string) string {
 	return ""
 }
 
+// TestApplyMiseUpdateMatchesVPrefixedCurrentVersion pins the apply against the
+// vocabulary the plan is actually written in. Deputy reports the Go runtime
+// with the module convention, so the emitted command carries the current
+// version as "v1.22.12", while the mise config and its lockfile write
+// "1.22.12". Comparing those byte-for-byte breaks the command Deputy itself
+// emitted: an array declaration is refused outright with "could not rewrite",
+// and a scalar one is rewritten while the stale lock entry survives, which is
+// the worse half. Lock resolution substitutes the locked version for the
+// declared one, so that apply reports success and the very next scan still
+// reports the version the fix was supposed to remove.
+func TestApplyMiseUpdateMatchesVPrefixedCurrentVersion(t *testing.T) {
+	t.Parallel()
+
+	const lockBody = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
+
+	tests := []struct {
+		name       string
+		config     string
+		cmd        string
+		wantConfig string
+	}{
+		{
+			name:       "scalar declaration",
+			config:     "[tools]\ngo = \"1.22.12\"\n",
+			cmd:        "deputy:mise:update mise.toml go 1.25.12 v1.22.12",
+			wantConfig: "[tools]\ngo = \"1.25.12\"\n",
+		},
+		{
+			name:       "array declaration",
+			config:     "[tools]\ngo = [\"1.22.12\", \"1.21.0\"]\n",
+			cmd:        "deputy:mise:update mise.toml go 1.25.12 v1.22.12",
+			wantConfig: "[tools]\ngo = [\"1.25.12\", \"1.21.0\"]\n",
+		},
+		{
+			// The mirror image: a config that spells the version with the
+			// leading "v" and a plan that does not.
+			name:       "v-prefixed declaration and a bare current version",
+			config:     "[tools]\ngo = \"v1.22.12\"\n",
+			cmd:        "deputy:mise:update mise.toml go 1.25.12 1.22.12",
+			wantConfig: "[tools]\ngo = \"1.25.12\"\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "mise.toml")
+			lockPath := filepath.Join(dir, "mise.lock")
+			if err := os.WriteFile(configPath, []byte(tt.config), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(lockPath, []byte(lockBody), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := ApplyDeputyCommand(dir, tt.cmd); err != nil {
+				t.Fatalf("apply: %v", err)
+			}
+
+			config, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(config) != tt.wantConfig {
+				t.Errorf("config mismatch:\n--- got ---\n%s\n--- want ---\n%s", config, tt.wantConfig)
+			}
+			// The stale lock entry has to go, or the fix does not take: the
+			// extractor substitutes the locked version for the declared one.
+			lock, err := os.ReadFile(lockPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(lock), "1.22.12") {
+				t.Errorf("stale lock entry survived the apply:\n%s", lock)
+			}
+		})
+	}
+}
+
 // TestApplyMiseUpdateRetryAfterLockFailure pins recovery from a partial
 // apply. The config is written before the lockfile is pruned, so a lockfile
 // failure leaves the config edited and the lock stale; re-running the same

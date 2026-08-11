@@ -461,11 +461,18 @@ func pruneStaleMiseLock(root *os.Root, configRelPath, tool string, currentVersio
 	}
 
 	keys := miseLockKeys(root, configRelPath, tool)
+	// The plan and the lockfile spell versions differently (the Go runtime is
+	// reported as "v1.22.12" and locked as "1.22.12"), so both comparisons go
+	// through mise.SameVersion. A byte-for-byte one leaves the stale entry in
+	// place, and lock resolution then keeps serving the version the fix just
+	// removed.
 	stale := func(version string) bool {
 		if len(currentVersions) > 0 {
-			return slices.Contains(currentVersions, version)
+			return slices.ContainsFunc(currentVersions, func(current string) bool {
+				return mise.SameVersion(current, version)
+			})
 		}
-		return version != newVersion
+		return !mise.SameVersion(version, newVersion)
 	}
 	pruned, changed := mise.PruneLockedVersions(data, keys, stale)
 	if !changed {

@@ -508,7 +508,9 @@ func replaceArrayElements(value string, spans [][2]int, currents []string, pinne
 		elem := value[span[0]:span[1]]
 		versions := elementVersions(elem)
 		targeted := slices.ContainsFunc(versions, func(v string) bool {
-			return slices.Contains(currents, v)
+			return slices.ContainsFunc(currents, func(current string) bool {
+				return mise.SameVersion(current, v)
+			})
 		})
 		if !targeted && !(sole && soleElementTargetsCurrent(versions, currents)) {
 			continue

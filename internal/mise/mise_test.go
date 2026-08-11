@@ -582,6 +582,42 @@ func TestDeclaredVersion(t *testing.T) {
 	}
 }
 
+// TestSameVersion pins the equality used to decide whether a declared or
+// locked version is one the finding names. The two sides come from different
+// vocabularies: Deputy reports the Go runtime with the module convention
+// ("v1.22.12") while a mise config and its lockfile write the release
+// ("1.22.12"). Comparing them byte-for-byte makes a fix Deputy just emitted
+// unapplicable, so the leading "v" is ignored on both sides, exactly as
+// SelectorMatches already ignores it.
+func TestSameVersion(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"1.22.12", "1.22.12", true},
+		{"v1.22.12", "1.22.12", true},
+		{"1.22.12", "v1.22.12", true},
+		{"V1.22.12", "v1.22.12", true},
+		{"  v1.22.12 ", "1.22.12", true},
+		{"temurin-21.0.6+7", "temurin-21.0.6+7", true},
+		// Not equal: a partial selector is not the release beneath it, which
+		// is SelectorMatches's job and not this one.
+		{"20", "20.11.0", false},
+		{"1.22.12", "1.25.1", false},
+		{"v1.22.12", "1.22.13", false},
+		// A leading "v" that is not a version prefix stays part of the name.
+		{"vault", "ault", false},
+		{"", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.a+"/"+tt.b, func(t *testing.T) {
+			if got := SameVersion(tt.a, tt.b); got != tt.want {
+				t.Errorf("SameVersion(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestSelectorMatches pins mise's matching rule against what a declaration
 // actually resolves to. Every row cites `mise ls --current` over a real config
 // on mise 2026.7.3, not `mise ls-remote`: ls-remote is a loose listing filter
