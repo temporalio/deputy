@@ -1,7 +1,10 @@
 package compare
 
 import (
+	"path"
 	"testing"
+
+	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
 func TestGetNpmDirectDeps(t *testing.T) {
@@ -206,7 +209,12 @@ version = "1.0"
 			},
 		},
 		{
-			name: "platform and workspace dependencies",
+			// A platform-conditional dependency is declared by this package, so
+			// it is direct. A workspace dependency is a version offered for
+			// inheritance, and the member that inherits it records it from its
+			// own manifest, so counting it here would mark a crate direct that
+			// nothing depends on.
+			name: "platform dependencies are direct, workspace declarations are not",
 			input: `[target.'cfg(windows)'.dependencies]
 winapi = "0.3"
 
@@ -215,7 +223,6 @@ anyhow = "1.0"
 `,
 			expected: map[string]bool{
 				"winapi": true,
-				"anyhow": true,
 			},
 		},
 		{
@@ -518,4 +525,112 @@ func TestMergeDirectDependencies(t *testing.T) {
 			t.Errorf("expected 3 deps, got %d", len(dst))
 		}
 	})
+}
+
+// TestCargoWorkspaceInheritanceDecidesDirect pins what a Cargo workspace makes
+// direct. A [workspace.dependencies] entry is a version offered for
+// inheritance, and Cargo requires a member to reference it with
+// "workspace = true" before anything depends on it. Counting the whole table
+// marked a crate direct because its version was declared centrally, so a
+// package the lockfile carries only as somebody else's transitive dependency
+// showed up as direct in the SBOM and in pkg.direct.
+//
+// The rename is the part a member's own manifest cannot spell: it writes the
+// alias, and only the workspace manifest knows which crate that alias means.
+func TestCargoWorkspaceInheritanceDecidesDirect(t *testing.T) {
+	tests := []struct {
+		name      string
+		manifests map[string]string
+		want      map[string]bool
+		notDirect []string
+	}{
+		{
+			name: "an inherited dependency is direct, an unused declaration is not",
+			manifests: map[string]string{
+				"Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+serde = "1.0"
+tokio = "1.0"
+`,
+				"member/Cargo.toml": `[package]
+name = "member"
+
+[dependencies]
+serde = { workspace = true }
+`,
+			},
+			want:      map[string]bool{"serde": true},
+			notDirect: []string{"tokio"},
+		},
+		{
+			name: "an inherited rename records the crate the workspace names",
+			manifests: map[string]string{
+				"Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+my-serde = { package = "serde-json", version = "1.0" }
+spare-alias = { package = "anyhow", version = "1.0" }
+`,
+				"member/Cargo.toml": `[package]
+name = "member"
+
+[dependencies]
+my-serde = { workspace = true }
+`,
+			},
+			want:      map[string]bool{"my_serde": true, "serde_json": true},
+			notDirect: []string{"spare_alias", "anyhow"},
+		},
+		{
+			name: "a member declaring its own dependency needs no workspace table",
+			manifests: map[string]string{
+				"Cargo.toml": `[workspace]
+members = ["member"]
+`,
+				"member/Cargo.toml": `[package]
+name = "member"
+
+[dev-dependencies]
+criterion = "0.5"
+`,
+			},
+			want:      map[string]bool{"criterion": true},
+			notDirect: []string{"serde"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ws, err := workspace.NewTempDir("cmp-cargo-ws")
+			if err != nil {
+				t.Fatalf("workspace: %v", err)
+			}
+			defer ws.Close()
+			for name, contents := range tt.manifests {
+				if dir := path.Dir(name); dir != "." {
+					if err := ws.MkdirAll(dir, 0o755); err != nil {
+						t.Fatalf("mkdir %s: %v", dir, err)
+					}
+				}
+				if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+					t.Fatalf("write %s: %v", name, err)
+				}
+			}
+
+			direct := CollectDirectDependenciesFromWorkspace(ws)
+			for crate, want := range tt.want {
+				if direct[crate] != want {
+					t.Errorf("direct[%q] = %v, want %v (collected %v)", crate, direct[crate], want, direct)
+				}
+			}
+			for _, crate := range tt.notDirect {
+				if direct[crate] {
+					t.Errorf("direct[%q] = true, want it absent (collected %v)", crate, direct)
+				}
+			}
+		})
+	}
 }
