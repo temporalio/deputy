@@ -2,6 +2,8 @@ package policy
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -991,6 +993,66 @@ func TestPURLAgreesWithIdentityFields(t *testing.T) {
 			}
 			if want := pkg["version"]; parsed.Version != want {
 				t.Errorf("purl version %q, package version %q", parsed.Version, want)
+			}
+		})
+	}
+}
+
+// policyInputsDoc is the reference whose payload samples document what a policy
+// receives.
+const policyInputsDoc = "../../docs/reference/policy-inputs.md"
+
+// jsonSampleBlocks returns the fenced json blocks of a markdown file that parse
+// as a JSON object. Blocks that do not parse are prose illustrations with
+// elisions rather than payload samples, and blocks that are not objects are not
+// payloads at all.
+func jsonSampleBlocks(t *testing.T, path string) map[int]string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	out := make(map[int]string)
+	for i, block := range strings.Split(string(data), "```json") {
+		if i == 0 {
+			continue
+		}
+		body, _, found := strings.Cut(block, "```")
+		if !found {
+			continue
+		}
+		var probe map[string]any
+		if json.Unmarshal([]byte(body), &probe) != nil {
+			continue
+		}
+		out[i] = body
+	}
+	return out
+}
+
+// TestDocumentedPayloadsAreCanonical checks every payload sample in the policy
+// input reference against the canonicalization a real payload goes through: a
+// sample that changes is a sample showing a value no policy will ever see.
+// Copying such a sample into an exact-match rule produces a rule that never
+// fires, which is how the reference came to show a Go version without its "v"
+// prefix while the text beside it promised the prefix.
+func TestDocumentedPayloadsAreCanonical(t *testing.T) {
+	samples := jsonSampleBlocks(t, policyInputsDoc)
+	if len(samples) == 0 {
+		t.Fatalf("no json payload samples found in %s", policyInputsDoc)
+	}
+	for i, body := range samples {
+		t.Run(fmt.Sprintf("block-%d", i), func(t *testing.T) {
+			var documented, canonical map[string]any
+			if err := json.Unmarshal([]byte(body), &documented); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if err := json.Unmarshal([]byte(body), &canonical); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			canonicalizeEcosystemPayload(canonical)
+			if !reflect.DeepEqual(documented, canonical) {
+				t.Errorf("documented payload is not what a policy sees:\n documented: %#v\n canonical:  %#v", documented, canonical)
 			}
 		})
 	}
