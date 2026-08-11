@@ -270,11 +270,12 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	seenNames := map[string]struct{}{}
 	source := cmp.Or(opts.Source, "policy")
 	for _, item := range policiesNode.Content {
-		// Skip a policy that carries an anchor, an alias, or a merge key anywhere
-		// beneath it: it is already reported, and every further message the walk
-		// could produce would describe the alias node rather than the policy the
-		// author meant. Plain policies alongside it are still checked.
-		if len(anchorIssues(item)) > 0 {
+		// Skip a policy the walk cannot read: an alias or a merge key beneath it
+		// puts part of the policy somewhere else, so every further message would
+		// describe the reference rather than the policy the author meant. Both are
+		// already reported. An anchor definition is not a reference, so a policy
+		// carrying one says what it says and is checked like any other.
+		if resolvesElsewhere(item) {
 			continue
 		}
 		if item.Kind != yaml.MappingNode {
@@ -322,8 +323,9 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 // restates one of those is dropped and a single mistake stays a single issue.
 func expandedPolicyIssues(item *yaml.Node, source string, extraVars []string, located []Issue) []Issue {
 	var pol structuredPolicy
-	// Decoding resolves aliases, which the format refuses; that is safe here
-	// because a policy carrying one anywhere beneath it never reaches this point.
+	// Decoding resolves aliases and merge keys, which the format refuses; that is
+	// safe here because a policy carrying one anywhere beneath it never reaches
+	// this point, so the decoder reads only what the policy itself writes.
 	if err := item.Decode(&pol); err != nil {
 		return backstopIssue(fmt.Errorf("%s: %w", source, err), source, item, located)
 	}
@@ -730,6 +732,36 @@ func anchorIssues(node *yaml.Node) []Issue {
 		issues = append(issues, anchorIssues(child)...)
 	}
 	return issues
+}
+
+// resolvesElsewhere reports whether a node says part of what it means somewhere
+// other than where it is written: a YAML alias, whose value lives at the anchor
+// it names, or a merge key, which pulls another mapping's entries in. Deputy
+// refuses both (see anchorIssues), so no reader resolves them, and a walk that
+// cannot follow them can only describe the reference rather than the value.
+// Nodes carrying one are therefore skipped by the checks that read a document's
+// values.
+//
+// An anchor definition is not a reference: `description: &text foo` says foo
+// right where a reader looks for it. It is still refused, but every other check
+// around it reads what the author wrote and reports in the same pass, so the
+// refusal costs no extra lint run.
+func resolvesElsewhere(node *yaml.Node) bool {
+	if node == nil {
+		return false
+	}
+	if node.Kind == yaml.AliasNode {
+		return true
+	}
+	for i, child := range node.Content {
+		if node.Kind == yaml.MappingNode && i%2 == 0 && isMergeKey(child) {
+			return true
+		}
+		if resolvesElsewhere(child) {
+			return true
+		}
+	}
+	return false
 }
 
 // bundleAnchorError reports the first anchor, alias, or merge key in data as an

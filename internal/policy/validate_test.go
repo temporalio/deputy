@@ -1317,6 +1317,79 @@ policies:
 	}
 }
 
+// TestValidateBundleReportsIndependentDefects pins that a defect the format
+// refuses does not withhold the diagnostics for an unrelated one. Anchors,
+// aliases, and merge keys are refused wherever they appear, but refusing them is
+// a diagnostic like any other: it must not cost the author a lint run per defect
+// on parts of the document that are written plainly and read the same either
+// way.
+func TestValidateBundleReportsIndependentDefects(t *testing.T) {
+	cases := []struct {
+		name      string
+		bundle    string
+		wantCodes []string
+	}{
+		{
+			name: "an anchored field beside a bad action in the same policy",
+			bundle: `
+policies:
+  - name: anchored-description
+    description: &text foo
+    rules:
+      - when: "true"
+        action: dney
+        reason: "r"
+`,
+			wantCodes: []string{"yaml-anchor", "invalid-action"},
+		},
+		{
+			name: "an anchored field beside a bad mode and an uncompilable condition",
+			bundle: `
+policies:
+  - name: anchored-scalar
+    mode: &m enfroce
+    rules:
+      - when: "this is not cel"
+        action: deny
+        reason: "r"
+`,
+			wantCodes: []string{"yaml-anchor", "invalid-mode", "cel-error"},
+		},
+		{
+			name: "an anchored policy beside a policy written as an alias",
+			bundle: `
+policies:
+  - &base
+    name: anchored-policy
+    rules:
+      - when: "true"
+        action: dney
+        reason: "r"
+  - *base
+`,
+			wantCodes: []string{"yaml-anchor", "invalid-action"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{Source: "bundle.yaml"})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			for _, want := range tc.wantCodes {
+				if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == want }) {
+					t.Fatalf("expected an issue with code %q, got %v", want, issues)
+				}
+			}
+			for _, issue := range issues {
+				if issue.Line <= 0 {
+					t.Fatalf("issue %v should name the line it is on", issue)
+				}
+			}
+		})
+	}
+}
+
 // TestBundleKeyMatchesStructTag pins the shape probe's key to the field the
 // decoder actually reads. The probe recognizes an authored bundle by that key,
 // including in the raw text of a document YAML cannot parse, so a rename of the
