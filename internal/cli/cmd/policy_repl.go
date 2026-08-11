@@ -83,11 +83,16 @@ func runPolicyREPL(ctx context.Context, in io.Reader, out io.Writer) error {
 	request := map[string]string{}
 	// Default to a real proxy entrypoint: "proxy" is a command, not an
 	// entrypoint, and would fail the same IsValid gate :entrypoint enforces.
-	// The initial payload is request-shaped, so a proxy entrypoint matches.
+	// npm_artifact_request is the proxy entrypoint that matches what the REPL
+	// starts with: a request-shaped payload (buildREPLPayload always binds
+	// "request"), in the ecosystem the sample data uses, down to
+	// request["ecosystem"] = "npm" in the lodash example below. :entrypoint
+	// switches it.
 	entrypoint := string(policy.EntrypointNpmArtifactRequest)
 
 	for {
-		// Build prompt string: "proxy ›" - simple and clean
+		// The prompt names the active entrypoint, so it reads
+		// "npm_artifact_request ›" until :entrypoint changes it.
 		t := engine.Config().Theme
 		prompt := t.Context.Render(entrypoint) + " " + t.Prompt.Render(t.PromptSymbol) + " "
 
