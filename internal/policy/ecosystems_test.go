@@ -3,6 +3,7 @@ package policy
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
 	"slices"
@@ -807,51 +808,189 @@ func TestScalibrEcosystemGuardMatchesScannerSpelling(t *testing.T) {
 // package name" fails the build instead of silently reaching policies
 // unnormalized, which is how request.package and package_name were missed.
 var notPackageIdentity = map[string]string{
-	"advisory":      "an advisory identifier attributed to a subject, not a package name",
-	"ecosystem":     "the ecosystem itself, canonicalized before the identity fields",
-	"id":            "an advisory identifier",
-	"aliases":       "advisory identifiers",
-	"artifact":      "an advisory coverage subject, not a resolved package",
-	"change_kind":   "an enum rendered as a string",
-	"change_type":   "an enum rendered as a string",
-	"description":   "prose",
-	"display_name":  "an extractor's human-readable name",
-	"file_patterns": "extractor file globs",
-	"import_status": "an enum rendered as a string",
-	"licenses":      "SPDX expressions",
-	"locations":     "manifest paths",
-	"operation":     "the proxy operation being requested",
-	"published":     "a timestamp",
-	"severity":      "a severity label",
-	"severity_type": "a severity scoring system",
-	"sources":       "advisory source names",
-	"summary":       "prose",
-	"target":        "what was scanned, not a package",
+	"added":                             "SPDX identifiers a license change added",
+	"advisory":                          "an advisory identifier attributed to a subject, not a package name",
+	"advisory_id":                       "an advisory identifier",
+	"aliases":                           "advisory identifiers",
+	"architecture":                      "an image platform architecture",
+	"artifact":                          "an advisory coverage subject, not a resolved package",
+	"author":                            "an image author",
+	"category":                          "a risk factor category",
+	"chain_id":                          "a container layer chain digest",
+	"change_kind":                       "an enum rendered as a string",
+	"change_type":                       "an enum rendered as a string",
+	"cmd":                               "an image default command",
+	"command":                           "the build instruction that produced a layer",
+	"comment":                           "prose on an image history entry",
+	"component_key":                     "the dependency key exactly as the manifest spells it, kept unfolded so remediation can edit that entry",
+	"conflicts":                         "conflicting SPDX identifiers",
+	"created_by":                        "the build instruction that created a layer",
+	"cve":                               "an advisory identifier",
+	"cwes":                              "weakness identifiers",
+	"deprecation_message":               "prose from a registry deprecation notice",
+	"description":                       "prose",
+	"details":                           "prose",
+	"diff_id":                           "a container layer content digest",
+	"digest":                            "an image content digest",
+	"display_name":                      "an extractor's human-readable name",
+	"docker_version":                    "the builder's Docker version, not a package version",
+	"ecosystem":                         "the ecosystem itself, canonicalized before the identity fields",
+	"entrypoint":                        "an image entrypoint",
+	"env":                               "image environment variables",
+	"exposed_ports":                     "image port declarations",
+	"file_patterns":                     "extractor file globs",
+	"groups":                            "dependency groups such as dev or test",
+	"id":                                "an advisory identifier",
+	"image":                             "a container image reference",
+	"import_status":                     "an enum rendered as a string",
+	"indicators":                        "malware detection indicators",
+	"kev_date_added":                    "a KEV catalog date",
+	"kev_due_date":                      "a KEV compliance deadline",
+	"kev_known_ransomware_campaign_use": "a KEV ransomware flag",
+	"kev_required_action":               "prose from the KEV catalog",
+	"kind":                              "an enum rendered as a string",
+	"licenses":                          "SPDX expressions",
+	"locations":                         "manifest paths",
+	"manager":                           "the package manager that owns a manifest",
+	"modified":                          "a timestamp",
+	"on_build":                          "image ONBUILD triggers",
+	"operation":                         "the proxy operation being requested",
+	"os":                                "an image platform OS",
+	"os_version":                        "an image platform OS version, not a package version",
+	"path":                              "a file path, an import path, or a dependency chain, not a package name",
+	"published":                         "a timestamp",
+	"raw":                               "a severity score as its source published it",
+	"raw_type":                          "a severity scoring system",
+	"references":                        "advisory reference URLs",
+	"registry":                          "a container registry host",
+	"remediation":                       "prose",
+	"removed":                           "SPDX identifiers a license change removed",
+	"repository":                        "a container image repository",
+	"sensitive_env":                     "image environment variable names flagged as sensitive",
+	"severity":                          "a severity label",
+	"severity_type":                     "a severity scoring system",
+	"shell":                             "an image default shell",
+	"source":                            "the data source that produced a risk signal",
+	"sources":                           "advisory source names",
+	"spdx_ids":                          "SPDX license identifiers",
+	"status":                            "an enum rendered as a string",
+	"stop_signal":                       "an image stop signal",
+	"summary":                           "prose",
+	"symbols":                           "vulnerable symbol names",
+	"tag":                               "a container image tag",
+	"target":                            "what was scanned, not a package",
+	"test":                              "an image healthcheck command",
+	"user":                              "an image default user",
+	"variant":                           "an image platform variant",
+	"volumes":                           "image volume declarations",
+	"working_dir":                       "an image working directory",
+}
+
+// declaresEcosystemField reports whether md has a singular string field named
+// "ecosystem", which is what [canonicalizeOwnEcosystem] reads.
+func declaresEcosystemField(md protoreflect.MessageDescriptor) bool {
+	fields := md.Fields()
+	for i := range fields.Len() {
+		f := fields.Get(i)
+		if string(f.Name()) == "ecosystem" && f.Kind() == protoreflect.StringKind && !f.IsList() {
+			return true
+		}
+	}
+	return false
+}
+
+// namesPackageThroughNestedField reports whether md resolves its ecosystem from
+// a nested package message, mirroring [nestedPackageEcosystem]. A finding names
+// no ecosystem of its own but normalizes its identity fields against the one
+// its package declares, so its fields need the same classification.
+func namesPackageThroughNestedField(md protoreflect.MessageDescriptor) bool {
+	for _, key := range []string{"package", "pkg"} {
+		f := md.Fields().ByName(protoreflect.Name(key))
+		if f == nil || f.Kind() != protoreflect.MessageKind || f.IsList() || f.IsMap() {
+			continue
+		}
+		if declaresEcosystemField(f.Message()) {
+			return true
+		}
+	}
+	return false
+}
+
+// arrivesAsItsOwnVariable reports whether a field name reaches policies as a
+// top-level payload variable that [variableCarriesEcosystem] keeps out of the
+// walk. A policy payload is flat: "env", "target", and "jwt" are siblings of
+// "pkg", not children of it, and each is gated on its own before the walk
+// starts. Following the proto nesting into them would demand a classification
+// for fields no ecosystem ever reaches, which is how a coverage rule stops
+// describing the code it guards.
+func arrivesAsItsOwnVariable(name string) bool {
+	if _, known := VariableInfo(name); !known {
+		return false
+	}
+	return !variableCarriesEcosystem(name)
+}
+
+// identityCoverageMessages returns every message whose string fields the
+// canonicalization walk can rewrite: one that declares an ecosystem, one that
+// names its package through a nested message, and everything reachable from
+// either. Reachability is the point of the derivation: an object with no
+// ecosystem of its own inherits the enclosing one (see
+// [canonicalizeEcosystemValue]), so a nested message's version field is
+// normalized exactly like the ecosystem-declaring parent's. Seeding on the
+// declaring message alone left those nested fields unclassified, which is how
+// FixVerdict.claimed kept an unnormalized spelling of a version its sibling
+// field normalized.
+func identityCoverageMessages() map[protoreflect.FullName]protoreflect.MessageDescriptor {
+	out := make(map[protoreflect.FullName]protoreflect.MessageDescriptor)
+	var visit func(md protoreflect.MessageDescriptor)
+	visit = func(md protoreflect.MessageDescriptor) {
+		if md == nil || out[md.FullName()] != nil {
+			return
+		}
+		out[md.FullName()] = md
+		fields := md.Fields()
+		for i := range fields.Len() {
+			f := fields.Get(i)
+			if f.IsMap() {
+				// Scalar maps are free-form caller data the walk never
+				// descends into; message-valued maps are not a shape Deputy's
+				// policy inputs use.
+				continue
+			}
+			if arrivesAsItsOwnVariable(string(f.Name())) {
+				continue
+			}
+			if f.Kind() == protoreflect.MessageKind || f.Kind() == protoreflect.GroupKind {
+				visit(f.Message())
+			}
+		}
+	}
+	_ = descriptorset.RangeMessages(func(md protoreflect.MessageDescriptor) bool {
+		if declaresEcosystemField(md) || namesPackageThroughNestedField(md) {
+			visit(md)
+		}
+		return true
+	})
+	return out
 }
 
 // TestIdentityKeysCoverSchema derives the check from the proto descriptors:
-// every string field on a message that declares an ecosystem must be classified
-// as a package name, a package version, a package URL, or explicitly not part
-// of a package identity. The descriptor set covers all of Deputy's protos, not
-// just the ones linked into this test binary, so a new field cannot hide in an
-// unimported package.
+// every string field the canonicalization walk can reach with an ecosystem in
+// hand must be classified as a package name, a package version, a package URL,
+// or explicitly not part of a package identity. The descriptor set covers all
+// of Deputy's protos, not just the ones linked into this test binary, so a new
+// field cannot hide in an unimported package.
 func TestIdentityKeysCoverSchema(t *testing.T) {
 	versionKeys := append(slices.Clone(packageVersionKeys), "fixed_versions")
 
-	err := descriptorset.RangeMessages(func(md protoreflect.MessageDescriptor) bool {
-		fields := md.Fields()
-		declaresEcosystem := false
-		for i := range fields.Len() {
-			f := fields.Get(i)
-			if string(f.Name()) == "ecosystem" && f.Kind() == protoreflect.StringKind && !f.IsList() {
-				declaresEcosystem = true
-				break
-			}
-		}
-		if !declaresEcosystem {
-			return true
-		}
-		t.Run(string(md.FullName()), func(t *testing.T) {
+	messages := identityCoverageMessages()
+	if len(messages) == 0 {
+		t.Fatal("no messages reached the identity coverage walk")
+	}
+	for _, name := range slices.Sorted(maps.Keys(messages)) {
+		md := messages[name]
+		t.Run(string(name), func(t *testing.T) {
+			fields := md.Fields()
 			for i := range fields.Len() {
 				f := fields.Get(i)
 				if f.Kind() != protoreflect.StringKind || f.IsMap() {
@@ -864,13 +1003,9 @@ func TestIdentityKeysCoverSchema(t *testing.T) {
 				if _, known := notPackageIdentity[name]; known {
 					continue
 				}
-				t.Errorf("%s.%s is a string field on a message that declares an ecosystem but is not classified: add it to packageNameKeys, packageVersionKeys, or packagePURLKeys if it holds a package identity, or to notPackageIdentity with the reason it does not", md.FullName(), name)
+				t.Errorf("%s.%s is a string field the canonicalization walk reaches with an ecosystem but is not classified: add it to packageNameKeys, packageVersionKeys, or packagePURLKeys if it holds a package identity, or to notPackageIdentity with the reason it does not", md.FullName(), name)
 			}
 		})
-		return true
-	})
-	if err != nil {
-		t.Fatalf("RangeMessages: %v", err)
 	}
 }
 
@@ -1026,6 +1161,98 @@ func TestPURLAgreesWithIdentityFields(t *testing.T) {
 				t.Errorf("purl version %q, package version %q", parsed.Version, want)
 			}
 		})
+	}
+}
+
+// TestSiblingVersionSpellingsAgree pins the fields that repeat a version the
+// payload already carries somewhere else. A Go fix verdict normalizes
+// "resolved_fix.version" to "v1.2.0" while the advisory-claimed spelling in
+// "resolved_fix.claimed" stayed "1.2.0", so a policy asking whether the
+// verified version matched the claim compared two spellings of one version and
+// took the wrong branch. The same shape holds for an SBOM package change and a
+// freshness signal, both of which put two versions of one package side by side.
+func TestSiblingVersionSpellingsAgree(t *testing.T) {
+	tests := []struct {
+		name    string
+		object  map[string]any
+		compare [2]string
+		want    string
+	}{
+		{
+			name: "unverified fix verdict",
+			object: map[string]any{
+				"ecosystem": "Go",
+				"name":      "example.com/mod",
+				"status":    "STATUS_UNVERIFIED",
+				"version":   "1.2.0",
+				"claimed":   "1.2.0",
+			},
+			compare: [2]string{"version", "claimed"},
+			want:    "v1.2.0",
+		},
+		{
+			name: "sbom package change",
+			object: map[string]any{
+				"ecosystem":        "Go",
+				"name":             "example.com/mod",
+				"previous_version": "1.2.0",
+				"new_version":      "1.2.0",
+			},
+			compare: [2]string{"previous_version", "new_version"},
+			want:    "v1.2.0",
+		},
+		{
+			name: "freshness signal",
+			object: map[string]any{
+				"ecosystem":       "Go",
+				"name":            "example.com/mod",
+				"current_version": "1.2.0",
+				"latest_version":  "1.2.0",
+			},
+			compare: [2]string{"current_version", "latest_version"},
+			want:    "v1.2.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := map[string]any{"pkg": tt.object}
+			canonicalizeEcosystemPayload(payload)
+			left, right := tt.object[tt.compare[0]], tt.object[tt.compare[1]]
+			if left != tt.want || right != tt.want {
+				t.Errorf("%s = %v, %s = %v, want both %q", tt.compare[0], left, tt.compare[1], right, tt.want)
+			}
+		})
+	}
+}
+
+// TestMigrationTargetModuleIsAPackageName pins the migration verdict's target
+// against the module spelling a package fix uses, because a policy comparing
+// resolved_fix.target_module with package_fixes[0].module is comparing one
+// identity written two ways.
+func TestMigrationTargetModuleIsAPackageName(t *testing.T) {
+	payload := map[string]any{
+		"pkg": map[string]any{
+			"ecosystem": "PyPI",
+			"name":      "Flask_SQLAlchemy",
+			"resolved_fix": map[string]any{
+				"status":        "STATUS_MIGRATION",
+				"target_module": "Flask_SQLAlchemy2",
+			},
+			"package_fixes": []any{
+				map[string]any{"module": "Flask_SQLAlchemy2"},
+			},
+		},
+	}
+	canonicalizeEcosystemPayload(payload)
+	pkg := payload["pkg"].(map[string]any)
+	verdict := pkg["resolved_fix"].(map[string]any)
+	fix := pkg["package_fixes"].([]any)[0].(map[string]any)
+	if got, want := verdict["target_module"], "flask-sqlalchemy2"; got != want {
+		t.Errorf("resolved_fix.target_module = %v, want %q", got, want)
+	}
+	if verdict["target_module"] != fix["module"] {
+		t.Errorf("resolved_fix.target_module = %v, package_fixes[0].module = %v, want them equal", verdict["target_module"], fix["module"])
 	}
 }
 
