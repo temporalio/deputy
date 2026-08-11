@@ -380,7 +380,7 @@ func TestComparePackages_NonGo(t *testing.T) {
 	}
 }
 
-func TestNormalizePyPIName(t *testing.T) {
+func TestPyPIComparisonKey(t *testing.T) {
 	cases := []struct {
 		name, in, want string
 	}{
@@ -400,9 +400,9 @@ func TestNormalizePyPIName(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := normalizePyPIName(tc.in)
+			got := pypiComparisonKey(tc.in)
 			if got != tc.want {
-				t.Errorf("normalizePyPIName(%q) = %q, want %q", tc.in, got, tc.want)
+				t.Errorf("pypiComparisonKey(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}
@@ -494,7 +494,7 @@ func TestComparePackages_GoGopkgInNormalization(t *testing.T) {
 	}
 }
 
-func TestNormalizeCargoName(t *testing.T) {
+func TestCargoComparisonKey(t *testing.T) {
 	cases := []struct {
 		name, in, want string
 	}{
@@ -511,16 +511,20 @@ func TestNormalizeCargoName(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := normalizeCargoName(tc.in)
+			got := cargoComparisonKey(tc.in)
 			if got != tc.want {
-				t.Errorf("normalizeCargoName(%q) = %q, want %q", tc.in, got, tc.want)
+				t.Errorf("cargoComparisonKey(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}
 }
 
+// TestComparePackages_CargoNameNormalization checks the two halves of Cargo
+// name handling at once: two spellings of one crate are one package, so the
+// diff is an upgrade rather than a removal plus an addition, and the change
+// still reports the spellings the two trees published rather than the folded
+// key that matched them.
 func TestComparePackages_CargoNameNormalization(t *testing.T) {
-	// Test that Cargo packages with different name formats (hyphen vs underscore) are recognized as the same package
 	oldPkgs := []*extractor.Package{
 		{Name: "serde-json", Version: "1.0.0", PURLType: "cargo"},
 	}
@@ -537,6 +541,12 @@ func TestComparePackages_CargoNameNormalization(t *testing.T) {
 	}
 	if changes[0].BaseVersion != "1.0.0" || changes[0].TargetVersion != "1.1.0" {
 		t.Fatalf("unexpected versions: %+v", changes[0])
+	}
+	if got := changes[0].GetPackage().GetName(); got != "serde_json" {
+		t.Errorf("change names %q, want the spelling the target tree published", got)
+	}
+	if got := changes[0].GetOldName(); got != "serde-json" {
+		t.Errorf("change reports old name %q, want the spelling the base tree published", got)
 	}
 }
 
