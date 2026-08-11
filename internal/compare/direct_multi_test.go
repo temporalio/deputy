@@ -24,6 +24,24 @@ func TestGetNpmDirectDeps(t *testing.T) {
 			},
 		},
 		{
+			name: "aliased dependencies record the aliased package",
+			input: `{
+				"dependencies": {
+					"my-lodash": "npm:lodash@^4.17.21",
+					"my-scoped": "npm:@babel/core@^7.0.0",
+					"unversioned": "npm:left-pad"
+				}
+			}`,
+			expected: map[string]bool{
+				"my-lodash":   true,
+				"lodash":      true,
+				"my-scoped":   true,
+				"@babel/core": true,
+				"unversioned": true,
+				"left-pad":    true,
+			},
+		},
+		{
 			name: "dev dependencies",
 			input: `{
 				"devDependencies": {
@@ -169,6 +187,35 @@ serde_json = "1.0"
 			expected: map[string]bool{
 				"reqwest":    true,
 				"serde_json": true,
+			},
+		},
+		{
+			name: "renamed dependency records the crate it names",
+			input: `[dependencies]
+my-serde = { package = "serde", version = "1.0" }
+
+[dev-dependencies.my-tokio]
+package = "tokio"
+version = "1.0"
+`,
+			expected: map[string]bool{
+				"my_serde": true,
+				"serde":    true,
+				"my_tokio": true,
+				"tokio":    true,
+			},
+		},
+		{
+			name: "platform and workspace dependencies",
+			input: `[target.'cfg(windows)'.dependencies]
+winapi = "0.3"
+
+[workspace.dependencies]
+anyhow = "1.0"
+`,
+			expected: map[string]bool{
+				"winapi": true,
+				"anyhow": true,
 			},
 		},
 		{
