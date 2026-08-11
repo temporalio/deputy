@@ -268,17 +268,36 @@ func nestedPackageEcosystem(m map[string]any) (eco ecosystem.Ecosystem, ok bool)
 // several ways: a package or change calls it "name", a proxy request calls it
 // "package" or "module", a container vulnerability change calls it
 // "package_name". A policy that reads one alias must not see a different string
-// than a policy that reads another, so all of them are normalized.
+// than a policy that reads another, so all of them are normalized. A migration
+// verdict names the module to move to in "target_module", which is the same
+// identity a package fix spells "module".
 // TestIdentityKeysCoverSchema derives the field list from the proto descriptors
 // and fails when a message grows an unclassified one.
-var packageNameKeys = []string{"name", "old_name", "package", "module", "package_name"}
+var packageNameKeys = []string{"name", "old_name", "package", "module", "package_name", "target_module"}
 
 // packageVersionKeys are the payload fields that hold a single version string
 // and so get the ecosystem's version normalization (Go versions gain the "v"
 // prefix, so a policy can write "^v1\\." and match the diff path too). The
 // repeated form, "fixed_versions", is normalized element by element in
 // [normalizeIdentityFields].
-var packageVersionKeys = []string{"version", "base_version", "target_version", "fixed_version"}
+//
+// A version that sits beside another spelling of itself has to be here too, or
+// the two compare unequal for a policy that reads both: an unverified fix
+// verdict repeats its version in "claimed", an SBOM package change carries
+// "previous_version" and "new_version", and a freshness signal carries
+// "current_version" next to the "latest_version" it is behind.
+var packageVersionKeys = []string{
+	"version",
+	"base_version",
+	"target_version",
+	"fixed_version",
+	"claimed",
+	"previous_version",
+	"new_version",
+	"current_version",
+	"latest_version",
+	"latest_prerelease",
+}
 
 // packagePURLKeys are the payload fields that hold a complete Package URL for
 // the object's own package. A PURL spells the same identity the name and
