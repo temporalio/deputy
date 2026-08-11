@@ -10,6 +10,7 @@ import (
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 )
@@ -28,6 +29,12 @@ var variableMessageTypes = map[string]protoreflect.MessageDescriptor{
 	"targetv1.Target":         (&targetv1.Target{}).ProtoReflect().Descriptor(),
 	"policyv1.JWTClaims":      (&policyv1.JWTClaims{}).ProtoReflect().Descriptor(),
 	"policyv1.Environment":    (&policyv1.Environment{}).ProtoReflect().Descriptor(),
+
+	// Sandbox variables are message-shaped: Manager.evaluateExecutionPolicy
+	// binds them straight from ExecuteRequest getters, so their fields are the
+	// proto fields (snake_case) of these messages.
+	"sandboxv1.SandboxConfig":    (&sandboxv1.SandboxConfig{}).ProtoReflect().Descriptor(),
+	"sandboxv1.ExecutionContext": (&sandboxv1.ExecutionContext{}).ProtoReflect().Descriptor(),
 }
 
 // ProtoVariableTypeNames returns the proto-backed variable type names used in

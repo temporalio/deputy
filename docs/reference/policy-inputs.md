@@ -391,11 +391,11 @@ Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
 
 | Variable | Type | Required | Description |
 | --- | --- | --- | --- |
-| `command` | `string` | yes | Command being evaluated |
+| `command` | `list(string)` | yes | Command argv being evaluated (first element is the executable) |
 | `workspace_dir` | `string` | yes | Workspace directory for sandbox execution |
-| `requested_config` | `object` | yes | Requested sandbox configuration |
+| `requested_config` | `sandboxv1.SandboxConfig` | yes | Requested sandbox configuration |
 | `env` | `policyv1.Environment` | yes | Execution environment context |
-| `context` | `object` | no | Additional policy execution context |
+| `context` | `sandboxv1.ExecutionContext` | no | Context about what triggered the sandbox execution |
 | `source` | `string` | no | Source of the sandbox execution request |
 
 #### `sandbox_command`
@@ -406,10 +406,10 @@ Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
 
 | Variable | Type | Required | Description |
 | --- | --- | --- | --- |
-| `command` | `string` | yes | Command being evaluated |
-| `sandbox_config` | `object` | yes | Effective sandbox configuration |
+| `command` | `list(string)` | yes | Command argv being evaluated (first element is the executable) |
+| `sandbox_config` | `sandboxv1.SandboxConfig` | yes | Effective sandbox configuration |
 | `env` | `policyv1.Environment` | yes | Execution environment context |
-| `context` | `object` | no | Additional policy execution context |
+| `context` | `sandboxv1.ExecutionContext` | no | Context about what triggered the sandbox execution |
 
 #### `sandbox_network`
 
@@ -422,9 +422,9 @@ Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
 | `host` | `string` | yes | Requested network host |
 | `port` | `int` | yes | Requested network port |
 | `protocol` | `string` | yes | Requested network protocol |
-| `sandbox_config` | `object` | yes | Effective sandbox configuration |
+| `sandbox_config` | `sandboxv1.SandboxConfig` | yes | Effective sandbox configuration |
 | `env` | `policyv1.Environment` | yes | Execution environment context |
-| `context` | `object` | no | Additional policy execution context |
+| `context` | `sandboxv1.ExecutionContext` | no | Context about what triggered the sandbox execution |
 
 ### Category: `sbom`
 
@@ -694,6 +694,57 @@ JWTClaims contains verified JWT claims from authenticated requests.
 | `jti` | `string` | Jti is the JWT ID. |
 | `nbf` | `int` | Nbf is the not-before timestamp (Unix). |
 | `sub` | `string` | Sub is the subject (user/service ID). |
+
+### `sandboxv1.ExecutionContext`
+
+ExecutionContext provides context for policy evaluation and audit.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `agent_name` | `string` | Agent name (for EXECUTION_SOURCE_AGENT). |
+| `jwt_claims` | `map(string, string)` | JWT claims from authenticated request (for server-side execution). |
+| `metadata` | `map(string, string)` | Additional metadata for policy evaluation. |
+| `plugin_name` | `string` | Plugin name (for EXECUTION_SOURCE_PLUGIN). |
+| `source` | `ExecutionSource` | What triggered this execution. |
+| `tenant_id` | `string` | Tenant ID for multi-tenant server deployments. |
+| `trace_context` | `string` | Trace context for distributed tracing (W3C format). |
+| `wrapped_command` | `string` | Command being wrapped (for EXECUTION_SOURCE_EXEC). |
+
+### `sandboxv1.SandboxConfig`
+
+SandboxConfig configures sandbox behavior.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `add_capabilities` | `list(string)` | Linux capabilities to add back. |
+| `allocate_tty` | `bool` | Allocate a pseudo-TTY for the sandbox. |
+| `attach_stdin` | `bool` | Connect stdin to the sandbox. |
+| `drop_capabilities` | `list(string)` | Linux capabilities to drop. |
+| `exec_allowlist` | `list(string)` | Explicit allowlist of executable paths or directories. |
+| `exec_paths` | `list(string)` | Additional host paths to allow executing (beyond system defaults). |
+| `extra_options` | `map(string, string)` | Extra runtime-specific options (key-value pairs). |
+| `file_mask` | `FileMaskConfig` | File masking configuration for hiding or protecting sensitive files. |
+| `group` | `string` | Group to run as inside the sandbox. |
+| `hidden_paths` | `list(string)` | Paths to hide (make inaccessible) from the sandbox. |
+| `image` | `string` | Container image for container runtimes. |
+| `limits` | `ResourceLimits` | Resource limits. |
+| `mode` | `Mode` | Filesystem access mode. |
+| `mounts` | `list(Mount)` | Additional host paths to mount. |
+| `network_allowlist` | `list(string)` | Network allowlist (when network_mode = ALLOWLIST). |
+| `network_audit` | `NetworkAuditMode` | Network connection audit mode. |
+| `network_mode` | `NetworkMode` | Network access mode. |
+| `plugin_name` | `string` | For plugin runtimes: the plugin name to use. |
+| `profiles` | `list(string)` | Named sandbox profile for common configurations. |
+| `read_only_paths` | `list(string)` | Paths to make read-only (in addition to mode defaults). |
+| `read_paths` | `list(string)` | Additional host paths to allow reading (beyond workspace and defaults). |
+| `review_before_commit` | `bool` | Whether to enable post-execution review workflow. |
+| `runtime` | `Runtime` | Runtime to use. |
+| `seccomp_profile` | `string` | Seccomp profile path (Linux). |
+| `two_phase_config` | `TwoPhaseExecutionConfig` | Two-phase execution configuration for supply chain security. |
+| `user` | `string` | User to run as inside the sandbox. |
+| `workspace_isolation` | `WorkspaceIsolationMode` | Workspace isolation mode for copy-on-write, snapshot, or overlay behavior. |
+| `workspace_isolation_config` | `WorkspaceIsolationConfig` | Detailed workspace isolation configuration. |
+| `write_paths` | `list(string)` | Additional host paths to allow writing (beyond workspace and temp). |
 
 ### `targetv1.Target`
 
