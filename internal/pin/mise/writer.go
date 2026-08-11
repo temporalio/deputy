@@ -295,20 +295,18 @@ func replaceVersionInValueTargeting(value string, currents []string, pinned stri
 		return replaceArrayElements(value, spans, currents, pinned)
 	}
 
-	valuePart, comment := splitTomlComment(value)
-
 	// Inline table: replace only the version field, which may itself be an
 	// array of versions (recursion handles that element-wise).
-	if isInlineTable(valuePart) {
-		start, end, ok := inlineTableVersionSpan(valuePart)
-		if !ok {
+	if table, trailing, ok := splitInlineTable(value); ok {
+		start, end, found := inlineTableVersionSpan(table)
+		if !found {
 			return value, false
 		}
-		sub, changed := replaceVersionInValueTargeting(valuePart[start:end], currents, pinned)
+		sub, changed := replaceVersionInValueTargeting(table[start:end], currents, pinned)
 		if !changed {
 			return value, false
 		}
-		newValue := valuePart[:start] + sub + valuePart[end:] + comment
+		newValue := table[:start] + sub + table[end:] + trailing
 		return newValue, newValue != value
 	}
 
@@ -438,14 +436,14 @@ func elementVersions(elem string) []string {
 		}
 		return out
 	}
-	valuePart, _ := splitTomlComment(elem)
-	if isInlineTable(valuePart) {
-		start, end, ok := inlineTableVersionSpan(valuePart)
-		if !ok {
+	if table, _, ok := splitInlineTable(elem); ok {
+		start, end, found := inlineTableVersionSpan(table)
+		if !found {
 			return nil
 		}
-		return elementVersions(valuePart[start:end])
+		return elementVersions(table[start:end])
 	}
+	valuePart, _ := splitTomlComment(elem)
 	if v := strings.TrimSpace(valuePart); v != "" {
 		return []string{unquoteKey(v)}
 	}
@@ -455,6 +453,29 @@ func elementVersions(elem string) []string {
 // isInlineTable reports whether a TOML value token is an inline table.
 func isInlineTable(s string) bool {
 	return strings.HasPrefix(strings.TrimSpace(s), "{")
+}
+
+// splitInlineTable separates a leading inline-table value from the trivia that
+// follows its closing brace, so a trailing comment survives a rewrite of the
+// table's version field. ok is false when the value is not an inline table or
+// its brace is never closed.
+//
+// The split is made at the closing brace, not at the first `#`: mise accepts an
+// inline table written across several lines, and such a table may carry a
+// comment of its own between two fields. Cutting there would hand the field
+// scanner nothing but the opening line, and the rewriter would report that it
+// could not rewrite a declaration that mise, and Deputy's own parser, read
+// perfectly well.
+func splitInlineTable(value string) (table, trailing string, ok bool) {
+	i := skipTomlSpaces(value, 0)
+	if i >= len(value) || value[i] != '{' {
+		return "", "", false
+	}
+	end := tomlValueSpan(value, i)
+	if end <= i || end > len(value) || value[end-1] != '}' {
+		return "", "", false
+	}
+	return value[:end], value[end:], true
 }
 
 // arrayElementSpans returns the [start, end) offsets of each element token in
@@ -725,6 +746,14 @@ func tomlValueSpan(s string, i int) int {
 		case !inSingle && c == '"':
 			inDouble = !inDouble
 		case inSingle || inDouble:
+		case c == '#':
+			// A comment runs to the end of the line; a brace or bracket inside
+			// it closes nothing. The gatherer in tomlDelimitersBalanced already
+			// skips comments, so a value it gathered whole would otherwise be
+			// cut short here.
+			for j < len(s) && s[j] != '\n' {
+				j++
+			}
 		case c == open:
 			depth++
 		case c == closing:

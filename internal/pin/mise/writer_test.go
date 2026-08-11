@@ -1125,6 +1125,76 @@ go = { "vers\u0069on" = "1.24.3" }
 `,
 		},
 		{
+			// mise accepts an inline table across several lines, and such a
+			// table may carry its own comments. Trailing trivia begins at the
+			// closing brace, not at the first "#".
+			name: "multiline inline table with an interior comment",
+			input: `[tools]
+go = {
+  # the toolchain the build pins
+  version = "1.22.12",
+  postinstall = "go version"
+}
+`,
+			tool: "go", current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+go = {
+  # the toolchain the build pins
+  version = "1.24.3",
+  postinstall = "go version"
+}
+`,
+		},
+		{
+			name: "multiline inline table with a comment after the version",
+			input: `[tools]
+go = { # opening
+  version = "1.22.12" # the vulnerable one
+} # closing
+`,
+			tool: "go", current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+go = { # opening
+  version = "1.24.3" # the vulnerable one
+} # closing
+`,
+		},
+		{
+			// A brace inside a comment closes nothing.
+			name: "inline table with a brace in a comment",
+			input: `[tools]
+go = {
+  # not a closing brace: }
+  version = "1.22.12"
+}
+`,
+			tool: "go", current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+go = {
+  # not a closing brace: }
+  version = "1.24.3"
+}
+`,
+		},
+		{
+			// The array path is the inline table's sibling and must read an
+			// interior comment the same way.
+			name: "multiline array with an interior comment",
+			input: `[tools]
+go = [
+  # the vulnerable line
+  "1.22.12"
+]
+`,
+			tool: "go", current: "1.22.12", pinned: "1.24.3",
+			want: `[tools]
+go = [
+  # the vulnerable line
+  "1.24.3"
+]
+`,
+		},
+		{
 			// An escaped quote is part of the key, not its terminator.
 			name: "escaped quote in key",
 			input: `[tools]
