@@ -905,17 +905,35 @@ func TestExecutePlanStopOnErrorDryRunParity(t *testing.T) {
 }
 
 // TestResolveExecutableMatchesExecCommand pins that resolving a step's
-// executable answers the question exec.Command would answer, since predicting
-// its verdict is the only reason the dry run resolves at all. A bare name comes
-// from PATH and is refused when PATH does not have it; a name carrying a
-// separator is left as written, because exec.Command does not search for one
-// and runs it relative to the command's directory, which is not this process's.
+// executable answers the question exec.Command would answer when it starts the
+// command in the step's own directory, since predicting its verdict is the only
+// reason the dry run resolves at all.
+//
+// A bare name comes from PATH and is refused when PATH does not have it. A name
+// carrying a separator is left as written, because exec.Command does not search
+// for one and runs it relative to the command's directory rather than this
+// process's, but it is still required to be there and to be runnable: an absent
+// ./gradlew is a command that cannot start, and a preview that never looked
+// would call the step runnable and then watch the run fail on it.
 func TestResolveExecutableMatchesExecCommand(t *testing.T) {
 	// A directory holding one executable, reachable only through PATH, so the
 	// rows say exactly which lookup they exercise.
 	binDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(binDir, "widgetpm"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
+	}
+	// The directory a step's command would run in, holding the wrapper a plan
+	// for that subproject would name, plus a file that is not runnable and a
+	// directory sharing a wrapper's name.
+	execDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(execDir, "gradlew"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile gradlew: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(execDir, "mvnw"), []byte("#!/bin/sh\nexit 0\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile mvnw: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(execDir, "tools"), 0o755); err != nil {
+		t.Fatalf("Mkdir tools: %v", err)
 	}
 
 	tests := []struct {
@@ -936,10 +954,25 @@ func TestResolveExecutableMatchesExecCommand(t *testing.T) {
 			path:       t.TempDir(),
 		},
 		{
-			name:       "relative wrapper is left for the command's own directory",
+			name:       "relative wrapper present in the command's own directory is left as written",
 			executable: "./gradlew",
 			path:       t.TempDir(),
 			wantPath:   "./gradlew",
+		},
+		{
+			name:       "relative wrapper absent from the command's own directory is refused",
+			executable: "./gradlew.bat",
+			path:       binDir,
+		},
+		{
+			name:       "relative wrapper that carries no execute bit is refused",
+			executable: "./mvnw",
+			path:       binDir,
+		},
+		{
+			name:       "relative name that is a directory is refused",
+			executable: "./tools",
+			path:       binDir,
 		},
 		{
 			name:       "absolute path is left as written",
@@ -947,12 +980,17 @@ func TestResolveExecutableMatchesExecCommand(t *testing.T) {
 			path:       t.TempDir(),
 			wantPath:   filepath.Join(binDir, "widgetpm"),
 		},
+		{
+			name:       "absolute path that is not there is refused",
+			executable: filepath.Join(binDir, "absent"),
+			path:       binDir,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("PATH", tt.path)
-			got, err := resolveExecutable(tt.executable)
+			got, err := resolveExecutable(execDir, tt.executable)
 			if tt.wantPath == "" {
 				if err == nil {
 					t.Fatalf("resolveExecutable(%q) = %q, want a refusal", tt.executable, got)
@@ -1180,6 +1218,13 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			wantReason:       `cannot resolve executable "go"`,
 			needsProcessTree: true,
 			emptyPath:        true,
+		},
+		{
+			name:             "wrapper missing from the directory the command would run in",
+			step:             &remediationv1.Step{Id: "step-1", Title: "refresh dependencies", Command: "./gradlew dependencies", Manager: "gradle", Executable: true, ManifestPath: "services/api/build.gradle"},
+			wantReason:       `cannot resolve executable "./gradlew"`,
+			needsProcessTree: true,
+			dirs:             []string{"services/api"},
 		},
 		{
 			name:       "deputy command target escaping the work directory",

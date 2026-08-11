@@ -837,8 +837,11 @@ func dryRunStep(position, total int, workDir string, step *remediationv1.Step, t
 
 	// Predict the containment refusal, in the order executeStep applies it:
 	// before the platform check and before the executable allowlist, so a
-	// preview blames the same check a real run would.
-	if _, err := stepExecDir(workDir, step); err != nil {
+	// preview blames the same check a real run would. The directory it resolves
+	// is also what a wrapper named relative to the step is resolved against
+	// below, exactly as it will be when the command runs there.
+	execDir, err := stepExecDir(workDir, step)
+	if err != nil {
 		return reject(err)
 	}
 
@@ -859,9 +862,10 @@ func dryRunStep(position, total int, workDir string, step *remediationv1.Step, t
 	}
 
 	// Predict the refusal to start: an allowed executable that this host cannot
-	// resolve never runs, so reporting the step as runnable would promise work
-	// the run would refuse before it began.
-	if _, err := resolveExecutable(args[0]); err != nil {
+	// resolve, on PATH or in the directory the command would run in, never runs,
+	// so reporting the step as runnable would promise work the run would refuse
+	// before it began.
+	if _, err := resolveExecutable(execDir, args[0]); err != nil {
 		return reject(err)
 	}
 
@@ -966,13 +970,29 @@ func stepExecDir(workDir string, step *remediationv1.Step) (string, error) {
 // against the same allowlist and then runs it inside another filesystem, where
 // this process's PATH answers nothing.
 //
-// Only a bare name is searched, because that is the only case exec.Command
-// searches. A name carrying a separator is executed as written, relative to the
-// command's own directory rather than this process's, so resolving it here would
-// refuse a wrapper a real run would have found: ./gradlew in a subproject is the
-// standard way to invoke that manager.
-func resolveExecutable(name string) (string, error) {
+// Only a bare name is searched on PATH, because that is the only case
+// exec.Command searches. A name carrying a separator is executed as written,
+// relative to execDir rather than to this process's directory, so searching for
+// it would refuse a wrapper a real run would have found: ./gradlew in a
+// subproject is the standard way to invoke that manager. Such a name is instead
+// resolved against execDir and required to be there and to be executable, which
+// is the same question exec.Cmd will put to the kernel when it starts the
+// command in that directory. Leaving it unasked was its own disagreement: a
+// missing ./gradlew was never checked at all, so a dry run counted the step as
+// runnable and satisfied its dependents while the run failed to start it.
+//
+// The name is returned as written rather than as the path it resolved to, so
+// the command still runs relative to its own directory and argv[0] reads the way
+// the plan wrote it.
+func resolveExecutable(execDir, name string) (string, error) {
 	if filepath.Base(name) != name {
+		target := name
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(execDir, target)
+		}
+		if err := requireExecutableFile(target); err != nil {
+			return "", fmt.Errorf("cannot resolve executable %q: %w", name, err)
+		}
 		return name, nil
 	}
 	path, err := exec.LookPath(name)
@@ -980,6 +1000,28 @@ func resolveExecutable(name string) (string, error) {
 		return "", fmt.Errorf("cannot resolve executable %q: %w", name, err)
 	}
 	return path, nil
+}
+
+// requireExecutableFile reports whether path names something this host could
+// start: an existing file, not a directory, carrying an execute bit. It is what
+// exec.LookPath asks of a candidate it finds on PATH, asked of a path that was
+// never on PATH to begin with.
+//
+// The execute bit is a unix notion, and this is only ever reached on a platform
+// that runs external commands at all (see processTreeTerminationSupported),
+// which is the same set.
+func requireExecutableFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%s is a directory", path)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("%s is not executable", path)
+	}
+	return nil
 }
 
 // executeStep runs a single remediation step and returns output.
@@ -1037,7 +1079,7 @@ func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) 
 	if err != nil {
 		return "", err
 	}
-	execPath, err := resolveExecutable(args[0])
+	execPath, err := resolveExecutable(execDir, args[0])
 	if err != nil {
 		return "", err
 	}
