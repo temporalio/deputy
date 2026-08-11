@@ -9,6 +9,7 @@ import (
 
 	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/proto/descriptorset"
+	"github.com/temporalio/deputy/internal/purlx"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -279,6 +280,13 @@ var packageNameKeys = []string{"name", "old_name", "package", "module", "package
 // [normalizeIdentityFields].
 var packageVersionKeys = []string{"version", "base_version", "target_version", "fixed_version"}
 
+// packagePURLKeys are the payload fields that hold a complete Package URL for
+// the object's own package. A PURL spells the same identity the name and
+// version fields carry, so it is canonicalized with them by
+// [canonicalizePURL]: a policy that reads purl(pkg.purl) must not see a
+// different package than one that reads pkg.name and pkg.version.
+var packagePURLKeys = []string{"purl"}
+
 // normalizeIdentityFields applies the ecosystem's own name and version
 // normalization to the identity fields of one payload object. Deputy already
 // uses these normalizers when querying OSV and comparing packages; running them
@@ -288,6 +296,11 @@ func normalizeIdentityFields(m map[string]any, eco ecosystem.Ecosystem) {
 	for _, key := range packageNameKeys {
 		if name, ok := m[key].(string); ok && name != "" {
 			m[key] = eco.NormalizeName(name)
+		}
+	}
+	for _, key := range packagePURLKeys {
+		if raw, ok := m[key].(string); ok && raw != "" {
+			m[key] = canonicalizePURL(raw, eco)
 		}
 	}
 	if !versionsAreConcrete(m) {
@@ -314,6 +327,37 @@ func normalizeIdentityFields(m map[string]any, eco ecosystem.Ecosystem) {
 func versionsAreConcrete(m map[string]any) bool {
 	hasVersion, present := m["has_version"].(bool)
 	return !present || hasVersion
+}
+
+// canonicalizePURL rewrites the name and version components of a PURL with the
+// same normalizers the object's name and version fields get, so both spellings
+// of one identity agree. Everything else about the PURL, its namespace,
+// qualifiers, and subpath, is carried through untouched.
+//
+// The PURL is only rewritten when it parses and when its type is the one the
+// ecosystem projects to ([ecosystem.PURLType]), which is what keeps the wrong
+// ecosystem's folding rules off a PURL that names something else: a package
+// whose ecosystem is Cargo but whose PURL is a pkg:github reference is left
+// exactly as it arrived, as is a PURL Deputy cannot parse. A PURL whose
+// components need no folding keeps its original string byte for byte, so
+// re-encoding never becomes a rewrite of its own.
+func canonicalizePURL(raw string, eco ecosystem.Ecosystem) string {
+	purlType := ecosystem.PURLType(eco)
+	if purlType == "" {
+		return raw
+	}
+	parsed, err := purlx.ParseLoose(raw)
+	if err != nil || !strings.EqualFold(parsed.Type, purlType) {
+		return raw
+	}
+	name := eco.NormalizeName(parsed.Name)
+	version := normalizePayloadVersion(eco, parsed.Version)
+	if name == parsed.Name && version == parsed.Version {
+		return raw
+	}
+	parsed.Name = name
+	parsed.Version = version
+	return parsed.ToString()
 }
 
 // normalizePayloadVersion applies the ecosystem's version normalization,
