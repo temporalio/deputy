@@ -703,6 +703,7 @@ func TestScalibrEcosystemGuardMatchesScannerSpelling(t *testing.T) {
 // package name" fails the build instead of silently reaching policies
 // unnormalized, which is how request.package and package_name were missed.
 var notPackageIdentity = map[string]string{
+	"advisory":      "an advisory identifier attributed to a subject, not a package name",
 	"ecosystem":     "the ecosystem itself, canonicalized before the identity fields",
 	"purl":          "a complete package URL, not a bare name or version",
 	"id":            "an advisory identifier",
