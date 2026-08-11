@@ -263,6 +263,38 @@ func TestExecutePlanExecutionOptions(t *testing.T) {
 			},
 		},
 		{
+			// A skip the handler cannot honor is a broken safety control, the
+			// same as an approval mode it does not implement: accepting the
+			// request and mutating the workspace anyway is the one outcome the
+			// caller ruled out. depends_on references are already checked
+			// against the plan's effective IDs, so a skip reference is checked
+			// the same way.
+			name:     "skip_step_ids naming no step is rejected",
+			options:  &remediationv1.ExecutionOptions{SkipStepIds: []string{"setp-1"}},
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			name:     "skip_step_ids is rejected for the unknown id among known ones",
+			options:  &remediationv1.ExecutionOptions{SkipStepIds: []string{"step-1", "step-9"}},
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			// A dry run predicts the run, so it has to refuse what the run
+			// refuses.
+			name:     "dry run rejects skip_step_ids naming no step",
+			options:  &remediationv1.ExecutionOptions{DryRun: true, SkipStepIds: []string{"step-9"}},
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			// A synthesized step-N id is a real id: a plan whose steps carry
+			// no explicit ids can still be skipped by position.
+			name:         "skip_step_ids accepts a synthesized step id",
+			options:      &remediationv1.ExecutionOptions{SkipStepIds: []string{"step-3"}},
+			extraSteps:   []*remediationv1.Step{{Title: "unnamed", Command: "go get example.com/third@v1.0.0", Executable: true}},
+			wantExecuted: []string{"step-1", "step-2"},
+			wantMessages: []string{"Skipped step 3/3 (requested via skip_step_ids)"},
+		},
+		{
 			name:     "negative timeout is rejected",
 			options:  &remediationv1.ExecutionOptions{Timeout: durationpb.New(-time.Second)},
 			wantCode: connect.CodeInvalidArgument,

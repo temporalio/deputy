@@ -290,10 +290,8 @@ func (h *RemediationHandler) ExecutePlan(
 	// VerboseOutput promises "includes full command output instead of
 	// summaries"; when unset, completion events carry a one-line summary.
 	verbose := opts.GetVerboseOutput()
-	skipSteps := make(map[string]struct{}, len(opts.GetSkipStepIds()))
-	for _, id := range opts.GetSkipStepIds() {
-		skipSteps[id] = struct{}{}
-	}
+	// Requested skips are resolved further down, once the plan's step IDs are
+	// known, so an ID naming no step is refused rather than quietly discarded.
 	// A malformed or negative timeout is a broken safety limit, not "no
 	// timeout": silently executing without a deadline would disable a
 	// control the client asked for. Zero or absent keeps meaning no timeout.
@@ -317,6 +315,13 @@ func (h *RemediationHandler) ExecutePlan(
 	// Dependency references are part of the plan's shape, so validate them
 	// up front rather than discovering an impossible ordering mid-run.
 	if err := validateStepDependencies(plan.GetSteps()); err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	// Requested skips are references into the same plan, so they are resolved
+	// against it here, beside the depends_on references.
+	skipSteps, err := resolveSkipSteps(plan.GetSteps(), opts.GetSkipStepIds())
+	if err != nil {
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
@@ -739,6 +744,37 @@ func validateStepDependencies(steps []*remediationv1.Step) error {
 		seen[stepID] = struct{}{}
 	}
 	return nil
+}
+
+// resolveSkipSteps turns the requested skip_step_ids into the set execution
+// checks each step against, refusing an ID that names no step in the plan.
+//
+// A skip the handler cannot honor is a broken safety control, not a harmless
+// typo: the caller named a step it did not want run, and discarding the
+// request silently runs it anyway and mutates the workspace. That is the same
+// failure the handler already refuses for an approval mode it cannot
+// implement, and the same reference check validateStepDependencies already
+// applies to depends_on, which resolves against these very IDs.
+//
+// IDs are matched against effective step IDs, so a plan whose steps carry no
+// explicit id can still be skipped by its synthesized step-N position.
+func resolveSkipSteps(steps []*remediationv1.Step, requested []string) (map[string]struct{}, error) {
+	if len(requested) == 0 {
+		return nil, nil
+	}
+	known := make(map[string]struct{}, len(steps))
+	for i, step := range steps {
+		known[effectiveStepID(step, i)] = struct{}{}
+	}
+	skip := make(map[string]struct{}, len(requested))
+	for _, id := range requested {
+		if _, ok := known[id]; !ok {
+			return nil, fmt.Errorf("options.skip_step_ids names unknown step %q; the plan's steps are %s",
+				id, strings.Join(slices.Sorted(maps.Keys(known)), ", "))
+		}
+		skip[id] = struct{}{}
+	}
+	return skip, nil
 }
 
 // unmetDependency returns the first prerequisite of a step that did not
