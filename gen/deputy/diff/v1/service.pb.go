@@ -750,8 +750,19 @@ type DiffVulnerabilitiesResponse struct {
 	// per-change and per-vulnerability results attributed to their subjects.
 	// Mirrors deputy.scan.v1.ScanResponse.policy_actions.
 	PolicyActions []*v14.Action `protobuf:"bytes,11,rep,name=policy_actions,json=policyActions,proto3" json:"policy_actions,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// UnchangedVulnerabilities are present in the target but not introduced by
+	// this diff, completing the added/removed/unchanged split. A finding stays
+	// here when it survives a version bump, so "unchanged" describes the
+	// finding's status across the diff, not the dependency's version.
+	// AddedVulnerabilities carries only the newly introduced set, so gates like
+	// fail-on-new-vulnerabilities can count it directly.
+	UnchangedVulnerabilities []*v13.Finding `protobuf:"bytes,12,rep,name=unchanged_vulnerabilities,json=unchangedVulnerabilities,proto3" json:"unchanged_vulnerabilities,omitempty"`
+	// PolicyFilesEvaluated is how many policy bundles were evaluated. It lets
+	// renderers distinguish "no policies configured" (0, omit the section)
+	// from "policies evaluated, all passed" (>0 with no policy_actions).
+	PolicyFilesEvaluated int32 `protobuf:"varint,13,opt,name=policy_files_evaluated,json=policyFilesEvaluated,proto3" json:"policy_files_evaluated,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *DiffVulnerabilitiesResponse) Reset() {
@@ -861,6 +872,20 @@ func (x *DiffVulnerabilitiesResponse) GetPolicyActions() []*v14.Action {
 	return nil
 }
 
+func (x *DiffVulnerabilitiesResponse) GetUnchangedVulnerabilities() []*v13.Finding {
+	if x != nil {
+		return x.UnchangedVulnerabilities
+	}
+	return nil
+}
+
+func (x *DiffVulnerabilitiesResponse) GetPolicyFilesEvaluated() int32 {
+	if x != nil {
+		return x.PolicyFilesEvaluated
+	}
+	return 0
+}
+
 // VulnerabilityDiffStats summarizes vulnerability differences.
 type VulnerabilityDiffStats struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -872,8 +897,12 @@ type VulnerabilityDiffStats struct {
 	AddedBySeverity map[string]int32 `protobuf:"bytes,3,rep,name=added_by_severity,json=addedBySeverity,proto3" json:"added_by_severity,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// RemovedBySeverity breaks down fixed vulnerabilities by severity.
 	RemovedBySeverity map[string]int32 `protobuf:"bytes,4,rep,name=removed_by_severity,json=removedBySeverity,proto3" json:"removed_by_severity,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// UnchangedCount is the number of vulnerabilities the diff neither
+	// introduced nor resolved (see
+	// DiffVulnerabilitiesResponse.unchanged_vulnerabilities).
+	UnchangedCount int32 `protobuf:"varint,5,opt,name=unchanged_count,json=unchangedCount,proto3" json:"unchanged_count,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *VulnerabilityDiffStats) Reset() {
@@ -932,6 +961,13 @@ func (x *VulnerabilityDiffStats) GetRemovedBySeverity() map[string]int32 {
 		return x.RemovedBySeverity
 	}
 	return nil
+}
+
+func (x *VulnerabilityDiffStats) GetUnchangedCount() int32 {
+	if x != nil {
+		return x.UnchangedCount
+	}
+	return 0
 }
 
 // DiffContainerImagesRequest specifies container images to compare.
@@ -2371,7 +2407,7 @@ const file_deputy_diff_v1_service_proto_rawDesc = "" +
 	"baseTarget\x12#\n" +
 	"\rtarget_target\x18\x02 \x01(\tR\ftargetTarget\x12>\n" +
 	"\fdiff_options\x18\x03 \x01(\v2\x1b.deputy.diff.v1.DiffOptionsR\vdiffOptions\x12>\n" +
-	"\fscan_options\x18\x04 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\vscanOptions\"\xd9\x06\n" +
+	"\fscan_options\x18\x04 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\vscanOptions\"\xee\a\n" +
 	"\x1bDiffVulnerabilitiesResponse\x129\n" +
 	"\vbase_target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\n" +
 	"baseTarget\x12=\n" +
@@ -2387,16 +2423,19 @@ const file_deputy_diff_v1_service_proto_rawDesc = "" +
 	"\achanges\x18\t \x03(\v2\x1d.deputy.diff.v1.PackageChangeR\achanges\x12<\n" +
 	"\fchange_stats\x18\n" +
 	" \x01(\v2\x19.deputy.diff.v1.DiffStatsR\vchangeStats\x12?\n" +
-	"\x0epolicy_actions\x18\v \x03(\v2\x18.deputy.policy.v1.ActionR\rpolicyActions\x1a`\n" +
+	"\x0epolicy_actions\x18\v \x03(\v2\x18.deputy.policy.v1.ActionR\rpolicyActions\x12]\n" +
+	"\x19unchanged_vulnerabilities\x18\f \x03(\v2 .deputy.vulnerability.v1.FindingR\x18unchangedVulnerabilities\x124\n" +
+	"\x16policy_files_evaluated\x18\r \x01(\x05R\x14policyFilesEvaluated\x1a`\n" +
 	"\x0fAdvisoriesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
-	"\x05value\x18\x02 \x01(\v2!.deputy.vulnerability.v1.AdvisoryR\x05value:\x028\x01\"\xc0\x03\n" +
+	"\x05value\x18\x02 \x01(\v2!.deputy.vulnerability.v1.AdvisoryR\x05value:\x028\x01\"\xe9\x03\n" +
 	"\x16VulnerabilityDiffStats\x12\x1f\n" +
 	"\vadded_count\x18\x01 \x01(\x05R\n" +
 	"addedCount\x12#\n" +
 	"\rremoved_count\x18\x02 \x01(\x05R\fremovedCount\x12g\n" +
 	"\x11added_by_severity\x18\x03 \x03(\v2;.deputy.diff.v1.VulnerabilityDiffStats.AddedBySeverityEntryR\x0faddedBySeverity\x12m\n" +
-	"\x13removed_by_severity\x18\x04 \x03(\v2=.deputy.diff.v1.VulnerabilityDiffStats.RemovedBySeverityEntryR\x11removedBySeverity\x1aB\n" +
+	"\x13removed_by_severity\x18\x04 \x03(\v2=.deputy.diff.v1.VulnerabilityDiffStats.RemovedBySeverityEntryR\x11removedBySeverity\x12'\n" +
+	"\x0funchanged_count\x18\x05 \x01(\x05R\x0eunchangedCount\x1aB\n" +
 	"\x14AddedBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\x1aD\n" +
@@ -2647,46 +2686,47 @@ var file_deputy_diff_v1_service_proto_depIdxs = []int32{
 	6,  // 19: deputy.diff.v1.DiffVulnerabilitiesResponse.changes:type_name -> deputy.diff.v1.PackageChange
 	7,  // 20: deputy.diff.v1.DiffVulnerabilitiesResponse.change_stats:type_name -> deputy.diff.v1.DiffStats
 	34, // 21: deputy.diff.v1.DiffVulnerabilitiesResponse.policy_actions:type_name -> deputy.policy.v1.Action
-	25, // 22: deputy.diff.v1.VulnerabilityDiffStats.added_by_severity:type_name -> deputy.diff.v1.VulnerabilityDiffStats.AddedBySeverityEntry
-	26, // 23: deputy.diff.v1.VulnerabilityDiffStats.removed_by_severity:type_name -> deputy.diff.v1.VulnerabilityDiffStats.RemovedBySeverityEntry
-	12, // 24: deputy.diff.v1.DiffContainerImagesRequest.options:type_name -> deputy.diff.v1.ContainerDiffOptions
-	32, // 25: deputy.diff.v1.ContainerDiffOptions.scan_options:type_name -> deputy.scan.v1.ScanOptions
-	14, // 26: deputy.diff.v1.DiffContainerImagesResponse.base_image:type_name -> deputy.diff.v1.ContainerImageRef
-	14, // 27: deputy.diff.v1.DiffContainerImagesResponse.target_image:type_name -> deputy.diff.v1.ContainerImageRef
-	30, // 28: deputy.diff.v1.DiffContainerImagesResponse.generated_at:type_name -> google.protobuf.Timestamp
-	16, // 29: deputy.diff.v1.DiffContainerImagesResponse.package_changes:type_name -> deputy.diff.v1.ContainerPackageChange
-	17, // 30: deputy.diff.v1.DiffContainerImagesResponse.vulnerability_changes:type_name -> deputy.diff.v1.ContainerVulnerabilityChange
-	27, // 31: deputy.diff.v1.DiffContainerImagesResponse.advisories:type_name -> deputy.diff.v1.DiffContainerImagesResponse.AdvisoriesEntry
-	18, // 32: deputy.diff.v1.DiffContainerImagesResponse.config_changes:type_name -> deputy.diff.v1.ContainerConfigDiff
-	21, // 33: deputy.diff.v1.DiffContainerImagesResponse.layer_analysis:type_name -> deputy.diff.v1.LayerDiffAnalysis
-	23, // 34: deputy.diff.v1.DiffContainerImagesResponse.summary:type_name -> deputy.diff.v1.ContainerDiffSummary
-	15, // 35: deputy.diff.v1.DiffContainerImagesResponse.base_context:type_name -> deputy.diff.v1.ContainerImageContext
-	15, // 36: deputy.diff.v1.DiffContainerImagesResponse.target_context:type_name -> deputy.diff.v1.ContainerImageContext
-	0,  // 37: deputy.diff.v1.ContainerPackageChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
-	35, // 38: deputy.diff.v1.ContainerPackageChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
-	35, // 39: deputy.diff.v1.ContainerPackageChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
-	1,  // 40: deputy.diff.v1.ContainerVulnerabilityChange.change_kind:type_name -> deputy.diff.v1.VulnerabilityChangeKind
-	35, // 41: deputy.diff.v1.ContainerVulnerabilityChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
-	35, // 42: deputy.diff.v1.ContainerVulnerabilityChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
-	19, // 43: deputy.diff.v1.ContainerConfigDiff.env_changes:type_name -> deputy.diff.v1.EnvChange
-	20, // 44: deputy.diff.v1.ContainerConfigDiff.label_changes:type_name -> deputy.diff.v1.LabelChange
-	0,  // 45: deputy.diff.v1.EnvChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
-	0,  // 46: deputy.diff.v1.LabelChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
-	22, // 47: deputy.diff.v1.LayerDiffAnalysis.layer_changes:type_name -> deputy.diff.v1.LayerChange
-	2,  // 48: deputy.diff.v1.LayerChange.change_kind:type_name -> deputy.diff.v1.LayerChangeKind
-	36, // 49: deputy.diff.v1.DiffVulnerabilitiesResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
-	36, // 50: deputy.diff.v1.DiffContainerImagesResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
-	3,  // 51: deputy.diff.v1.DiffService.DiffPackages:input_type -> deputy.diff.v1.DiffPackagesRequest
-	8,  // 52: deputy.diff.v1.DiffService.DiffVulnerabilities:input_type -> deputy.diff.v1.DiffVulnerabilitiesRequest
-	11, // 53: deputy.diff.v1.DiffService.DiffContainerImages:input_type -> deputy.diff.v1.DiffContainerImagesRequest
-	5,  // 54: deputy.diff.v1.DiffService.DiffPackages:output_type -> deputy.diff.v1.DiffPackagesResponse
-	9,  // 55: deputy.diff.v1.DiffService.DiffVulnerabilities:output_type -> deputy.diff.v1.DiffVulnerabilitiesResponse
-	13, // 56: deputy.diff.v1.DiffService.DiffContainerImages:output_type -> deputy.diff.v1.DiffContainerImagesResponse
-	54, // [54:57] is the sub-list for method output_type
-	51, // [51:54] is the sub-list for method input_type
-	51, // [51:51] is the sub-list for extension type_name
-	51, // [51:51] is the sub-list for extension extendee
-	0,  // [0:51] is the sub-list for field type_name
+	33, // 22: deputy.diff.v1.DiffVulnerabilitiesResponse.unchanged_vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	25, // 23: deputy.diff.v1.VulnerabilityDiffStats.added_by_severity:type_name -> deputy.diff.v1.VulnerabilityDiffStats.AddedBySeverityEntry
+	26, // 24: deputy.diff.v1.VulnerabilityDiffStats.removed_by_severity:type_name -> deputy.diff.v1.VulnerabilityDiffStats.RemovedBySeverityEntry
+	12, // 25: deputy.diff.v1.DiffContainerImagesRequest.options:type_name -> deputy.diff.v1.ContainerDiffOptions
+	32, // 26: deputy.diff.v1.ContainerDiffOptions.scan_options:type_name -> deputy.scan.v1.ScanOptions
+	14, // 27: deputy.diff.v1.DiffContainerImagesResponse.base_image:type_name -> deputy.diff.v1.ContainerImageRef
+	14, // 28: deputy.diff.v1.DiffContainerImagesResponse.target_image:type_name -> deputy.diff.v1.ContainerImageRef
+	30, // 29: deputy.diff.v1.DiffContainerImagesResponse.generated_at:type_name -> google.protobuf.Timestamp
+	16, // 30: deputy.diff.v1.DiffContainerImagesResponse.package_changes:type_name -> deputy.diff.v1.ContainerPackageChange
+	17, // 31: deputy.diff.v1.DiffContainerImagesResponse.vulnerability_changes:type_name -> deputy.diff.v1.ContainerVulnerabilityChange
+	27, // 32: deputy.diff.v1.DiffContainerImagesResponse.advisories:type_name -> deputy.diff.v1.DiffContainerImagesResponse.AdvisoriesEntry
+	18, // 33: deputy.diff.v1.DiffContainerImagesResponse.config_changes:type_name -> deputy.diff.v1.ContainerConfigDiff
+	21, // 34: deputy.diff.v1.DiffContainerImagesResponse.layer_analysis:type_name -> deputy.diff.v1.LayerDiffAnalysis
+	23, // 35: deputy.diff.v1.DiffContainerImagesResponse.summary:type_name -> deputy.diff.v1.ContainerDiffSummary
+	15, // 36: deputy.diff.v1.DiffContainerImagesResponse.base_context:type_name -> deputy.diff.v1.ContainerImageContext
+	15, // 37: deputy.diff.v1.DiffContainerImagesResponse.target_context:type_name -> deputy.diff.v1.ContainerImageContext
+	0,  // 38: deputy.diff.v1.ContainerPackageChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
+	35, // 39: deputy.diff.v1.ContainerPackageChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
+	35, // 40: deputy.diff.v1.ContainerPackageChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
+	1,  // 41: deputy.diff.v1.ContainerVulnerabilityChange.change_kind:type_name -> deputy.diff.v1.VulnerabilityChangeKind
+	35, // 42: deputy.diff.v1.ContainerVulnerabilityChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
+	35, // 43: deputy.diff.v1.ContainerVulnerabilityChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
+	19, // 44: deputy.diff.v1.ContainerConfigDiff.env_changes:type_name -> deputy.diff.v1.EnvChange
+	20, // 45: deputy.diff.v1.ContainerConfigDiff.label_changes:type_name -> deputy.diff.v1.LabelChange
+	0,  // 46: deputy.diff.v1.EnvChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
+	0,  // 47: deputy.diff.v1.LabelChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
+	22, // 48: deputy.diff.v1.LayerDiffAnalysis.layer_changes:type_name -> deputy.diff.v1.LayerChange
+	2,  // 49: deputy.diff.v1.LayerChange.change_kind:type_name -> deputy.diff.v1.LayerChangeKind
+	36, // 50: deputy.diff.v1.DiffVulnerabilitiesResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
+	36, // 51: deputy.diff.v1.DiffContainerImagesResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
+	3,  // 52: deputy.diff.v1.DiffService.DiffPackages:input_type -> deputy.diff.v1.DiffPackagesRequest
+	8,  // 53: deputy.diff.v1.DiffService.DiffVulnerabilities:input_type -> deputy.diff.v1.DiffVulnerabilitiesRequest
+	11, // 54: deputy.diff.v1.DiffService.DiffContainerImages:input_type -> deputy.diff.v1.DiffContainerImagesRequest
+	5,  // 55: deputy.diff.v1.DiffService.DiffPackages:output_type -> deputy.diff.v1.DiffPackagesResponse
+	9,  // 56: deputy.diff.v1.DiffService.DiffVulnerabilities:output_type -> deputy.diff.v1.DiffVulnerabilitiesResponse
+	13, // 57: deputy.diff.v1.DiffService.DiffContainerImages:output_type -> deputy.diff.v1.DiffContainerImagesResponse
+	55, // [55:58] is the sub-list for method output_type
+	52, // [52:55] is the sub-list for method input_type
+	52, // [52:52] is the sub-list for extension type_name
+	52, // [52:52] is the sub-list for extension extendee
+	0,  // [0:52] is the sub-list for field type_name
 }
 
 func init() { file_deputy_diff_v1_service_proto_init() }

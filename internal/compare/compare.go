@@ -62,13 +62,14 @@ func (c ChangeType) String() string {
 // support. IsDirect is true when the module root appears explicitly (without
 // "// indirect" annotation) in go.mod of the target workspace.
 type Change struct {
-	Name          string     `json:"name"`          // canonical or full import path in target inventory
-	OldName       string     `json:"oldName"`       // previous path (may differ after canonicalization)
-	TargetVersion string     `json:"targetVersion"` // version in target inventory (for Added/Updated)
-	BaseVersion   string     `json:"baseVersion"`   // version in base inventory (for Removed/Updated)
-	ChangeType    ChangeType `json:"changeType"`    // classification of the change
-	Ecosystem     string     `json:"ecosystem"`     // e.g. "go", "npm"
-	IsDirect      bool       `json:"isDirect"`      // true if a direct dependency when known (currently Go)
+	Name          string     `json:"name"`               // canonical or full import path in target inventory
+	OldName       string     `json:"oldName"`            // previous path (may differ after canonicalization)
+	TargetVersion string     `json:"targetVersion"`      // version in target inventory (for Added/Updated)
+	BaseVersion   string     `json:"baseVersion"`        // version in base inventory (for Removed/Updated)
+	ChangeType    ChangeType `json:"changeType"`         // classification of the change
+	Ecosystem     string     `json:"ecosystem"`          // e.g. "go", "npm"
+	IsDirect      bool       `json:"isDirect"`           // true if a direct dependency when known (currently Go)
+	Licenses      []string   `json:"licenses,omitempty"` // SPDX identifiers for the target version, when license enrichment ran
 }
 
 // GoPackageInfo represents a parsed interpretation of an import path possibly

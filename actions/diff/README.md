@@ -29,9 +29,23 @@ Compare dependency changes between Git refs with vulnerability analysis.
 |--------|-------------|
 | `added-count` | Dependencies added |
 | `removed-count` | Dependencies removed |
-| `updated-count` | Dependencies updated |
-| `new-vulnerabilities` | New vulnerabilities introduced |
-| `summary` | Text summary of changes |
+| `updated-count` | Dependencies updated (upgraded, downgraded, or otherwise changed) |
+| `new-vulnerabilities` | Vulnerabilities newly introduced by the change set |
+| `policy-denials` | Policy deny results |
+| `policy-warnings` | Policy warn results |
+| `json-path` | Path to the full structured diff (`deputy diff --format json` output) |
+| `summary` | Markdown summary of changes (base64 encoded) |
+
+All counts derive from the structured JSON output (`deputy.diff.v1`), and the
+PR comment and job summary are rendered from the same file via
+`deputy diff --from-json ... --format markdown`, so the gate and the comment
+can never disagree. Use `json-path` with `jq` for custom processing:
+
+```yaml
+- uses: temporalio/deputy/actions/diff@main
+  id: diff
+- run: jq '.policy_actions[]? | select(.type == "ACTION_TYPE_DENY")' "${{ steps.diff.outputs.json-path }}"
+```
 
 ## Examples
 

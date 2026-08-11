@@ -2,27 +2,23 @@ package cmd
 
 import (
 	"context"
-	"crypto/x509"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 
 	"connectrpc.com/connect"
 	pb "deps.dev/api/v3"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sync/errgroup"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
@@ -37,7 +33,6 @@ import (
 	"github.com/temporalio/deputy/internal/ignore"
 	"github.com/temporalio/deputy/internal/inputs"
 	inv "github.com/temporalio/deputy/internal/inventory"
-	"github.com/temporalio/deputy/internal/license"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/output"
 	"github.com/temporalio/deputy/internal/policy"
@@ -45,7 +40,6 @@ import (
 	"github.com/temporalio/deputy/internal/report"
 	"github.com/temporalio/deputy/internal/report/render"
 	"github.com/temporalio/deputy/internal/repository"
-	"github.com/temporalio/deputy/internal/repository/workspace"
 	"github.com/temporalio/deputy/internal/scanning"
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
@@ -72,6 +66,7 @@ func AddDiffCommand(root *cobra.Command, c *services.Clients) {
 		source                                         string // source type: remote, docker-daemon
 		outputFormat                                   string
 		outPath                                        string
+		fromJSONPath                                   string
 		platform                                       string
 	)
 
@@ -151,12 +146,22 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 				outW = f
 			}
 
+			// Render-only mode: re-render a previously saved structured output
+			// without re-running analysis. CI uses this to derive both counts
+			// (jq over the JSON) and the PR comment (markdown) from one scan.
+			if fromJSONPath != "" {
+				return renderDiffFromJSON(fromJSONPath, outputFormat, outW)
+			}
+
 			// Check if both arguments are container image references.
 			// BUT only if they don't look like Git refs in the current repo context.
 			if len(args) == 2 && isMixedContainerDiffInContext(args[0], args[1], repo) {
 				return fmt.Errorf("base and target must both be Git refs or both be container image refs")
 			}
 			if len(args) == 2 && isContainerDiffInContext(args[0], args[1], repo) {
+				if strings.EqualFold(strings.TrimSpace(outputFormat), "markdown") {
+					return fmt.Errorf("--format markdown is not supported for container diffs yet (use --format json)")
+				}
 				// Determine if using local daemon (--source docker-daemon or deprecated --local-daemon)
 				useDaemon := useLocalDaemon || source == "docker-daemon" || source == "daemon" || source == "local"
 				opts := containerDiffOpts{
@@ -318,8 +323,9 @@ PERFORMANCE TIPS:
 	cmd.Flags().StringArrayVar(&policyPaths, "policy", nil, "Path to CEL policy files or bundles to evaluate against diff results (repeatable)")
 	cmd.Flags().BoolVar(&useLocalDaemon, "local-daemon", false, "Use local Docker daemon instead of pulling from remote registry (deprecated: use --source docker-daemon)")
 	cmd.Flags().StringVarP(&source, "source", "s", "", "Target source type for container images: remote, docker-daemon")
-	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "Output format: text | json")
+	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "Output format: text | json | markdown")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
+	cmd.Flags().StringVar(&fromJSONPath, "from-json", "", "Render a saved --format json output file instead of running analysis (use with --format markdown)")
 	cmd.Flags().StringVar(&platform, "platform", "", "Platform for container images (os/arch[/variant])")
 
 	root.AddCommand(cmd)
@@ -358,16 +364,19 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 
 	// Validate and normalize output format early
 	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
-	if outputFormat != "" && outputFormat != "text" && outputFormat != "json" {
-		return fmt.Errorf("unsupported --format %q (use text|json)", outputFormat)
+	if outputFormat != "" && outputFormat != "text" && outputFormat != "json" && outputFormat != "markdown" {
+		return fmt.Errorf("unsupported --format %q (use text|json|markdown)", outputFormat)
 	}
-	isJSON := outputFormat == "json"
+	// Structured formats render from the deputy.diff.v1 response instead of
+	// the interactive text report; markdown is a pure view over the same
+	// message JSON emits.
+	structured := outputFormat == "json" || outputFormat == "markdown"
 
 	dispTarget := targetRef
 	if isWorkingPseudoRef(targetRef) {
 		dispTarget = "WORKING"
 	}
-	if !isJSON {
+	if !structured {
 		doc := render.DiffHeaderDoc(baseRef, dispTarget)
 		_ = doc.Render(outW, output.UIStyles())
 	}
@@ -380,15 +389,15 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 			return fmt.Errorf("error checking files changed: %w", err)
 		}
 
-		if debugMatcher && !isJSON {
+		if debugMatcher && !structured {
 			renderMatcherDebug(outW, changedFiles, matcher)
 		}
 
 		if matcher != nil && !matcher.AnyMatch(changedFiles) {
-			if isJSON {
-				emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil)
+			if structured {
+				emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil, nil, 0)
 				otel.SetSpanOK(span)
-				return outputDiffProtoJSON(outW, emptyResp)
+				return outputDiffResponse(outW, emptyResp, outputFormat)
 			}
 			fmt.Fprintln(outW, ui.StyleAdded.Render("No dependency changes detected."))
 			otel.SetSpanOK(span)
@@ -516,9 +525,9 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 		ExcludeMainModules: excludeMainModules,
 	})
 	if len(changes) == 0 {
-		if isJSON {
-			emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil)
-			return outputDiffProtoJSON(outW, emptyResp)
+		if structured {
+			emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil, nil, nil, 0)
+			return outputDiffResponse(outW, emptyResp, outputFormat)
 		}
 		fmt.Fprintln(outW, "No package changes detected.")
 		otel.SetSpanOK(span)
@@ -528,17 +537,23 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	// Normalize license source
 	licenseSource = flags.NormalizeLicenseSource(licenseSource)
 
-	// Detailed dependency change rendering (legacy style) with optional enrichment
+	// Resolve license data onto the change set before anything consumes it:
+	// the rendered report, policy evaluation (pkg.licenses), and structured
+	// output must all see the same licenses.
+	if enrichLicenses {
+		changes = enrichChangeLicenses(ctx, changes, licenseSource)
+	}
+
 	// Skip text rendering in JSON mode
-	if !isJSON {
-		displayDetailedDependencyChanges(ctx, repoSrc.Workspace(), changes, enrichLicenses, licenseSource, outW, errW)
+	if !structured {
+		displayDetailedDependencyChanges(changes, outW)
 	}
 
 	// Scan for vulnerabilities if enabled
 	if enableVulnScan {
 		// Show progress indicator for interactive mode
 		var progress *ui.Progress
-		if ui.IsTTY(errW) && !isJSON {
+		if ui.IsTTY(errW) && !structured {
 			fmt.Fprintln(errW) // Visual spacing (cleared with spinner)
 			progress = ui.NewProgress(errW, "Scanning for vulnerabilities")
 			progress.Start(ctx)
@@ -605,6 +620,15 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 
 		reportVulns := report.FlattenScanningResult(result)
 
+		// Partition findings into newly-introduced and pre-existing before any
+		// output is produced, so the rendered report, JSON contract, and CI
+		// gates all agree on what this change actually introduced.
+		changedVulns, unchangedVulns := splitVulnsByChange(reportVulns, changes)
+		if len(changedVulns) > 0 {
+			baseAffected := baseVersionAdvisories(ctx, changes, errW)
+			changedVulns, unchangedVulns = reclassifyUnchangedVulns(changedVulns, unchangedVulns, baseAffected)
+		}
+
 		policyReport := DiffPolicyReport{
 			Repo:            repoPath,
 			BaseRef:         baseRef,
@@ -619,9 +643,12 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 		}
 
 		// JSON output mode
-		if isJSON {
-			protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, result.Findings, result.Advisories, policyActions)
-			if err := outputDiffProtoJSON(outW, protoResp); err != nil {
+		if structured {
+			protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes,
+				report.VulnerabilitiesToFindings(changedVulns),
+				report.VulnerabilitiesToFindings(unchangedVulns),
+				result.Advisories, policyActions, len(policyPaths))
+			if err := outputDiffResponse(outW, protoResp, outputFormat); err != nil {
 				otel.SetSpanError(span, err)
 				return err
 			}
@@ -633,18 +660,6 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 			}
 			otel.SetSpanOK(span)
 			return nil
-		}
-
-		changedVulns, unchangedVulns := splitVulnsByChange(reportVulns, changes)
-
-		// An advisory that already affected the base version of an updated
-		// package is not introduced by the change: the diff contract is
-		// vulnerability additions, removals, and fixes, and CI gates count
-		// the changed set as newly introduced. Reclassify those advisories
-		// into the pre-existing bucket.
-		if len(changedVulns) > 0 {
-			baseAffected := baseVersionAdvisories(ctx, changes, errW)
-			changedVulns, unchangedVulns = reclassifyPreexistingVulns(changedVulns, unchangedVulns, baseAffected)
 		}
 
 		_, unchangedStats := consolidateReportVulnerabilities(unchangedVulns)
@@ -705,8 +720,13 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 			fmt.Fprintln(outW, ui.StyleDowngraded.Render("∴ ")+ui.StyleHeader.Render("Vulnerabilities"))
 			render.VulnerabilityList(outW, changedCons, render.VulnerabilityDisplayOptions{})
 			if showUnchangedEff && len(unchangedVulns) > 0 {
-				// Visual separator for unchanged dependencies, include reason if any
-				title := "Unchanged dependencies"
+				// Separator for the pre-existing set, with the reason it is
+				// shown. Not "unchanged dependencies": an upgraded package
+				// whose advisory already affected its base version is
+				// reclassified into this bucket, so it can name dependencies
+				// listed in the changes above. What unites them is that this
+				// diff did not introduce them.
+				title := "Not introduced by this change"
 				if reason != "" {
 					title += " (" + reason + ")"
 				}
@@ -745,10 +765,10 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	}
 
 	// No vulnerability scanning - output changes only
-	if isJSON {
-		protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, nil, nil, nil)
+	if structured {
+		protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, nil, nil, nil, nil, 0)
 		otel.SetSpanOK(span)
-		return outputDiffProtoJSON(outW, protoResp)
+		return outputDiffResponse(outW, protoResp, outputFormat)
 	}
 
 	// Display results (no vulnerabilities scanned)
@@ -790,154 +810,23 @@ func licenseScanConcurrency(total int) int {
 	return parallel
 }
 
-// displayDetailedDependencyChanges renders dependency changes with symbols, arrows,
-// license lookups via deps.dev and a concise summary similar to the original tool output.
-func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, changes []compare.Change, enrich bool, licenseSource string, outW io.Writer, errW io.Writer) {
+// displayDetailedDependencyChanges renders the Dependency Changes section and
+// summary for the (possibly license-enriched) change set. It is a pure
+// renderer: license data comes from Change.Licenses, populated by
+// enrichChangeLicenses before policy evaluation and output conversion, so
+// every surface shows the same licenses.
+func displayDetailedDependencyChanges(changes []compare.Change, outW io.Writer) {
 	if len(changes) == 0 {
 		return
 	}
 	fmt.Fprintln(outW)
 	fmt.Fprintln(outW, ui.StyleHeader.Render("Dependency Changes:"))
 
-	// Open deps.dev gRPC client (best‑effort). Failures degrade gracefully.
-	var client pb.InsightsClient
-	if certPool, err := x509.SystemCertPool(); err == nil {
-		if conn, err := grpc.NewClient("api.deps.dev:443", grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certPool, ""))); err == nil {
-			client = pb.NewInsightsClient(conn)
-			// closing conn when context done (fire and forget); rely on GC otherwise
-			go func() { <-ctx.Done(); _ = conn.Close() }()
-		}
-	}
-
-	// Pre-fetch deps.dev licenses in parallel when requested
-	type pkgKey struct {
-		ecosystem string
-		name      string
-		version   string
-	}
-	resolveEcosystem := func(raw string) string {
-		eco := strings.ToLower(strings.TrimSpace(raw))
-		if eco == "" {
-			return "go"
-		}
-		return eco
-	}
-	licMap := map[pkgKey][]string{}
-	if client != nil && enrich && (licenseSource == flags.LicenseSourceDepsDev || licenseSource == flags.LicenseSourceBoth) {
-		var mu sync.Mutex
-		g, gctx := errgroup.WithContext(ctx)
-		for _, c := range changes {
-			if c.ChangeType == compare.Removed || c.TargetVersion == "" {
-				continue
-			}
-			pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
-			if _, ok := licMap[pk]; ok {
-				continue
-			}
-			pkCopy := pk
-			g.Go(func() error {
-				l := license.FetchLicensesForEcosystem(gctx, depsClient{client}, pkCopy.ecosystem, pkCopy.name, pkCopy.version)
-				mu.Lock()
-				licMap[pkCopy] = l
-				mu.Unlock()
-				return nil
-			})
-		}
-		_ = g.Wait()
-	}
-
-	var localScan []string
-	if enrich && (licenseSource == flags.LicenseSourceScan || licenseSource == flags.LicenseSourceBoth) {
-		localScan = license.LocalRepoLicenseScan(ws)
-	}
-
-	var remoteFetchers map[pkgKey]chan []string
-	var remoteCache map[pkgKey][]string
-	var remoteTasks []pkgKey
-	if enrich && (licenseSource == flags.LicenseSourceScan || licenseSource == flags.LicenseSourceBoth) {
-		required := map[pkgKey]struct{}{}
-		for _, c := range changes {
-			if c.ChangeType == compare.Removed || c.TargetVersion == "" {
-				continue
-			}
-			pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
-			if _, ok := required[pk]; ok {
-				continue
-			}
-			required[pk] = struct{}{}
-		}
-		if len(required) > 0 {
-			remoteFetchers = make(map[pkgKey]chan []string, len(required))
-			remoteCache = make(map[pkgKey][]string, len(required))
-			remoteTasks = make([]pkgKey, 0, len(required))
-			seen := map[pkgKey]struct{}{}
-			for _, c := range changes {
-				if c.ChangeType == compare.Removed || c.TargetVersion == "" {
-					continue
-				}
-				pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
-				if _, ok := seen[pk]; ok {
-					continue
-				}
-				seen[pk] = struct{}{}
-				ch := make(chan []string, 1)
-				remoteFetchers[pk] = ch
-				remoteTasks = append(remoteTasks, pk)
-			}
-			concurrency := max(licenseScanConcurrency(len(remoteTasks)), 1)
-			sem := make(chan struct{}, concurrency)
-			for _, task := range remoteTasks {
-				t := task
-				ch := remoteFetchers[t]
-				go func() {
-					defer close(ch)
-					select {
-					case sem <- struct{}{}:
-					case <-ctx.Done():
-						return
-					}
-					defer func() { <-sem }()
-					lics := license.LookupLicensesBestEffort(ctx, t.ecosystem, t.name, t.version)
-					ch <- lics
-				}()
-			}
-		}
-	}
-
 	// Counters
 	var addedN, removedN, updatedN, upgradedN, downgradedN int
 
 	for _, c := range changes {
-		// Build the license and direct/indirect annotation in the new format: [License1, License2] (direct/indirect)
-		pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
-		licenses := []string{"?"}
-		if l, ok := licMap[pk]; ok && len(l) > 0 {
-			licenses = l
-		}
-		if c.ChangeType != compare.Removed && c.TargetVersion != "" && enrich && (licenseSource == flags.LicenseSourceScan || licenseSource == flags.LicenseSourceBoth) {
-			if len(localScan) > 0 {
-				licenses = license.MergeLicenseSources(licenses, localScan)
-			}
-			if remoteFetchers != nil {
-				switch {
-				case remoteCache[pk] != nil:
-					licenses = license.MergeLicenseSources(licenses, remoteCache[pk])
-				case remoteFetchers[pk] != nil:
-					ch := remoteFetchers[pk]
-					select {
-					case rc, ok := <-ch:
-						if ok && len(rc) > 0 {
-							remoteCache[pk] = rc
-							licenses = license.MergeLicenseSources(licenses, rc)
-						} else {
-							remoteCache[pk] = nil
-						}
-					case <-ctx.Done():
-						remoteCache[pk] = nil
-					}
-				}
-			}
-		}
+		licenses := c.Licenses
 
 		// Format the combined license and direct/indirect annotation
 		var licAndDepStr string
@@ -948,7 +837,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			directnessStr = ui.StyleIndirect.Render("[indirect]")
 		}
 
-		if len(licenses) > 0 && licenses[0] != "?" {
+		if len(licenses) > 0 {
 			licenseStr := strings.Join(licenses, ", ")
 			licAndDepStr = ui.StyleLicense.Render("["+licenseStr+"]") + " " + directnessStr
 		} else {
@@ -1117,12 +1006,12 @@ func baseQueryPackages(changes []compare.Change) []*dependencyv1.Package {
 	return basePkgs
 }
 
-// reclassifyPreexistingVulns moves changed-package vulnerabilities whose
+// reclassifyUnchangedVulns moves changed-package vulnerabilities whose
 // advisory already affected the package's base version (matched by ID or any
 // alias) into the pre-existing bucket, leaving the changed set to carry only
 // what the change actually introduces. A nil baseAffected map reclassifies
 // nothing.
-func reclassifyPreexistingVulns(changed, unchanged []report.Vulnerability, baseAffected map[string]map[string]bool) (newChanged, newUnchanged []report.Vulnerability) {
+func reclassifyUnchangedVulns(changed, unchanged []report.Vulnerability, baseAffected map[string]map[string]bool) (newChanged, newUnchanged []report.Vulnerability) {
 	if len(baseAffected) == 0 {
 		return changed, unchanged
 	}
@@ -1297,6 +1186,38 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 		collect(actions, policy.EntrypointDiffVulnerability, internalproto.PolicySubjectFromFinding(finding))
 	}
 	return results, nil
+}
+
+// renderDiffFromJSON renders a previously saved `deputy diff --format json`
+// response without re-running analysis. The file must contain a
+// deputy.diff.v1.DiffVulnerabilitiesResponse in protojson form (exactly what
+// --format json emits); the requested format must be a structured one, since
+// the interactive text report is not reconstructable from the contract.
+func renderDiffFromJSON(path, format string, w io.Writer) error {
+	format = strings.ToLower(strings.TrimSpace(format))
+	if format != "json" && format != "markdown" {
+		return fmt.Errorf("--from-json requires --format json or --format markdown")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read diff JSON: %w", err)
+	}
+	resp := &diffv1.DiffVulnerabilitiesResponse{}
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(data, resp); err != nil {
+		return fmt.Errorf("parse %s (expected `deputy diff --format json` output): %w", path, err)
+	}
+	return outputDiffResponse(w, resp, format)
+}
+
+// outputDiffResponse writes a diff response in the requested structured
+// format: protojson for "json", rendered markdown for "markdown". Both are
+// views over the same deputy.diff.v1 message, so they always agree.
+func outputDiffResponse(w io.Writer, resp *diffv1.DiffVulnerabilitiesResponse, format string) error {
+	if format == "markdown" {
+		_, err := io.WriteString(w, render.DiffMarkdown(resp))
+		return err
+	}
+	return outputDiffProtoJSON(w, resp)
 }
 
 // outputDiffProtoJSON writes a diff response as JSON using protojson.

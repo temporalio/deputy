@@ -9,13 +9,13 @@ import (
 	"github.com/temporalio/deputy/internal/report"
 )
 
-// TestReclassifyPreexistingVulns pins the diff's newly-introduced semantics:
+// TestReclassifyUnchangedVulns pins the diff's newly-introduced semantics:
 // an advisory that already affected the updated package's base version
 // (matched by ID or alias) moves to the pre-existing bucket, while advisories
 // the change actually introduces stay in the changed set. A nil base map
 // (lookup failed or nothing to check) reclassifies nothing, failing toward
 // reporting.
-func TestReclassifyPreexistingVulns(t *testing.T) {
+func TestReclassifyUnchangedVulns(t *testing.T) {
 	changed := []report.Vulnerability{
 		{ID: "GO-2026-5932", Package: "golang.org/x/crypto", Version: "0.53.0"},
 		{ID: "GHSA-new-1111-2222", Aliases: []string{"CVE-2026-9999"}, Package: "golang.org/x/crypto", Version: "0.53.0"},
@@ -56,7 +56,7 @@ func TestReclassifyPreexistingVulns(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotChanged, gotUnchanged := reclassifyPreexistingVulns(changed, unchanged, tt.baseAffected)
+			gotChanged, gotUnchanged := reclassifyUnchangedVulns(changed, unchanged, tt.baseAffected)
 			if got := vulnIDs(gotChanged); !slices.Equal(got, tt.wantChanged) {
 				t.Errorf("changed = %v, want %v", got, tt.wantChanged)
 			}
