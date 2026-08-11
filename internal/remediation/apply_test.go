@@ -856,6 +856,28 @@ func TestApplyDeputyCommandThroughSymlinkedRepoDir(t *testing.T) {
 	}
 }
 
+// expiringContext is a deadline that expires between a step's first check and
+// its second: the first Err call reports a live context, every later one
+// reports the deadline as blown. Real clocks cannot be aimed that precisely, and
+// the window it stands for is the one that matters, between the read a step has
+// already done and the write it has not.
+//
+// It counts the checks so a test can tell a path that honoured the deadline from
+// one that simply never asked again.
+type expiringContext struct {
+	context.Context
+	checks int
+}
+
+// Err reports the deadline as live once and blown from then on.
+func (c *expiringContext) Err() error {
+	c.checks++
+	if c.checks == 1 {
+		return nil
+	}
+	return context.DeadlineExceeded
+}
+
 // TestApplyDeputyCommandHonorsContext pins the execution timeout for
 // deputy-internal steps. These commands are applied in process, so no
 // subprocess machinery enforces the caller's deadline on them: if the apply
@@ -863,9 +885,10 @@ func TestApplyDeputyCommandThroughSymlinkedRepoDir(t *testing.T) {
 // still commit its rewrite, and the caller that was already told the step
 // timed out would find the workspace modified anyway.
 //
-// Each opcode is checked with a context that is already done and with a live
-// one. The live case is the positive control: without it, an apply path that
-// refused every command would pass the cancelled cases.
+// Each opcode is checked with a context that is already done, with one that
+// expires while the command runs, and with a live one. The live case is the
+// positive control: without it, an apply path that refused every command would
+// pass the cancelled cases.
 func TestApplyDeputyCommandHonorsContext(t *testing.T) {
 	const (
 		workflow   = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
@@ -955,6 +978,23 @@ func TestApplyDeputyCommandHonorsContext(t *testing.T) {
 					t.Fatalf("ApplyDeputyCommand() error = %v, want context.DeadlineExceeded", err)
 				}
 				requireUnmodified(t, path, tt.content)
+			})
+
+			t.Run("deadline expiring during the edit modifies nothing", func(t *testing.T) {
+				dir, path := writeWorkspace(t, tt.file, tt.content)
+				ctx := &expiringContext{Context: t.Context()}
+
+				err := ApplyDeputyCommand(ctx, dir, tt.cmd)
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("ApplyDeputyCommand() error = %v, want context.DeadlineExceeded", err)
+				}
+				requireUnmodified(t, path, tt.content)
+				// A row that never looked past its first check would pass
+				// vacuously: the deadline it is meant to survive expired after
+				// that check, so it has to be consulted again.
+				if ctx.checks < 2 {
+					t.Fatalf("the deadline was consulted %d time(s); a write must recheck it", ctx.checks)
+				}
 			})
 
 			t.Run("live context applies the edit", func(t *testing.T) {

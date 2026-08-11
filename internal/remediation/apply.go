@@ -209,9 +209,12 @@ func ApplyDeputyCommand(ctx context.Context, repoDir, cmd string) error {
 // ensureLive reports ctx's cancellation as an error naming the file the step
 // was about to touch and the operation it was about to perform.
 //
-// Every deputy-internal edit calls it twice: once before reading, so an already
-// expired deadline costs no filesystem work, and once after the read and before
-// the write, which is the check that matters. A rewrite that took longer than
+// Every deputy-internal edit is checked twice: once before reading, so an
+// already expired deadline costs no filesystem work, and once after the read and
+// before the write, which is the check that matters. The two opcodes that read
+// and write here call this function for both; deputy:action:pin delegates its
+// write to githubactions.RewriteWorkflow, which makes the second check itself
+// with the same context. A rewrite that took longer than
 // the caller allowed must not still be committed, because the caller has by
 // then been told the step timed out and is entitled to treat the workspace as
 // untouched by it.
@@ -495,13 +498,14 @@ func applyDockerfileUpdate(ctx context.Context, filePath, image, newVersion stri
 // opcode fail on any checkout reached through a symlink, which on macOS is
 // every path under /tmp and /var.
 //
-// The deadline is checked here rather than around the rewrite's own read and
-// write: RewriteWorkflow backs [pin.Strategy].Rewrite, whose signature is
-// shared by every pin strategy, so it takes no context and threading one
-// through would change that interface for every strategy. This opcode's window
-// between the check and the write is therefore wider than the other two. It
-// stays bounded because the rewrite reads and writes one already-resolved
-// regular file, which resolveDeputyCommand has already required.
+// The deadline is checked twice, as it is for the other two opcodes: once here
+// before any filesystem work, and once inside the rewrite between its read and
+// its write. The second check is the one that matters, since a rewrite that
+// outlived the caller's deadline must not still be committed to a workspace the
+// caller has been told is untouched. Reaching it did not require a context on
+// [pin.Strategy].Rewrite, whose signature every strategy shares: the rewrite
+// itself is a package-level function, so it can take a context while the
+// interface method keeps passing a background one.
 func applyActionPin(ctx context.Context, repoDir, filePath string, update pin.Update) error {
 	if err := ensureLive(ctx, "rewriting", filePath); err != nil {
 		return err
@@ -523,7 +527,7 @@ func applyActionPin(ctx context.Context, repoDir, filePath string, update pin.Up
 		return fmt.Errorf("computing relative path: %w", err)
 	}
 
-	if err := githubactions.RewriteWorkflow(root, filepath.ToSlash(relPath), []pin.Update{update}); err != nil {
+	if err := githubactions.RewriteWorkflow(ctx, root, filepath.ToSlash(relPath), []pin.Update{update}); err != nil {
 		return fmt.Errorf("pinning %s in %s: %w", update.Name, filePath, err)
 	}
 	return nil

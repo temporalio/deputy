@@ -1,6 +1,7 @@
 package githubactions
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -17,7 +18,15 @@ import (
 // The output format is Dependabot-compatible:
 //
 //	uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-func RewriteWorkflow(root *os.Root, relPath string, updates []pin.Update) error {
+//
+// ctx bounds the write, not the read: a caller that gave up while the file was
+// being read and rewritten has been told its work did not happen, and must not
+// find the file changed afterwards. Reading a workflow is a single bounded
+// read of a regular file, so the check that matters is the one between that
+// read and the write it feeds. [Strategy.Rewrite] passes a background context
+// because [pin.Strategy] carries none; callers that do have a deadline, such as
+// Deputy's deputy:action:pin remediation step, pass theirs here.
+func RewriteWorkflow(ctx context.Context, root *os.Root, relPath string, updates []pin.Update) error {
 	if len(updates) == 0 {
 		return nil
 	}
@@ -84,6 +93,13 @@ func RewriteWorkflow(root *os.Root, relPath string, updates []pin.Update) error 
 
 	if !modified {
 		return nil
+	}
+
+	// Last chance to abandon the rewrite: past this point the file is
+	// truncated, so a caller whose deadline expired during the read above
+	// would otherwise be told the work was abandoned and find it done.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("not writing %s: %w", relPath, err)
 	}
 
 	// Write back via os.Root for path-traversal safety.
