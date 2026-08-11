@@ -21,6 +21,7 @@ import (
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/proto/descriptorset"
 )
 
 // SchemaRegistry provides proto schema introspection for CEL hints.
@@ -173,21 +174,32 @@ func (r *SchemaRegistry) registerContainerSchemas() {
 		"Container image metadata")
 }
 
-// severityDescriptions documents the severity constant members offered in
-// completions. Keys are the runtime constant names from policy.SeverityConstants().
-var severityDescriptions = map[string]string{
-	"critical":    "Critical severity (CVSS 9.0-10.0)",
-	"high":        "High severity (CVSS 7.0-8.9)",
-	"medium":      "Medium severity (CVSS 4.0-6.9)",
-	"low":         "Low severity (CVSS 0.1-3.9)",
-	"unspecified": "Unknown severity",
+// enumValueDescription returns the description offered for an enum member: the
+// first sentence of the proto comment on the enum value with that number.
+// Descriptions therefore keep the proto's trailing period, unlike the
+// hand-written descriptions elsewhere in this file.
+//
+// The lookup goes through the value descriptor rather than reconstructing the
+// value name from a prefix, so a renamed or renumbered enum value yields "" (a
+// signal, caught by the schema tests) instead of a plausible wrong description.
+func enumValueDescription(enum protoreflect.EnumDescriptor, number protoreflect.EnumNumber) string {
+	value := enum.Values().ByNumber(number)
+	if value == nil {
+		return ""
+	}
+	// The descriptor set keys enum values as <enum full name>.<VALUE_NAME>,
+	// which is not EnumValueDescriptor.FullName(): proto scopes enum values to
+	// the enum's parent, not the enum itself.
+	return descriptorset.Summary(enum.FullName().Append(value.Name()))
 }
 
 // registerEnums adds enum schemas.
 func (r *SchemaRegistry) registerEnums() {
 	// SeverityLevel: member names derive from the runtime constants map so the
 	// REPL completes exactly the identifiers that evaluate (severity.critical,
-	// not severity.CRITICAL).
+	// not severity.CRITICAL), and the descriptions derive from the proto
+	// comments on the enum values those constants carry.
+	severityEnum := vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_UNSPECIFIED.Descriptor()
 	consts := policy.SeverityConstants()
 	values := make([]EnumValue, 0, len(consts))
 	for _, name := range policy.SeverityConstantNames() {
@@ -195,7 +207,7 @@ func (r *SchemaRegistry) registerEnums() {
 		values = append(values, EnumValue{
 			Name:        name,
 			Number:      int32(level),
-			Description: severityDescriptions[name],
+			Description: enumValueDescription(severityEnum, level.Number()),
 		})
 	}
 	r.enums["severity"] = &EnumSchema{
@@ -205,19 +217,34 @@ func (r *SchemaRegistry) registerEnums() {
 		Values:      values,
 	}
 
-	// Scope
+	// Scope: the runtime binds uppercase member names (scope.RUNTIME) that the
+	// policy package does not export, so the names stay literal here; the
+	// numbers and descriptions come from the proto enum they name.
+	scopeEnum := graphv1.Scope_SCOPE_UNSPECIFIED.Descriptor()
+	scopeMembers := []struct {
+		name  string
+		scope graphv1.Scope
+	}{
+		{"RUNTIME", graphv1.Scope_SCOPE_RUNTIME},
+		{"DEV", graphv1.Scope_SCOPE_DEV},
+		{"TEST", graphv1.Scope_SCOPE_TEST},
+		{"BUILD", graphv1.Scope_SCOPE_BUILD},
+		{"OPTIONAL", graphv1.Scope_SCOPE_OPTIONAL},
+		{"UNSPECIFIED", graphv1.Scope_SCOPE_UNSPECIFIED},
+	}
+	scopeValues := make([]EnumValue, 0, len(scopeMembers))
+	for _, member := range scopeMembers {
+		scopeValues = append(scopeValues, EnumValue{
+			Name:        member.name,
+			Number:      int32(member.scope),
+			Description: enumValueDescription(scopeEnum, member.scope.Number()),
+		})
+	}
 	r.enums["scope"] = &EnumSchema{
 		Name:        "Scope",
 		Description: "Dependency scope",
 		CELPrefix:   "scope.",
-		Values: []EnumValue{
-			{Name: "RUNTIME", Number: 1, Description: "Runtime dependency"},
-			{Name: "DEV", Number: 2, Description: "Development dependency"},
-			{Name: "TEST", Number: 5, Description: "Test dependency"},
-			{Name: "BUILD", Number: 4, Description: "Build-time dependency"},
-			{Name: "OPTIONAL", Number: 3, Description: "Optional dependency"},
-			{Name: "UNSPECIFIED", Number: 0, Description: "Unspecified scope"},
-		},
+		Values:      scopeValues,
 	}
 }
 

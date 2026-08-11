@@ -98,6 +98,63 @@ func TestSchemaRegistry_Enums(t *testing.T) {
 	}
 }
 
+// TestSchemaRegistry_EnumDescriptionsComeFromProtoComments pins the enum member
+// descriptions to the proto comments. Every member must carry a description,
+// because an empty one means the descriptor lookup drifted (a renamed or
+// renumbered enum value) rather than that the member deserves no help text. The
+// exact expectations keep the assertion non-vacuous: they are the proto comments
+// verbatim, first sentence and trailing period included, so editing a comment in
+// the .proto surfaces here instead of silently changing REPL hints.
+func TestSchemaRegistry_EnumDescriptionsComeFromProtoComments(t *testing.T) {
+	r := NewSchemaRegistry()
+
+	tests := []struct {
+		enum string
+		want map[string]string // member name -> exact expected description
+	}{
+		{
+			enum: "severity",
+			want: map[string]string{
+				"critical":    "Critical severity (CVSS 9.0-10.0).",
+				"unspecified": "The advisory record Deputy matched carries no rating.",
+			},
+		},
+		{
+			enum: "scope",
+			want: map[string]string{
+				"RUNTIME": "Runtime dependency.",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.enum, func(t *testing.T) {
+			schema := r.GetEnum(tt.enum)
+			if schema == nil {
+				t.Fatalf("expected %s enum", tt.enum)
+			}
+			if len(schema.Values) == 0 {
+				t.Fatalf("expected %s enum members", tt.enum)
+			}
+			for _, v := range schema.Values {
+				if v.Description == "" {
+					t.Errorf("%s.%s has an empty description: the proto comment is missing or the descriptor lookup no longer resolves this member", tt.enum, v.Name)
+				}
+				if want, ok := tt.want[v.Name]; ok && v.Description != want {
+					t.Errorf("%s.%s description = %q, want the proto comment %q", tt.enum, v.Name, v.Description, want)
+				}
+			}
+			// Guard the expectations themselves: a renamed member would make
+			// the exact checks above vacuous.
+			for name := range tt.want {
+				if !slices.ContainsFunc(schema.Values, func(v EnumValue) bool { return v.Name == name }) {
+					t.Errorf("%s enum has no member %q to check", tt.enum, name)
+				}
+			}
+		})
+	}
+}
+
 func TestSchemaRegistry_Functions(t *testing.T) {
 	r := NewSchemaRegistry()
 
