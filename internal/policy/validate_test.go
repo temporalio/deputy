@@ -1369,6 +1369,32 @@ policies:
 `,
 			wantCodes: []string{"yaml-anchor", "invalid-action"},
 		},
+		{
+			name: "an unused anchor beside a policies mapping",
+			bundle: `
+unused: &u 1
+
+policies: {}
+`,
+			wantCodes: []string{"yaml-anchor", "policies-not-list"},
+		},
+		{
+			name: "an unused anchor beside a policies scalar",
+			bundle: `
+unused: &u 1
+
+policies: none
+`,
+			wantCodes: []string{"yaml-anchor", "policies-not-list"},
+		},
+		{
+			name: "an unused anchor in a document with no policies key",
+			bundle: `
+unused: &u
+  name: never-referenced
+`,
+			wantCodes: []string{"yaml-anchor", "missing-policies"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1387,6 +1413,36 @@ policies:
 				}
 			}
 		})
+	}
+}
+
+// TestValidateBundleReadsPoliciesSuppliedByAMergeKey pins the one case where a
+// missing policies key is not missing: a root merge key supplies it. The merge
+// key is refused, and saying the list is absent as well would name a mistake the
+// author did not make.
+func TestValidateBundleReadsPoliciesSuppliedByAMergeKey(t *testing.T) {
+	bundle := `
+defaults: &defaults
+  policies:
+    - name: inherited
+      rules:
+        - when: "true"
+          action: deny
+          reason: "r"
+
+<<: *defaults
+`
+	issues, err := ValidateBundle(bundle, ValidateOptions{Source: "bundle.yaml"})
+	if err != nil {
+		t.Fatalf("ValidateBundle: %v", err)
+	}
+	for _, issue := range issues {
+		if issue.Code == "missing-policies" {
+			t.Fatalf("a merged policies list is not missing: %v", issues)
+		}
+	}
+	if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == "yaml-merge-key" }) {
+		t.Fatalf("expected the merge key to be reported, got %v", issues)
 	}
 }
 

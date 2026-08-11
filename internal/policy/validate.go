@@ -249,15 +249,20 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	issues = append(issues, anchors...)
 	policiesNode := MappingValue(doc, bundlePoliciesKey)
 	if policiesNode == nil {
-		if len(anchors) == 0 {
+		// A root merge key supplies the whole list, so a document carrying one is
+		// not missing it and the merge key is the only mistake to report. Nothing
+		// else the document does can put the key here, so an anchor elsewhere does
+		// not withhold this.
+		if !hasMergeKey(doc) {
 			issues = append(issues, issueAt(doc, IssueError, "missing-policies", "missing required 'policies' list"))
 		}
 		return issues, nil
 	}
 	if policiesNode.Kind != yaml.SequenceNode {
 		// An aliased list is a list once resolved, so saying it is not one would
-		// describe the alias rather than the mistake.
-		if len(anchors) == 0 {
+		// describe the alias rather than the mistake. A value written directly is
+		// the mistake, whatever the document does elsewhere.
+		if policiesNode.Kind != yaml.AliasNode {
 			issues = append(issues, issueAt(policiesNode, IssueError, "policies-not-list", "'policies' must be a list"))
 		}
 		return issues, nil
@@ -676,6 +681,22 @@ func MappingValue(mapNode *yaml.Node, key string) *yaml.Node {
 // policy name two such policies would then collide on.
 func isNullNode(node *yaml.Node) bool {
 	return node != nil && node.Kind == yaml.ScalarNode && node.Tag == "!!null"
+}
+
+// hasMergeKey reports whether a mapping node merges another mapping's entries
+// into itself. Only a merge key on the mapping itself can add keys to it, which
+// is what makes a bundle whose policies key arrives that way not a bundle
+// missing the key.
+func hasMergeKey(mapNode *yaml.Node) bool {
+	if mapNode == nil || mapNode.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(mapNode.Content); i += 2 {
+		if isMergeKey(mapNode.Content[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 // isMergeKey reports whether a mapping key is YAML's merge key, the "<<" that
