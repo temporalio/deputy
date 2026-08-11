@@ -64,7 +64,7 @@ func PolicyEntrypointsMarkdown() string {
 			continue
 		}
 		b.WriteString(fmt.Sprintf("### `%s`\n\n", typeName))
-		if comment := firstSentence(descriptorset.Comment(md.FullName())); comment != "" {
+		if comment := descriptorset.Summary(md.FullName()); comment != "" {
 			b.WriteString(comment + "\n\n")
 		}
 		writeFieldTable(&b, md)
@@ -133,7 +133,7 @@ func writeFieldTable(b *strings.Builder, md protoreflect.MessageDescriptor) {
 	slices.Sort(names)
 	for _, name := range names {
 		fd := byName[name]
-		fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", name, fieldTypeString(fd), tableCell(firstSentence(descriptorset.Comment(fd.FullName()))))
+		fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", name, fieldTypeString(fd), tableCell(descriptorset.Summary(fd.FullName())))
 	}
 	b.WriteString("\n")
 }
@@ -166,32 +166,6 @@ func scalarTypeString(fd protoreflect.FieldDescriptor) string {
 		return "double"
 	default:
 		return fd.Kind().String()
-	}
-}
-
-// firstSentence trims a proto comment to its first sentence so it fits a
-// table cell without losing the contract statement. A period only ends the
-// sentence when an uppercase letter follows, so abbreviations, URLs, and
-// version strings mid-sentence do not truncate it.
-func firstSentence(comment string) string {
-	comment = strings.TrimSpace(comment)
-	if comment == "" {
-		return ""
-	}
-	line := strings.ReplaceAll(comment, "\n", " ")
-	for idx := 0; ; {
-		next := strings.Index(line[idx:], ". ")
-		if next == -1 {
-			return line
-		}
-		idx += next
-		rest := strings.TrimLeft(line[idx+1:], " ")
-		if rest != "" {
-			if r := rune(rest[0]); r >= 'A' && r <= 'Z' {
-				return line[:idx+1]
-			}
-		}
-		idx += 2
 	}
 }
 

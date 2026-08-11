@@ -170,7 +170,7 @@ func handleREPLCommandV2(line string, request map[string]string, entrypoint *str
 		})
 		r.Blank()
 		r.Section("Examples")
-		r.CELExample(`vulnerability.severity == severity.HIGH`)
+		r.CELExample(`finding.advisory.severity.level == severity.high`)
 		r.CELExample(`vulnerability.isDirect && size(vulnerability.fixedVersions) > 0`)
 		r.CELExample(`request.package == "lodash" && request.version == "4.17.20"`)
 		r.CELExample(`severityAtLeast(vulnerability, "HIGH")`)
@@ -213,7 +213,7 @@ func handleREPLCommandV2(line string, request map[string]string, entrypoint *str
 		r.FormatContext("request", toAnyMap(request))
 		r.Blank()
 		r.Section("Available Constants")
-		r.KeyValue("severity", "CRITICAL, HIGH, MEDIUM, LOW, UNSPECIFIED")
+		r.KeyValue("severity", strings.Join(policy.SeverityConstantNames(), ", "))
 		r.KeyValue("scope", "RUNTIME, DEV, TEST, BUILD, OPTIONAL, UNSPECIFIED")
 		return "", nil
 
@@ -296,13 +296,12 @@ func handleREPLCommandV2(line string, request map[string]string, entrypoint *str
 
 	case ":severity":
 		r.Section("Severity Constants")
-		r.Table([]ui.TableRow{
-			{Label: "severity.CRITICAL", Value: "\"CRITICAL\""},
-			{Label: "severity.HIGH", Value: "\"HIGH\""},
-			{Label: "severity.MEDIUM", Value: "\"MEDIUM\""},
-			{Label: "severity.LOW", Value: "\"LOW\""},
-			{Label: "severity.UNSPECIFIED", Value: "\"UNSPECIFIED\""},
-		})
+		consts := policy.SeverityConstants()
+		rows := make([]ui.TableRow, 0, len(consts))
+		for _, name := range policy.SeverityConstantNames() {
+			rows = append(rows, ui.TableRow{Label: "severity." + name, Value: fmt.Sprint(consts[name])})
+		}
+		r.Table(rows)
 		r.Blank()
 		r.Section("Severity Functions")
 		r.CommandHelp("severityAtLeast(vuln, level)", "Check if severity >= level")
@@ -553,7 +552,7 @@ func suggestFix(expr, errMsg string) string {
 	switch {
 	case strings.Contains(errMsg, "undeclared reference"):
 		if strings.Contains(expr, "severity.") && !strings.Contains(errMsg, "severity") {
-			return "severity constants are available: severity.CRITICAL, severity.HIGH, etc."
+			return "severity constants are available: severity.critical, severity.high, etc."
 		}
 		if strings.Contains(expr, ".") {
 			parts := strings.Split(expr, ".")

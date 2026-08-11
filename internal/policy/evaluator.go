@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -118,6 +119,33 @@ func DefaultVariableNames() []string {
 // This allows external packages to use the same constants (severity.critical, etc.)
 func SeverityConstants() map[string]any {
 	return severityConstants
+}
+
+// SeverityConstantNames returns the member names of the severity constants map
+// (critical, high, medium, low, unspecified), ordered from most to least
+// severe. Tooling (REPL, LSP completions) must derive severity member lists
+// from this function so the names they teach can never drift from what the
+// runtime actually binds.
+func SeverityConstantNames() []string {
+	names := make([]string, 0, len(severityConstants))
+	for name := range severityConstants {
+		names = append(names, name)
+	}
+	slices.SortFunc(names, func(a, b string) int {
+		// Descending severity: critical first, unspecified last.
+		return cmp.Compare(severityLevelNumber(b), severityLevelNumber(a))
+	})
+	return names
+}
+
+// severityLevelNumber returns the proto enum number backing a severity
+// constant, used to order constant names by severity rank.
+func severityLevelNumber(name string) int32 {
+	level, ok := severityConstants[name].(vulnerabilityv1.SeverityLevel)
+	if !ok {
+		return -1
+	}
+	return int32(level)
 }
 
 // NewFilterEnv creates a CEL environment suitable for filter expressions.

@@ -1,7 +1,10 @@
 package repl
 
 import (
+	"slices"
 	"testing"
+
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 func TestNewSchemaRegistry(t *testing.T) {
@@ -63,25 +66,92 @@ func TestSchemaRegistry_Enums(t *testing.T) {
 		t.Errorf("expected 5 severity values, got %d", len(severity.Values))
 	}
 
-	// Check CRITICAL value
+	// Check critical value (constant members are lowercase at runtime)
 	hasCritical := false
 	for _, v := range severity.Values {
-		if v.Name == "CRITICAL" {
+		if v.Name == "critical" {
 			hasCritical = true
 			if v.Number != 4 {
-				t.Errorf("expected CRITICAL number 4, got %d", v.Number)
+				t.Errorf("expected critical number 4, got %d", v.Number)
 			}
 			break
 		}
 	}
 	if !hasCritical {
-		t.Error("expected CRITICAL in severity enum")
+		t.Error("expected critical in severity enum")
+	}
+
+	// The offered member names must match the runtime constants map exactly,
+	// otherwise completions teach identifiers that fail to evaluate.
+	var names []string
+	for _, v := range severity.Values {
+		names = append(names, v.Name)
+	}
+	if want := policy.SeverityConstantNames(); !slices.Equal(names, want) {
+		t.Errorf("severity enum members = %v, want runtime constants %v", names, want)
 	}
 
 	// Should have scope enum
 	scope := r.GetEnum("scope")
 	if scope == nil {
 		t.Fatal("expected scope enum")
+	}
+}
+
+// TestSchemaRegistry_EnumDescriptionsComeFromProtoComments pins the enum member
+// descriptions to the proto comments. Every member must carry a description,
+// because an empty one means the descriptor lookup drifted (a renamed or
+// renumbered enum value) rather than that the member deserves no help text. The
+// exact expectations keep the assertion non-vacuous: they are the proto comments
+// verbatim, first sentence and trailing period included, so editing a comment in
+// the .proto surfaces here instead of silently changing REPL hints.
+func TestSchemaRegistry_EnumDescriptionsComeFromProtoComments(t *testing.T) {
+	r := NewSchemaRegistry()
+
+	tests := []struct {
+		enum string
+		want map[string]string // member name -> exact expected description
+	}{
+		{
+			enum: "severity",
+			want: map[string]string{
+				"critical":    "Critical severity (CVSS 9.0-10.0).",
+				"unspecified": "The advisory record Deputy matched carries no rating.",
+			},
+		},
+		{
+			enum: "scope",
+			want: map[string]string{
+				"RUNTIME": "Runtime dependency.",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.enum, func(t *testing.T) {
+			schema := r.GetEnum(tt.enum)
+			if schema == nil {
+				t.Fatalf("expected %s enum", tt.enum)
+			}
+			if len(schema.Values) == 0 {
+				t.Fatalf("expected %s enum members", tt.enum)
+			}
+			for _, v := range schema.Values {
+				if v.Description == "" {
+					t.Errorf("%s.%s has an empty description: the proto comment is missing or the descriptor lookup no longer resolves this member", tt.enum, v.Name)
+				}
+				if want, ok := tt.want[v.Name]; ok && v.Description != want {
+					t.Errorf("%s.%s description = %q, want the proto comment %q", tt.enum, v.Name, v.Description, want)
+				}
+			}
+			// Guard the expectations themselves: a renamed member would make
+			// the exact checks above vacuous.
+			for name := range tt.want {
+				if !slices.ContainsFunc(schema.Values, func(v EnumValue) bool { return v.Name == name }) {
+					t.Errorf("%s enum has no member %q to check", tt.enum, name)
+				}
+			}
+		})
 	}
 }
 
@@ -231,5 +301,23 @@ func TestToCamelCase(t *testing.T) {
 				t.Errorf("toCamelCase(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
+	}
+}
+
+// TestSchemaFunctions_SeverityHelpersAreRegistered pins the severity helper
+// functions offered in completions to the runtime helper catalog, so the REPL
+// cannot offer functions (e.g. a former vulnerabilitySeverity entry) that are
+// not registered in any CEL environment.
+func TestSchemaFunctions_SeverityHelpersAreRegistered(t *testing.T) {
+	registered := make(map[string]bool)
+	for _, fn := range policy.HelperCatalog() {
+		registered[fn.Name] = true
+	}
+
+	r := NewSchemaRegistry()
+	for _, fn := range r.GetFunctionsByCategory("severity") {
+		if !registered[fn.Name] {
+			t.Errorf("schema offers severity function %q, which is not in the runtime helper catalog", fn.Name)
+		}
 	}
 }
