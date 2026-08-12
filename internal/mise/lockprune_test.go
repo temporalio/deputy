@@ -247,7 +247,13 @@ func TestPruneLockedVersionsReadsVersionLikeTheParser(t *testing.T) {
 		{name: "undefined escape", token: `"1.22.\q12"`, want: "", prunable: false},
 		// The value continues on a line the pruner has not gathered, so it has
 		// not seen the version and must not act on the entry.
+		// The multiline gathering added for header-shaped string content must not
+		// turn any of these into a silent skip: a version the pruner cannot read
+		// on the line that declares it is a version it cannot call stale,
+		// whichever quoting form carries the value past the end of the line.
 		{name: "value spanning lines", token: "\"\"\"\n1.22.12\"\"\"", want: "1.22.12", prunable: false},
+		{name: "literal value spanning lines", token: "'''\n1.22.12'''", want: "1.22.12", prunable: false},
+		{name: "value spanning lines after content", token: "\"\"\"1.22.12\n\"\"\"", want: "1.22.12\n", prunable: false},
 		{name: "unterminated string", token: `"1.22.12`, want: "", prunable: false},
 	}
 
@@ -586,6 +592,27 @@ notes = """
 version = "9.9.9"
 [[tools.go]]
 """
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+			want: `[[tools.node]]
+version = "20.11.0"
+`,
+			wantChanged: true,
+		},
+		{
+			// The entry's own version still decides staleness when a string
+			// field precedes it: the skip must not carry the scan past the
+			// version line, and a `version` written inside the string is not
+			// the entry's.
+			name: "a string field before the version",
+			lock: `[[tools.node]]
+version = "20.11.0"
+
+[[tools.go]]
+notes = """
+version = "9.9.9"
+"""
+version = "1.22.12"
 `,
 			toolKeys: []string{"go"}, stale: "1.22.12",
 			want: `[[tools.node]]
