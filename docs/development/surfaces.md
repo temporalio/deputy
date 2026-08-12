@@ -46,7 +46,7 @@ The CLI, the TUI, PR comments, human-readable reports.
 
 These need affordances the proto cannot carry: short flag names, sensible defaults, progressive disclosure, color, summary versus detail. The split that makes them tractable is that the contract derives (which fields exist, their types, their validation) while the affordance is designed by hand.
 
-**Direction, not fact, for the CLI.** Nothing derives. `internal/cli/cmd/scan.go` declares each Cobra flag by hand with its own default and help string, including prose that restates a domain the proto already owns: `--source` spells out the target kinds and `--ecosystems` spells out the ecosystem list. `scanFlags.toScanRequest` in `internal/cli/cmd/scan_flags.go` then copies the parsed flags into `ScanOptions` field by field. Nothing compares the two ends. `TestScanFlags_ScanOptions` checks that the ecosystems slice survives that copy, which tests one field's plumbing, not the correspondence. Add a field to `ScanOptions` or tighten a protovalidate constraint on one and the CLI is unchanged and every test still passes.
+**Direction:** for the CLI, nothing derives. `internal/cli/cmd/scan.go` declares each Cobra flag by hand with its own default and help string, including prose that restates a domain the proto already owns: `--source` spells out the target kinds and `--ecosystems` spells out the ecosystem list. `scanFlags.toScanRequest` in `internal/cli/cmd/scan_flags.go` then copies the parsed flags into `ScanOptions` field by field. Nothing compares the two ends. `TestScanFlags_ScanOptions` checks that the ecosystems slice survives that copy, which tests one field's plumbing, not the correspondence. Add a field to `ScanOptions` or tighten a protovalidate constraint on one and the CLI is unchanged and every test still passes.
 
 **Rule:** derive the contract, hand-write the ergonomics, and add a correspondence test so the two cannot separate. There is no such test in the tree to copy, so the first surface to follow this rule builds the pattern.
 
@@ -107,13 +107,13 @@ Nothing ties the reference to the struct. No test reads `configuration.md`, whic
 
 **Rule:** the same as any other ergonomic projection. The struct is the contract until the contract moves to proto, so derive the reference tables from it and add a correspondence test that fails when a documented key has no field, or a field no documented key. Adding a setting should be one edit, not three.
 
-**Direction, all of it.** No generator renders those tables and no test reads them, so adding a setting is three edits until someone builds the mechanism in *Choosing a mechanism*.
+**Direction:** all of it. No generator renders those tables and no test reads them, so adding a setting is three edits until someone builds the mechanism in *Choosing a mechanism*.
 
 The environment variables are the harder half and need a step first: the binding has to exist as data before it can be derived. It is control flow instead, an `if os.Getenv(...)` per variable in `loadFromEnv`, and the name is not a function of the field. `DEPUTY_PROXY_ADDR` sets `proxy.listen_addr` and `DEPUTY_OSV_CONCURRENCY` sets `performance.osv_concurrency`, so neither the key nor the section survives the mapping, and some variables have no `Config` field at all: `DEPUTY_SERVER` is read in `internal/cli/cmd/register.go` and `DEPUTY_OSV_BASE_URL` in `internal/analysis/osv/client.go`, by the code that wants them. Give the bindings a representation the loader and the docs can share, then derive the list from that.
 
 ## Why this matters, empirically
 
-Auditing the surfaces split them by direction, if not by outcome. Derived surfaces were faithful to their source. Hand-maintained ones had mostly drifted, offering functions nothing registers, fields that exist on no message, and configuration sections that do not exist. Faithful is not the same as correct, and the difference is the whole point of the next section.
+Auditing the surfaces split them cleanly by whether they derived, if not by outcome. Derived surfaces were faithful to their source. Hand-maintained ones had mostly drifted, offering functions nothing registers, fields that exist on no message, and configuration sections that do not exist. Faithful is not the same as correct, and the difference is the whole point of the next section.
 
 The case that decides the design is the policy entrypoint reference. It **is** generated, and it was still publishing variables that crash the proxy, because the source it derived from was wrong. The same generated file advertises scan helpers that no CEL environment registers (#180). Generation was faithful both times; `helpersByCategory` in `internal/policy/helpers.go` is a hand list, and it was copied accurately.
 
