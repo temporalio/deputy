@@ -501,13 +501,24 @@ func pruneStaleMiseLock(root *os.Root, configRelPath, tool string, currentVersio
 	}
 
 	keys := miseLockKeys(root, configRelPath, tool)
+	// A config left declaring one version has no use for an entry recording any
+	// other, whether or not the plan named it: the keys above are only the ones
+	// no other declaration claims, so nothing else installs from them. Keeping
+	// them is how a fix reintroduces a version it was never asked about, since
+	// the last obsolete entry left standing is a sole entry, and lock resolution
+	// hands a sole entry to a declaration that matched nothing.
+	//
+	// The plan's versions still decide it for a declaration that stays
+	// multi-version, where an entry may belong to a version the config still
+	// asks for.
+	exclusive := declaresOnlyNewVersion(root, configRelPath, tool, newVersion)
 	// The plan and the lockfile spell versions differently (the Go runtime is
 	// reported as "v1.22.12" and locked as "1.22.12"), so both comparisons go
 	// through mise.SameVersion. A byte-for-byte one leaves the stale entry in
 	// place, and lock resolution then keeps serving the version the fix just
 	// removed.
 	stale := func(version string) bool {
-		if len(currentVersions) > 0 {
+		if len(currentVersions) > 0 && !exclusive {
 			return slices.ContainsFunc(currentVersions, func(current string) bool {
 				return mise.SameVersion(current, version)
 			})
@@ -524,6 +535,34 @@ func pruneStaleMiseLock(root *os.Root, configRelPath, tool string, currentVersio
 		return fmt.Errorf("stat %s: %w", lockRel, err)
 	}
 	return replaceFileAtomically(root, lockRel, pruned, info.Mode().Perm())
+}
+
+// declaresOnlyNewVersion reports whether the edited config declares exactly one
+// version for tool and that version is the one the fix wrote. It is the
+// question "does anything this config asks for still need a lock entry other
+// than the new version's", asked of the file as it now stands rather than of
+// the plan, because the plan only names the versions a finding reported and a
+// lockfile may record versions no finding ever mentioned.
+//
+// It parses the config the way mise does, so every declaration form is
+// recognized, and answers false on any read or parse failure: an unclear
+// declaration must not widen pruning beyond the versions the plan named.
+func declaresOnlyNewVersion(root *os.Root, configRelPath, tool, newVersion string) bool {
+	data, err := fs.ReadFile(root.FS(), configRelPath)
+	if err != nil {
+		return false
+	}
+	cfg, err := mise.Parse(configRelPath, data)
+	if err != nil {
+		return false
+	}
+	for _, spec := range cfg.Tools {
+		if spec.Key != tool {
+			continue
+		}
+		return len(spec.Versions) == 1 && mise.SameVersion(spec.Versions[0], newVersion)
+	}
+	return false
 }
 
 // replaceFileAtomically publishes content to relPath without ever leaving the

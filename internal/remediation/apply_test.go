@@ -2772,3 +2772,138 @@ func TestApplyMiseUpdateMatchesGoPrefixedSpellings(t *testing.T) {
 		})
 	}
 }
+
+// TestApplyMiseUpdatePrunesObsoleteLockEntries pins which of a tool's lock
+// entries a fix leaves behind. A lockfile can record versions no finding ever
+// named, and the plan only carries the ones it did, so pruning by the plan alone
+// leaves the rest: for a config that now declares a single version, the last
+// obsolete entry standing is a sole entry, and lock resolution hands a sole
+// entry to a declaration that matched nothing. The fix then reports success
+// while the next scan reads the tool at a version older than the one that was
+// flagged.
+//
+// A declaration that is still multi-version keeps the entries it still asks for,
+// and a key another config claims is still not this fix's to prune.
+func TestApplyMiseUpdatePrunesObsoleteLockEntries(t *testing.T) {
+	t.Parallel()
+
+	entry := func(version, checksum string) string {
+		return "[[tools.go]]\nversion = \"" + version + "\"\nbackend = \"core:go\"\n\n" +
+			"[tools.go.platforms.linux-x64]\nchecksum = \"" + checksum + "\"\n"
+	}
+	const flagged, obsolete = "1.22.12", "1.21.9"
+	lock := entry(flagged, "sha256:flagged") + "\n" + entry(obsolete, "sha256:obsolete")
+
+	tests := []struct {
+		name string
+		// files are written into the repository before the apply.
+		files map[string]string
+		cmd   string
+		// wantGone and wantKept are checksum markers, so a case cannot pass by
+		// deleting an entry and its metadata separately.
+		wantGone []string
+		wantKept []string
+		// links map a symlink path to its target, relative to the link's
+		// directory, for a lockfile two configs write through.
+		links map[string]string
+		// wantResolved is the version lock resolution serves the edited
+		// declaration afterwards; "" means it substitutes nothing.
+		wantResolved string
+	}{
+		{
+			// The reported case: only the flagged version is in the plan, and
+			// the obsolete entry left beside it becomes the sole entry.
+			name: "scalar declaration drops every entry it no longer declares",
+			files: map[string]string{
+				"mise.toml": "[tools]\ngo = \"" + flagged + "\"\n",
+				"mise.lock": lock,
+			},
+			cmd:      "deputy:mise:update mise.toml go 1.24.3 " + flagged,
+			wantGone: []string{"sha256:flagged", "sha256:obsolete"},
+		},
+		{
+			// Still multi-version: the surviving declaration's entry is not
+			// obsolete, and the plan decides on its own.
+			name: "multi-version declaration keeps what it still declares",
+			files: map[string]string{
+				"mise.toml": "[tools]\ngo = [\"" + flagged + "\", \"" + obsolete + "\"]\n",
+				"mise.lock": lock,
+			},
+			cmd:      "deputy:mise:update mise.toml go 1.24.3 " + flagged,
+			wantGone: []string{"sha256:flagged"},
+			wantKept: []string{"sha256:obsolete"},
+			// Not what the fixed declaration should resolve to, and not
+			// pruning's doing: the entry that survives is the one the other
+			// declared version asks for, and mise.Lockfile.Lookup lends a sole
+			// entry to a declaration that matched no version. Recorded so the
+			// day that fallback learns about sibling declarations, this row is
+			// where it shows up.
+			wantResolved: obsolete,
+		},
+		{
+			// Ownership still comes first: a second config declaring the same
+			// key means neither entry is this fix's to remove, and the wider
+			// rule must not talk its way past that.
+			name: "a key another config claims is still left alone",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\ngo = \"" + flagged + "\"\n",
+				"b/mise.toml": "[tools]\ngo = \"" + flagged + "\"\n",
+				"a/mise.lock": lock,
+			},
+			links:    map[string]string{"b/mise.lock": "../a/mise.lock"},
+			cmd:      "deputy:mise:update a/mise.toml go 1.24.3 " + flagged,
+			wantKept: []string{"sha256:flagged", "sha256:obsolete"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			configRel, lockRel := "mise.toml", "mise.lock"
+			for rel, content := range tt.files {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, target := range tt.links {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(target), full); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+			if _, ok := tt.files["a/mise.toml"]; ok {
+				configRel, lockRel = "a/mise.toml", "a/mise.lock"
+			}
+
+			if err := ApplyDeputyCommand(dir, tt.cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+			after, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(lockRel)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, marker := range tt.wantGone {
+				if strings.Contains(string(after), marker) {
+					t.Errorf("expected %q to be pruned:\n%s", marker, after)
+				}
+			}
+			for _, marker := range tt.wantKept {
+				if !strings.Contains(string(after), marker) {
+					t.Errorf("expected %q to survive:\n%s", marker, after)
+				}
+			}
+			if got := lockedVersionForConfig(t, dir, configRel, "go", "1.24.3"); got != tt.wantResolved {
+				t.Errorf("lock resolution serves the fixed tool %q, want %q:\n%s", got, tt.wantResolved, after)
+			}
+		})
+	}
+}
