@@ -178,6 +178,10 @@ func generateVariableValue(ep Entrypoint, varName string, level ExampleLevel, re
 		return generateJWT(level), "JWT claims (anonymous if no auth)"
 	case "target":
 		return generateTarget(level), "scan target metadata"
+	case "base_target":
+		return generateDiffTarget(level, "base"), "the base side of the diff"
+	case "target_target":
+		return generateDiffTarget(level, "target"), "the target side of the diff"
 	case "image", "image_info":
 		return generateImageInfo(level), "container image configuration"
 	case "licenses":
@@ -504,6 +508,25 @@ func generateTarget(level ExampleLevel) map[string]any {
 	if level != ExampleLevelMinimal {
 		target["commit_hash"] = "abc123def456"
 		target["reference"] = "main"
+		target["origin"] = "https://github.com/example/project.git"
+	}
+
+	return target
+}
+
+// generateDiffTarget creates one side of a diff request's target pair. The two
+// sides get distinct values because a diff compares independent resources, and
+// a fixture that repeated one value would let a policy checking only one side
+// pass against it.
+func generateDiffTarget(level ExampleLevel, side string) map[string]any {
+	target := map[string]any{
+		"display_path": "/path/to/" + side,
+		"type":         "directory",
+	}
+
+	if level != ExampleLevelMinimal {
+		target["reference"] = map[string]string{"base": "main", "target": "feature-branch"}[side]
+		target["commit_hash"] = map[string]string{"base": "abc123def456", "target": "789fed654cba"}[side]
 		target["origin"] = "https://github.com/example/project.git"
 	}
 
