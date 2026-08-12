@@ -22,7 +22,7 @@ A **Rule** is never labelled: a rule is what to do, not a report on what the cod
 
 ### 1. Direct projections
 
-ConnectRPC service contracts and their transport bindings, MCP tool schemas, the generated policy input reference.
+ConnectRPC service contracts and their transport bindings, the plugin wire contracts an extension implements, MCP tool schemas, the generated policy input reference.
 
 These are the domain re-encoded. They should be generated, and drift is a bug rather than a maintenance chore. They do not all stand on the same footing, and the difference is what a reader needs:
 
@@ -32,9 +32,13 @@ These are the domain re-encoded. They should be generated, and drift is a bug ra
 
 That last one is worth naming precisely, because calling it descriptor-derived hides the drift this page later audits. `PolicyEntrypointsMarkdown` is a joined projection: the entrypoint list, each entrypoint's description, its required and optional variables and their types, and its helper list all come from hand-maintained Go registries in `internal/policy` (`AllEntrypoints`, `BindingProfiles`, `EntrypointHelpers`, and the variable metadata behind `VariableInfoOrDefault`), while descriptors supply only the field tables for proto-backed variable types and the comments in them. The drift test holds the rendering to those sources. It cannot see that a source is wrong, which is exactly how the reference came to publish variables the runtime cannot supply.
 
+Plugin wire contracts belong here for the same reason the Connect ones do: they are proto in [`api/deputy/plugin/v1`](../../api/deputy/plugin/v1) and [`api/deputy/sandbox/v1`](../../api/deputy/sandbox/v1), and Buf generates the bindings from them, `protoc-gen-pluginrpc-go` for the services a subprocess plugin serves and the Connect output for the sandbox runtime a plugin binds over a socket. What separates them is the consumer. An extractor, an advisory source, or a sandbox runtime can be a program this repository does not build and cannot update, so renumbering a field or dropping a method breaks something no change here can fix. Every other direct projection has both ends in the tree and gets a compile error instead.
+
+That obligation is **convention**. `api/buf.yaml` configures `breaking: use: FILE`, but nothing runs `buf breaking`, so a wire-incompatible plugin edit reaches a release the same way a compatible one does.
+
 Handler bodies are not part of this. The behavior behind an endpoint (`internal/server/scan_handler.go` and its siblings) is written by hand, as it should be. What is generated is the contract the handler implements, and what this rule forbids is a second, hand-written copy of that contract living somewhere else.
 
-**Rule:** generate the contract. Do not hand-maintain a copy of it.
+**Rule:** generate the contract. Do not hand-maintain a copy of it. Where a contract has an implementer outside the repository, changing it is a compatibility decision, and the check for that runs before the change lands, not after.
 
 ### 2. Ergonomic projections
 
@@ -180,7 +184,7 @@ Ecosystem-specific name and version normalization still has to happen before the
 ## Adding a capability
 
 1. Model it in proto first. It is the domain, not a serialization detail.
-2. Let the direct projections regenerate.
+2. Regenerate the direct projections, the pluginrpc bindings alongside the ConnectRPC and MCP ones. If the change touched a contract a plugin implements, run `buf breaking` yourself before it lands; no CI job will.
 3. Decide the ergonomic affordance for the CLI deliberately, and add the correspondence test.
 4. For the DSL, derive the vocabulary. Apply the admission test before adding a helper.
 5. If it crosses the proxy, decide what the extension band says.
