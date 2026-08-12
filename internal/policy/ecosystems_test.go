@@ -1353,6 +1353,71 @@ func TestReferencesAndIdentityAgreeOnTheScheme(t *testing.T) {
 	}
 }
 
+// TestHandBuiltVersionListsNormalize drives the map surface of the engine,
+// EvaluateAllMap, which is what a caller reaches for when it assembles a payload
+// itself rather than handing over a proto. A repeated version field arrives as
+// []any from a proto and commonly as []string from such a caller, and only the
+// first was normalized, so one payload carried both conventions: the scalar
+// versions gained their "v" and the fixed versions beside them did not.
+//
+// The caller's slice is asserted unchanged in the same pass. The payload clone
+// the engine makes is shallow, so writing into the slice a caller handed over
+// would rewrite data it still owns, which is worse than the inconsistency.
+func TestHandBuiltVersionListsNormalize(t *testing.T) {
+	eng, err := NewEngine([]Source{{
+		Name: "fixed-versions",
+		Body: `vulnerability.advisory.fixed_versions.exists(v, v == "v1.44.1")
+  ? [{"action": "deny", "reason": "matched"}]
+  : [{"action": "allow"}]`,
+	}})
+	if err != nil {
+		t.Fatalf("NewEngine() error: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		build func() (fixed any, unchanged func() bool)
+	}{
+		{
+			name: "a string slice",
+			build: func() (any, func() bool) {
+				fixed := []string{"1.44.1", "1.45.0"}
+				return fixed, func() bool { return slices.Equal(fixed, []string{"1.44.1", "1.45.0"}) }
+			},
+		},
+		{
+			name: "an any slice",
+			build: func() (any, func() bool) {
+				fixed := []any{"1.44.1", "1.45.0"}
+				return fixed, func() bool { return slices.Equal(fixed, []any{"1.44.1", "1.45.0"}) }
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixed, unchanged := tt.build()
+			payload := map[string]any{
+				"vulnerability": map[string]any{
+					"package":  map[string]any{"ecosystem": "Go", "name": "github.com/aws/aws-sdk-go", "version": "1.44.0"},
+					"advisory": map[string]any{"id": "GHSA-1", "fixed_versions": fixed},
+				},
+			}
+
+			actions, err := eng.EvaluateAllMap(t.Context(), payload, "scan", EntrypointScanVulnerability.String())
+			if err != nil {
+				t.Fatalf("EvaluateAllMap: %v", err)
+			}
+			if len(actions) != 1 || actions[0].Type != ActionDeny {
+				t.Errorf("rule on the canonical fixed version did not fire: actions=%v (fixed_versions %v)", actions, fixed)
+			}
+			if !unchanged() {
+				t.Errorf("caller's fixed_versions slice was rewritten in place: %v", fixed)
+			}
+		})
+	}
+}
+
 // TestPackageReferencesLeaveEverythingElseAlone pins the blast radius of the
 // reference pass, which is the half that widens the walk. It rewrites a string
 // only when the string is a package URL of a type a registration claims, so
