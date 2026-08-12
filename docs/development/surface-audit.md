@@ -53,11 +53,33 @@ not a dependency.
 
 **4. Dynamic reachability.** Reflection, encoding, interface dispatch, protobuf
 registration, and lookup by name all reach code that looks unreferenced. The
-audit does not guess: findings carry the reasons they might be wrong (a name
-appearing in a string literal or a template, a method name in some interface's
-method set, a protobuf message type, an encoding struct tag, a package imported
-only for its side effects). A finding with no such reason is one you can act on
-mechanically.
+audit does not guess: findings carry the reasons they might be wrong, and each
+reason names its own evidence.
+
+- **Dispatch.** A method whose receiver satisfies an interface can be called
+  without the call site naming it. Membership is checked with `types.Implements`
+  against the interfaces the module declares plus the standard-library contracts
+  whose implementations are dispatched from code this module does not contain
+  (`error`, `fmt.Stringer`, `json.Marshaler`, the `io` interfaces,
+  `sort.Interface`, `http.Handler`, `protoreflect.Message`). Sharing a method
+  name is not enough: `Read()` with no arguments does not implement `io.Reader`
+  and earns no doubt.
+- **Lookup by name.** The audit tokenizes Go string literals and the repository's
+  executable assets (CEL policies, templates, configuration, fixtures) and
+  reports which one named the symbol. Documentation is deliberately not scanned:
+  prose that mentions a symbol does not execute it, and treating docs as evidence
+  would attach a doubt to everything well documented.
+- **Encoding.** A type with encoding-tagged fields is normally built by a decoder
+  rather than by a caller naming it.
+- **Registration.** A package imported only for its side effects wires up its own
+  exports.
+
+A finding with no such reason is one you can act on mechanically.
+
+The report also prints a caveat listing any files this platform's build
+constraints excluded from the load. Nothing in them is type-checked, so
+references they make are invisible to every check; auditing on another platform,
+or with the relevant tags, closes that gap.
 
 ## Interpreting a finding
 

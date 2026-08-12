@@ -7,9 +7,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"golang.org/x/tools/go/packages"
 )
 
 // dynamic answers check 4: it collects the evidence that a declaration might be
@@ -22,21 +25,27 @@ import (
 // registration, plugin and registry lookup by name, and templates or policies
 // that name a field in text rather than in Go.
 type dynamic struct {
-	// tokens holds every identifier-shaped token found in a Go string literal
-	// or in a non-Go repository asset (templates, policies, configuration,
-	// documentation). A symbol whose name appears there may be looked up by
-	// name rather than referenced.
-	tokens map[string]bool
+	// tokens maps every identifier-shaped token found in a Go string literal or
+	// an executable repository asset (templates, policies, configuration) to a
+	// description of where it was found. A symbol whose name appears there may
+	// be looked up by name rather than referenced, and naming the source lets a
+	// reader judge that in one step: a name in a CEL policy is a reachability
+	// path, and a name in a code fence is not.
+	//
+	// Documentation is deliberately not scanned. Prose that mentions a symbol
+	// does not execute it, so treating docs as evidence would attach a doubt to
+	// every well documented symbol and make the signal meaningless.
+	tokens map[string]string
 
-	// interfaceMethods holds every method name in the method set of any
-	// interface in the module. A method with such a name can be called through
-	// an interface without its own name ever appearing at the call site.
-	interfaceMethods map[string]bool
+	// byMethod indexes the dispatch contracts of the whole program by method
+	// name, so a method finding is checked only against the interfaces that
+	// declare a method by that name.
+	byMethod map[string][]contract
 
-	// taggedFields holds "Type.Field" for every struct field carrying an
-	// encoding tag, plus the bare type name, since a tagged struct is normally
-	// populated by a decoder rather than by field assignment.
-	taggedFields map[string]bool
+	// taggedTypes holds the named types with at least one encoding-tagged
+	// field. Such a type is normally built by a decoder rather than by a caller
+	// naming it, so a decoder can reach it without any reference.
+	taggedTypes map[string]bool
 
 	// blankImported holds canonical paths imported for side effects only. Such
 	// a package's exported symbols are wired up by its own init, not by a
@@ -44,33 +53,64 @@ type dynamic struct {
 	blankImported map[string]bool
 }
 
+// contract is an interface a method can be reached through. Holding the
+// interface itself, and not just its method names, lets the audit verify that
+// the receiver actually satisfies it: a type with a String method that does not
+// implement [fmt.Stringer] gains nothing from the coincidence.
+type contract struct {
+	// name is how the contract is described in a doubt, such as "fmt.Stringer".
+	name string
+
+	iface *types.Interface
+}
+
+// dispatchContracts names the standard-library and protobuf interfaces whose
+// methods are called from code this module does not contain, so no reference to
+// them will ever appear in the load graph. Interfaces the module declares itself
+// are collected from the program and need no list.
+//
+// This list cannot be derived: nothing in the type graph distinguishes an
+// interface whose implementations are dispatched by a foreign package from any
+// other interface. It only has to name contracts satisfied by accident of
+// method signature, which is why membership is verified with [types.Implements]
+// rather than by method name.
+var dispatchContracts = map[string][]string{
+	"fmt":                 {"Stringer", "GoStringer", "Formatter"},
+	"encoding":            {"TextMarshaler", "TextUnmarshaler", "BinaryMarshaler", "BinaryUnmarshaler"},
+	"encoding/json":       {"Marshaler", "Unmarshaler"},
+	"io":                  {"Reader", "Writer", "Closer", "ReaderAt", "WriterAt", "Seeker", "ReaderFrom", "WriterTo", "StringWriter"},
+	"sort":                {"Interface"},
+	"net/http":            {"Handler", "RoundTripper", "ResponseWriter", "Flusher"},
+	"database/sql/driver": {"Valuer", "Scanner"},
+	"google.golang.org/protobuf/reflect/protoreflect": {"ProtoMessage", "Message"},
+}
+
 // encodingTags are the struct tag keys that mean a field is read or written by
 // a reflective codec in this module.
 var encodingTags = []string{"json", "yaml", "toml", "protobuf", "cel", "xml", "mapstructure", "kong", "env"}
 
-// assetExtensions are the non-Go files whose text can name a Go symbol: policy
-// sources, templates, configuration, fixtures, and documentation.
+// assetExtensions are the non-Go files that can name a Go symbol in a way that
+// reaches it: policy sources, templates, and configuration or fixture data a
+// decoder binds to fields. Markdown and other prose are excluded on purpose;
+// documentation names symbols without reaching them.
 var assetExtensions = map[string]bool{
 	".cel":       true,
 	".tmpl":      true,
 	".gotmpl":    true,
-	".md":        true,
 	".yaml":      true,
 	".yml":       true,
 	".json":      true,
 	".toml":      true,
-	".proto":     true,
-	".txt":       true,
 	".textproto": true,
 }
 
 // newDynamic gathers the dynamic-reachability evidence for the whole module.
-func newDynamic(p *program) *dynamic {
+func newDynamic(p *program, roots []*packages.Package) *dynamic {
 	d := &dynamic{
-		tokens:           map[string]bool{},
-		interfaceMethods: map[string]bool{},
-		taggedFields:     map[string]bool{},
-		blankImported:    map[string]bool{},
+		tokens:        map[string]string{},
+		byMethod:      map[string][]contract{},
+		taggedTypes:   map[string]bool{},
+		blankImported: map[string]bool{},
 	}
 
 	p.files(func(v *variant, file *ast.File) bool {
@@ -91,11 +131,11 @@ func newDynamic(p *program) *dynamic {
 			case *ast.BasicLit:
 				if node.Kind == token.STRING && !importPaths[node] {
 					if s, err := strconv.Unquote(node.Value); err == nil {
-						d.addTokens(s)
+						d.addTokens(s, "a Go string literal")
 					}
 				}
-			case *ast.StructType:
-				d.addTaggedFields(v, node)
+			case *ast.TypeSpec:
+				d.addTaggedTypes(v, node)
 			}
 			return true
 		})
@@ -103,16 +143,111 @@ func newDynamic(p *program) *dynamic {
 	})
 
 	for _, v := range p.variants() {
-		d.addInterfaceMethods(v.pkg.Types.Scope())
+		d.addDeclaredInterfaces(v.pkg)
 	}
-	d.addAssets(p.rootHint())
+	d.addForeignContracts(roots)
+	d.addAssets(p.root)
 	return d
 }
 
-// addTokens splits text into identifier-shaped tokens. Splitting beats
-// substring matching: it will not let "Expirable" match inside
-// "NotExpirableAtAll", and it costs one pass.
-func (d *dynamic) addTokens(text string) {
+// addContract indexes one dispatch contract under each of its method names.
+func (d *dynamic) addContract(name string, iface *types.Interface) {
+	if iface == nil || iface.NumMethods() == 0 {
+		return
+	}
+	c := contract{name: name, iface: iface}
+	for i := range iface.NumMethods() {
+		method := iface.Method(i).Name()
+		if !slices.ContainsFunc(d.byMethod[method], func(have contract) bool { return have.name == c.name }) {
+			d.byMethod[method] = append(d.byMethod[method], c)
+		}
+	}
+}
+
+// addDeclaredInterfaces indexes the interfaces a package declares. A method
+// whose receiver satisfies one of them can be called through it without the
+// call site naming the method's own type.
+func (d *dynamic) addDeclaredInterfaces(pkg *packages.Package) {
+	scope := pkg.Types.Scope()
+	for _, name := range scope.Names() {
+		tn, ok := scope.Lookup(name).(*types.TypeName)
+		if !ok {
+			continue
+		}
+		if iface, ok := tn.Type().Underlying().(*types.Interface); ok {
+			d.addContract(pkg.PkgPath+"."+name, iface)
+		}
+	}
+}
+
+// addForeignContracts indexes the interfaces from [dispatchContracts] that the
+// load graph contains, plus the builtin error interface. Without these, a method
+// reached only by the standard library (Marshaler dispatched from json.Marshal,
+// Stringer from fmt) looks unreferenced with nothing to doubt.
+func (d *dynamic) addForeignContracts(roots []*packages.Package) {
+	if errType, ok := types.Universe.Lookup("error").Type().Underlying().(*types.Interface); ok {
+		d.addContract("error", errType)
+	}
+	packages.Visit(roots, nil, func(pkg *packages.Package) {
+		names, wanted := dispatchContracts[pkg.PkgPath]
+		if !wanted || pkg.Types == nil {
+			return
+		}
+		for _, name := range names {
+			tn, ok := pkg.Types.Scope().Lookup(name).(*types.TypeName)
+			if !ok {
+				continue
+			}
+			if iface, ok := tn.Type().Underlying().(*types.Interface); ok {
+				d.addContract(pkg.PkgPath+"."+name, iface)
+			}
+		}
+	})
+}
+
+// dispatchedThrough returns the contracts a method can be reached through: those
+// declaring a method of the same name that the receiver's type actually
+// satisfies.
+func (d *dynamic) dispatchedThrough(fn *types.Func) []string {
+	candidates := d.byMethod[fn.Name()]
+	if len(candidates) == 0 {
+		return nil
+	}
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok || sig.Recv() == nil {
+		return nil
+	}
+	recv := sig.Recv().Type()
+	forms := []types.Type{recv}
+	if _, isPtr := recv.(*types.Pointer); !isPtr {
+		forms = append(forms, types.NewPointer(recv))
+	}
+
+	var out []string
+	for _, c := range candidates {
+		for _, form := range forms {
+			if types.Implements(form, c.iface) {
+				out = append(out, c.name)
+				break
+			}
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// addTokens splits text into identifier-shaped tokens, recording source as
+// where they came from. Splitting beats substring matching: it will not let
+// "Expirable" match inside "NotExpirableAtAll", and it costs one pass.
+//
+// The first source to claim a token wins, so the description stays stable
+// regardless of walk order.
+func (d *dynamic) addTokens(text, source string) {
+	add := func(tok string) {
+		if _, seen := d.tokens[tok]; !seen {
+			d.tokens[tok] = source
+		}
+	}
 	start := -1
 	for i, r := range text {
 		if isIdentRune(r) {
@@ -122,12 +257,12 @@ func (d *dynamic) addTokens(text string) {
 			continue
 		}
 		if start >= 0 {
-			d.tokens[text[start:i]] = true
+			add(text[start:i])
 			start = -1
 		}
 	}
 	if start >= 0 {
-		d.tokens[text[start:]] = true
+		add(text[start:])
 	}
 }
 
@@ -136,10 +271,16 @@ func isIdentRune(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
-// addTaggedFields records struct fields carrying an encoding tag, and the
-// enclosing named type when one can be determined from the field's own type
-// info.
-func (d *dynamic) addTaggedFields(v *variant, st *ast.StructType) {
+// addTaggedTypes records the named type declared by spec when its struct body
+// carries an encoding tag. The type, not the field, is what the doubt is about:
+// a decoder constructs the whole value, and struct fields are outside the
+// audited surface anyway. Keying on the field name instead would attach a doubt
+// to any unrelated symbol that happened to share a field's name.
+func (d *dynamic) addTaggedTypes(v *variant, spec *ast.TypeSpec) {
+	st, ok := spec.Type.(*ast.StructType)
+	if !ok {
+		return
+	}
 	for _, field := range st.Fields.List {
 		if field.Tag == nil {
 			continue
@@ -148,15 +289,11 @@ func (d *dynamic) addTaggedFields(v *variant, st *ast.StructType) {
 		if err != nil {
 			continue
 		}
-		if !hasEncodingTag(tag) {
-			continue
-		}
-		for _, name := range field.Names {
-			obj := v.pkg.TypesInfo.Defs[name]
-			if obj == nil {
-				continue
+		if hasEncodingTag(tag) {
+			if obj := v.pkg.TypesInfo.Defs[spec.Name]; obj != nil {
+				d.taggedTypes[obj.Name()] = true
 			}
-			d.taggedFields[obj.Name()] = true
+			return
 		}
 	}
 }
@@ -171,30 +308,10 @@ func hasEncodingTag(tag string) bool {
 	return false
 }
 
-// addInterfaceMethods records the method names of every interface declared in
-// a package scope, including methods promoted from embedded interfaces.
-func (d *dynamic) addInterfaceMethods(scope *types.Scope) {
-	for _, name := range scope.Names() {
-		obj := scope.Lookup(name)
-		tn, ok := obj.(*types.TypeName)
-		if !ok {
-			continue
-		}
-		iface, ok := tn.Type().Underlying().(*types.Interface)
-		if !ok {
-			continue
-		}
-		for m := range iface.NumMethods() {
-			d.interfaceMethods[iface.Method(m).Name()] = true
-		}
-	}
-}
-
-// addAssets tokenizes the repository's non-Go text files, so a field named only
-// in a template, a CEL policy, or a fixture is not reported as unreferenced.
-// Directories the Go tool itself ignores (dot-prefixed, "testdata" excluded
-// deliberately since fixtures do name symbols) are skipped along with vendored
-// and version-control trees.
+// addAssets tokenizes the repository's executable non-Go files, so a field
+// named only in a template, a CEL policy, or fixture data is not reported as
+// unreferenced. Dot-prefixed and vendored trees are skipped; testdata is not,
+// because fixtures do name the fields a decoder binds.
 func (d *dynamic) addAssets(root string) {
 	if root == "" {
 		return
@@ -221,7 +338,7 @@ func (d *dynamic) addAssets(root string) {
 		if readErr != nil {
 			return nil
 		}
-		d.addTokens(string(data))
+		d.addTokens(string(data), filepath.ToSlash(trimRoot(path, root)))
 		return nil
 	})
 }
@@ -233,11 +350,13 @@ const maxAssetBytes = 4 << 20
 // symbolDoubts returns the reasons a symbol finding might be wrong.
 func (d *dynamic) symbolDoubts(obj types.Object, kind SymbolKind, pkgPath string) []string {
 	var doubts []string
-	if kind == KindMethod && d.interfaceMethods[obj.Name()] {
-		doubts = append(doubts, "method name is in an interface method set, so calls can reach it through dispatch")
+	if fn, ok := obj.(*types.Func); ok && kind == KindMethod {
+		if through := d.dispatchedThrough(fn); len(through) > 0 {
+			doubts = append(doubts, "receiver satisfies "+strings.Join(through, ", ")+", so calls reach this method through dispatch")
+		}
 	}
-	if d.tokens[obj.Name()] {
-		doubts = append(doubts, "name appears as a token in a Go string literal or repository asset, so it may be looked up by name")
+	if src, ok := d.tokens[obj.Name()]; ok {
+		doubts = append(doubts, "name appears in "+src+", so it may be looked up by name")
 	}
 	if d.blankImported[pkgPath] {
 		doubts = append(doubts, "declaring package is imported for side effects only, so its exports are wired up by registration")
@@ -245,8 +364,8 @@ func (d *dynamic) symbolDoubts(obj types.Object, kind SymbolKind, pkgPath string
 	if tn, ok := obj.(*types.TypeName); ok && d.protoLike(tn) {
 		doubts = append(doubts, "type is a protobuf message, reachable through the proto registry")
 	}
-	if d.taggedFields[obj.Name()] {
-		doubts = append(doubts, "an encoding struct tag names this identifier, so a codec may reach it reflectively")
+	if d.taggedTypes[obj.Name()] {
+		doubts = append(doubts, "type has encoding-tagged fields, so a codec may construct it reflectively")
 	}
 	return doubts
 }
@@ -270,8 +389,8 @@ func (d *dynamic) protoLike(tn *types.TypeName) bool {
 // interfaceDoubts returns the reasons an interface finding might be wrong.
 func (d *dynamic) interfaceDoubts(obj types.Object, pkgPath string) []string {
 	var doubts []string
-	if d.tokens[obj.Name()] {
-		doubts = append(doubts, "name appears as a token in a Go string literal or repository asset")
+	if src, ok := d.tokens[obj.Name()]; ok {
+		doubts = append(doubts, "name appears in "+src)
 	}
 	if d.blankImported[pkgPath] {
 		doubts = append(doubts, "declaring package is imported for side effects only")

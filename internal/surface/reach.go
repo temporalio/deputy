@@ -111,7 +111,7 @@ func (p *program) packageDir(path string) string {
 	if plain == nil || len(plain.GoFiles) == 0 {
 		return ""
 	}
-	return filepath.ToSlash(trimRoot(filepath.Dir(plain.GoFiles[0]), p.rootHint()))
+	return filepath.ToSlash(trimRoot(filepath.Dir(plain.GoFiles[0]), p.root))
 }
 
 // testFileCount counts the package's test files across its test variants.

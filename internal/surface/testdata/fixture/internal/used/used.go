@@ -18,3 +18,24 @@ type Never struct{}
 
 // Method is an exported method nothing outside this package calls.
 func (Never) Method() {}
+
+// Stringish is referenced nowhere, but its String method satisfies
+// [fmt.Stringer], so any %v verb anywhere can reach it.
+type Stringish struct{}
+
+// String implements [fmt.Stringer].
+func (Stringish) String() string { return "stringish" }
+
+// Decoy names a method like an interface method without satisfying the
+// interface: this Read takes no arguments, so io.Reader is not implemented and
+// the audit must not claim dispatch reaches it.
+type Decoy struct{}
+
+// Read is not io.Reader's Read.
+func (Decoy) Read() {}
+
+// Tagged carries an encoding tag, so a decoder can construct it without any
+// caller naming the type.
+type Tagged struct {
+	Name string `json:"name"`
+}

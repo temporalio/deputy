@@ -29,6 +29,9 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -78,9 +81,10 @@ func Analyze(ctx context.Context, dir string) (*Report, error) {
 	}
 
 	report := &Report{
-		Module:   prog.module,
-		Audited:  prog.auditedPaths(),
-		Packages: prog.unreachablePackages(),
+		Module:      prog.module,
+		Audited:     prog.auditedPaths(),
+		Packages:    prog.unreachablePackages(),
+		Constrained: prog.relativeConstrained(),
 	}
 	report.Symbols, report.SymbolTotals = prog.unusedSymbols()
 	report.Interfaces, report.InterfaceTotal = prog.unusedInterfaces()
@@ -118,6 +122,18 @@ type program struct {
 
 	// order is the sorted canonical path list, so output is deterministic.
 	order []string
+
+	// root is the absolute module root directory. Finding positions are
+	// reported relative to it and the asset scan starts from it, so it must be
+	// resolved rather than left empty: an empty root would silently turn the
+	// asset scan into a no-op and make every finding look more certain than it
+	// is.
+	root string
+
+	// constrained lists the source files this platform's build constraints
+	// excluded from the load. Nothing in them is type-checked, so references
+	// they make are invisible to every check.
+	constrained []string
 
 	// dyn is the check 4 evidence: the ways a declaration can be reached
 	// without a package naming it. Every check consults it before asserting a
@@ -176,8 +192,46 @@ func newProgram(dir string, loaded []*packages.Package) (*program, error) {
 	}
 
 	p.order = sortedKeys(p.pkgs)
-	p.dyn = newDynamic(p)
+
+	root, err := moduleRoot(dir, loaded)
+	if err != nil {
+		return nil, err
+	}
+	p.root = root
+	p.constrained = constrainedFiles(p.variants())
+	p.dyn = newDynamic(p, loaded)
 	return p, nil
+}
+
+// moduleRoot resolves the absolute directory of the module under audit,
+// preferring what the go tool reported and falling back to the requested
+// directory. It is an error for neither to resolve: positions and the asset
+// scan both depend on it.
+func moduleRoot(dir string, loaded []*packages.Package) (string, error) {
+	for _, pkg := range loaded {
+		if pkg.Module != nil && pkg.Module.Dir != "" {
+			return pkg.Module.Dir, nil
+		}
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve module root for %s: %w", dir, err)
+	}
+	return abs, nil
+}
+
+// constrainedFiles collects the Go files excluded from the load by this
+// platform's build constraints, deduplicated across compilation variants.
+func constrainedFiles(variants []*variant) []string {
+	seen := map[string]bool{}
+	for _, v := range variants {
+		for _, name := range v.pkg.IgnoredFiles {
+			if filepath.Ext(name) == ".go" {
+				seen[name] = true
+			}
+		}
+	}
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // classify decides whether a loaded package belongs to the module under audit
@@ -226,22 +280,31 @@ func (p *program) auditedPaths() []string {
 	return out
 }
 
-// audited reports whether findings in path should be reported. Excluded trees
-// still contribute references: a symbol used by sdk/ is used.
+// relativeConstrained returns the build-constraint-excluded files relative to
+// the module root, for the report's caveat.
+func (p *program) relativeConstrained() []string {
+	out := make([]string, 0, len(p.constrained))
+	for _, name := range p.constrained {
+		out = append(out, filepath.ToSlash(trimRoot(name, p.root)))
+	}
+	return out
+}
+
+// audited reports whether findings in path should be reported.
+//
+// Only internal/ is audited. That single condition is what excludes examples/
+// and the public sdk/: both are module-root trees, and the SDK's exports are
+// legitimate regardless, since they serve consumers outside this module.
+// Generated code is excluded by name because it can also be nested under
+// internal/, and nobody maintains its surface by hand.
+//
+// Excluded trees still contribute references: a symbol the SDK uses is used.
 func (p *program) audited(path string) bool {
 	rel := strings.TrimPrefix(strings.TrimPrefix(path, p.module), "/")
-	if rel == "" {
-		return false
-	}
 	if !strings.HasPrefix(rel, "internal/") {
 		return false
 	}
-	for _, skip := range []string{"gen/", "examples/", "sdk/"} {
-		if strings.HasPrefix(rel, skip) || strings.Contains(rel, "/"+skip) {
-			return false
-		}
-	}
-	return true
+	return !slices.Contains(strings.Split(rel, "/"), "gen")
 }
 
 // plain returns the non-test compilation of a canonical path, which is the
@@ -285,31 +348,16 @@ func (p *program) position(pos token.Pos) string {
 		return ""
 	}
 	at := p.fset.Position(pos)
-	return fmt.Sprintf("%s:%d", trimRoot(at.Filename, p.rootHint()), at.Line)
-}
-
-// rootHint returns the directory prefix to strip from finding positions. The
-// module directory is not recorded on every package, so the shortest module
-// root among loaded packages is used.
-func (p *program) rootHint() string {
-	for _, v := range p.variants() {
-		if v.pkg.Module != nil && v.pkg.Module.Dir != "" {
-			return v.pkg.Module.Dir
-		}
-	}
-	return ""
+	return fmt.Sprintf("%s:%d", filepath.ToSlash(trimRoot(at.Filename, p.root)), at.Line)
 }
 
 // origin normalizes a generic instantiation back to the declaration it came
-// from, so a reference to Foo[int] counts as a reference to Foo.
+// from, so a reference to Foo[int] counts as a reference to Foo. Only funcs need
+// this: the other kind of object with an origin is a struct field of an
+// instantiated type, and fields are not part of the audited surface.
 func origin(obj types.Object) types.Object {
-	switch o := obj.(type) {
-	case *types.Func:
-		if orig := o.Origin(); orig != nil {
-			return orig
-		}
-	case *types.Var:
-		if orig := o.Origin(); orig != nil {
+	if fn, ok := obj.(*types.Func); ok {
+		if orig := fn.Origin(); orig != nil {
 			return orig
 		}
 	}

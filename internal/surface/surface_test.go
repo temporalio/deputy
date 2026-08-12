@@ -26,8 +26,10 @@ func analyzeFixture(t *testing.T) *Report {
 }
 
 // TestAuditedPackagesExcludeGeneratedAndPublicTrees pins the exclusions: only
-// packages under internal/ are candidates, and generated code under internal/ is
-// skipped even so.
+// packages under internal/ are candidates, generated code under internal/ is
+// skipped even so, and the module-root sdk/ and examples/ trees are excluded
+// while still counting as usage (see TestSymbolReachGrading, where a symbol
+// referenced only from sdk/ is not reported).
 func TestAuditedPackagesExcludeGeneratedAndPublicTrees(t *testing.T) {
 	report := analyzeFixture(t)
 
@@ -119,12 +121,16 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 
 	// Every exported declaration under internal/, and nothing from the excluded
 	// trees: 8 funcs (Used, Local, NamedInString, Orphaned, ForForeignTests,
-	// ForOwnBlackBoxTest, Run, Make), 7 types (Never plus 6 interfaces), and 7
-	// methods (Never.Method plus one per interface).
+	// ForOwnBlackBoxTest, Run, Make), 10 types (Never, Stringish, Decoy, Tagged
+	// plus 6 interfaces), and 9 methods (Never.Method, Stringish.String,
+	// Decoy.Read plus one per interface). Vars and consts are zero, which also
+	// pins that struct fields such as Tagged.Name are not counted as symbols.
 	want := map[SymbolKind]int{
 		KindFunc:   8,
-		KindType:   7,
-		KindMethod: 7,
+		KindType:   10,
+		KindMethod: 9,
+		KindVar:    0,
+		KindConst:  0,
 	}
 	for kind, n := range want {
 		if got := report.SymbolTotals[kind]; got != n {
@@ -132,8 +138,10 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 		}
 	}
 	for _, f := range report.Symbols {
-		if strings.Contains(f.Package, "/internal/gen/") || strings.Contains(f.Package, "/sdk") {
-			t.Errorf("reported %s.%s from an excluded tree", f.Package, f.Name)
+		for _, excluded := range []string{"/internal/gen/", "/sdk", "/examples/"} {
+			if strings.Contains(f.Package, excluded) {
+				t.Errorf("reported %s.%s from the excluded %s tree", f.Package, f.Name, excluded)
+			}
 		}
 	}
 }
@@ -194,6 +202,62 @@ func TestUnusedInterfacesDistinguishDependencyFromMention(t *testing.T) {
 	}
 	if diff := cmp.Diff(wantRoles, roles); diff != "" {
 		t.Errorf("interface roles mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// TestDispatchDoubtRequiresImplementingTheInterface covers the part of check 4
+// that decides whether a method can be reached without being named. The doubt is
+// earned by satisfying an interface, not by sharing a method name with one:
+// otherwise every String, Read, or Close would carry it and the signal would be
+// worthless.
+func TestDispatchDoubtRequiresImplementingTheInterface(t *testing.T) {
+	report := analyzeFixture(t)
+
+	tests := []struct {
+		name       string
+		symbol     string
+		wantDoubt  string
+		wantDoubts bool
+	}{
+		{
+			name:       "satisfying fmt.Stringer earns the doubt",
+			symbol:     "Stringish.String",
+			wantDoubt:  "fmt.Stringer",
+			wantDoubts: true,
+		},
+		{
+			name:       "sharing a name without the signature does not",
+			symbol:     "Decoy.Read",
+			wantDoubts: false,
+		},
+		{
+			name:       "a method no interface declares does not",
+			symbol:     "Never.Method",
+			wantDoubts: false,
+		},
+		{
+			name:       "an encoding tag makes the type decoder-reachable",
+			symbol:     "Tagged",
+			wantDoubt:  "encoding-tagged",
+			wantDoubts: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := findSymbol(report, "fixture/internal/used", tt.symbol)
+			if !ok {
+				t.Fatalf("%s was not reported", tt.symbol)
+			}
+			if hasDoubts := !certain(got.Doubts); hasDoubts != tt.wantDoubts {
+				t.Fatalf("%s doubts = %v, want any = %v", tt.symbol, got.Doubts, tt.wantDoubts)
+			}
+			if tt.wantDoubt == "" {
+				return
+			}
+			if !slices.ContainsFunc(got.Doubts, func(d string) bool { return strings.Contains(d, tt.wantDoubt) }) {
+				t.Errorf("%s doubts = %v, want one mentioning %q", tt.symbol, got.Doubts, tt.wantDoubt)
+			}
+		})
 	}
 }
 
