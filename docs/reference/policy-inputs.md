@@ -563,8 +563,9 @@ Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
 | Variable | Type | Required | Description |
 | --- | --- | --- | --- |
 | `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `base_target` | `targetv1.Target` | yes | Base side of a diff request, the target being compared from |
+| `target_target` | `targetv1.Target` | yes | Target side of a diff request, the target being compared to |
 | `env` | `policyv1.Environment` | yes | Execution environment context |
-| `target` | `targetv1.Target` | no | Target or provenance metadata |
 | `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
 
 #### `service_secrets_request`

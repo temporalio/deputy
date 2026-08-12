@@ -55,6 +55,11 @@ var (
 	// targetVars provide target/provenance information
 	targetVars = []string{"target"}
 
+	// diffTargetVars provide the two sides of a diff request. A diff compares
+	// independent resources, so each side is bound separately and a policy can
+	// authorize them separately.
+	diffTargetVars = []string{"base_target", "target_target"}
+
 	// dockerfileVars provide Dockerfile analysis
 	dockerfileVars = []string{"dockerfile", "dockerfile_analysis"}
 
@@ -279,9 +284,13 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 		Description: "Triggers before SBOM generation via the API",
 	},
 	EntrypointServiceDiffRequest: {
-		Entrypoint:  EntrypointServiceDiffRequest,
-		Required:    append([]string{"request"}, envVars...),
-		Optional:    append(targetVars, jwtVars...),
+		Entrypoint: EntrypointServiceDiffRequest,
+		// A diff names two independent resources, so its payload carries a
+		// target per side and no single "target". Advertising "target" here
+		// pointed authors at a variable the payload never sets. Both sides are
+		// always bound, so neither needs a null guard.
+		Required:    append(append([]string{"request"}, diffTargetVars...), envVars...),
+		Optional:    jwtVars,
 		Description: "Triggers before a diff operation via the API",
 	},
 	EntrypointServiceSecretsRequest: {

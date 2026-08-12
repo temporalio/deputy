@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -1212,16 +1213,21 @@ func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint 
 		Procedure: req.Spec().Procedure,
 	}
 
-	// Build target if extractable
-	var target *targetv1.Target
+	// Extract the targets the request names. Diff requests name two, and both
+	// have to reach the policy, so authorization cannot be satisfied by the
+	// base side alone.
+	var extracted requestTargets
 	if msg := req.Any(); msg != nil {
-		if targetStr := extractTargetFromMessage(msg); targetStr != "" {
-			svcReq.Target = targetStr
-			target = &targetv1.Target{
-				DisplayPath: targetStr,
-			}
-		}
+		extracted = extractRequestTargets(msg)
 	}
+
+	// ServiceRequest.target is a single string, so a two-sided request reports
+	// its base there (falling back to the target side when the base is
+	// absent). base_target and target_target on the typed diff input below are
+	// what a diff policy should match on.
+	svcReq.Target = cmp.Or(extracted.base, extracted.target)
+
+	target := policyTarget(extracted.target)
 
 	// Return the appropriate typed input based on entrypoint
 	switch entrypoint {
@@ -1247,12 +1253,13 @@ func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint 
 			Env:     env,
 		}
 	case policy.EntrypointServiceDiffRequest:
-		// Diff has base_target and target_target instead of target
+		// Diff has base_target and target_target instead of target, and each
+		// carries its own side of the comparison.
 		return &policyv1.ServiceDiffRequestPolicyInput{
 			Jwt:          jwtClaims,
 			Request:      svcReq,
-			BaseTarget:   target,
-			TargetTarget: target,
+			BaseTarget:   diffSideTarget(extracted.base),
+			TargetTarget: diffSideTarget(extracted.target),
 			Env:          env,
 		}
 	case policy.EntrypointServiceSecretsRequest:
@@ -1280,25 +1287,65 @@ func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint 
 	}
 }
 
-// extractTargetFromMessage attempts to extract the target field from request messages.
-// This uses type assertions for known request types with GetTarget/GetPath methods.
-func extractTargetFromMessage(msg any) string {
-	// Check for Target field (most scan/list/sbom requests)
-	if m, ok := msg.(interface{ GetTarget() string }); ok {
-		return m.GetTarget()
+// requestTargets are the targets a request names. Most requests name one, in
+// target. A diff compares two independent resources, so it names both, and
+// each has to reach the policy on its own field: a policy that authorizes one
+// side must not be handed that side twice.
+type requestTargets struct {
+	base   string
+	target string
+}
+
+// extractRequestTargets pulls the targets out of a request message by the
+// getters its generated type carries. A request that names no target yields
+// the zero value; how the caller renders that is its own decision, since a
+// procedure with no target at all and a diff side the caller omitted are not
+// the same thing.
+func extractRequestTargets(msg any) requestTargets {
+	// Two-sided requests are matched first, and on both getters at once, so a
+	// diff can never fall through to a single-target case and report one side
+	// as if it were the whole request.
+	switch m := msg.(type) {
+	case interface {
+		GetBaseTarget() string
+		GetTargetTarget() string
+	}:
+		// DiffPackages, DiffVulnerabilities.
+		return requestTargets{base: m.GetBaseTarget(), target: m.GetTargetTarget()}
+	case interface {
+		GetBaseImage() string
+		GetTargetImage() string
+	}:
+		// DiffContainerImages.
+		return requestTargets{base: m.GetBaseImage(), target: m.GetTargetImage()}
+	case interface{ GetTarget() string }:
+		// Scan, list, sbom, secrets, and graph requests.
+		return requestTargets{target: m.GetTarget()}
+	case interface{ GetPath() string }:
+		return requestTargets{target: m.GetPath()}
 	}
 
-	// Check for BaseTarget (diff requests)
-	if m, ok := msg.(interface{ GetBaseTarget() string }); ok {
-		if base := m.GetBaseTarget(); base != "" {
-			return base
-		}
-	}
+	return requestTargets{}
+}
 
-	// Check for Path (secrets requests)
-	if m, ok := msg.(interface{ GetPath() string }); ok {
-		return m.GetPath()
+// policyTarget renders a target string as a policy target, or nil when the
+// request did not name one. Nil rather than an empty Target keeps "the request
+// named no target" distinguishable from "the request named the empty string",
+// which matters for procedures that have no target at all (SecretsService
+// Verify, ListDetectors, RegisterDetector).
+func policyTarget(value string) *targetv1.Target {
+	if value == "" {
+		return nil
 	}
+	return &targetv1.Target{DisplayPath: value}
+}
 
-	return ""
+// diffSideTarget renders one side of a diff request as a policy target. Both
+// sides are always bound, even when the caller left one empty, because a diff
+// always has two sides and the policy has to be able to talk about each. An
+// omitted side therefore reads as an empty display_path, which fails any
+// allowlist check, rather than dropping the variable and making every policy
+// that references it error out.
+func diffSideTarget(value string) *targetv1.Target {
+	return &targetv1.Target{DisplayPath: value}
 }

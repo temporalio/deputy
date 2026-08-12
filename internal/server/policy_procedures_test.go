@@ -12,10 +12,78 @@ import (
 
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	"github.com/temporalio/deputy/gen/deputy/diff/v1/diffv1connect"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	"github.com/temporalio/deputy/gen/deputy/scan/v1/scanv1connect"
 	"github.com/temporalio/deputy/internal/policy"
 )
+
+// TestBuildPolicyPayloadCarriesBothDiffSides pins that a diff policy sees each
+// side of the comparison as the caller sent it. The two sides are independent
+// resources, so collapsing them lets a caller pair an authorized base with an
+// unauthorized target and have the policy authorize the base twice, and
+// dropping them entirely leaves the policy with nothing to match on.
+func TestBuildPolicyPayloadCarriesBothDiffSides(t *testing.T) {
+	tests := []struct {
+		name       string
+		request    connect.AnyRequest
+		wantBase   string
+		wantTarget string
+	}{
+		{
+			name:       "diff packages",
+			request:    connect.NewRequest(&diffv1.DiffPackagesRequest{BaseTarget: "base-repo", TargetTarget: "target-repo"}),
+			wantBase:   "base-repo",
+			wantTarget: "target-repo",
+		},
+		{
+			name:       "diff vulnerabilities",
+			request:    connect.NewRequest(&diffv1.DiffVulnerabilitiesRequest{BaseTarget: "base-repo", TargetTarget: "target-repo"}),
+			wantBase:   "base-repo",
+			wantTarget: "target-repo",
+		},
+		{
+			name:       "diff container images",
+			request:    connect.NewRequest(&diffv1.DiffContainerImagesRequest{BaseImage: "base-image", TargetImage: "target-image"}),
+			wantBase:   "base-image",
+			wantTarget: "target-image",
+		},
+		{
+			// An omitted side is still bound, as an empty display path, so a
+			// policy referencing it denies instead of failing to evaluate.
+			name:       "diff with only a base",
+			request:    connect.NewRequest(&diffv1.DiffPackagesRequest{BaseTarget: "base-repo"}),
+			wantBase:   "base-repo",
+			wantTarget: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := buildPolicyPayload(context.Background(), tt.request, policy.EntrypointServiceDiffRequest)
+
+			input, ok := payload.(*policyv1.ServiceDiffRequestPolicyInput)
+			if !ok {
+				t.Fatalf("payload is a %T, want *policyv1.ServiceDiffRequestPolicyInput", payload)
+			}
+			// Both sides must be bound, not merely read as empty: an unset
+			// message is stripped from the CEL activation, which turns every
+			// policy that mentions it into an evaluation error.
+			if input.GetBaseTarget() == nil {
+				t.Error("base_target is unset, want it bound even when the caller omits it")
+			}
+			if input.GetTargetTarget() == nil {
+				t.Error("target_target is unset, want it bound even when the caller omits it")
+			}
+			if got := input.GetBaseTarget().GetDisplayPath(); got != tt.wantBase {
+				t.Errorf("base_target.display_path = %q, want %q", got, tt.wantBase)
+			}
+			if got := input.GetTargetTarget().GetDisplayPath(); got != tt.wantTarget {
+				t.Errorf("target_target.display_path = %q, want %q", got, tt.wantTarget)
+			}
+		})
+	}
+}
 
 // writePolicyFile writes a policy document to a temp file and returns its path.
 func writePolicyFile(t *testing.T, contents string) string {
@@ -55,16 +123,23 @@ func denyPolicy(name, when string, entrypoints ...policy.Entrypoint) string {
 // change, mapping twelve more procedures would start firing every loaded policy
 // on RPCs it never touched.
 //
-// Each request is deliberately empty, so a request that clears policy fails in
-// the handler with invalid_argument. That code therefore means "reached the
-// handler exactly as before", and permission_denied means a policy fired.
+// No request here can succeed, which is what makes the codes legible.
+// permission_denied means a policy fired. Any other code means the request
+// cleared policy and failed inside the handler: invalid_argument for an empty
+// request, and internal for one whose targets are non-empty but unresolvable.
 func TestServicePolicyEnforcement(t *testing.T) {
-	diffPackages := func(t *testing.T, ts *httptest.Server) error {
-		t.Helper()
-		client := diffv1connect.NewDiffServiceClient(ts.Client(), ts.URL)
-		_, err := client.DiffPackages(context.Background(), connect.NewRequest(&diffv1.DiffPackagesRequest{}))
-		return err
+	diffPackagesBetween := func(base, target string) func(*testing.T, *httptest.Server) error {
+		return func(t *testing.T, ts *httptest.Server) error {
+			t.Helper()
+			client := diffv1connect.NewDiffServiceClient(ts.Client(), ts.URL)
+			_, err := client.DiffPackages(context.Background(), connect.NewRequest(&diffv1.DiffPackagesRequest{
+				BaseTarget:   base,
+				TargetTarget: target,
+			}))
+			return err
+		}
 	}
+	diffPackages := diffPackagesBetween("", "")
 	scan := func(t *testing.T, ts *httptest.Server) error {
 		t.Helper()
 		client := scanv1connect.NewScanServiceClient(ts.Client(), ts.URL)
@@ -76,6 +151,8 @@ func TestServicePolicyEnforcement(t *testing.T) {
 	denyScan := denyPolicy("deny-scan", "true", policy.EntrypointServiceScanRequest)
 	denyNothing := denyPolicy("deny-nothing", "false", policy.EntrypointServiceDiffRequest)
 	denyEverywhere := denyPolicy("deny-everywhere", "true")
+	denyBaseSide := denyPolicy("deny-base-side", "base_target.display_path == 'forbidden'", policy.EntrypointServiceDiffRequest)
+	denyTargetSide := denyPolicy("deny-target-side", "target_target.display_path == 'forbidden'", policy.EntrypointServiceDiffRequest)
 
 	tests := []struct {
 		name     string
@@ -105,6 +182,29 @@ func TestServicePolicyEnforcement(t *testing.T) {
 			policy:   denyScan,
 			call:     diffPackages,
 			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			// The target side is authorized independently, so a forbidden
+			// target cannot ride along with an allowed base.
+			name:     "diff with a forbidden target side is denied",
+			policy:   denyTargetSide,
+			call:     diffPackagesBetween("allowed", "forbidden"),
+			wantCode: connect.CodePermissionDenied,
+		},
+		{
+			name:     "diff with a forbidden base side is denied",
+			policy:   denyBaseSide,
+			call:     diffPackagesBetween("forbidden", "allowed"),
+			wantCode: connect.CodePermissionDenied,
+		},
+		{
+			// The sharp anti-conflation case. A target-side policy must not
+			// fire on the base value: when the two sides were collapsed, this
+			// request was denied for a target that is allowed.
+			name:     "diff with a forbidden base does not trip a target-side policy",
+			policy:   denyTargetSide,
+			call:     diffPackagesBetween("forbidden", "allowed"),
+			wantCode: connect.CodeInternal,
 		},
 		{
 			name:     "diff with an unscoped policy still fires",

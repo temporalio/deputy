@@ -222,6 +222,31 @@ Streaming operations (`StreamScan`) are listed for completeness but are not
 enforced yet: the policy interceptor is a unary interceptor, so streaming RPCs
 pass through without evaluation.
 
+A diff compares two independent resources, so `service_diff_request` binds
+`base_target` and `target_target` instead of the single `target` the other
+service entrypoints bind. Authorize both sides: a policy that checks only one
+lets a caller pair an authorized base with a target they should not reach.
+`request.target` reports the base side for these requests, so it is not a
+substitute for checking `target_target`.
+
+Both sides are always bound, so neither needs a null guard. A side the caller
+omitted reads as an empty `display_path`, which fails an allowlist check and so
+denies rather than passing:
+
+```yaml
+policies:
+  - name: diff-tenant-isolation
+    entrypoints: ["service_diff_request"]
+    rules:
+      - action: deny
+        when: |
+          has(jwt.tenant) && !(
+            base_target.display_path.contains(jwt.tenant) &&
+            target_target.display_path.contains(jwt.tenant)
+          )
+        reason: "Cross-tenant diff denied"
+```
+
 A policy runs on an operation when it declares that operation's entrypoint, or
 when it declares no `entrypoints` at all. A policy scoped to
 `service_scan_request` does not run on diff or list requests, and a policy
