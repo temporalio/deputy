@@ -389,7 +389,7 @@ func expandedPolicyIssues(item *yaml.Node, source string, extraVars []string, lo
 	// still worth asking about.
 	decodeErr := item.Decode(&pol)
 	pol.Name = strings.TrimSpace(pol.Name)
-	issues := varCompileIssues(pol, item, extraVars)
+	issues := varCompileIssues(pol, item, source, extraVars, located)
 	if decodeErr != nil {
 		return append(issues, backstopIssue(fmt.Errorf("%s: %w", source, decodeErr), source, item, located)...)
 	}
@@ -418,15 +418,19 @@ func expandedPolicyIssues(item *yaml.Node, source string, extraVars []string, lo
 // the walk has already reported, an entrypoint it does not recognize, or a field
 // the decoder refuses would each hide an uncompilable var behind them.
 //
-// It reports only what nothing else owns. A var name that is empty or
-// duplicated is already reported by the walk, so neither is restated here.
-func varCompileIssues(pol structuredPolicy, item *yaml.Node, extraVars []string) []Issue {
+// It reports only what nothing else owns, which is what located is for: a var
+// name that is empty or duplicated is located by the walk, so the wrapping
+// failure that restates it is folded rather than printed twice. Discarding that
+// failure outright is not the same thing. It withheld any var-shape defect the
+// walk does not model, and left the one it does to a bundle-wide backstop that an
+// unrelated located error stops before it runs.
+func varCompileIssues(pol structuredPolicy, item *yaml.Node, source string, extraVars []string, located []Issue) []Issue {
 	if len(pol.Vars) == 0 {
 		return nil
 	}
 	body, err := pol.wrapVars("[]")
 	if err != nil {
-		return nil
+		return backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, err), source, item, located)
 	}
 	if err := Compile(body, extraVars); err != nil {
 		issue := issueAt(item, IssueError, "cel-error", err.Error())
@@ -512,6 +516,23 @@ func validateMode(item *yaml.Node) []Issue {
 	return nil
 }
 
+// varKeyName returns the name a vars key binds, read the way the decoder reads
+// it, or the empty string when it binds none. A null key is the case the two
+// readers would otherwise disagree about: the decoder leaves the name at its zero
+// value, which every reader of a bundle refuses, while `null` and `~` are text a
+// walk over the document would take for a name.
+//
+// It is the key-position counterpart of MappingValue reading a null value as
+// unset, and it is what lets rewritesItsText go on exempting null: the exemption
+// holds only because both readers model null the same way, which in key position
+// they now do.
+func varKeyName(key *yaml.Node) string {
+	if key == nil || key.Kind != yaml.ScalarNode || isNullNode(key) {
+		return ""
+	}
+	return normalizeVarName(key.Value)
+}
+
 // validateVars checks the vars mapping: it must be a mapping, and every variable
 // needs a unique non-empty name, since duplicates silently shadow each other
 // when the policy is expanded.
@@ -527,8 +548,8 @@ func validateVars(item *yaml.Node) []Issue {
 	seen := map[string]struct{}{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := node.Content[i]
-		name := normalizeVarName(key.Value)
-		if key.Kind != yaml.ScalarNode || name == "" {
+		name := varKeyName(key)
+		if name == "" {
 			issues = append(issues, issueAt(key, IssueError, "empty-var-name", "vars must have non-empty names"))
 			continue
 		}
@@ -812,10 +833,13 @@ func DeclaredVarNames(policyNode *yaml.Node) []string {
 	}
 	for i := 0; i+1 < len(varsNode.Content); i += 2 {
 		k := varsNode.Content[i]
-		if k.Kind == yaml.ScalarNode && !isMergeKey(k) && normalizeVarName(k.Value) != "" {
-			// The name is normalized because the expansion binds the normalized
-			// spelling, and a condition is compiled against the names it can use.
-			names = append(names, normalizeVarName(k.Value))
+		// varKeyName normalizes, because the expansion binds the normalized
+		// spelling and a condition is compiled against the names it can use, and
+		// reads a null key as binding nothing, as the decoder does. Declaring the
+		// text of a null key would put a name in scope that the expanded policy
+		// never binds.
+		if name := varKeyName(k); name != "" && !isMergeKey(k) {
+			names = append(names, name)
 		}
 	}
 	return names

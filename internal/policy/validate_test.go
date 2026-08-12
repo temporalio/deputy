@@ -1696,6 +1696,37 @@ unused: &u
 `,
 			wantCodes: []string{"yaml-anchor", "missing-policies"},
 		},
+		{
+			// The decoder reads a null key as the empty name every reader of a
+			// bundle refuses, so the walk has to read it the same way and locate
+			// it, rather than leaving it to a backstop an unrelated defect stops.
+			name: "an explicitly null var name beside a bad action",
+			bundle: `
+policies:
+  - name: null-var-name-and-action
+    vars:
+      null: pkg.name
+    rules:
+      - when: "true"
+        action: dney
+        reason: "r"
+`,
+			wantCodes: []string{"empty-var-name", "invalid-action"},
+		},
+		{
+			name: "a var name written as a tilde beside a bad action",
+			bundle: `
+policies:
+  - name: tilde-var-name-and-action
+    vars:
+      ~: pkg.name
+    rules:
+      - when: "true"
+        action: dney
+        reason: "r"
+`,
+			wantCodes: []string{"empty-var-name", "invalid-action"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
