@@ -218,6 +218,27 @@ policies:
 `,
 			wantText: "do not support YAML merge keys",
 		},
+		{
+			// The list a root merge key supplies is what makes the document a
+			// bundle, so how well formed that list is cannot decide whether the
+			// construct supplying it is refused.
+			name: "root merge key supplying an empty list",
+			bundle: `defaults: &defaults
+  policies: []
+
+<<: *defaults
+`,
+			wantText: "do not support YAML merge keys",
+		},
+		{
+			name: "root merge key supplying a malformed list",
+			bundle: `defaults: &defaults
+  policies: {}
+
+<<: *defaults
+`,
+			wantText: "do not support YAML merge keys",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

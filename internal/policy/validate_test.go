@@ -1055,6 +1055,21 @@ func TestLooksLikeStructuredBundle(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "a policies list inherited through a merge key",
+			data: "defaults: &d\n  policies:\n    - name: p\n      rules:\n        - when: \"true\"\n          action: deny\n          reason: r\n\n<<: *d\n",
+			want: true,
+		},
+		{
+			name: "an empty policies list inherited through a merge key",
+			data: "defaults: &d\n  policies: []\n\n<<: *d\n",
+			want: true,
+		},
+		{
+			name: "a malformed policies value inherited through a merge key",
+			data: "defaults: &d\n  policies: {}\n\n<<: *d\n",
+			want: true,
+		},
+		{
 			name: "a document whose unparsed key only starts with the bundle key",
 			data: "policiesx:\n  - name: broken\n    rules: [\n",
 		},

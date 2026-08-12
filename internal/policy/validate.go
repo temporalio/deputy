@@ -119,10 +119,14 @@ type ValidateOptions struct {
 // instead of being dismissed as an unknown format. Compiled bundles are ruled
 // out first: their JSON has a "policies" array too.
 //
-// A document whose "policies" key is not written directly still counts when the
-// decoder finds one anyway, which a top-level merge key does. Without that
-// fallback a bundle could inherit its whole policy list from an anchor and slip
-// past the checks that key off this probe, the anchor refusal among them.
+// A document whose "policies" key is not written directly still counts when a
+// reader that resolves references finds one anyway, which a top-level merge key
+// does. Without that fallback a bundle could inherit its whole policy list from
+// an anchor and slip past the checks that key off this probe, the anchor refusal
+// among them. The fallback asks the same question of the resolved document that
+// the node walk asks of the written one, whether the key is there, so an
+// inherited list that is empty or malformed is as much a bundle as an inherited
+// list that is well formed.
 //
 // A document that does not parse as YAML has no nodes to probe, so the raw text
 // is checked for the key instead. A syntax error is the mistake an author is
@@ -145,7 +149,7 @@ func LooksLikeStructuredBundle(data []byte) bool {
 	if hasMappingKey(root.Content[0], bundlePoliciesKey) {
 		return true
 	}
-	return decodesWithPolicies(data)
+	return resolvesToBundleKey(data)
 }
 
 // bundlePoliciesKey is the mapping key that marks a document as an authored
@@ -216,17 +220,25 @@ func hasMappingKey(mapNode *yaml.Node, key string) bool {
 	return false
 }
 
-// decodesWithPolicies reports whether data decodes into a bundle carrying at
-// least one policy. It is how the shape probe sees a policies key the node walk
-// cannot: the decoder resolves the aliases and merge keys the walk refuses to
-// follow, so this answers "would a reader that resolves them find policies here"
-// without any reader having to act on the resolved value.
-func decodesWithPolicies(data []byte) bool {
-	var bundle structuredBundle
-	if err := yaml.Unmarshal(data, &bundle); err != nil {
+// resolvesToBundleKey reports whether data carries the bundle key once the
+// references the node walk refuses to follow are resolved. It is how the shape
+// probe sees a policies key the walk cannot: the decoder resolves the aliases and
+// merge keys, so this answers "would a reader that resolves them find the key
+// here" without any reader having to act on the resolved value.
+//
+// It decodes into a plain mapping rather than into Deputy's bundle types, and
+// asks only whether the key is present, so the answer does not depend on the
+// inherited value being a well-formed, non-empty policy list. Requiring that
+// dismissed a bundle whose inherited list was empty or malformed as an unknown
+// format, which withheld the refusal of the construct that supplied it and left
+// the linter describing a different mistake than the editor.
+func resolvesToBundleKey(data []byte) bool {
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return false
 	}
-	return len(bundle.Policies) > 0
+	_, ok := doc[bundlePoliciesKey]
+	return ok
 }
 
 // ValidateBundle reports every structural problem in a structured policy bundle:
