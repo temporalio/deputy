@@ -39,14 +39,35 @@ func setupTraceRecorder(t *testing.T) *tracetest.SpanRecorder {
 	return recorder
 }
 
-// findSpan finds a span whose name contains the given substring.
-func findSpan(spans []sdktrace.ReadOnlySpan, nameContains string) sdktrace.ReadOnlySpan {
+// rpcSpanName derives the otelconnect server span name from a generated
+// Connect procedure constant. otelconnect names RPC spans after the full
+// procedure minus the leading slash (verified against a live recorder:
+// "/deputy.scan.v1.ScanService/Scan" produces the span
+// "deputy.scan.v1.ScanService/Scan"). Deriving from the generated constants
+// keeps these tests in sync if a proto service or RPC is renamed.
+func rpcSpanName(procedure string) string {
+	return strings.TrimPrefix(procedure, "/")
+}
+
+// findSpan finds the span with the exact given name. Exact matching prevents
+// a test from accidentally latching onto a span from a different service that
+// shares a method name.
+func findSpan(spans []sdktrace.ReadOnlySpan, name string) sdktrace.ReadOnlySpan {
 	for _, span := range spans {
-		if strings.Contains(span.Name(), nameContains) {
+		if span.Name() == name {
 			return span
 		}
 	}
 	return nil
+}
+
+// spanNames lists the recorded span names for failure messages.
+func spanNames(spans []sdktrace.ReadOnlySpan) []string {
+	names := make([]string, 0, len(spans))
+	for _, span := range spans {
+		names = append(names, span.Name())
+	}
+	return names
 }
 
 // spanHasAttribute checks if span has an attribute with the given key.
@@ -80,12 +101,12 @@ func TestScanHandler_Trace_InvalidArgument(t *testing.T) {
 
 	spans := recorder.Ended()
 	if len(spans) == 0 {
-		t.Skip("no spans recorded")
+		t.Fatal("no spans recorded")
 	}
 
-	scanSpan := findSpan(spans, "Scan")
+	scanSpan := findSpan(spans, rpcSpanName(scanv1connect.ScanServiceScanProcedure))
 	if scanSpan == nil {
-		t.Skip("Scan span not found")
+		t.Fatalf("Scan span not found, got %v", spanNames(spans))
 	}
 
 	if scanSpan.Status().Code != codes.Error {
@@ -112,12 +133,12 @@ func TestScanHandler_Trace_TargetAttribute(t *testing.T) {
 
 	spans := recorder.Ended()
 	if len(spans) == 0 {
-		t.Skip("no spans recorded")
+		t.Fatal("no spans recorded")
 	}
 
-	scanSpan := findSpan(spans, "Scan")
+	scanSpan := findSpan(spans, rpcSpanName(scanv1connect.ScanServiceScanProcedure))
 	if scanSpan == nil {
-		t.Skip("Scan span not found")
+		t.Fatalf("Scan span not found, got %v", spanNames(spans))
 	}
 
 	if !spanHasAttribute(scanSpan, "deputy.target.path") {
@@ -147,12 +168,12 @@ func TestListHandler_Trace_Ecosystems(t *testing.T) {
 
 	spans := recorder.Ended()
 	if len(spans) == 0 {
-		t.Skip("no spans recorded")
+		t.Fatal("no spans recorded")
 	}
 
-	span := findSpan(spans, "ListEcosystems")
+	span := findSpan(spans, rpcSpanName(listv1connect.ListServiceListEcosystemsProcedure))
 	if span == nil {
-		t.Skip("ListEcosystems span not found")
+		t.Fatalf("ListEcosystems span not found, got %v", spanNames(spans))
 	}
 
 	if span.Status().Code == codes.Error {
@@ -182,12 +203,12 @@ func TestSecretsHandler_Trace_ListDetectors(t *testing.T) {
 
 	spans := recorder.Ended()
 	if len(spans) == 0 {
-		t.Skip("no spans recorded")
+		t.Fatal("no spans recorded")
 	}
 
-	span := findSpan(spans, "ListDetectors")
+	span := findSpan(spans, rpcSpanName(secretsv1connect.SecretsServiceListDetectorsProcedure))
 	if span == nil {
-		t.Skip("ListDetectors span not found")
+		t.Fatalf("ListDetectors span not found, got %v", spanNames(spans))
 	}
 
 	if span.Status().Code == codes.Error {
@@ -216,12 +237,14 @@ func TestSecretsHandler_Trace_ScanError(t *testing.T) {
 
 	spans := recorder.Ended()
 	if len(spans) == 0 {
-		t.Skip("no spans recorded")
+		t.Fatal("no spans recorded")
 	}
 
-	span := findSpan(spans, "Scan")
+	// Exact name: a bare "Scan" substring would also match the scan
+	// service's span, which is not the RPC under test here.
+	span := findSpan(spans, rpcSpanName(secretsv1connect.SecretsServiceScanProcedure))
 	if span == nil {
-		t.Skip("Scan span not found")
+		t.Fatalf("secrets Scan span not found, got %v", spanNames(spans))
 	}
 
 	if span.Status().Code != codes.Error {
@@ -248,7 +271,7 @@ func TestHandler_Trace_SpanParenting(t *testing.T) {
 
 	spans := recorder.Ended()
 	if len(spans) == 0 {
-		t.Skip("no spans recorded")
+		t.Fatal("no spans recorded")
 	}
 
 	for _, span := range spans {
@@ -281,23 +304,19 @@ func TestOtelconnect_Integration(t *testing.T) {
 
 	spans := recorder.Ended()
 	if len(spans) == 0 {
-		t.Skip("no spans recorded")
+		t.Fatal("no spans recorded")
 	}
 
-	var scanSpans, listSpans, secretsSpans int
-	for _, span := range spans {
-		name := span.Name()
-		switch {
-		case strings.Contains(name, "ScanService") || (strings.Contains(name, "Scan") && !strings.Contains(name, "Secrets")):
-			scanSpans++
-		case strings.Contains(name, "ListService") || strings.Contains(name, "ListEcosystems"):
-			listSpans++
-		case strings.Contains(name, "SecretsService") || strings.Contains(name, "ListDetectors"):
-			secretsSpans++
+	// Each RPC must have produced its otelconnect server span.
+	for _, want := range []string{
+		rpcSpanName(scanv1connect.ScanServiceScanProcedure),
+		rpcSpanName(listv1connect.ListServiceListEcosystemsProcedure),
+		rpcSpanName(secretsv1connect.SecretsServiceListDetectorsProcedure),
+	} {
+		if findSpan(spans, want) == nil {
+			t.Errorf("expected span %q, got %v", want, spanNames(spans))
 		}
 	}
-
-	t.Logf("spans: scan=%d list=%d secrets=%d total=%d", scanSpans, listSpans, secretsSpans, len(spans))
 }
 
 func TestScanHandler_Direct_Trace(t *testing.T) {

@@ -425,6 +425,10 @@ token: ghp_ABCDEFghijklmnopqrstuvwxyz0123456789
 stripe: sk_live_abcdefghijklmnopqrstuvwxyz
 `)
 
+	// The fixture yields exactly two findings from the raw engine: a GitHub
+	// token (confidence 0.99) and a Stripe key (confidence 0.95). Each
+	// subtest asserts a floor on what must survive filtering so a scanner
+	// regression that produces nothing cannot pass vacuously.
 	t.Run("allow types", func(t *testing.T) {
 		filtered := NewFilteringScanner(engine, WithAllowedTypes(TypeGitHubToken))
 		findings, err := filtered.Scan(t.Context(), content)
@@ -432,6 +436,9 @@ stripe: sk_live_abcdefghijklmnopqrstuvwxyz
 			t.Fatalf("Scan() error = %v", err)
 		}
 
+		if len(findings) == 0 {
+			t.Fatal("expected the GitHub token finding to pass the allowlist, got none")
+		}
 		for _, f := range findings {
 			if f.Type != TypeGitHubToken {
 				t.Errorf("unexpected type %s, only TypeGitHubToken should pass", f.Type)
@@ -446,10 +453,17 @@ stripe: sk_live_abcdefghijklmnopqrstuvwxyz
 			t.Fatalf("Scan() error = %v", err)
 		}
 
+		foundStripe := false
 		for _, f := range findings {
 			if f.Type == TypeGitHubToken {
 				t.Error("TypeGitHubToken should be filtered out")
 			}
+			if f.Type == TypeStripeKey {
+				foundStripe = true
+			}
+		}
+		if !foundStripe {
+			t.Fatalf("expected the non-denied Stripe key finding to remain, got %+v", findings)
 		}
 	})
 
@@ -460,6 +474,9 @@ stripe: sk_live_abcdefghijklmnopqrstuvwxyz
 			t.Fatalf("Scan() error = %v", err)
 		}
 
+		if len(findings) == 0 {
+			t.Fatal("expected the 0.99-confidence GitHub token to pass the threshold, got none")
+		}
 		for _, f := range findings {
 			if f.Confidence < 0.98 {
 				t.Errorf("finding %s has confidence %f, expected >= 0.98", f.Type, f.Confidence)

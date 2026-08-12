@@ -352,9 +352,18 @@ func TestEvaluateAll_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	// Evaluation should still work for simple policies (CEL doesn't check context for simple evals)
-	// This is primarily a smoke test for context passing
-	_, _ = eng.EvaluateAll(ctx, nil, "", "")
+	// The engine compiles programs without cel.InterruptCheckFrequency, so a
+	// cancelled context does not abort evaluation: the policy still runs to
+	// completion and returns its actions. Pin that guarantee so a behavior
+	// change (e.g. cancellation starting to abort evaluation mid-request)
+	// shows up as a deliberate test update rather than silently.
+	actions, err := eng.EvaluateAll(ctx, nil, "", "")
+	if err != nil {
+		t.Fatalf("EvaluateAll() with cancelled context error: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Type != "allow" {
+		t.Fatalf("expected one allow action despite cancelled context, got %+v", actions)
+	}
 }
 
 func TestEvaluateAll_PayloadNotModified(t *testing.T) {
