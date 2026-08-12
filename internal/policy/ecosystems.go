@@ -478,12 +478,52 @@ func normalizeIdentityFields(m map[string]any, eco ecosystem.Ecosystem) {
 			m[key] = normalizePayloadVersion(eco, version)
 		}
 	}
-	if versions, ok := m["fixed_versions"].([]any); ok {
+	if versions, present := m[packageVersionListKey]; present {
+		m[packageVersionListKey] = normalizeVersionList(versions, eco)
+	}
+}
+
+// packageVersionListKey is the one repeated version field a payload object
+// carries, an advisory's fixed versions. It is normalized element by element by
+// [normalizeVersionList] rather than in the scalar loop above.
+// TestIdentityKeysCoverSchema classifies it with the scalar version keys, so a
+// second repeated version field cannot appear unclassified.
+const packageVersionListKey = "fixed_versions"
+
+// normalizeVersionList normalizes a repeated version field and returns a new
+// value, leaving anything that is not a list of versions untouched.
+//
+// Both shapes a payload carries it in are handled. A proto's repeated field
+// reaches the walk as []any, and a payload a caller assembled itself (the map
+// surface, [Engine.EvaluateAllMap]) commonly carries []string. Only the first was
+// normalized, so a hand-built payload gave a policy "1.44.1" in fixed_versions
+// beside a "v1.44.0" in the version field next to it, and the canonical identity
+// contract held for one of the two.
+//
+// The result is a fresh slice because the payload the walk rewrites is not
+// wholly its own: the engine's clone is shallow, and while [convertProtosInMap]
+// rebuilds every map[string]any and []any on the way in, a []string is a scalar
+// slice it passes through by reference. Normalizing that in place would rewrite a
+// slice the caller still holds, which is a worse bug than the one being fixed.
+func normalizeVersionList(value any, eco ecosystem.Ecosystem) any {
+	switch versions := value.(type) {
+	case []any:
+		out := make([]any, len(versions))
 		for i, elem := range versions {
+			out[i] = elem
 			if version, isString := elem.(string); isString {
-				versions[i] = normalizePayloadVersion(eco, version)
+				out[i] = normalizePayloadVersion(eco, version)
 			}
 		}
+		return out
+	case []string:
+		out := make([]string, len(versions))
+		for i, version := range versions {
+			out[i] = normalizePayloadVersion(eco, version)
+		}
+		return out
+	default:
+		return value
 	}
 }
 
