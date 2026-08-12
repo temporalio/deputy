@@ -23,7 +23,7 @@ func IsDeputyInternalCommand(cmd string) bool {
 	return strings.HasPrefix(cmd, "deputy:")
 }
 
-// fileEdits serializes the file edits [ApplyDeputyCommand] performs within a
+// fileEdits orders the file edits [ApplyDeputyCommand] performs within a
 // process. Every one of them reads a file, computes a new version of it, and
 // publishes that, so two overlapping edits read the same bytes, compute two
 // independent results, and write them one over the other. The loser's change is
@@ -32,34 +32,156 @@ func IsDeputyInternalCommand(cmd string) bool {
 // unedited or one stale lock entry alive, and the next scan reports the fix as
 // ineffective at the version it just removed.
 //
-// One lock covers all of them rather than one per file, because the files
-// alias. A mise.lock reached through a symlink belongs to every directory that
-// links to it, so keying on the config would not order two configs sharing a
-// lockfile; a config reached through a symlink is one file under two names, so
-// keying on the manifest path would not order those either; and taking a lock
-// per resource invites a deadlock over their order. An edit is a handful of
-// operations on files of a few kilobytes and every caller applies its plan's
-// steps one at a time, so finer granularity would buy nothing.
+// The unit is the working tree, not the file. Within a tree the files alias: a
+// mise.lock reached through a symlink belongs to every directory that links to
+// it, so keying on the config would not order two configs sharing a lockfile; a
+// config reached through a symlink is one file under two names, so keying on the
+// manifest path would not order those either; and taking a lock per resource
+// invites a deadlock over their order. An edit is a handful of operations on
+// files of a few kilobytes and every caller applies its plan's steps one at a
+// time, so finer granularity within a tree would buy nothing.
+//
+// Across trees there is nothing to order, and one lock for the process is a
+// bottleneck a shared deployment feels: the server executes a plan step by
+// step through this function, so a slow read, write, or fsync in one request
+// would stall every other tenant's remediation behind it.
 //
 // The guard is process-local. Two `deputy fix` runs over one working tree still
 // race, on these files and on the working tree itself, and ordering those would
 // take a filesystem lock that Deputy does not take.
-var fileEdits sync.Mutex
+var fileEdits = newEditGuards()
+
+// editGuards lets edits to unrelated working trees run at once while any two
+// that could touch one file still take turns.
+//
+// Two trees are unrelated only when neither contains the other. A nested work
+// directory shares files with the tree above it, so a plan applied to a
+// monorepo root and a plan applied to one of its subdirectories are ordered
+// against each other exactly as two plans over one tree are; treating them as
+// independent would trade the bottleneck for the lost update this guard exists
+// to prevent. Overlap is decided by path containment rather than by a lock per
+// tree, so no holder ever waits on a second guard and there is no ordering to
+// deadlock over.
+//
+// Entries live only while a tree is held or waited on, so the map is bounded by
+// the number of edits in flight rather than by the number of trees a
+// long-running daemon has ever seen.
+type editGuards struct {
+	mu   sync.Mutex
+	cond *sync.Cond
+	held map[string]struct{}
+}
+
+// newEditGuards returns an empty set of guards.
+func newEditGuards() *editGuards {
+	g := &editGuards{held: make(map[string]struct{})}
+	g.cond = sync.NewCond(&g.mu)
+	return g
+}
+
+// guard blocks until no edit is in flight against a working tree overlapping
+// dir, then claims dir and returns the release to call when the edit is done.
+func (g *editGuards) guard(dir string) (release func()) {
+	key := treeIdentity(dir)
+
+	g.mu.Lock()
+	for g.overlapsHeldLocked(key) {
+		g.cond.Wait()
+	}
+	g.held[key] = struct{}{}
+	g.mu.Unlock()
+
+	return func() {
+		g.mu.Lock()
+		delete(g.held, key)
+		g.mu.Unlock()
+		// Any waiter may now be free, and which ones depends on the key that
+		// was released, so they all get to re-check rather than one being
+		// picked that may still be blocked.
+		g.cond.Broadcast()
+	}
+}
+
+// overlapsHeldLocked reports whether an edit is in flight against a tree that
+// shares files with key. The caller holds g.mu.
+func (g *editGuards) overlapsHeldLocked(key string) bool {
+	for held := range g.held {
+		if treesOverlap(held, key) {
+			return true
+		}
+	}
+	return false
+}
+
+// treeIdentity names the working tree a directory belongs to, so that two edits
+// reaching one tree by different spellings take one turn. The path is made
+// absolute and its symlinks resolved, since a relative path, an absolute one,
+// and a link into the same directory are the same tree and a fix applied
+// through one of them is visible through the others.
+//
+// A directory whose identity cannot be established (it does not exist, or a
+// parent cannot be read) is named by the empty string, which [treesOverlap]
+// treats as overlapping everything: an edit Deputy cannot place is ordered
+// against all of them rather than against none. Such an edit is about to fail
+// on the same missing directory anyway, so the cost is nothing and the
+// alternative is two spellings of one tree running at once.
+func treeIdentity(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return ""
+	}
+	return resolved
+}
+
+// treesOverlap reports whether two working trees can touch the same file, which
+// is true when they are the same tree or one contains the other. An unknown
+// identity (the empty string) overlaps everything, so nothing runs beside an
+// edit whose tree could not be placed.
+func treesOverlap(a, b string) bool {
+	if a == "" || b == "" {
+		return true
+	}
+	if a == b {
+		return true
+	}
+	return contains(a, b) || contains(b, a)
+}
+
+// contains reports whether sub is dir or sits beneath it. The answer comes from
+// [filepath.Rel] rather than a string prefix, so a sibling whose name merely
+// starts with the directory's ("/w/repo" and "/w/repo-fork") is not read as
+// nested; only a path that climbs out of dir is outside it, and a directory may
+// legitimately be named "..data", as Kubernetes secret mounts are.
+//
+// A pair of paths that cannot be related at all (separate volumes on Windows) is
+// reported as contained, keeping the answer conservative: two trees are only
+// allowed to run at once when they are known not to overlap.
+func contains(dir, sub string) bool {
+	rel, err := filepath.Rel(dir, sub)
+	if err != nil {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
 
 // ApplyDeputyCommand executes a deputy-internal command.
 // Returns an error if the command is not recognized or fails.
 //
-// The edit is serialized against every other one in the process by [fileEdits],
-// so a command reads the file its predecessor wrote rather than the bytes they
-// both started from.
+// The edit is serialized by [fileEdits] against every other one in the process
+// that could touch the same files, so a command reads the file its predecessor
+// wrote rather than the bytes they both started from. Edits to unrelated
+// working trees proceed at once.
 func ApplyDeputyCommand(repoDir, cmd string) error {
 	parts, err := ParseCommandArgs(cmd)
 	if err != nil {
 		return fmt.Errorf("invalid command: %w", err)
 	}
 
-	fileEdits.Lock()
-	defer fileEdits.Unlock()
+	defer fileEdits.guard(repoDir)()
 
 	switch parts[0] {
 	case "deputy:action:update":

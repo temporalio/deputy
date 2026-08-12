@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/google/osv-scalibr/extractor/filesystem"
 	"github.com/temporalio/deputy/internal/inventory/plugins/mise/misex"
@@ -2905,5 +2906,138 @@ func TestApplyMiseUpdatePrunesObsoleteLockEntries(t *testing.T) {
 				t.Errorf("lock resolution serves the fixed tool %q, want %q:\n%s", got, tt.wantResolved, after)
 			}
 		})
+	}
+}
+
+// TestEditGuardsOrderOverlappingTreesOnly pins the granularity of the edit
+// guard. Two edits that could touch one file have to take turns, or one reads
+// the bytes the other is replacing and the loser's change is silently gone; two
+// edits in unrelated working trees have nothing to order, and making them wait
+// is a bottleneck a shared deployment feels, since the server runs a plan's
+// steps through the same function one at a time.
+//
+// Overlap is not just equality of the path as written. A relative spelling, an
+// absolute one, and a symlink into a tree all name that tree, and a nested work
+// directory shares files with the tree above it.
+func TestEditGuardsOrderOverlappingTreesOnly(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "sub")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	other := t.TempDir()
+	linked := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(root, linked); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	relative, err := filepath.Rel(mustGetwd(t), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		// held is taken first; want says whether an edit in second must wait
+		// for it.
+		held, second string
+		wantOrdered  bool
+	}{
+		{name: "the same tree", held: root, second: root, wantOrdered: true},
+		{name: "the same tree spelled with a dot segment", held: root, second: filepath.Join(root, "."), wantOrdered: true},
+		{name: "the same tree through a symlink", held: root, second: linked, wantOrdered: true},
+		{name: "the same tree relative to the working directory", held: root, second: relative, wantOrdered: true},
+		{name: "a directory nested in the held tree", held: root, second: nested, wantOrdered: true},
+		{name: "a tree containing the held one", held: nested, second: root, wantOrdered: true},
+		{name: "an unrelated tree", held: root, second: other},
+		{name: "a tree that does not exist", held: root, second: filepath.Join(other, "missing"), wantOrdered: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			guards := newEditGuards()
+			release := guards.guard(tt.held)
+
+			taken := make(chan func(), 1)
+			go func() { taken <- guards.guard(tt.second) }()
+
+			select {
+			case secondRelease := <-taken:
+				if tt.wantOrdered {
+					t.Fatalf("%s ran while %s was held", tt.second, tt.held)
+				}
+				secondRelease()
+				release()
+			case <-time.After(100 * time.Millisecond):
+				if !tt.wantOrdered {
+					release()
+					t.Fatalf("%s waited for the unrelated %s", tt.second, tt.held)
+				}
+				// Releasing the first must let the waiter through.
+				release()
+				select {
+				case secondRelease := <-taken:
+					secondRelease()
+				case <-time.After(5 * time.Second):
+					t.Fatal("the waiter was never released")
+				}
+			}
+			// Nothing may outlive the edits that needed it.
+			guards.mu.Lock()
+			defer guards.mu.Unlock()
+			if len(guards.held) != 0 {
+				t.Errorf("guards still holding %v", guards.held)
+			}
+		})
+	}
+}
+
+// mustGetwd returns the process's working directory or fails the test.
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
+}
+
+// TestApplyDeputyCommandRunsUnrelatedTreesConcurrently pins the guard's effect
+// on the command itself: an apply to one working tree must not be held up by an
+// edit in flight against an unrelated one, which is what a daemon serving
+// several tenants does all day.
+func TestApplyDeputyCommandRunsUnrelatedTreesConcurrently(t *testing.T) {
+	tree := func() string {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "mise.toml"), []byte("[tools]\ngo = \"1.22.12\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	busy, independent := tree(), tree()
+
+	// Stand in for a slow apply in the first tree: hold its guard for the
+	// duration, as an in-flight edit does.
+	release := fileEdits.guard(busy)
+	defer release()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- ApplyDeputyCommand(independent, "deputy:mise:update mise.toml go 1.24.3 1.22.12")
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("apply to the independent tree: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("an apply to an independent tree waited for an edit in another tree")
+	}
+	got, err := os.ReadFile(filepath.Join(independent, "mise.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "1.24.3") {
+		t.Errorf("independent tree was not edited:\n%s", got)
 	}
 }
