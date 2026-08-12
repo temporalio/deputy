@@ -61,17 +61,28 @@ func (r *Report) Text(w io.Writer) error {
 	fmt.Fprintf(b, "\n4. dynamic reachability: %d of %d symbol findings and %d of %d interface findings carry a doubt\n",
 		len(r.Symbols)-certainSymbols, len(r.Symbols), doubted(r.Interfaces), len(r.Interfaces))
 
+	if len(r.Constrained) > 0 {
+		fmt.Fprintf(b, "\ncaveat: %d file(s) excluded by this platform's build constraints were not\n", len(r.Constrained))
+		fmt.Fprintf(b, "type-checked, so references they make are invisible to every check above:\n")
+		for _, name := range r.Constrained {
+			fmt.Fprintf(b, "   %s\n", name)
+		}
+	}
+
 	_, err := io.WriteString(w, b.String())
 	return err
 }
 
 // Detail writes the per-symbol findings for one package, which is what a
-// contributor reads before unexporting anything.
+// contributor reads before unexporting anything. The package is matched on whole
+// path elements: a bare suffix match would silently interleave the findings of
+// "internal/vmimage" and "internal/container/image" under one query.
 func (r *Report) Detail(w io.Writer, pkg string) error {
 	b := &strings.Builder{}
 	var found bool
+	pkg = strings.Trim(pkg, "/")
 	for _, f := range r.Symbols {
-		if !strings.HasSuffix(f.Package, pkg) {
+		if f.Package != pkg && !strings.HasSuffix(f.Package, "/"+pkg) {
 			continue
 		}
 		found = true
