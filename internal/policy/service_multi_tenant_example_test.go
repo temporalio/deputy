@@ -180,6 +180,38 @@ func TestShippedTenantIsolationAuthorizesBothDiffSides(t *testing.T) {
 			target:     "git@github.com:other/repo",
 			wantDenied: true,
 		},
+		{
+			// Accepting the tenant as any path component authorized this: the
+			// repository someone else owns is merely named after the tenant.
+			name:       "another owner's repository named after the tenant",
+			tenant:     "acme",
+			base:       "github.com/acme/repo",
+			target:     "github.com/other/acme",
+			wantDenied: true,
+		},
+		{
+			// Same bypass through an image tag, which folding ":" turns into a
+			// component of its own.
+			name:       "another owner's image tagged with the tenant name",
+			tenant:     "acme",
+			base:       "ghcr.io/acme/app:v1",
+			target:     "ghcr.io/other/app:acme",
+			wantDenied: true,
+		},
+		{
+			name:       "tagged images the tenant owns",
+			tenant:     "acme",
+			base:       "ghcr.io/acme/app:v1",
+			target:     "ghcr.io/acme/app:v2",
+			wantDenied: false,
+		},
+		{
+			name:       "nested namespace the tenant owns",
+			tenant:     "acme",
+			base:       "github.com/acme/group/repo",
+			target:     "github.com/acme/other/repo",
+			wantDenied: false,
+		},
 	}
 
 	for _, tt := range tests {

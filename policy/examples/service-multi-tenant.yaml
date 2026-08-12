@@ -55,15 +55,21 @@ policies:
   - name: tenant-isolation
     description: |
       Restricts users to resources within their tenant namespace.
-      Compares whole path components to the tenant claim literally, so a tenant
-      cannot be matched as a substring of a longer name and a claim containing
-      regex metacharacters cannot alter the test.
-      Example: tenant "acme" can access "github.com/acme/repo" but NOT
-      "github.com/acme-corp-archive/repo".
 
-      ":" is folded to "/" before splitting so SCP-style git targets such as
-      "git@github.com:acme/repo" and tagged image references such as
-      "ghcr.io/acme/app:v1" yield "acme" as a component.
+      The tenant must appear as a path component that owns something, so it is
+      matched as "/<tenant>/" against the target with a leading "/" added. That
+      requires the claim to name a namespace rather than any component:
+
+        github.com/acme/repo            allowed, acme owns the repo
+        git@github.com:acme/repo        allowed, ":" is folded to "/" first
+        ghcr.io/acme/app:v1             allowed, tag does not affect the owner
+        github.com/other/acme           denied, acme is only the repository name
+        ghcr.io/other/app:acme          denied, acme is only the tag
+        github.com/acme-corp-archive/r  denied, not a whole component
+
+      Matching is a literal contains, so nothing in the claim is interpreted:
+      a tenant such as "acme.com" cannot match "github.com/acmeXcom/repo" the
+      way interpolating it into a regex would.
 
       The nonempty guard on request.target is required, not defensive: several
       procedures this rule covers name no resource at all (SecretsService
@@ -80,7 +86,7 @@ policies:
           !jwt.anonymous &&
           jwt.?tenant.orValue("") != "" &&
           request.?target.orValue("") != "" &&
-          !request.target.replace(":", "/").split("/").exists(c, c == jwt.tenant)
+          !("/" + request.target.replace(":", "/")).contains("/" + jwt.tenant + "/")
         reason: "Cross-tenant access denied - target does not belong to your tenant"
         remediation: "You can only access resources within your tenant namespace"
 
@@ -103,7 +109,7 @@ policies:
           !jwt.anonymous &&
           jwt.?tenant.orValue("") != "" &&
           ![base_target, target_target].all(t,
-            t.display_path.replace(":", "/").split("/").exists(c, c == jwt.tenant)
+            ("/" + t.display_path.replace(":", "/")).contains("/" + jwt.tenant + "/")
           )
         reason: "Cross-tenant diff denied - both sides must belong to your tenant"
         remediation: "You can only diff resources within your tenant namespace"

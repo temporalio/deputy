@@ -242,7 +242,7 @@ policies:
         when: |
           jwt.?tenant.orValue("") != "" &&
           ![base_target, target_target].all(t,
-            t.display_path.split("/").exists(c, c == jwt.tenant)
+            ("/" + t.display_path.replace(":", "/")).contains("/" + jwt.tenant + "/")
           )
         reason: "Cross-tenant diff denied"
 ```
@@ -251,7 +251,20 @@ policies:
 instead of repeating the test per side, and `jwt.?tenant.orValue("")` replaces
 `has(jwt.tenant) && jwt.tenant != ""` with the optional selector.
 
-Compare whole path components literally, as above. Two shortcuts fail here:
+The tenant has to own the resource, so it is matched as `/<tenant>/` against the
+target with a leading `/` prepended, and `:` is folded to `/` first so SCP-style
+git targets and tagged image references normalize the same way:
+
+| target | tenant `acme` |
+| --- | --- |
+| `github.com/acme/repo` | allowed |
+| `git@github.com:acme/repo` | allowed |
+| `ghcr.io/acme/app:v1` | allowed |
+| `github.com/other/acme` | denied, `acme` is only the repository name |
+| `ghcr.io/other/app:acme` | denied, `acme` is only the tag |
+| `github.com/acme-corp-archive/repo` | denied, not a whole component |
+
+Three shortcuts all fail, and each one looks reasonable until it does not:
 
 - `display_path.contains(jwt.tenant)` accepts the tenant anywhere in the path,
   so tenant `acme` reaches `github.com/acme-corp-archive/...`, and an empty
@@ -260,11 +273,16 @@ Compare whole path components literally, as above. Two shortcuts fail here:
   `matches("(^|[/:])" + jwt.tenant + "([/:]|$)")`, fixes the substring case but
   lets the claim change the pattern. Tenant `acme.com` then matches
   `github.com/acmeXcom/repo`, because `.` is a wildcard.
+- Accepting the tenant as any path component fixes both of those and still
+  authorizes a resource someone else owns whenever the tenant name happens to
+  appear later in the path, such as a repository or an image tag named `acme`.
 
-Splitting on `/` and comparing with `==` avoids both, since nothing in the claim
-is interpreted. Keep the explicit `jwt.tenant != ""` regardless: requests that
-should carry a tenant but do not are better rejected outright, either by a
-separate rule or by listing `tenant` in `auth.required_claims`.
+Requiring `/<tenant>/` avoids all three: the claim is compared literally, so
+nothing in it is interpreted, and it has to sit in a position that owns
+something rather than merely appear. Keep the explicit `jwt.tenant != ""`
+regardless: requests that should carry a tenant but do not are better rejected
+outright, either by a separate rule or by listing `tenant` in
+`auth.required_claims`.
 
 A policy runs on an operation when it declares that operation's entrypoint, or
 when it declares no `entrypoints` at all. A policy scoped to
@@ -285,13 +303,12 @@ policies:
         when: |
           jwt.?tenant.orValue("") != "" &&
           request.?target.orValue("") != "" &&
-          !request.target.replace(":", "/").split("/").exists(c, c == jwt.tenant)
+          !("/" + request.target.replace(":", "/")).contains("/" + jwt.tenant + "/")
         reason: "Cross-tenant access denied"
 ```
 
-The `":"` is folded to `"/"` so an SCP-style target such as
-`git@github.com:acme/repo` still yields `acme` as a component. Keep the
-non-empty check on `request.target`: some procedures name no resource at all
+This is the same namespace-ownership test described above. Keep the non-empty
+check on `request.target`: some procedures name no resource at all
 (`SecretsService` `Verify`, `ListDetectors`, `RegisterDetector`, and
 `SBOMService` `Diff`), and without it this rule denies them unconditionally.
 
