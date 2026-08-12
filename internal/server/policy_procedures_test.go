@@ -116,6 +116,24 @@ func denyPolicy(name, when string, entrypoints ...policy.Entrypoint) string {
 	return b.String()
 }
 
+// commandScopedDenyPolicy builds a policy that declares commands: but no
+// entrypoints:, the shape a shared bundle written for the CLI has. Such a policy
+// must be filtered by command alone.
+func commandScopedDenyPolicy(name, when string, commands ...string) string {
+	var b strings.Builder
+	b.WriteString("policies:\n")
+	b.WriteString("  - name: " + name + "\n")
+	b.WriteString("    commands:\n")
+	for _, command := range commands {
+		b.WriteString("      - " + command + "\n")
+	}
+	b.WriteString("    rules:\n")
+	b.WriteString("      - action: deny\n")
+	b.WriteString("        when: \"" + when + "\"\n")
+	b.WriteString("        reason: \"denied by " + name + "\"\n")
+	return b.String()
+}
+
 // TestServicePolicyEnforcement pins the two behavior changes that have to ship
 // together. Mapping the real DiffService procedures makes DiffPackages evaluate
 // service_diff_request, and forwarding that entrypoint to the engine keeps a
@@ -223,6 +241,23 @@ func TestServicePolicyEnforcement(t *testing.T) {
 			policy:   denyDiff,
 			call:     scan,
 			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			// A CLI-scoped policy in a shared bundle must not reach server
+			// RPCs. Passing no command disabled this filter, so the policy
+			// below fired on every mapped procedure.
+			name:     "diff with a policy scoped to the scan command does not fire",
+			policy:   commandScopedDenyPolicy("deny-scan-command", "true", "scan"),
+			call:     diffPackages,
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			// The other direction, so the case above cannot pass merely because
+			// command filtering rejects everything.
+			name:     "diff with a policy scoped to the server command fires",
+			policy:   commandScopedDenyPolicy("deny-server-command", "true", "server"),
+			call:     diffPackages,
+			wantCode: connect.CodePermissionDenied,
 		},
 	}
 

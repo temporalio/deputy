@@ -1075,28 +1075,34 @@ var procedureToEntrypoint = map[string]policy.Entrypoint{
 	graphv1connect.GraphServiceQueryGraphProcedure:    policy.EntrypointServiceGraphRequest,
 }
 
+// serverPolicyCommand is the policy command every request the server evaluates
+// runs under. It is both the value policies read as env.command and the value
+// the engine filters commands: declarations against, so the two cannot drift.
+const serverPolicyCommand = "server"
+
 // evaluateServicePolicies runs the configured policy sources for one RPC at the
 // entrypoint the interceptor resolved from procedureToEntrypoint.
 //
-// It exists to forward that entrypoint. The package-level policy.EvaluateAll
-// helper evaluates with an empty entrypoint, which disables the engine's
-// entrypoint filter entirely, so every loaded policy would run at every mapped
-// procedure and a policy declaring entrypoints: [service_scan_request] would
-// deny diff requests. Compiling per request matches the helper it replaces.
+// It exists to forward both scoping dimensions. The package-level
+// policy.EvaluateAll helper evaluates with an empty command and entrypoint, and
+// shouldSkip applies each filter only when its argument is non-empty, so every
+// loaded policy would run at every mapped procedure: a policy declaring
+// entrypoints: [service_scan_request] would deny diff requests, and a policy
+// declaring commands: [scan] would run against server payloads it was never
+// written for. Compiling per request matches the helper it replaces.
 //
-// The command filter is deliberately left empty. Policy commands name CLI
-// invocations, while every service_*_request entrypoint is server only, so the
-// entrypoint is the precise filter here; passing "server" would additionally
-// skip any policy that declares commands: without listing "server", silently
-// disabling a policy an operator explicitly loaded into the server. Policies
-// that want to discriminate can still read env.command, which the payload sets
-// to "server".
+// Both arguments must stay non-empty. Over-application is not merely noisy
+// here: policyInterceptor turns any evaluation error into CodeInternal, so one
+// CLI-scoped policy in a shared bundle whose expression does not fit a server
+// payload fails every mapped RPC closed. The command is always "server", which
+// is what buildPolicyPayload reports as env.command, so a policy's declared
+// scope and the scope it is filtered by cannot disagree.
 func evaluateServicePolicies(ctx context.Context, policies []policy.Source, entrypoint policy.Entrypoint, payload proto.Message) ([]policy.Action, error) {
 	engine, err := policy.NewEngine(policies)
 	if err != nil {
 		return nil, fmt.Errorf("compile policies: %w", err)
 	}
-	return engine.EvaluateAll(ctx, payload, "", entrypoint.String())
+	return engine.EvaluateAll(ctx, payload, serverPolicyCommand, entrypoint.String())
 }
 
 // policyInterceptor evaluates service-level policies for authorization.
@@ -1181,7 +1187,7 @@ func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
 func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint policy.Entrypoint) proto.Message {
 	// Build common fields
 	env := &policyv1.Environment{
-		Command:    "server",
+		Command:    serverPolicyCommand,
 		Entrypoint: entrypoint.String(),
 	}
 
