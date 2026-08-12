@@ -15,6 +15,7 @@ import (
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -498,20 +499,34 @@ func generateJWT(level ExampleLevel) map[string]any {
 	return mustProtoToMap(jwt)
 }
 
-// generateTarget creates target metadata.
-func generateTarget(level ExampleLevel) map[string]any {
-	target := map[string]any{
-		"display_path": "/path/to/project",
-		"type":         "directory",
+// exampleTarget builds a target fixture from targetv1.Target and converts it
+// with the same function the engine uses at evaluation time, so the example
+// cannot advertise a field a policy will not find on a real request.
+//
+// The hand written maps this replaces had drifted from the proto: they emitted
+// "type" and "origin", which the message does not define, and put a branch name
+// in "reference", which holds a container image reference. A policy copied from
+// that output compiled, because these variables are dynamic, then failed with a
+// missing field error during evaluation.
+func exampleTarget(level ExampleLevel, displayPath, ref, commit string) map[string]any {
+	target := &targetv1.Target{
+		Kind:        targetv1.TargetKind_TARGET_KIND_DIR,
+		DisplayPath: displayPath,
 	}
 
 	if level != ExampleLevelMinimal {
-		target["commit_hash"] = "abc123def456"
-		target["reference"] = "main"
-		target["origin"] = "https://github.com/example/project.git"
+		target.Ref = ref
+		target.EffectiveRef = ref
+		target.CommitHash = commit
+		target.OriginUrl = "https://github.com/example/project.git"
 	}
 
-	return target
+	return mustProtoToMap(target)
+}
+
+// generateTarget creates target metadata.
+func generateTarget(level ExampleLevel) map[string]any {
+	return exampleTarget(level, "/path/to/project", "main", "abc123def456")
 }
 
 // generateDiffTarget creates one side of a diff request's target pair. The two
@@ -519,18 +534,10 @@ func generateTarget(level ExampleLevel) map[string]any {
 // a fixture that repeated one value would let a policy checking only one side
 // pass against it.
 func generateDiffTarget(level ExampleLevel, side string) map[string]any {
-	target := map[string]any{
-		"display_path": "/path/to/" + side,
-		"type":         "directory",
+	if side == "base" {
+		return exampleTarget(level, "/path/to/base", "main", "abc123def456")
 	}
-
-	if level != ExampleLevelMinimal {
-		target["reference"] = map[string]string{"base": "main", "target": "feature-branch"}[side]
-		target["commit_hash"] = map[string]string{"base": "abc123def456", "target": "789fed654cba"}[side]
-		target["origin"] = "https://github.com/example/project.git"
-	}
-
-	return target
+	return exampleTarget(level, "/path/to/target", "feature-branch", "789fed654cba")
 }
 
 // generateImageInfo creates container image information.
