@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -135,9 +136,12 @@ type HandlerFactory struct {
 }
 
 // NewHandlerFactory creates a factory with the default ecosystem registry.
+// The factory owns a copy of the defaults, so Register extends this factory
+// only instead of mutating the package-level registry shared by every other
+// factory.
 func NewHandlerFactory() *HandlerFactory {
 	return &HandlerFactory{
-		registry: ecosystemRegistry,
+		registry: maps.Clone(ecosystemRegistry),
 	}
 }
 

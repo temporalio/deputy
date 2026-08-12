@@ -84,6 +84,12 @@ type Server struct {
 	toolTimeouts        ToolTimeouts // configurable timeouts for tool operations
 	defaultExcludePaths []string
 	startedAt           time.Time
+
+	// registeredTools retains every registered tool definition (name plus the
+	// proto-derived input/output schemas) so tests can walk the complete
+	// schema corpus; the MCP SDK does not expose registered tools for
+	// enumeration.
+	registeredTools []*mcp.Tool
 }
 
 // ServerOption configures a Server.
@@ -138,7 +144,7 @@ const serverInstructions = "Deputy is a supply-chain security engine. Its tools 
 	"- Prefer a PURL (e.g. `pkg:npm/lodash@4.17.21`) for exact matches. Tools also accept `name`, `name@version`, or `name` + `ecosystem`. Ecosystem names are lenient (e.g. `gha` resolves to `github-actions`, `golang` to `go`).\n" +
 	"\n" +
 	"Reading results\n" +
-	"- Severity totals include an `unknown` bucket, so per-severity counts always sum to the total. `UNKNOWN` means the matched advisory record carries no rating (common for Go vuln DB records), not that none exists: pass `enrich: true` to scan and triage tools to resolve ratings from alias advisories (GHSA first), at the cost of extra network lookups. `explain_vulnerability` always resolves across aliases.\n" +
+	"- Severity totals include an `unknown` bucket, so per-severity counts always sum to the total. `UNKNOWN` means the matched advisory record carries no rating (common for Go vuln DB records), not that none exists: pass `enrich: true` to scan and triage tools to resolve ratings from alias advisories (GHSA first), at the cost of extra network lookups. `explain_vulnerability` (and `explain_vulnerabilities` for batches) always resolves across aliases.\n" +
 	"- Sampled outputs (advisory references, graph paths) are capped and set a `*Truncated` flag alongside a full count (e.g. `pathCount` with `pathsTruncated`); check them before assuming a result is complete. Other lists are returned whole. Ordering is deterministic across calls.\n" +
 	"- A clean target reports `clean: true`; this is success, not an error.\n" +
 	"- Absent fields mean empty, zero, or not applicable: results omit empty lists, zero counts, and optional attributes (no `vulnerabilities` key = none found; no `kind` = ordinary vulnerability). Affirmative answers (`clean`, `found`, `direct`, `hasFix`, `migration`, `executable`, `depth`, `isContainerDiff`) are present whenever they apply, even when false or zero; severity count maps always carry all their keys.\n" +
@@ -148,10 +154,12 @@ const serverInstructions = "Deputy is a supply-chain security engine. Its tools 
 	"\n" +
 	"Typical workflow\n" +
 	"- Assess: `scan_directory` then `triage_vulnerabilities` to rank findings by severity and fixability.\n" +
-	"- Investigate: `graph_why` (why a package is present) and `graph_needs` (what depends on it). Set `resolveTransitives` for precise transitive edges (slower, may use the network).\n" +
+	"- Inventory: `list_dependencies` for a plain package inventory; `generate_sbom` for a CycloneDX or SPDX document.\n" +
+	"- Investigate: `graph_why` (why a package is present), `graph_needs` (what depends on it), and `analyze_dependency_graph` (whole-graph stats and paths to a PURL). Set `resolveTransitives` for precise transitive edges (slower, may use the network).\n" +
 	"- Remediate: `get_remediation` for upgrade/migration commands; hints reference these MCP tools by name.\n" +
 	"- Compare: `diff_refs` for two Git refs or two container images.\n" +
-	"- Author policies: `list_policy_entrypoints` returns entrypoints, categories, CEL variables, and helpers."
+	"- Author policies: `list_policy_entrypoints` returns entrypoints, categories, CEL variables, and helpers.\n" +
+	"- Server metadata: `get_server_info` reports build, uptime, and registered tools."
 
 // NewServer creates a new Deputy MCP server with vulnerability analysis tools.
 func NewServer(opts ...ServerOption) *Server {
@@ -396,6 +404,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 func addTool[T, R any](s *Server, tool *mcp.Tool, handler func(context.Context, *mcp.CallToolRequest, T) (*mcp.CallToolResult, R, error)) {
 	mcp.AddTool(s.server, tool, handler)
 	s.toolNames = append(s.toolNames, tool.Name)
+	s.registeredTools = append(s.registeredTools, tool)
 }
 
 func addReadOnlyTool[T, R any](

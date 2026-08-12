@@ -4,9 +4,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 
 	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
 	"github.com/temporalio/deputy/gen/deputy/list/v1/listv1connect"
@@ -14,6 +18,7 @@ import (
 	"github.com/temporalio/deputy/gen/deputy/scan/v1/scanv1connect"
 	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
 	"github.com/temporalio/deputy/gen/deputy/secrets/v1/secretsv1connect"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -235,6 +240,12 @@ func TestListServiceRegistered(t *testing.T) {
 	}
 }
 
+// TestAllServicesRegistered derives the procedure corpus from the services the
+// server actually registers: every recorded service path maps to a proto
+// service descriptor, and every method of every registered service must route
+// (anything but 404). Deriving from srv.servicePaths plus the descriptors
+// keeps the corpus in lockstep with server registration instead of
+// hand-maintaining endpoint strings that silently go stale.
 func TestAllServicesRegistered(t *testing.T) {
 	srv, err := New(DefaultConfig())
 	if err != nil {
@@ -245,43 +256,252 @@ func TestAllServicesRegistered(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	// Test that all service endpoints respond (not 404)
-	// We use actual method paths since ConnectRPC routes service/method
-	serviceEndpoints := []struct {
-		path        string
-		contentType string
-	}{
-		// Scan service
-		{"/deputy.scan.v1.ScanService/Scan", "application/json"},
-		// List service
-		{"/deputy.list.v1.ListService/ListPackages", "application/json"},
-		{"/deputy.list.v1.ListService/ListEcosystems", "application/json"},
-		// SBOM service
-		{"/deputy.sbom.v1.SBOMService/Generate", "application/json"},
-		{"/deputy.sbom.v1.SBOMService/Diff", "application/json"},
-		// Remediation service
-		{"/deputy.remediation.v1.RemediationService/GeneratePlan", "application/json"},
-		// Secrets service
-		{"/deputy.secrets.v1.SecretsService/Scan", "application/json"},
-		{"/deputy.secrets.v1.SecretsService/ListDetectors", "application/json"},
-	}
+	procedures := registeredProcedures(t, srv)
 
-	for _, ep := range serviceEndpoints {
-		req, err := http.NewRequest(http.MethodPost, ts.URL+ep.path, nil)
+	for _, procedure := range procedures {
+		req, err := http.NewRequest(http.MethodPost, ts.URL+procedure, nil)
 		if err != nil {
-			t.Fatalf("failed to create request for %s: %v", ep.path, err)
+			t.Fatalf("failed to create request for %s: %v", procedure, err)
 		}
-		req.Header.Set("Content-Type", ep.contentType)
+		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			t.Fatalf("request to %s failed: %v", ep.path, err)
+			t.Fatalf("request to %s failed: %v", procedure, err)
 		}
 		resp.Body.Close()
 
-		// Should not be 404 (service is registered)
+		// Should not be 404 (procedure is registered); streaming procedures
+		// reject the unary content type with a non-404 status, which is fine.
 		if resp.StatusCode == http.StatusNotFound {
-			t.Errorf("endpoint %s returned 404 - not registered", ep.path)
+			t.Errorf("procedure %s returned 404 - not registered", procedure)
+		}
+	}
+}
+
+// registeredService is a ConnectRPC service the server registers, paired with
+// the policy entrypoint that must authorize it. authorized is false for a
+// service that has no service entrypoint of its own, which is a legitimate
+// state (RemediationService) and not the same thing as a missing mapping.
+type registeredService struct {
+	// procedures are the service's full Connect procedure paths, each already
+	// prefixed with the service's URL path.
+	procedures []string
+	// entrypoint authorizes every procedure of the service.
+	entrypoint policy.Entrypoint
+	// authorized reports whether entrypoint is set.
+	authorized bool
+}
+
+// serviceEntrypoint derives the policy entrypoint that authorizes a proto
+// service from its package segment: deputy.scan.v1.ScanService is authorized
+// by service_scan_request. It reports false when the derived name is not a
+// real service entrypoint, which keeps the derivation honest in both
+// directions: a service with no authorization surface is recognized as such,
+// and a future service whose package diverges from its entrypoint name is
+// caught by the coverage check over policy.EntrypointsService.
+func serviceEntrypoint(name protoreflect.FullName) (policy.Entrypoint, bool) {
+	parts := strings.Split(string(name), ".")
+	if len(parts) < 3 {
+		return "", false
+	}
+	candidate := policy.Entrypoint("service_" + parts[1] + "_request")
+	if !slices.Contains(policy.EntrypointsService, candidate) {
+		return "", false
+	}
+	return candidate, true
+}
+
+// registeredServices expands the server's recorded service paths into proto
+// service descriptors, their full procedure paths, and the policy entrypoint
+// that must authorize each, enforcing floors so an empty or shrunken
+// registration set fails instead of hollowing out the callers' corpora.
+func registeredServices(t *testing.T, srv *Server) []registeredService {
+	t.Helper()
+
+	// Sanity floor: the server currently registers 7 services; fewer means
+	// registration (or path recording) broke, not that the corpus shrank.
+	if len(srv.servicePaths) < 7 {
+		t.Fatalf("server recorded %d service paths, want at least 7: %v", len(srv.servicePaths), srv.servicePaths)
+	}
+
+	services := make([]registeredService, 0, len(srv.servicePaths))
+	total := 0
+	for _, path := range srv.servicePaths {
+		name := protoreflect.FullName(strings.Trim(path, "/"))
+		desc, err := protoregistry.GlobalFiles.FindDescriptorByName(name)
+		if err != nil {
+			t.Fatalf("registered service %q has no proto descriptor: %v", name, err)
+		}
+		svc, ok := desc.(protoreflect.ServiceDescriptor)
+		if !ok {
+			t.Fatalf("descriptor %q is %T, want a service descriptor", name, desc)
+		}
+
+		entrypoint, authorized := serviceEntrypoint(name)
+		service := registeredService{entrypoint: entrypoint, authorized: authorized}
+		methods := svc.Methods()
+		for i := range methods.Len() {
+			service.procedures = append(service.procedures, path+string(methods.Get(i).Name()))
+		}
+		total += len(service.procedures)
+		services = append(services, service)
+	}
+
+	// Sanity floor: 25 procedures across the registered services today.
+	if total < 25 {
+		t.Fatalf("derived %d procedures across %d services, want at least 25", total, len(services))
+	}
+	return services
+}
+
+// registeredProcedures is the flat list of Connect procedure paths the server
+// registers, derived from registeredServices.
+func registeredProcedures(t *testing.T, srv *Server) []string {
+	t.Helper()
+
+	var procedures []string
+	for _, service := range registeredServices(t, srv) {
+		procedures = append(procedures, service.procedures...)
+	}
+	return procedures
+}
+
+// stalePolicyProcedures are procedureToEntrypoint keys that do not match any
+// procedure the server registers, meaning server policies for those
+// entrypoints are silently never evaluated (unknown procedures are allowed by
+// default). KNOWN DEFECT, pinned rather than hidden: DiffService's real
+// procedures are DiffPackages/DiffVulnerabilities/DiffContainerImages and
+// GraphService's are BuildGraph/WhyDependency/QueryGraph, so the
+// service_diff_request and service_graph_request entrypoints currently guard
+// nothing. Fixing the map (a behavior change: those RPCs become policy
+// enforced) must remove the entry here, which makes this list self-cleaning.
+var stalePolicyProcedures = map[string]bool{
+	"/deputy.diff.v1.DiffService/Diff":      true,
+	"/deputy.graph.v1.GraphService/Resolve": true,
+	"/deputy.graph.v1.GraphService/Why":     true,
+}
+
+// unenforcedProcedures are procedures of policy-bearing services that
+// procedureToEntrypoint does not map, so policyInterceptor waves them through
+// with no policy evaluation at all. KNOWN DEFECT, pinned rather than hidden:
+// twelve of the nineteen procedures that should be authorized are not, so a
+// service_diff_request, service_graph_request or service_secrets_request
+// policy covers far less than its name suggests. DiffService and GraphService
+// are unmapped entirely (the map still names their pre-rename procedures, see
+// stalePolicyProcedures) and SecretsService is mapped only for Scan.
+//
+// Mapping these is a behavior change, since they become policy enforced, so
+// it is deliberately left out of this test-only change; closing a gap must
+// remove the entry here, which makes the list self-cleaning. Note that
+// policyInterceptor is a connect.UnaryInterceptorFunc, whose
+// WrapStreamingHandler returns the next handler untouched, so mapping the
+// StreamScan entries alone would not enforce anything either.
+var unenforcedProcedures = map[string]bool{
+	"/deputy.diff.v1.DiffService/DiffContainerImages":    true,
+	"/deputy.diff.v1.DiffService/DiffPackages":           true,
+	"/deputy.diff.v1.DiffService/DiffVulnerabilities":    true,
+	"/deputy.graph.v1.GraphService/BuildGraph":           true,
+	"/deputy.graph.v1.GraphService/QueryGraph":           true,
+	"/deputy.graph.v1.GraphService/WhyDependency":        true,
+	"/deputy.secrets.v1.SecretsService/ListDetectors":    true,
+	"/deputy.secrets.v1.SecretsService/RegisterDetector": true,
+	"/deputy.secrets.v1.SecretsService/ScanDiff":         true,
+	"/deputy.secrets.v1.SecretsService/ScanHistory":      true,
+	"/deputy.secrets.v1.SecretsService/StreamScan":       true,
+	"/deputy.secrets.v1.SecretsService/Verify":           true,
+}
+
+// TestPolicyProcedureMapMatchesRegisteredProcedures checks procedureToEntrypoint
+// against the procedures the server registers, in both directions, because
+// each direction hides a different defect.
+//
+// Outward: a key that matches no registered procedure is dead weight and its
+// entrypoint is never evaluated. Known-stale keys are pinned in
+// stalePolicyProcedures.
+//
+// Inward, and this is the security-relevant direction: unknown procedures are
+// allowed by default, so a procedure of a policy-bearing service that the map
+// omits is authorized by nothing. The expectation is derived rather than
+// hand-pinned, by crossing the registered services with the service
+// entrypoints in policy.EntrypointsService, so deleting or renaming a live
+// mapping fails here instead of silently disabling enforcement. Known gaps are
+// pinned in unenforcedProcedures.
+//
+// Both pin lists are checked for staleness, so closing a gap or fixing a key
+// without unpinning it fails too.
+func TestPolicyProcedureMapMatchesRegisteredProcedures(t *testing.T) {
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	services := registeredServices(t, srv)
+
+	registered := make(map[string]bool)
+	expected := make(map[string]policy.Entrypoint)
+	claimed := make(map[policy.Entrypoint]bool)
+	for _, service := range services {
+		for _, procedure := range service.procedures {
+			registered[procedure] = true
+			if service.authorized {
+				expected[procedure] = service.entrypoint
+			}
+		}
+		if service.authorized {
+			claimed[service.entrypoint] = true
+		}
+	}
+
+	// Every service entrypoint must belong to some registered service. An
+	// unclaimed one means the entrypoint is unreachable, or that a service
+	// package no longer matches its entrypoint name and so dropped out of the
+	// derived expectation below without anything noticing.
+	for _, entrypoint := range policy.EntrypointsService {
+		if !claimed[entrypoint] {
+			t.Errorf("service entrypoint %s is claimed by no registered service; the derived authorization expectation cannot cover it", entrypoint)
+		}
+	}
+
+	// Sanity floor: 19 procedures across the six policy-bearing services
+	// today. A collapsed expectation would make the inward check vacuous.
+	if len(expected) < 19 {
+		t.Fatalf("derived %d procedures needing authorization, want at least 19", len(expected))
+	}
+
+	// Inward: every procedure that should be authorized is mapped, to the
+	// right entrypoint.
+	for procedure, entrypoint := range expected {
+		mapped, ok := procedureToEntrypoint[procedure]
+		switch {
+		case !ok && !unenforcedProcedures[procedure]:
+			t.Errorf("registered procedure %s has no procedureToEntrypoint mapping, so %s is never evaluated and the RPC is authorized by nothing", procedure, entrypoint)
+		case ok && unenforcedProcedures[procedure]:
+			t.Errorf("procedure %s is mapped now; remove it from unenforcedProcedures", procedure)
+		case ok && mapped != entrypoint:
+			t.Errorf("procedure %s maps to entrypoint %s, want %s derived from its service package", procedure, mapped, entrypoint)
+		}
+	}
+
+	// Outward: every key names a procedure the server registers.
+	for procedure := range procedureToEntrypoint {
+		switch {
+		case registered[procedure] && stalePolicyProcedures[procedure]:
+			t.Errorf("procedure %s is registered again; remove it from stalePolicyProcedures", procedure)
+		case !registered[procedure] && !stalePolicyProcedures[procedure]:
+			t.Errorf("procedureToEntrypoint key %s matches no registered procedure; its policy entrypoint is silently never evaluated", procedure)
+		}
+	}
+
+	for procedure := range stalePolicyProcedures {
+		if _, ok := procedureToEntrypoint[procedure]; !ok {
+			t.Errorf("stalePolicyProcedures entry %s is no longer in procedureToEntrypoint; remove it", procedure)
+		}
+	}
+
+	for procedure := range unenforcedProcedures {
+		if !registered[procedure] {
+			t.Errorf("unenforcedProcedures entry %s matches no registered procedure; remove it", procedure)
 		}
 	}
 }

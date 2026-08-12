@@ -365,22 +365,33 @@ func TestWantsLicenseLookup(t *testing.T) {
 	}
 }
 
+// TestProxyEntrypoint pins the entrypoint synthesis contract across the whole
+// registry. ProxyEntrypoint mechanically synthesizes "<name>_artifact_request"
+// for every ecosystem, but only proxy-capable ecosystems ever reach it (the
+// proxy handler registry is keyed by proxy support, see
+// internal/proxy/handler_registry.go), so the load-bearing invariant is that
+// every proxy-capable ecosystem synthesizes a canonical policy entrypoint.
+// Non-proxy ecosystems synthesizing unknown names is expected and harmless.
 func TestProxyEntrypoint(t *testing.T) {
-	tests := []struct {
-		eco  Ecosystem
-		want string
-	}{
-		{Go, "go_artifact_request"},
-		{NPM, "npm_artifact_request"},
-		{PyPI, "pypi_artifact_request"},
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.eco), func(t *testing.T) {
-			got := string(tt.eco.ProxyEntrypoint())
-			if got != tt.want {
-				t.Errorf("%s.ProxyEntrypoint() = %q, want %q", tt.eco, got, tt.want)
+	proxyCapable := 0
+	for _, eco := range All() {
+		t.Run(string(eco), func(t *testing.T) {
+			got := eco.ProxyEntrypoint()
+			if want := string(eco) + "_artifact_request"; string(got) != want {
+				t.Errorf("%s.ProxyEntrypoint() = %q, want %q", eco, got, want)
+			}
+			if eco.Capabilities().Proxy && !got.IsValid() {
+				t.Errorf("proxy-capable ecosystem %s synthesizes entrypoint %q, which is not a canonical policy entrypoint; proxy policies for it would never match", eco, got)
 			}
 		})
+		if eco.Capabilities().Proxy {
+			proxyCapable++
+		}
+	}
+
+	// Sanity floor: 4 proxy-capable ecosystems today (go, npm, pypi,
+	// rubygems); zero would make the validity assertion above vacuous.
+	if proxyCapable < 4 {
+		t.Errorf("only %d proxy-capable ecosystems in All(), want at least 4", proxyCapable)
 	}
 }
