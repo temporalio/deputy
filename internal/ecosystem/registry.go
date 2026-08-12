@@ -181,6 +181,17 @@ type Registration struct {
 	Absent []Projection
 }
 
+// Spellings returns every string that names this ecosystem: its canonical
+// token, its display name, and each alias. It is the one definition of that set,
+// used both by [Registry.Register] and by the alias index for the canonical
+// tokens that carry no registration, so the two answer the same spellings. The
+// strings are returned as declared; callers fold them.
+func (r Registration) Spellings() []string {
+	out := make([]string, 0, len(r.Aliases)+2)
+	out = append(out, string(r.Ecosystem), r.DisplayName)
+	return append(out, r.Aliases...)
+}
+
 // Lacks reports whether this registration declares the projection absent.
 func (r Registration) Lacks(p Projection) bool {
 	return slices.Contains(r.Absent, p)
@@ -246,19 +257,37 @@ func NewRegistry() *Registry {
 	return r
 }
 
-// Register adds an ecosystem registration to the registry.
+// Register adds an ecosystem registration to the registry, indexing every
+// spelling that names it (see [Registration.Spellings]) under the fold
+// [normalizeToken] applies.
+//
+// The fold is what makes the index and the resolver agree. [Canonical]
+// normalizes before it asks, and a verbatim index answers only the one spelling
+// the registration happened to use, so a plugin that declared the alias
+// "Acme Registry" could not be resolved from it, from "acme-registry", or from
+// any other casing, while [Canonical] documents the opposite. Registration is
+// the half that folds because every reader then gets it without knowing to.
 func (r *Registry) Register(reg Registration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.byEcosystem[reg.Ecosystem] = &reg
-	for _, alias := range reg.Aliases {
-		r.byAlias[alias] = &reg
+	for _, spelling := range reg.Spellings() {
+		if key := normalizeToken(spelling); key != "" {
+			r.byAlias[key] = &reg
+		}
 	}
 }
 
-// Lookup returns the registration for an ecosystem (by name or alias).
-// Returns nil if not found.
+// Lookup returns the registration for an ecosystem named by any of its
+// spellings: its canonical token, its display name, or an alias, in any casing
+// and with spaces or underscores where the token has hyphens. Returns nil if no
+// registration claims the name.
+//
+// The name is folded with the same [normalizeToken] that built the index, so the
+// two cannot disagree about what a spelling is. [Parse] still sees the raw
+// string first, because some of its aliases carry separators of their own
+// ("cargo (crates.io)") that the fold does not produce.
 func (r *Registry) Lookup(name string) *Registration {
 	eco := Parse(name)
 
@@ -268,7 +297,7 @@ func (r *Registry) Lookup(name string) *Registration {
 	if reg, ok := r.byEcosystem[eco]; ok {
 		return reg
 	}
-	if reg, ok := r.byAlias[name]; ok {
+	if reg, ok := r.byAlias[normalizeToken(name)]; ok {
 		return reg
 	}
 	return nil

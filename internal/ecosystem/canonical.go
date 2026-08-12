@@ -96,15 +96,17 @@ var extraCanonicalEcosystems = []Registration{
 }
 
 // extraCanonicalAliases indexes [extraCanonicalEcosystems] by every spelling
-// that resolves to it, including its own token and display name. Keys are
-// normalized by [normalizeToken].
+// that resolves to it, including its own token and display name. The set of
+// spellings is [Registration.Spellings] and the keys are folded by
+// [normalizeToken], which is exactly what [Registry.Register] indexes, so a
+// registry-less token answers to the same spellings a registered one does.
 var extraCanonicalAliases = func() map[string]Ecosystem {
 	out := make(map[string]Ecosystem)
 	for _, reg := range extraCanonicalEcosystems {
-		out[normalizeToken(string(reg.Ecosystem))] = reg.Ecosystem
-		out[normalizeToken(reg.DisplayName)] = reg.Ecosystem
-		for _, alias := range reg.Aliases {
-			out[normalizeToken(alias)] = reg.Ecosystem
+		for _, spelling := range reg.Spellings() {
+			if key := normalizeToken(spelling); key != "" {
+				out[key] = reg.Ecosystem
+			}
 		}
 	}
 	return out
