@@ -536,6 +536,18 @@ func TestPolicyLintAgreesAcrossStdinAndPath(t *testing.T) {
   - name: ruleless
 `,
 		},
+		{
+			// A flow mapping keying the bundle key is the one document that is
+			// both a bundle and a compilable CEL expression. Arrival cannot break
+			// the tie: reading it as raw CEL because it was piped is how the same
+			// bytes used to pass on stdin and fail as a file.
+			name:     "a flow mapping that is also a CEL map literal",
+			document: `{"policies": []}`,
+		},
+		{
+			name:     "a flow mapping keying the bundle key beside an action",
+			document: `{"policies": [], "action": "deny"}`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
