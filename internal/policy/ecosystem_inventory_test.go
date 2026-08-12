@@ -203,6 +203,113 @@ func TestCratePolicyReadsThePublishedName(t *testing.T) {
 	}
 }
 
+// TestOptionalDependencyPolicyReadsItAsDirect drives the real npm construction
+// path (package.json plus package-lock.json extraction -> direct-dependency
+// collection -> proto conversion -> policy payload) and pins what "direct" means
+// for an optionalDependencies entry.
+//
+// npm installs an optional dependency like any other, the lockfile carries it,
+// and the extractor reports it as an installed package; only a failed install is
+// tolerated. Collecting direct dependencies read "dependencies" and
+// "devDependencies" alone, so an explicitly declared optional package reached
+// policies and the generated SBOM as direct=false and a direct-only rule skipped
+// it. A lockfile entry nobody declared is checked alongside it, since the fix
+// must not amount to marking everything installed direct.
+func TestOptionalDependencyPolicyReadsItAsDirect(t *testing.T) {
+	pkgs := scanNpmProject(t)
+
+	tests := []struct {
+		name       string
+		pkgName    string
+		wantDirect bool
+	}{
+		{name: "optional dependency is declared", pkgName: "fsevents", wantDirect: true},
+		{name: "runtime dependency is declared", pkgName: "left-pad", wantDirect: true},
+		{name: "lockfile entry nobody declared is not", pkgName: "tiny-dep", wantDirect: false},
+	}
+
+	sources, err := policy.ParseStructuredSources([]byte(`policies:
+  - name: direct-npm-dependency
+    ecosystems: ["npm"]
+    rules:
+      - action: deny
+        when: pkg.ecosystem == "npm" && pkg.direct
+        reason: matched
+`), "direct.yaml")
+	if err != nil {
+		t.Fatalf("ParseStructuredSources: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pkg := findPackageByName(pkgs, tt.pkgName)
+			if pkg == nil {
+				t.Fatalf("fixture produced no %q package (got %v)", tt.pkgName, namesOf(pkgs))
+			}
+
+			actions, err := policy.EvaluateMap(t.Context(), sources, map[string]any{"pkg": pkg})
+			if err != nil {
+				t.Fatalf("EvaluateMap: %v", err)
+			}
+			if matched := len(actions) == 1; matched != tt.wantDirect {
+				t.Errorf("direct-dependency deny on %q matched=%v, want %v (policy saw direct=%v)",
+					tt.pkgName, matched, tt.wantDirect, pkg.GetDirect())
+			}
+		})
+	}
+}
+
+// scanNpmProject inventories a temporary npm project that declares one runtime
+// dependency and one optional dependency, with a lockfile that also carries a
+// package nothing declares.
+func scanNpmProject(t *testing.T) []*dependencyPackage {
+	t.Helper()
+
+	dir := t.TempDir()
+	writeFixture(t, filepath.Join(dir, "package.json"), `{
+  "name": "fixture",
+  "version": "1.0.0",
+  "dependencies": { "left-pad": "^1.3.0" },
+  "optionalDependencies": { "fsevents": "^2.3.2" }
+}
+`)
+	writeFixture(t, filepath.Join(dir, "package-lock.json"), `{
+  "name": "fixture",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "fixture",
+      "version": "1.0.0",
+      "dependencies": { "left-pad": "^1.3.0" },
+      "optionalDependencies": { "fsevents": "^2.3.2" }
+    },
+    "node_modules/left-pad": { "version": "1.3.0" },
+    "node_modules/fsevents": { "version": "2.3.2", "optional": true },
+    "node_modules/tiny-dep": { "version": "0.1.0" }
+  }
+}
+`)
+
+	ws, err := workspace.NewDir(dir)
+	if err != nil {
+		t.Fatalf("workspace.NewDir: %v", err)
+	}
+	t.Cleanup(func() { _ = ws.Close() })
+
+	extracted, err := inventory.ScanPackagesWorking(t.Context(), ws, inventory.ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanPackagesWorking: %v", err)
+	}
+	direct := compare.CollectDirectDependenciesFromWorkspace(ws)
+	pkgs := internalproto.ExtractorPackagesToProto(extracted, direct)
+	if len(pkgs) == 0 {
+		t.Fatal("npm fixture produced no packages")
+	}
+	return pkgs
+}
+
 // scanCargoProject inventories a temporary Rust project whose manifest renames
 // one dependency (my-serde = { package = "serde" }) and declares another under
 // a published hyphenated name, with a lockfile that spells both the way Cargo

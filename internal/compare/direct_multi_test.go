@@ -58,6 +58,44 @@ func TestGetNpmDirectDeps(t *testing.T) {
 			},
 		},
 		{
+			// npm installs an optionalDependencies entry like any other and the
+			// lockfile carries it, so the project declared it and depends on it;
+			// only a failed install is tolerated.
+			name: "optional dependencies",
+			input: `{
+				"optionalDependencies": {
+					"fsevents": "^2.3.2"
+				}
+			}`,
+			expected: map[string]bool{
+				"fsevents": true,
+			},
+		},
+		{
+			name: "aliased optional dependencies record the aliased package",
+			input: `{
+				"optionalDependencies": {
+					"my-fsevents": "npm:fsevents@^2.3.2"
+				}
+			}`,
+			expected: map[string]bool{
+				"my-fsevents": true,
+				"fsevents":    true,
+			},
+		},
+		{
+			// A peerDependencies entry is a constraint on whoever installs this
+			// package, not a dependency this package declares for itself, so it
+			// is deliberately absent. See the note on [getNpmDirectDeps].
+			name: "peer dependencies are not this package's own",
+			input: `{
+				"peerDependencies": {
+					"react": "^18.2.0"
+				}
+			}`,
+			expected: map[string]bool{},
+		},
+		{
 			name: "scoped packages",
 			input: `{
 				"dependencies": {

@@ -314,24 +314,37 @@ func CollectDirectDependenciesFromCommit(repo *git.Repository, hash plumbing.Has
 
 // getNpmDirectDeps extracts direct dependencies from package.json.
 // Returns map of package names to true (direct).
-// devDependencies are marked as direct=true since they're explicitly declared.
+//
+// Every table a project declares for itself counts as direct: dependencies,
+// devDependencies, and optionalDependencies. An optional dependency is installed
+// like any other and the lockfile records it, so the extractor reports it as an
+// installed package; what "optional" tolerates is a failed install, not the
+// declaration. Leaving the table out left a package the project named itself
+// looking transitive in the SBOM and in pkg.direct, and a direct-only rule
+// skipped it.
+//
+// peerDependencies is deliberately not among them. A peer entry is a constraint
+// on whoever installs this package ("bring your own react"), not a dependency
+// this package declares for itself, so the project that satisfies it is the one
+// that declares it.
+//
 // An aliased entry contributes both spellings, see [recordNpmDependency].
 func getNpmDirectDeps(data []byte) map[string]bool {
 	deps := make(map[string]bool)
 
 	var pkg struct {
-		Dependencies    map[string]string `json:"dependencies"`
-		DevDependencies map[string]string `json:"devDependencies"`
+		Dependencies         map[string]string `json:"dependencies"`
+		DevDependencies      map[string]string `json:"devDependencies"`
+		OptionalDependencies map[string]string `json:"optionalDependencies"`
 	}
 	if err := json.Unmarshal(data, &pkg); err != nil {
 		return deps
 	}
 
-	for name, spec := range pkg.Dependencies {
-		recordNpmDependency(deps, name, spec)
-	}
-	for name, spec := range pkg.DevDependencies {
-		recordNpmDependency(deps, name, spec)
+	for _, table := range []map[string]string{pkg.Dependencies, pkg.DevDependencies, pkg.OptionalDependencies} {
+		for name, spec := range table {
+			recordNpmDependency(deps, name, spec)
+		}
 	}
 	return deps
 }
