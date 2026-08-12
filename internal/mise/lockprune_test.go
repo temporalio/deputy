@@ -516,3 +516,123 @@ func TestUnquoteTOMLString(t *testing.T) {
 		})
 	}
 }
+
+// TestPruneLockedVersionsSkipsMultilineStringContent pins that the pruner reads
+// a lockfile's structure and not the prose inside it. A lock entry may carry a
+// multi-line string, and TOML puts no restriction on its content: a field
+// holding release notes or a diff can contain a line reading `[[tools.go]]`.
+//
+// A line-wise scan took such a line for the start of the next entry, which broke
+// the file in two directions. Pruning the entry the string belongs to deleted
+// only the lines above it and left the closing delimiter behind, and a fake
+// header naming the tool being pruned made the pruner delete the tail of an
+// entry that had to survive. Either way [ParseLock] accepts the original file
+// and rejects the result, so a fix reports success and leaves a lockfile mise
+// cannot read.
+func TestPruneLockedVersionsSkipsMultilineStringContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		lock     string
+		toolKeys []string
+		stale    string
+		// want is the expected content; wantChanged false means the file must
+		// come back byte for byte.
+		want        string
+		wantChanged bool
+	}{
+		{
+			// The string belongs to the entry being pruned, so it goes with it,
+			// delimiters and all.
+			name: "a header inside the pruned entry's own string",
+			lock: `[[tools.go]]
+version = "1.22.12"
+notes = """
+[[tools.node]]
+version = "20.11.0"
+"""
+
+[[tools.ripgrep]]
+version = "14.1.1"
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+			want: `[[tools.ripgrep]]
+version = "14.1.1"
+`,
+			wantChanged: true,
+		},
+		{
+			// The only mention of the pruned tool is inside another entry's
+			// string, so there is no entry to prune and nothing may be touched.
+			name: "a header inside a surviving entry's string",
+			lock: `[[tools.node]]
+version = "20.11.0"
+notes = """
+[[tools.go]]
+version = "1.22.12"
+"""
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+		},
+		{
+			// The version of the entry being pruned is real, and the string
+			// after it merely mentions another one.
+			name: "a stale entry is still pruned around its string",
+			lock: `[[tools.node]]
+version = "20.11.0"
+
+[[tools.go]]
+version = "1.22.12"
+notes = """
+version = "9.9.9"
+[[tools.go]]
+"""
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+			want: `[[tools.node]]
+version = "20.11.0"
+`,
+			wantChanged: true,
+		},
+		{
+			// A string that never closes leaves the extent of everything after
+			// it unknown, so the edit is abandoned rather than guessed at.
+			name: "an unterminated string abandons the edit",
+			lock: `[[tools.go]]
+version = "1.22.12"
+notes = """
+[[tools.node]]
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Every fixture but the unterminated one is a lockfile the parser
+			// reads, so the pruner is being held to the same file it does.
+			_, parseErr := ParseLock("mise.lock", []byte(tt.lock))
+			if !strings.Contains(tt.name, "unterminated") && parseErr != nil {
+				t.Fatalf("fixture does not parse: %v", parseErr)
+			}
+
+			got, changed := PruneLockedVersions([]byte(tt.lock), tt.toolKeys, func(v string) bool {
+				return v == tt.stale
+			})
+			if changed != tt.wantChanged {
+				t.Fatalf("changed = %v, want %v:\n%s", changed, tt.wantChanged, got)
+			}
+			want := tt.want
+			if !tt.wantChanged {
+				want = tt.lock
+			}
+			if string(got) != want {
+				t.Errorf("prune mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+			if parseErr == nil {
+				if _, err := ParseLock("mise.lock", got); err != nil {
+					t.Errorf("pruned lockfile no longer parses: %v\n%s", err, got)
+				}
+			}
+		})
+	}
+}

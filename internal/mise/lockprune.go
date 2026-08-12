@@ -45,6 +45,19 @@ func PruneLockedVersions(content []byte, toolKeys []string, stale func(version s
 	changed := false
 
 	for i := 0; i < len(lines); i++ {
+		// A line that opens a multi-line string carries its continuation lines
+		// with it. They are string content whatever they look like, so a
+		// `[[tools.go]]` spelled inside one starts no entry and ends none.
+		if stop := MultilineStringEndLine(lines, i); stop != i {
+			if stop < 0 {
+				// A string that never closes is a file no TOML parser reads,
+				// and its extent is unknown, so nothing here may be deleted.
+				return content, false
+			}
+			out = append(out, lines[i:stop+1]...)
+			i = stop
+			continue
+		}
 		segs, isArray, ok := lockHeaderPath(lines[i])
 		if !ok || !isArray || len(segs) != 2 || !isTool(segs) {
 			out = append(out, lines[i])
@@ -64,7 +77,10 @@ func PruneLockedVersions(content []byte, toolKeys []string, stale func(version s
 					break
 				}
 				sawSubHeader = true
-			} else if !sawSubHeader && !sawVersion {
+				end++
+				continue
+			}
+			if !sawSubHeader && !sawVersion {
 				v, readable := lockEntryVersion(lines[end])
 				if !readable {
 					// A version this cannot decode is a version it cannot call
@@ -79,7 +95,16 @@ func PruneLockedVersions(content []byte, toolKeys []string, stale func(version s
 					version, sawVersion = v, true
 				}
 			}
-			end++
+			// A field whose value is a multi-line string reaches past this line,
+			// and every line of it belongs to this entry. Reading them as
+			// headers ended the entry inside the string, so pruning cut
+			// the opening delimiter off its own closing one and left a file
+			// nothing could parse.
+			stop := MultilineStringEndLine(lines, end)
+			if stop < 0 {
+				return content, false
+			}
+			end = stop + 1
 		}
 
 		if !stale(version) {
@@ -284,6 +309,55 @@ func TOMLStringEnd(s string, i int) (end int, ok bool) {
 		}
 	}
 	return 0, false
+}
+
+// MultilineStringEndLine reports how far the logical line beginning at lines[i]
+// reaches: the index of the line that closes a multi-line string the line leaves
+// open, i itself when it leaves none, and -1 when such a string is never closed.
+//
+// Every line-oriented scanner over a mise file needs it, because TOML's
+// multi-line strings can hold anything, including text that looks exactly like
+// the structure the scanner is hunting for. A release note containing a `[tools]`
+// line or a lock entry whose comment field contains `[[tools.go]]` is ordinary
+// string content, but a scanner reading one line at a time sees a table header
+// and acts on it: the config rewriter rewrote versions inside the note, and the
+// lockfile pruner cut an entry short and left the file unparsable. Advancing
+// past the whole logical line is what keeps string content out of the grammar.
+//
+// The end is found by [TOMLStringEnd] over the remaining text rather than by a
+// second reading of TOML's quoting rules, so a scanner skipping a string and a
+// parser reading one cannot disagree about where it ends. Only a line that
+// actually opens an unterminated string pays for the join.
+func MultilineStringEndLine(lines []string, i int) int {
+	if i < 0 || i >= len(lines) {
+		return i
+	}
+	line := lines[i]
+	for j := 0; j < len(line); j++ {
+		switch c := line[j]; {
+		case c == '"' || c == '\'':
+			if end, ok := TOMLStringEnd(line, j); ok {
+				j = end - 1
+				continue
+			}
+			if !IsMultilineStringOpener(line, j) {
+				// An unterminated single-line string cannot continue onto the
+				// next line, so the line stands alone however malformed it is.
+				return i
+			}
+			rest := strings.Join(lines[i:], "\n")
+			end, ok := TOMLStringEnd(rest, j)
+			if !ok {
+				return -1
+			}
+			return i + strings.Count(rest[:end], "\n")
+		case c == '#':
+			// A comment runs to the end of the line, and quotes in it open
+			// nothing.
+			return i
+		}
+	}
+	return i
 }
 
 // multilineStringEnd returns the offset just past the closing delimiter of the
