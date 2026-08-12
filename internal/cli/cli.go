@@ -255,7 +255,7 @@ CONNECTION MODES:
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", logLevel, "Logging level: debug, info, warn, error (default: warn). Override with DEPUTY_LOG_LEVEL")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", logFormat, "Logging format (text, json). Override with DEPUTY_LOG_FORMAT")
 	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "", "Connect to remote Deputy server (e.g., https://deputy.example.com:8090). Takes precedence over DEPUTY_SERVER; --server= (empty) forces in-process mode")
-	rootCmd.PersistentFlags().StringVar(&daemonSocket, "daemon", "", "Reserved for future daemon support; currently has no effect")
+	rootCmd.PersistentFlags().StringVar(&daemonSocket, "daemon", "", "Reserved for future daemon support; has no effect as of August 2026")
 	// Hidden while reserved: the flag stays parseable so scripts written against
 	// it keep working when daemon mode lands, without adding help-text noise for
 	// a mode that does not exist yet.

@@ -111,7 +111,7 @@ Mode selection:
 1. If `--server` or `DEPUTY_SERVER` is set (the flag takes precedence) → Remote mode
 2. Otherwise → In-process mode (default)
 
-Daemon mode is reserved: the `--daemon` flag exists but currently has no effect.
+Daemon mode is reserved: the `--daemon` flag exists but has no effect as of August 2026.
 
 The public SDK (`sdk/`) wraps this client for external Go consumers.
 
