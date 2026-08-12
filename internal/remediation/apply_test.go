@@ -2,6 +2,7 @@ package remediation
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1279,27 +1280,39 @@ node = "20.11.0"
 // see rather than what pruning intended.
 func lockedVersionAfterFix(t *testing.T, dir, tool, version string) string {
 	t.Helper()
+	return lockedVersionForConfig(t, dir, "mise.toml", tool, version)
+}
 
-	cfgData, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
+// lockedVersionForConfig is [lockedVersionAfterFix] for a config at any path in
+// the repository, so a test can ask the question of a config that only shares
+// the lockfile with the one that was edited. The lockfile is derived with
+// mise.LockfilePath and read through the repository's filesystem, so a shared
+// or symlinked lock is resolved exactly as inventory resolves it.
+func lockedVersionForConfig(t *testing.T, dir, configRel, tool, version string) string {
+	t.Helper()
+
+	fsys := os.DirFS(dir)
+	cfgData, err := fs.ReadFile(fsys, configRel)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lockData, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+	lockRel := mise.LockfilePath(configRel)
+	lockData, err := fs.ReadFile(fsys, lockRel)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := mise.Parse("mise.toml", cfgData)
+	cfg, err := mise.Parse(configRel, cfgData)
 	if err != nil {
 		t.Fatalf("parse config: %v", err)
 	}
-	lf, err := mise.ParseLock("mise.lock", lockData)
+	lf, err := mise.ParseLock(lockRel, lockData)
 	if err != nil {
 		t.Fatalf("parse lock: %v", err)
 	}
 	// The same claim count inventory uses, over every config sharing the
 	// lockfile, so the helper cannot pass a fix that the real extractor would
 	// still see as vulnerable.
-	claims, err := mise.LockClaims(os.DirFS(dir), "mise.toml")
+	claims, err := mise.LockClaims(fsys, configRel)
 	if err != nil {
 		t.Fatalf("lock claims: %v", err)
 	}
@@ -1312,8 +1325,135 @@ func lockedVersionAfterFix(t *testing.T, dir, tool, version string) string {
 		}
 		return ""
 	}
-	t.Fatalf("tool %q not declared in the config after the fix:\n%s", tool, cfgData)
+	t.Fatalf("tool %q not declared in %s after the fix:\n%s", tool, configRel, cfgData)
 	return ""
+}
+
+// TestApplyMiseUpdateKeepsLockEntryAnotherConfigClaims pins the pruning of a
+// lock entry keyed by exactly the tool that was fixed. That key is not the
+// edited config's to prune on its own: several configs write into one
+// mise.lock, and when a second one declares the same key at the same version,
+// the entry the fix would delete is the metadata that config still installs
+// from. Deleting it discards the checksums of a toolchain nobody edited, and
+// it buys nothing, because a contested name is one lock resolution refuses to
+// lend to the edited declaration anyway.
+func TestApplyMiseUpdateKeepsLockEntryAnotherConfigClaims(t *testing.T) {
+	t.Parallel()
+
+	const declaration = "[tools]\ngo = \"1.22.12\"\n"
+	const lock = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n\n" +
+		"[tools.go.platforms.linux-x64]\nchecksum = \"sha256:oldgo\"\n"
+
+	tests := []struct {
+		name string
+		// files are the regular files to write, keyed by slash-separated path.
+		files map[string]string
+		// links map a symlink path to its target, relative to the link's
+		// directory.
+		links map[string]string
+		// edited is the config the fix is applied to; sharing is the other
+		// config writing into the same lockfile, "" when there is none.
+		edited  string
+		sharing string
+		// lockPath is the lockfile both configs resolve to.
+		lockPath string
+		// wantKept says whether the stale entry must survive the fix.
+		wantKept bool
+	}{
+		{
+			// Two conf.d drop-ins of one mise directory: mise merges them and
+			// locks them into a single mise.lock.
+			name: "drop-ins of one mise directory declare the same tool",
+			files: map[string]string{
+				".config/mise/conf.d/a.toml": declaration,
+				".config/mise/conf.d/b.toml": declaration,
+				".config/mise/mise.lock":     lock,
+			},
+			edited:   ".config/mise/conf.d/a.toml",
+			sharing:  ".config/mise/conf.d/b.toml",
+			lockPath: ".config/mise/mise.lock",
+			wantKept: true,
+		},
+		{
+			// Two directories whose lockfiles are one file: mise reads through
+			// the link, so the fix publishes its pruning to b's lock too.
+			name: "configs sharing a symlinked lockfile declare the same tool",
+			files: map[string]string{
+				"a/mise.toml": declaration,
+				"b/mise.toml": declaration,
+				"a/mise.lock": lock,
+			},
+			links:    map[string]string{"b/mise.lock": "../a/mise.lock"},
+			edited:   "a/mise.toml",
+			sharing:  "b/mise.toml",
+			lockPath: "a/mise.lock",
+			wantKept: true,
+		},
+		{
+			// Nobody else claims the key, so the entry is the edited config's
+			// and has to go: lock resolution would otherwise hand it back.
+			name: "sole claimant still prunes its stale entry",
+			files: map[string]string{
+				"a/mise.toml": declaration,
+				"b/mise.toml": "[tools]\nnode = \"20.11.0\"\n",
+				"a/mise.lock": lock,
+			},
+			links:    map[string]string{"b/mise.lock": "../a/mise.lock"},
+			edited:   "a/mise.toml",
+			lockPath: "a/mise.lock",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for rel, content := range tt.files {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, target := range tt.links {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(target), full); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+
+			if err := ApplyDeputyCommand(dir, "deputy:mise:update "+tt.edited+" go 1.24.3 1.22.12"); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			lockAfter, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(tt.lockPath)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(lockAfter), "sha256:oldgo"); got != tt.wantKept {
+				t.Errorf("stale entry present = %v, want %v:\n%s", got, tt.wantKept, lockAfter)
+			}
+			// Whatever the entry's fate, the fix has to take: the edited config
+			// must not resolve back to the version it just replaced.
+			if got := lockedVersionForConfig(t, dir, tt.edited, "go", "1.24.3"); got == "1.22.12" {
+				t.Errorf("edited config resolves back to 1.22.12:\n%s", lockAfter)
+			}
+			if tt.sharing == "" {
+				return
+			}
+			// The config nobody edited still declares 1.22.12, and its
+			// integrity metadata has to still be there to install from.
+			if got := lockedVersionForConfig(t, dir, tt.sharing, "go", "1.22.12"); got != "1.22.12" {
+				t.Errorf("%s resolves go to %q, want the 1.22.12 entry it declares:\n%s", tt.sharing, got, lockAfter)
+			}
+		})
+	}
 }
 
 // TestApplyMiseUpdateMatchesVPrefixedCurrentVersion pins the apply against the

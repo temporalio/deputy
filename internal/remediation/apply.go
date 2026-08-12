@@ -422,51 +422,62 @@ func applyMiseUpdate(repoDir, configRel, tool string, currentVersions []string, 
 }
 
 // miseLockKeys returns the mise.lock table keys to prune for the tool that was
-// just edited: always the configured key, plus its backend-stripped short name
-// when no other declaration could own that name. A config can declare both a
-// backend-qualified tool and its short name as separate tools (`"npm:node"`
-// and `node`), and pruning a contested name would discard integrity metadata
-// for a declaration that was never edited.
+// just edited: the configured key and, when a backend prefix makes them differ,
+// its backend-stripped short name, each of them only when no other declaration
+// could own it. A config can declare both a backend-qualified tool and its
+// short name as separate tools (`"npm:node"` and `node`), and several configs
+// write into one lockfile, so pruning a contested name would discard integrity
+// metadata for a declaration that was never edited.
 //
-// Ownership is the claimant count from [mise.LockClaims], nothing else. In
-// particular, an entry under the exact key does not make a legacy entry under
-// the short name someone else's: with a single declaration, [mise.Lockfile.Lookup]
-// borrows the short-name entry through its sole-entry fallback once the exact
-// entry is gone, so leaving it behind restores the vulnerable version on the
-// next scan and the applied fix reads as ineffective. Pruning and enrichment
-// answer "who owns this name" the same way, so an entry one of them treats as
-// this tool's cannot be treated as another tool's by the other.
+// Ownership is the claimant count from [mise.LockClaims], nothing else, and the
+// exact key is subject to it like any other name. Two configs sharing a
+// lockfile can spell the same key at the same version, in which case the single
+// entry is the one the config nobody edited still installs from. Withholding it
+// costs the fix nothing: a contested name is one [mise.Lockfile.Lookup] refuses
+// to lend through its sole-entry fallback, and the edited declaration no longer
+// spells the version the entry records, so it cannot be matched exactly either.
+//
+// In particular, an entry under the exact key does not make a legacy entry
+// under the short name someone else's: with a single declaration, the
+// sole-entry fallback borrows the short-name entry once the exact entry is
+// gone, so leaving it behind restores the vulnerable version on the next scan
+// and the applied fix reads as ineffective. Pruning and enrichment answer "who
+// owns this name" the same way, so an entry one of them treats as this tool's
+// cannot be treated as another tool's by the other.
 func miseLockKeys(root *os.Root, configRelPath, tool string) []string {
-	_, name := mise.SplitBackend(tool)
-	if name == "" || name == tool {
+	claims, err := mise.LockClaims(root.FS(), configRelPath)
+	if err != nil {
+		// Ownership could not be established. The exact key keeps the reading it
+		// has when nothing is known about the other configs, because enrichment
+		// makes the same permissive reading of a nil claim count: leaving the
+		// entry would let the fixed tool resolve back to the version the fix
+		// removed. Nothing is widened beyond it.
 		return []string{tool}
 	}
-	if shortNameContested(root, configRelPath, name) {
-		return []string{tool}
+
+	keys := make([]string, 0, 2)
+	if !nameContested(claims, tool) {
+		keys = append(keys, tool)
 	}
-	return []string{tool, name}
+	if _, name := mise.SplitBackend(tool); name != "" && name != tool && !nameContested(claims, name) {
+		keys = append(keys, name)
+	}
+	return keys
 }
 
-// shortNameContested reports whether more than one declaration could be the
-// owner of a legacy lock entry keyed by the short name. It asks
-// [mise.LockClaims], the same count that decides whether inventory may enrich
-// from such an entry, so pruning and enrichment cannot disagree about who owns
-// a name: an entry left in place here because it is ambiguous must also be
-// refused there.
+// nameContested reports whether more than one declaration could be the owner of
+// a lock entry keyed by name. The counts come from [mise.LockClaims], the same
+// count that decides whether inventory may enrich from such an entry, so
+// pruning and enrichment cannot disagree about who owns a name: an entry left
+// in place here because it is ambiguous must also be refused there.
 //
 // The count spans every config sharing the lockfile, not just the one being
-// edited. The lockfile is shared: a mise directory's config.toml and all of
-// its conf.d drop-ins write to one mise.lock, so a name uncontested within one
-// fragment can still be claimed by a declaration in another, and pruning it
-// would discard integrity metadata for a tool this fix never touched.
-//
-// A config that cannot be read or parsed counts as contested, so an ambiguous
-// case never widens lock pruning.
-func shortNameContested(root *os.Root, relPath, name string) bool {
-	claims, err := mise.LockClaims(root.FS(), relPath)
-	if err != nil {
-		return true
-	}
+// edited. The lockfile is shared: a mise directory's config.toml and all of its
+// conf.d drop-ins write to one mise.lock, and a lockfile may be a symlink two
+// directories both write through, so a name uncontested within one fragment can
+// still be claimed by a declaration in another, and pruning it would discard
+// integrity metadata for a tool this fix never touched.
+func nameContested(claims map[string]int, name string) bool {
 	return claims[name] > 1
 }
 
