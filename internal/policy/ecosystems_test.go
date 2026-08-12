@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/proto/descriptorset"
 	"github.com/temporalio/deputy/internal/purlx"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -83,6 +84,44 @@ func TestValidateEcosystems(t *testing.T) {
 	}
 }
 
+// TestEveryProxyCapableEcosystemHasAnEntrypoint sweeps the registry rather than
+// a list of ecosystems anyone maintains. ProxyEntrypoint answers "" for an
+// ecosystem with no artifact-request entrypoint, and a handler for such an
+// ecosystem is refused rather than served (see internal/proxy), so an ecosystem
+// that declares proxy capability without an entrypoint to enforce policy at
+// cannot be proxied at all. Deriving the cases from Capabilities().Proxy is what
+// makes that a build-time answer instead of a discovery at request time.
+func TestEveryProxyCapableEcosystemHasAnEntrypoint(t *testing.T) {
+	proxyCapable := 0
+	for _, eco := range ecosystem.All() {
+		if !eco.Capabilities().Proxy {
+			continue
+		}
+		proxyCapable++
+		t.Run(string(eco), func(t *testing.T) {
+			got := ProxyEntrypoint(string(eco))
+			if got == "" {
+				t.Fatalf("proxy-capable ecosystem %s has no artifact-request entrypoint, so a proxy for it cannot be served", eco)
+			}
+			if !got.IsValid() {
+				t.Fatalf("ProxyEntrypoint(%q) = %q, which is not a canonical policy entrypoint", eco, got)
+			}
+			if want := Entrypoint(string(eco) + "_artifact_request"); got != want {
+				t.Fatalf("ProxyEntrypoint(%q) = %q, want the synthesized %q", eco, got, want)
+			}
+		})
+	}
+
+	// Sanity floor: 4 proxy-capable ecosystems today (go, npm, pypi,
+	// rubygems); zero would make every assertion above vacuous.
+	if proxyCapable < 4 {
+		t.Errorf("only %d proxy-capable ecosystems in ecosystem.All(), want at least 4", proxyCapable)
+	}
+}
+
+// TestProxyEntrypoint pins the resolutions the sweep above cannot ask about:
+// the spellings an ecosystem arrives under, and the answer for an ecosystem
+// that has no artifact-request entrypoint at all.
 func TestProxyEntrypoint(t *testing.T) {
 	tests := []struct {
 		name string
