@@ -48,7 +48,7 @@ The first clause is narrower than it sounds, which is worth stating because the 
 
 `pathLength()` earns nothing. Its binding returns the list's `Size()`, so it is `size(p)` spelled longer, and the expression it replaces is already clear.
 
-`isCritical()` reads like the same case and is not, which is the trap worth naming: apply the test to the binding, not to the name. It is not `== severity.critical`. It walks `advisory.severity.level` itself and accepts the level as either a number or a string, so on a map-backed payload carrying `"CRITICAL"` the helper returns true where the equality returns false. Whether the normalization earns its place under the second clause is a real question; deleting it as an abbreviation would change which findings match.
+`isCritical()` reads like the same case and is not, so the test applies to the binding rather than to the name. It is not `== severity.critical`. It walks `advisory.severity.level` itself and accepts the level as either a number or a string, so on a map-backed payload carrying `"CRITICAL"` the helper returns true where the equality returns false. Whether the normalization earns its place under the second clause is a real question; deleting it as an abbreviation would change which findings match.
 
 `age()` is the case worth naming, because it looks like it earns its place and does not. It is `now() - timestamp(x)` with one overload missing, so `age(image.metadata.created)` fails at evaluation where the expression it abbreviates succeeds (#179). An abbreviation narrower than the thing it abbreviates is worse than no helper, because it looks like the safe choice.
 
@@ -99,7 +99,7 @@ So generation is necessary and not sufficient. The root needs a contract test: o
 
 The first version of that test landed in #138. [`internal/policy/bindings_test.go`](../../internal/policy/bindings_test.go) compares each profile against the names the CEL environment declares, and pins the names that still fail in `undeclaredBindingVars` so the gap is enforced at its current size and cannot grow quietly.
 
-It is not the whole contract, and the test says so itself. The environment is one flat list shared by every entrypoint and every variable in it is `DynType`, so a name it declares may still be unbound at the entrypoint advertising it. Declared is necessary and not sufficient, and the profile can also advertise a name no message carries: `go_artifact_request` offers an optional `licenses` that `GoArtifactRequestPolicyInput` has no field for.
+It is not the whole contract, and the test says so itself. The environment is one flat list shared by every entrypoint and every variable in it is `DynType`, so a name it declares may still be unbound at the entrypoint advertising it. Declared is not bound, and the profile can also advertise a name no message carries: `go_artifact_request` offers an optional `licenses` that `GoArtifactRequestPolicyInput` has no field for.
 
 The payload is the real root, and the thing to get right is that **a root is an evaluation route, not an entrypoint**. Filing each profile under one payload kind is the mistake, because a profile can be reached by more than one route with a different payload shape on each.
 
