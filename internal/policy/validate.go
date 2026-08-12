@@ -931,8 +931,21 @@ func hasMergeKey(mapNode *yaml.Node) bool {
 
 // isMergeKey reports whether a mapping key is YAML's merge key, the "<<" that
 // pulls another mapping's entries into this one.
+//
+// The question is the tag YAML resolves, not the text the key is spelled with. A
+// quoted "<<" is an ordinary string key that merges nothing, and a bundle may
+// legitimately carry it wherever it accepts arbitrary keys, in its metadata and in
+// a rule's details. Reading the text instead named a merge the author did not
+// write and, worse, made every check that reads the document's values skip the
+// policy carrying it (see resolvesElsewhere).
+//
+// Tightening this cannot let a merge through unreported: yaml.v3 merges a key when
+// it is a scalar whose value is "<<" and whose tag resolves to !!merge, which is
+// what ShortTag answers, so every spelling the decoder acts on is refused here,
+// including a tag written verbatim as its URI. A key the author explicitly tagged
+// !!merge is refused whatever its name, which is the safe direction to err in.
 func isMergeKey(key *yaml.Node) bool {
-	return key.Tag == "!!merge" || key.Value == "<<"
+	return key != nil && key.Kind == yaml.ScalarNode && key.ShortTag() == mergeTag
 }
 
 // Messages for the YAML constructs a policy bundle does not accept. Each names
@@ -949,6 +962,9 @@ const (
 
 // nullTag is YAML's resolved tag for every spelling of null.
 const nullTag = "!!null"
+
+// mergeTag is YAML's resolved tag for the merge key, in every spelling of it.
+const mergeTag = "!!merge"
 
 // rewritesItsText reports whether a scalar's value is not the text the document
 // writes for it. A YAML tag can arrange exactly that: `action: !!binary ZGVueQ==`

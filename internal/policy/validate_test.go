@@ -591,6 +591,130 @@ defaults: &defaults
 	}
 }
 
+// TestMergeKeysRefusedByTagNotByText pins that a merge key is recognized by the
+// tag YAML resolves for it and not by the text it is spelled with. A quoted "<<"
+// is an ordinary string key: yaml.v3 tags it !!str and the decoder keeps it as a
+// key rather than merging anything, so a bundle whose free-form metadata or rule
+// details carry that name says nothing about a merge and has to lint and load.
+// Refusing it on the text alone named a construct the author did not write, and
+// withheld every other diagnostic for the policy carrying it, since the checks
+// that read a document's values step over the nodes a merge key makes unreadable.
+//
+// Every spelling the decoder does merge is still refused, whatever value it
+// merges from and however the tag is written, which is what keeps the tag a safe
+// signal to gate on. The two directions are pinned together so the check cannot
+// pass by accepting both. TestAnchorsRejectedAtEveryPosition covers the positions
+// a merge key can take; this covers the spellings.
+func TestMergeKeysRefusedByTagNotByText(t *testing.T) {
+	const plainPolicy = `
+policies:
+  - name: plain
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+`
+	cases := []struct {
+		name    string
+		bundle  string
+		refused bool
+	}{
+		{
+			name:   "a double-quoted key named << in bundle metadata",
+			bundle: "metadata:\n  \"<<\": literal\n" + plainPolicy,
+		},
+		{
+			name:   "a single-quoted key named << in bundle metadata",
+			bundle: "metadata:\n  '<<': literal\n" + plainPolicy,
+		},
+		{
+			name: "a quoted key named << in a rule's details",
+			bundle: `
+policies:
+  - name: quoted-detail
+    rules:
+      - when: "true"
+        action: deny
+        reason: "r"
+        details:
+          "<<": literal
+`,
+		},
+		{
+			name:    "a merge key with a mapping value",
+			bundle:  "metadata:\n  <<: {inherited: 1}\n" + plainPolicy,
+			refused: true,
+		},
+		{
+			name: "a merge key with an alias value",
+			bundle: `
+base: &base
+  inherited: 1
+
+metadata:
+  <<: *base
+` + plainPolicy,
+			refused: true,
+		},
+		{
+			name: "a merge key with a sequence of aliases",
+			bundle: `
+base: &base
+  inherited: 1
+
+metadata:
+  <<: [*base]
+` + plainPolicy,
+			refused: true,
+		},
+		{
+			name:    "a merge key tagged explicitly on a quoted key",
+			bundle:  "metadata:\n  !!merge \"<<\": {inherited: 1}\n" + plainPolicy,
+			refused: true,
+		},
+		{
+			name:    "a merge key tagged with the verbatim tag URI",
+			bundle:  "metadata:\n  !<tag:yaml.org,2002:merge> \"<<\": {inherited: 1}\n" + plainPolicy,
+			refused: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{Source: "bundle.yaml"})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			sources, loadErr := ParseStructuredSources([]byte(tc.bundle), "bundle.yaml")
+			if !tc.refused {
+				if len(issues) != 0 {
+					t.Fatalf("a key named << is not a merge key: %v", issues)
+				}
+				if loadErr != nil {
+					t.Fatalf("the loader refused a key named <<: %v", loadErr)
+				}
+				if len(sources) != 1 {
+					t.Fatalf("expected one compiled source, got %d", len(sources))
+				}
+				return
+			}
+			if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == "yaml-merge-key" }) {
+				t.Fatalf("expected the merge key to be reported, got %v", issues)
+			}
+			// The loader has to refuse the same document, or a merge would expand
+			// into policy content nobody reviewed. It names the first refused
+			// construct, which is the anchor the merge inherits from when the
+			// document defines one, so the wording is pinned to the family and the
+			// merge key itself to the located diagnostic above.
+			if loadErr == nil {
+				t.Fatalf("expected the loader to refuse the merge key, got %d sources", len(sources))
+			}
+			if !strings.Contains(loadErr.Error(), "policy bundles do not support YAML") {
+				t.Fatalf("loader error %q should refuse the construct by name", loadErr)
+			}
+		})
+	}
+}
+
 // TestValidateBundleAgreesWithLoader pins the equivalence the two paths must
 // keep: a bundle the loader compiles has to validate clean, and one the loader
 // rejects has to be reported. Validation walks YAML nodes while the loader
