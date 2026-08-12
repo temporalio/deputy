@@ -1,6 +1,7 @@
 package compare
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1004,6 +1005,103 @@ func TestCollectDirectDependenciesFromCommit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := direct[tt.key]; got != tt.want {
 				t.Errorf("direct[%q] = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestWorkspaceAndCommitWalksAgree pins the two collection paths to one answer.
+// A ref scan and a working-tree scan differ only in where the manifests are
+// read from, so a rule one of them applies and the other does not is a
+// classification that changes with how the scan was started. Cargo workspace
+// inheritance is the rule most able to drift, since it is the one that needs
+// two manifests read in one pass.
+func TestWorkspaceAndCommitWalksAgree(t *testing.T) {
+	tests := []struct {
+		name      string
+		manifests map[string]string
+	}{
+		{
+			name: "an inherited rename",
+			manifests: map[string]string{
+				"Cargo.toml":        "[workspace]\nmembers = [\"member\"]\n\n[workspace.dependencies]\nmy-serde = { package = \"serde\", version = \"1.0\" }\n",
+				"member/Cargo.toml": "[package]\nname = \"member\"\n\n[dependencies]\nmy-serde = { workspace = true }\n",
+			},
+		},
+		{
+			name: "a local dependency sharing an alias name",
+			manifests: map[string]string{
+				"Cargo.toml":        "[workspace]\nmembers = [\"member\"]\n\n[workspace.dependencies]\nmy-serde = { package = \"serde\", version = \"1.0\" }\n",
+				"member/Cargo.toml": "[package]\nname = \"member\"\n\n[dependencies]\nmy-serde = { path = \"../my-serde\" }\n",
+			},
+		},
+		{
+			name: "a rename nobody inherits",
+			manifests: map[string]string{
+				"Cargo.toml":        "[workspace]\nmembers = [\"member\"]\n\n[workspace.dependencies]\nmy-serde = { package = \"serde\", version = \"1.0\" }\n",
+				"member/Cargo.toml": "[package]\nname = \"member\"\n\n[dependencies]\ntokio = \"1.0\"\n",
+			},
+		},
+		{
+			name: "manifests from several ecosystems",
+			manifests: map[string]string{
+				"go.mod":           "module example.com/app\n\nrequire github.com/some/dependency v1.2.3\n",
+				"package.json":     `{"dependencies":{"lodash":"^4.17.21"}}`,
+				"Cargo.toml":       "[package]\nname = \"app\"\n\n[dependencies]\ntokio = \"1.26\"\n",
+				"requirements.txt": "flask==2.3.0\n",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ws, err := workspace.NewTempDir("cmp-agree")
+			if err != nil {
+				t.Fatalf("workspace: %v", err)
+			}
+			defer ws.Close()
+			root := t.TempDir()
+			repo, err := git.PlainInit(root, false)
+			if err != nil {
+				t.Fatalf("init repo: %v", err)
+			}
+			for name, contents := range tt.manifests {
+				if dir := filepath.Dir(name); dir != "." {
+					if err := ws.MkdirAll(dir, 0o755); err != nil {
+						t.Fatalf("mkdir %s: %v", dir, err)
+					}
+				}
+				if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+					t.Fatalf("write %s: %v", name, err)
+				}
+				full := filepath.Join(root, filepath.FromSlash(name))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatalf("mkdir for %s: %v", name, err)
+				}
+				if err := os.WriteFile(full, []byte(contents), 0o644); err != nil {
+					t.Fatalf("write %s: %v", name, err)
+				}
+			}
+			wt, err := repo.Worktree()
+			if err != nil {
+				t.Fatalf("worktree: %v", err)
+			}
+			if err := wt.AddWithOptions(&git.AddOptions{All: true}); err != nil {
+				t.Fatalf("add: %v", err)
+			}
+			hash, err := wt.Commit("add manifests", &git.CommitOptions{
+				Author: &object.Signature{Name: "Tester", Email: "tester@example.com", When: time.Now()},
+			})
+			if err != nil {
+				t.Fatalf("commit: %v", err)
+			}
+
+			fromWorkspace := CollectDirectDependenciesFromWorkspace(ws)
+			fromCommit, err := CollectDirectDependenciesFromCommit(repo, hash)
+			if err != nil {
+				t.Fatalf("CollectDirectDependenciesFromCommit: %v", err)
+			}
+			if !maps.Equal(fromWorkspace, fromCommit) {
+				t.Fatalf("walks disagree:\nworkspace: %v\n   commit: %v", fromWorkspace, fromCommit)
 			}
 		})
 	}
