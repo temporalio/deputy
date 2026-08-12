@@ -13,7 +13,6 @@ var (
 	yamlTopKeys = []string{"policies", "metadata"}
 	policyKeys  = []string{"name", "description", "ecosystems", "entrypoints", "commands", "mode", "vars", "rules"}
 	actions     = []string{"allow", "deny", "warn"}
-	modes       = []string{"enforce", "advisory"}
 )
 
 // celVariables are the common identifiers injected into CEL environments.
@@ -53,9 +52,10 @@ func completionItems(line string, cursor int) []protocol.CompletionItem {
 		return items
 	}
 	if strings.Contains(linePrefix, "mode") {
+		modes := policy.Modes()
 		items := make([]protocol.CompletionItem, 0, len(modes))
 		for _, m := range modes {
-			items = append(items, protocol.CompletionItem{Label: m, Kind: protocol.CIKEnum})
+			items = append(items, protocol.CompletionItem{Label: m.String(), Kind: protocol.CIKEnum})
 		}
 		return items
 	}
