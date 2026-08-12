@@ -1332,6 +1332,81 @@ policies:
 	}
 }
 
+// TestValidateBundleKeepsComplaintsSharingALocatedLine pins that folding a
+// loader restatement is keyed on the value the located issue describes and not on
+// the line it sits on. A line carries more than one field whenever the author
+// writes a policy in flow style, and the line a missing rules list is reported on
+// is the policy's first field whatever that field is, so a fold keyed on the line
+// alone drops a defect only the decoder finds and hands it back one lint run
+// later. Each case pairs a shape the walk locates with a mistyped field the walk
+// does not model, and the last case is the same mistyped field on its own, so the
+// pairing is what the assertion turns on.
+func TestValidateBundleKeepsComplaintsSharingALocatedLine(t *testing.T) {
+	cases := []struct {
+		name      string
+		bundle    string
+		wantCodes []string
+		denyText  []string
+	}{
+		{
+			name:      "a mistyped field beside a rules value that is not a list",
+			bundle:    "\npolicies:\n  - {name: once, description: [1], rules: 5}\n",
+			wantCodes: []string{"rules-not-list", "bundle-error"},
+			denyText:  []string{"structuredRule"},
+		},
+		{
+			name:      "a mistyped field on the line a missing rules list is reported",
+			bundle:    "\npolicies:\n  - description: [1]\n    name: once\n",
+			wantCodes: []string{"missing-rules", "bundle-error"},
+		},
+		{
+			name:      "a mistyped field beside an empty rules list",
+			bundle:    "\npolicies:\n  - {name: once, description: [1], rules: []}\n",
+			wantCodes: []string{"empty-rules", "bundle-error"},
+		},
+		{
+			name:      "a mistyped field beside a policies entry that is not a policy",
+			bundle:    "\npolicies: [1, {name: once, description: [1], rules: 5}]\n",
+			wantCodes: []string{"policy-not-mapping", "rules-not-list", "bundle-error"},
+			denyText:  []string{"structuredPolicy"},
+		},
+		{
+			name:      "the mistyped field on its own",
+			bundle:    "\npolicies:\n  - name: once\n    description: [1]\n    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n",
+			wantCodes: []string{"bundle-error"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			if len(issues) != len(tc.wantCodes) {
+				t.Fatalf("expected %d issues, got %d: %v", len(tc.wantCodes), len(issues), issues)
+			}
+			for _, want := range tc.wantCodes {
+				if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == want }) {
+					t.Fatalf("expected an issue with code %q, got %v", want, issues)
+				}
+			}
+			var reported strings.Builder
+			for _, issue := range issues {
+				reported.WriteString(issue.Message)
+				reported.WriteString("\n")
+			}
+			if !strings.Contains(reported.String(), "cannot unmarshal !!seq into string") {
+				t.Fatalf("expected the report to name the mistyped field, got %v", issues)
+			}
+			for _, deny := range tc.denyText {
+				if strings.Contains(reported.String(), deny) {
+					t.Fatalf("the report restates %q the walk already located: %v", deny, issues)
+				}
+			}
+		})
+	}
+}
+
 // TestValidateBundleRejectsCompiledBundle pins that a bundle compiled by
 // `deputy policy bundle` is not mistaken for an authored one. Its JSON parses as
 // YAML and has a "policies" array, so without the check every entry would be

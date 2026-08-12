@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -709,30 +710,36 @@ func loaderMessage(err error, source string, located []Issue) (string, bool) {
 		if strings.Contains(issue.Message, detail) || strings.Contains(detail, issue.Message) {
 			return message, true
 		}
-		if detail == policyNeedsRuleMessage && slices.Contains(valueShapeCodes, issue.Code) {
+		if _, shape := valueShapeTypes[issue.Code]; detail == policyNeedsRuleMessage && shape {
 			return message, true
 		}
 	}
 	return message, false
 }
 
-// valueShapeCodes are the codes the node walk reports for a value that is not the
-// shape a bundle needs: a policies list that is not a list, an entry of it that
-// is not a policy, and rules the walk cannot read as a list of rules. Every
-// reader of a bundle refuses each of them, so every one of these codes means the
-// loader is about to say the same thing in its own words, either as its refusal
-// of a policy with no rules to run or as the decoder's complaint about the
-// value's type. Neither wording contains the walk's, so the codes are what lets
-// the backstop recognize the restatement and leave one mistake as one issue.
+// valueShapeTypes maps each code the node walk reports for a value that is not
+// the shape a bundle needs, a policies list that is not a list, an entry of it
+// that is not a policy, and rules the walk cannot read as a list of rules, to the
+// Go type the decoder names when it refuses the same value. Every reader of a
+// bundle refuses each of these, so every one of these codes means the loader is
+// about to say the same thing in its own words, either as its refusal of a policy
+// with no rules to run or as the decoder's complaint about the value's type.
+// Neither wording contains the walk's, so this is what lets the backstop
+// recognize the restatement and leave one mistake as one issue.
+//
+// The types are read from the decoder's own targets rather than written out, so
+// renaming one cannot leave a restatement unrecognized. Pairing a code with its
+// type is what keeps the fold on the value the walk located instead of on
+// everything the decoder says about that line (see coversComplaint).
 //
 // TestValidateBundleReportsEachDefectOnce drives one bundle per shape check, so a
 // check added without its code here fails rather than reporting twice.
-var valueShapeCodes = []string{
-	"policies-not-list",
-	"policy-not-mapping",
-	"missing-rules",
-	"rules-not-list",
-	"empty-rules",
+var valueShapeTypes = map[string]string{
+	"policies-not-list":  reflect.TypeFor[[]structuredPolicy]().String(),
+	"policy-not-mapping": reflect.TypeFor[structuredPolicy]().String(),
+	"missing-rules":      reflect.TypeFor[[]structuredRule]().String(),
+	"rules-not-list":     reflect.TypeFor[[]structuredRule]().String(),
+	"empty-rules":        reflect.TypeFor[[]structuredRule]().String(),
 }
 
 // unlocatedDecodeMessage returns the loader's failure with the decoder
@@ -775,6 +782,14 @@ func unlocatedDecodeMessage(err error, located []Issue) (string, bool) {
 // unmarshal into its rule slice, one mistake in two vocabularies, and the line
 // the decoder names is the line the walk located it on. The same holds one level
 // up, for the policies list and for an entry of it that is not a policy.
+//
+// The line is not enough to tell a restatement from a second defect: a line
+// carries as many fields as the author writes on it, and the line a missing rules
+// list is reported on is the policy's first field whatever that field is. So the
+// complaint has to be about the value the located issue describes, which it says
+// by naming the type the decoder could not read that value into. Folding on the
+// line alone dropped a field only the decoder finds and handed it back a lint run
+// later, once the located defect beside it was fixed.
 func coversComplaint(issue Issue, complaint string) bool {
 	if issue.Severity == IssueHint {
 		return false
@@ -782,8 +797,12 @@ func coversComplaint(issue Issue, complaint string) bool {
 	if strings.Contains(issue.Message, complaint) {
 		return true
 	}
+	shape, ok := valueShapeTypes[issue.Code]
+	if !ok {
+		return false
+	}
 	line := lineFromYAMLError(complaint)
-	return line > 0 && line == issue.Line && slices.Contains(valueShapeCodes, issue.Code)
+	return line > 0 && line == issue.Line && strings.Contains(complaint, "into "+shape)
 }
 
 // lineFromYAMLError returns the 1-based line a YAML decode error names, or zero
