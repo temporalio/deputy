@@ -564,15 +564,22 @@ func applyMiseUpdate(repoDir, configRel, tool string, currentVersions []string, 
 // and the applied fix reads as ineffective. Pruning and enrichment answer "who
 // owns this name" the same way, so an entry one of them treats as this tool's
 // cannot be treated as another tool's by the other.
+//
+// That symmetry decides the failure case too: with ownership unresolved every
+// name is contested and nothing is pruned. Both readers of a lockfile answer an
+// unresolved count by setting the whole lockfile aside rather than by reading it
+// permissively (misex.Extract drops enrichment, Strategy.Discover drops the
+// locked version), so a preserved entry cannot be served back to the edited
+// declaration and the fix does not read as ineffective. Pruning on the guess
+// would delete integrity metadata a config nobody edited still installs from,
+// and that is the loss that does not undo itself: once whatever obscured
+// ownership is repaired, an entry left standing is visible again and the next
+// fix removes it, while checksums deleted on a guess are gone from the
+// repository.
 func miseLockKeys(root *os.Root, configRelPath, tool string) []string {
 	claims, err := mise.LockClaims(root.FS(), configRelPath)
 	if err != nil {
-		// Ownership could not be established. The exact key keeps the reading it
-		// has when nothing is known about the other configs, because enrichment
-		// makes the same permissive reading of a nil claim count: leaving the
-		// entry would let the fixed tool resolve back to the version the fix
-		// removed. Nothing is widened beyond it.
-		return []string{tool}
+		return nil
 	}
 
 	keys := make([]string, 0, 2)

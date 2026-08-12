@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/osv-scalibr/extractor/filesystem"
+	scalibrfs "github.com/google/osv-scalibr/fs"
+
 	"github.com/temporalio/deputy/internal/inventory/plugins/mise/misex"
 	"github.com/temporalio/deputy/internal/mise"
 )
@@ -3040,4 +3042,138 @@ func TestApplyDeputyCommandRunsUnrelatedTreesConcurrently(t *testing.T) {
 	if !strings.Contains(string(got), "1.24.3") {
 		t.Errorf("independent tree was not edited:\n%s", got)
 	}
+}
+
+// TestApplyMiseUpdateWithUnknownOwnership pins the direction the lockfile half
+// of a fix fails in when ownership cannot be established. Nothing is pruned:
+// both readers of a lockfile answer an unresolved claimant count by setting the
+// whole lockfile aside, so an entry left standing cannot be served back to the
+// declaration that was just fixed, while an entry deleted on the guess takes
+// with it the checksums a config nobody edited still installs from.
+//
+// The config edit still lands, and the scan still reports the fixed version,
+// which is the evidence that withholding the prune costs the fix nothing here.
+func TestApplyMiseUpdateWithUnknownOwnership(t *testing.T) {
+	t.Parallel()
+
+	const declaration = "[tools]\ngo = \"1.22.12\"\n"
+	const lock = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n\n" +
+		"[tools.go.platforms.linux-x64]\nchecksum = \"sha256:shared\"\n"
+
+	tests := []struct {
+		name  string
+		files map[string]string
+		links map[string]string
+	}{
+		{
+			// A config sharing the lockfile cannot be parsed, so its
+			// declarations, which may well include this tool, cannot be counted.
+			name: "a config sharing the lockfile cannot be parsed",
+			files: map[string]string{
+				"a/mise.toml": declaration,
+				"a/mise.lock": lock,
+				"b/mise.toml": declaration,
+				"c/mise.toml": "[tools\nbroken\n",
+			},
+			links: map[string]string{
+				"b/mise.lock": "../a/mise.lock",
+				"c/mise.lock": "../a/mise.lock",
+			},
+		},
+		{
+			// A candidate's lock link loops, so resolution stops before learning
+			// where it lands, which may be this very file.
+			name: "a candidate's lock links loop",
+			files: map[string]string{
+				"a/mise.toml": declaration,
+				"a/mise.lock": lock,
+				"b/mise.toml": declaration,
+			},
+			links: map[string]string{
+				"b/mise.lock":  "other.lock",
+				"b/other.lock": "mise.lock",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for rel, content := range tt.files {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, target := range tt.links {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(target), full); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+			// The premise: ownership really is unresolvable here.
+			if _, err := mise.LockClaims(os.DirFS(dir), "a/mise.toml"); err == nil {
+				t.Fatal("expected ownership to be unresolvable in this layout")
+			}
+
+			if err := ApplyDeputyCommand(dir, "deputy:mise:update a/mise.toml go 1.24.3 1.22.12"); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			config, err := os.ReadFile(filepath.Join(dir, "a", "mise.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(config), "1.24.3") {
+				t.Errorf("the config edit did not land:\n%s", config)
+			}
+			after, err := os.ReadFile(filepath.Join(dir, "a", "mise.lock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(after), "sha256:shared") {
+				t.Errorf("pruned a lock entry on unresolved ownership:\n%q", after)
+			}
+			// And the fix is not ineffective for it: with ownership unresolved
+			// the lockfile is set aside, so the scan reports the declaration.
+			if got := scannedVersion(t, dir, "a/mise.toml", "go"); got != "1.24.3" {
+				t.Errorf("the extractor reports go %q after the fix, want 1.24.3", got)
+			}
+		})
+	}
+}
+
+// scannedVersion reports the version the mise extractor reads for a tool,
+// against the repository as it now stands. It is what the next scan sees, so a
+// test can tell "the entry survived" from "the entry came back as a finding".
+func scannedVersion(t *testing.T, dir, configRel, tool string) string {
+	t.Helper()
+
+	fsys, ok := os.DirFS(dir).(scalibrfs.FS)
+	if !ok {
+		t.Fatal("os.DirFS does not satisfy the scan filesystem")
+	}
+	f, err := fsys.Open(configRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, err := misex.New().Extract(t.Context(), &filesystem.ScanInput{Path: configRel, Reader: f, FS: fsys})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	for _, pkg := range inv.Packages {
+		if pkg.Name == tool {
+			return pkg.Version
+		}
+	}
+	t.Fatalf("the extractor reported no package for %q", tool)
+	return ""
 }
