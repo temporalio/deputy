@@ -86,7 +86,7 @@ func alreadyAtVersion(root *os.Root, relPath, tool string, currentVersions []str
 		if spec.Key != tool {
 			continue
 		}
-		if !slices.Contains(spec.Versions, newVersion) {
+		if !declaresVersion(spec.Versions, newVersion) {
 			return false
 		}
 		if len(currentVersions) == 0 {
@@ -100,13 +100,32 @@ func alreadyAtVersion(root *os.Root, relPath, tool string, currentVersions []str
 		// so this guards against a partially written config rather than a
 		// state the happy path can produce.
 		for _, current := range currentVersions {
-			if slices.Contains(spec.Versions, current) {
+			if declaresVersion(spec.Versions, current) {
 				return false
 			}
 		}
 		return true
 	}
 	return false
+}
+
+// declaresVersion reports whether a declaration's versions name the release
+// want, comparing through [mise.SameVersion] so the two vocabularies that meet
+// here agree: Deputy reports a Go runtime as "v1.24.3" while a mise config
+// writes the release as mise installs it, and either side may be the one
+// carrying the "v".
+//
+// A byte-for-byte comparison reads a config that already declares the target in
+// the other spelling as never edited. The rewriter has already refused to
+// overwrite that declaration, correctly, since it is not the version the finding
+// describes, so the caller is told the fix could not be applied and stops before
+// the work that is left: the stale sibling lock entry survives, lock resolution
+// keeps serving the vulnerable version, and the next scan reports it against a
+// config that no longer declares it.
+func declaresVersion(versions []string, want string) bool {
+	return slices.ContainsFunc(versions, func(v string) bool {
+		return mise.SameVersion(v, want)
+	})
 }
 
 // rewriteToolsTable walks a mise.toml-family config and applies replace to the

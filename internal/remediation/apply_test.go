@@ -1497,6 +1497,17 @@ func TestApplyMiseUpdateMatchesVPrefixedCurrentVersion(t *testing.T) {
 			cmd:        "deputy:mise:update mise.toml go 1.25.12 1.22.12",
 			wantConfig: "[tools]\ngo = \"1.25.12\"\n",
 		},
+		{
+			// The config already declares the target, spelled the other way.
+			// The declaration is correctly left alone, but the apply still has
+			// the stale lock entry to prune: treating the config as unedited
+			// aborts before that and the next scan reports the vulnerable
+			// version the lockfile is still serving.
+			name:       "v-prefixed declaration already at the target version",
+			config:     "[tools]\ngo = \"v1.24.3\"\n",
+			cmd:        "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			wantConfig: "[tools]\ngo = \"v1.24.3\"\n",
+		},
 	}
 
 	for _, tt := range tests {

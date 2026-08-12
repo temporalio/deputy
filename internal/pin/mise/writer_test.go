@@ -1045,6 +1045,36 @@ go = { version = "1.24.3" }
 			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
 		},
 		{
+			// The config and the plan spell the same release differently, the
+			// way Deputy reports a Go runtime ("v1.24.3") and mise installs it.
+			// The rewriter already refuses to overwrite this declaration because
+			// it is not the vulnerable one, so reading it as unapplied leaves the
+			// caller unable to finish the fix it already made.
+			name: "v-prefixed declaration of the new version",
+			input: `[tools]
+go = "v1.24.3"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+		},
+		{
+			name: "bare declaration of a v-prefixed new version",
+			input: `[tools]
+go = "1.24.3"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "v1.24.3",
+		},
+		{
+			// A declaration ahead of the plan is not the plan's edit already
+			// applied, whichever way the versions are spelled: the rewriter
+			// refuses it and the caller must hear about it.
+			name: "v-prefixed declaration of another version",
+			input: `[tools]
+go = "v1.25.1"
+`,
+			tool: "go", currents: []string{"1.22.12"}, version: "1.24.3",
+			wantErr: true,
+		},
+		{
 			// With no known vulnerable versions, a second declared version may
 			// still be the vulnerable one, so this is not provably applied.
 			name: "unknown currents with several declared versions",
