@@ -130,43 +130,63 @@ func (o *orderedVars) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// bindable splits a policy's vars into the ones it can bind, in author order,
-// and an error for every name it cannot. A name binds nothing when it is empty,
-// and a repeated name binds once: the later declaration shadows the earlier, so
-// only one of the two can survive and the surviving one is the declaration the
-// expansion would bind.
+// varBinding is what a policy can do with one of its vars: the var as authored,
+// the scope its expression is evaluated in, and the reason its name binds nothing
+// when it binds nothing.
+type varBinding struct {
+	kv    varKV       // kv is the var as the document declares it.
+	scope orderedVars // scope is the vars bound above it, the names its expression may read.
+	err   error       // err is why the name binds nothing, nil when it binds.
+}
+
+// bindings pairs every var with the scope its expression sees and with the reason
+// its name binds nothing, in author order. A name binds nothing when it is empty,
+// and a repeated name binds once: the first declaration wins, because every
+// expression below it, the repeat's own included, is written against the name
+// already in scope. Reporting the repeat rather than the declaration it repeats is
+// also how the node walk names that defect, so the two readers point at one line.
 //
-// Splitting rather than refusing at the first bad name is what lets validation
-// report every name defect and still compile the vars beneath them. A reader that
-// runs the policy must refuse it instead (see wrapVars): a var the author named
-// twice is a var Deputy cannot say which value it holds, and a dropped
-// declaration is not something to run.
-// Names are compared normalized, as CEL binds them and as the node walk reports
-// them, so " blocked " and "blocked" are the one name they read as and the walk's
-// wording of each defect is the wording reported here.
-func (o orderedVars) bindable() (orderedVars, []error) {
-	binds := make(map[string]int, len(o))
-	for i, kv := range o {
-		if name := normalizeVarName(kv.Name); name != "" {
-			binds[name] = i
-		}
-	}
-	var (
-		bound      orderedVars
-		unbindable []error
-	)
-	for i, kv := range o {
+// Names are compared normalized, as CEL binds them, so " blocked " and "blocked"
+// are the one name they read as.
+//
+// Carrying the scopes is what lets validation compile the expression of a var
+// whose name it has already refused: the expression is wrong or right on its own,
+// in the scope it would have been evaluated in, whatever the name above it says.
+// Compiling it in any other scope would invent a diagnostic, since a name the
+// document declares below cannot be read from above. A reader that runs the policy
+// refuses it at the first unbindable name instead (see wrapVars): a var the author
+// named twice is a var Deputy cannot say which value it holds.
+func (o orderedVars) bindings() []varBinding {
+	out := make([]varBinding, 0, len(o))
+	var bound orderedVars
+	seen := make(map[string]struct{}, len(o))
+	for _, kv := range o {
+		binding := varBinding{kv: kv, scope: slices.Clone(bound)}
 		name := normalizeVarName(kv.Name)
+		_, repeated := seen[name]
 		switch {
 		case name == "":
-			unbindable = append(unbindable, errors.New(emptyVarNameMessage))
-		case binds[name] != i:
-			unbindable = append(unbindable, fmt.Errorf(duplicateVarNameFormat, name))
+			binding.err = errors.New(emptyVarNameMessage)
+		case repeated:
+			binding.err = fmt.Errorf(duplicateVarNameFormat, name)
 		default:
+			seen[name] = struct{}{}
 			bound = append(bound, kv)
 		}
+		out = append(out, binding)
 	}
-	return bound, unbindable
+	return out
+}
+
+// nestVars wraps a CEL body in one comprehension per var, in reverse author order
+// so an earlier var is in scope for a later one. It does no checking: a caller
+// that runs a policy validates the names first (wrapVars), and validation uses it
+// to compile the expression of a var whose name it has already reported.
+func nestVars(vars orderedVars, body string) string {
+	for _, v := range slices.Backward(vars) {
+		body = fmt.Sprintf("([%s]).map(%s, %s)[0]", v.exprString(), v.Name, body)
+	}
+	return body
 }
 
 // Names returns the ordered variable names.
@@ -414,19 +434,18 @@ func (p structuredPolicy) toCELSource() (string, error) {
 // defect in, which the whole-policy expansion cannot do.
 //
 // A name the policy cannot bind refuses the whole policy, which is what a reader
-// that runs it must do; validation reports every one of them and compiles what is
-// left (see bindable).
+// that runs it must do; validation reports every one of them and compiles the rest
+// (see bindings).
 func (p structuredPolicy) wrapVars(body string) (string, error) {
 	if len(p.Vars) == 0 {
 		return body, nil
 	}
-	if _, unbindable := p.Vars.bindable(); len(unbindable) > 0 {
-		return "", unbindable[0]
+	for _, binding := range p.Vars.bindings() {
+		if binding.err != nil {
+			return "", binding.err
+		}
 	}
-	for _, v := range slices.Backward(p.Vars) {
-		body = fmt.Sprintf("([%s]).map(%s, %s)[0]", v.exprString(), v.Name, body)
-	}
-	return body, nil
+	return nestVars(p.Vars, body), nil
 }
 
 // toRuleExpr converts a structured rule into a CEL expression string.

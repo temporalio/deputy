@@ -1753,6 +1753,88 @@ policies:
 // on parts of the document that are written plainly and read the same either
 // way. A policy's vars are independent of its rules for the same reason, since
 // they are wrong or right on their own.
+// TestValidateBundleAsksEveryVarItsOwnQuestion pins that each var of a policy is
+// reported on its own terms: the name it binds, and separately the expression it
+// holds. A name the policy cannot bind does not withhold the expression beside it,
+// and the expression is compiled in the scope it would have been evaluated in,
+// which is the vars declared above it. Compiling it anywhere else would invent a
+// diagnostic: a name the file declares below cannot be read from above, and a
+// repeated name is read from the declaration already in scope.
+func TestValidateBundleAsksEveryVarItsOwnQuestion(t *testing.T) {
+	cases := []struct {
+		name      string
+		vars      string
+		wantCodes []string
+		denyCodes []string
+		wantText  []string
+	}{
+		{
+			name:      "an unnamed var holding an uncompilable expression",
+			vars:      "      \"\": 'no_such_function()'\n      good: '1'\n",
+			wantCodes: []string{"empty-var-name", "cel-error"},
+			wantText:  []string{"no_such_function"},
+		},
+		{
+			name:      "an unnamed var holding an expression that compiles",
+			vars:      "      \"\": '1'\n      good: '1'\n",
+			wantCodes: []string{"empty-var-name"},
+			denyCodes: []string{"cel-error"},
+		},
+		{
+			name:      "an unnamed var reading a name declared below it",
+			vars:      "      \"\": 'good'\n      good: '1'\n",
+			wantCodes: []string{"empty-var-name", "cel-error"},
+			wantText:  []string{"undeclared reference to 'good'"},
+		},
+		{
+			name:      "a repeated name whose expression reads the declaration above it",
+			vars:      "      dup: '1'\n      dup: 'dup + 1'\n",
+			wantCodes: []string{"duplicate-var"},
+			denyCodes: []string{"cel-error"},
+		},
+		{
+			name:      "a repeated name holding an uncompilable expression",
+			vars:      "      dup: '1'\n      dup: 'no_such_function()'\n",
+			wantCodes: []string{"duplicate-var", "cel-error"},
+			wantText:  []string{"no_such_function"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := "policies:\n  - name: vars\n    vars:\n" + tc.vars +
+				"    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n"
+			issues, err := ValidateBundle(bundle, ValidateOptions{Source: "bundle.yaml"})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			var reported strings.Builder
+			for _, issue := range issues {
+				reported.WriteString(issue.Message)
+				reported.WriteString("\n")
+			}
+			for _, want := range tc.wantCodes {
+				if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == want }) {
+					t.Fatalf("expected an issue with code %q, got %v", want, issues)
+				}
+			}
+			for _, deny := range tc.denyCodes {
+				if slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == deny }) {
+					t.Fatalf("did not expect an issue with code %q, got %v", deny, issues)
+				}
+			}
+			for _, want := range tc.wantText {
+				if !strings.Contains(reported.String(), want) {
+					t.Fatalf("expected the report to mention %q, got %v", want, issues)
+				}
+			}
+			// A var the policy cannot bind is never a var the policy may run.
+			if _, loadErr := ParseStructuredSources([]byte(bundle), "bundle.yaml"); loadErr == nil {
+				t.Fatal("expected the loader to refuse the bundle")
+			}
+		})
+	}
+}
+
 func TestValidateBundleReportsIndependentDefects(t *testing.T) {
 	cases := []struct {
 		name      string

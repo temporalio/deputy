@@ -432,28 +432,44 @@ func expandedPolicyIssues(item *yaml.Node, source string, extraVars []string, lo
 // cost the author a lint run per mistyped name. Setting one aside is not
 // forgiving it: the name is reported here, the walk locates it as an error of its
 // own, and every reader that runs the policy refuses it outright.
+//
+// The expression such a var holds is still asked about too, in the scope it would
+// have been evaluated in, which is the vars bound above it. A name that binds
+// nothing says nothing about the expression beside it, and withholding it made the
+// author fix the name to be told the value was wrong as well.
 func varCompileIssues(pol structuredPolicy, item *yaml.Node, source string, extraVars []string, located []Issue) []Issue {
 	if len(pol.Vars) == 0 {
 		return nil
 	}
-	bound, unbindable := pol.Vars.bindable()
-	var issues []Issue
-	for _, err := range unbindable {
-		issues = append(issues, backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, err), source, item, located)...)
+	var (
+		issues []Issue
+		bound  orderedVars
+	)
+	for _, binding := range pol.Vars.bindings() {
+		if binding.err == nil {
+			bound = append(bound, binding.kv)
+			continue
+		}
+		issues = append(issues, backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, binding.err), source, item, located)...)
+		issues = append(issues, celIssues(nestVars(binding.scope, binding.kv.exprString()), extraVars, item, pol.Name)...)
 	}
-	// pol is a copy, so narrowing its vars to the ones the policy can bind asks
-	// the compiler about exactly the names the expansion would put in scope.
-	pol.Vars = bound
-	body, err := pol.wrapVars("[]")
-	if err != nil {
-		return append(issues, backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, err), source, item, located)...)
+	// The vars that do bind are compiled as one nest, since each is in scope for
+	// the next, and wrapping an empty body asks about them and nothing else.
+	return append(issues, celIssues(nestVars(bound, "[]"), extraVars, item, pol.Name)...)
+}
+
+// celIssues reports generated CEL that does not compile as an issue anchored on the
+// policy node. It is the one place validation renders a compiler failure over CEL
+// the author did not write, so the vars a policy binds and the expression of one it
+// cannot bind are reported the same way.
+func celIssues(body string, extraVars []string, item *yaml.Node, policyName string) []Issue {
+	err := Compile(body, extraVars)
+	if err == nil {
+		return nil
 	}
-	if err := Compile(body, extraVars); err != nil {
-		issue := issueAt(item, IssueError, "cel-error", err.Error())
-		issue.Policy = strings.TrimSpace(pol.Name)
-		issues = append(issues, issue)
-	}
-	return issues
+	issue := issueAt(item, IssueError, "cel-error", err.Error())
+	issue.Policy = policyName
+	return []Issue{issue}
 }
 
 // backstopIssue renders a load failure as an issue, or nothing when a located
