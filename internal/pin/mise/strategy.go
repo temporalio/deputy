@@ -386,16 +386,13 @@ func lockedVersionSatisfiesRequest(locked, request string) bool {
 // waiting to disagree with the first; they happened to agree, and now they
 // cannot do otherwise.
 //
-// The one thing it adds is the Go toolchain's "go" prefix, which mise selectors
-// carry and release strings do not.
+// The Go toolchain's "go" prefix, which mise selectors carry and mise's own
+// locked versions do not, was stripped here too. [mise.SelectorMatches] now
+// normalizes it, so discovery and remediation cannot disagree about whether
+// "go1.24" selects 1.24.9: they did, and a fix Deputy planned from a discovered
+// version came back as "could not rewrite".
 func versionHasPrefix(version, prefix string) bool {
-	return mise.SelectorMatches(trimGoPrefix(prefix), trimGoPrefix(version))
-}
-
-// trimGoPrefix strips the Go toolchain's "go" release prefix so "go1.22" and
-// "1.22" compare equal.
-func trimGoPrefix(v string) string {
-	return strings.TrimPrefix(strings.TrimSpace(v), "go")
+	return mise.SelectorMatches(prefix, version)
 }
 
 // Resolve implements pin.Strategy. It resolves a fuzzy version to an exact one.

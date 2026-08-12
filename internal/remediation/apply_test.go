@@ -2683,3 +2683,92 @@ backend = "core:go"
 		})
 	}
 }
+
+// TestApplyMiseUpdateMatchesGoPrefixedSpellings pins the apply against the Go
+// toolchain's own version vocabulary. mise accepts `go = "go1.24"` and locks
+// the release as 1.24.9, which is the version inventory then reports and the
+// plan is written in, so a matcher that reads "go" as part of the version
+// disagrees with Deputy's own finding: the declaration is refused as some other
+// version ("could not rewrite"), nothing is edited, and the stale lock entry
+// stays to be served back. The mirror case, a lockfile that spells the prefix,
+// leaves an entry the pruner does not recognize as the one it just replaced.
+//
+// Each case asserts the whole fix landed: the config edited, the stale entry
+// gone, and the tool no longer resolving to the version that was replaced.
+func TestApplyMiseUpdateMatchesGoPrefixedSpellings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		config     string
+		lock       string
+		cmd        string
+		wantConfig string
+		// staleMarker must be gone from the lockfile after the apply.
+		staleMarker string
+	}{
+		{
+			// The real combination: mise resolves the go-prefixed selector and
+			// locks the bare release, which is what the plan carries.
+			name:        "go-prefixed selector against a locked release",
+			config:      "[tools]\ngo = \"go1.24\"\n",
+			lock:        "[[tools.go]]\nversion = \"1.24.9\"\nbackend = \"core:go\"\n",
+			cmd:         "deputy:mise:update mise.toml go 1.24.10 1.24.9",
+			wantConfig:  "[tools]\ngo = \"1.24.10\"\n",
+			staleMarker: "1.24.9",
+		},
+		{
+			name:        "go-prefixed exact declaration",
+			config:      "[tools]\ngo = \"go1.24.9\"\n",
+			lock:        "[[tools.go]]\nversion = \"1.24.9\"\nbackend = \"core:go\"\n",
+			cmd:         "deputy:mise:update mise.toml go 1.24.10 1.24.9",
+			wantConfig:  "[tools]\ngo = \"1.24.10\"\n",
+			staleMarker: "1.24.9",
+		},
+		{
+			// The lockfile spells the prefix and the plan does not, so the
+			// pruner has to recognize its own replaced version. Left behind, it
+			// becomes the sole entry and lock resolution hands it straight back.
+			name:        "go-prefixed lock entry",
+			config:      "[tools]\ngo = \"1.24.9\"\n",
+			lock:        "[[tools.go]]\nversion = \"go1.24.9\"\nbackend = \"core:go\"\n",
+			cmd:         "deputy:mise:update mise.toml go 1.24.10 1.24.9",
+			wantConfig:  "[tools]\ngo = \"1.24.10\"\n",
+			staleMarker: "go1.24.9",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for name, content := range map[string]string{"mise.toml": tt.config, "mise.lock": tt.lock} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := ApplyDeputyCommand(dir, tt.cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			config, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(config) != tt.wantConfig {
+				t.Errorf("config mismatch:\n--- got ---\n%s\n--- want ---\n%s", config, tt.wantConfig)
+			}
+			lock, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(lock), tt.staleMarker) {
+				t.Errorf("stale entry %q survived the apply:\n%s", tt.staleMarker, lock)
+			}
+			if got := lockedVersionAfterFix(t, dir, "go", "1.24.10"); got != "" {
+				t.Errorf("fixed tool still resolves to a locked %q:\n%s", got, lock)
+			}
+		})
+	}
+}

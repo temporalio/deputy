@@ -674,6 +674,15 @@ func TestSameVersion(t *testing.T) {
 		// A leading "v" that is not a version prefix stays part of the name.
 		{"vault", "ault", false},
 		{"", "", true},
+		// The Go toolchain's own prefix, which mise accepts in a declaration
+		// and go.dev publishes releases under, while mise locks the bare
+		// number. Both spellings name one release.
+		{"go1.24.9", "1.24.9", true},
+		{"1.24.9", "go1.24.9", true},
+		{"go1.24.9", "v1.24.9", true},
+		{"go1.24.9", "1.24.8", false},
+		// A "go" that is not a version prefix stays part of the name.
+		{"golang", "lang", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.a+"/"+tt.b, func(t *testing.T) {
@@ -721,6 +730,15 @@ func TestSelectorMatches(t *testing.T) {
 		{"another vendor", "zulu-21.0.6+7", "temurin-21.0.6+7", false},
 		{"vendor-prefixed on another line", "temurin-22", "temurin-21.0.6+7", false},
 		{"a v that is not a version prefix", "vault", "1.0.0", false},
+		// mise accepts `go = "go1.24"` and locks it as 1.24.9, so the selector
+		// has to govern the release it resolves to. Reading the prefix as part
+		// of the version made remediation refuse the fix it had just planned
+		// from that locked version.
+		{"go-prefixed request", "go1.24", "1.24.9", true},
+		{"go-prefixed request and version", "go1.24", "go1.24.9", true},
+		{"go-prefixed version", "1.24", "go1.24.9", true},
+		{"go-prefixed request off the line", "go1.23", "1.24.9", false},
+		{"a go that is not a version prefix", "golang", "1.24.9", false},
 		// An empty request is not a licence to match; callers that mean
 		// "no version named" go through DeclaredVersion first.
 		{"empty request", "", "20.11.0", false},

@@ -423,10 +423,12 @@ func DeclaredVersion(request string) (version string, ok bool) {
 // therefore too permissive, letting remediation rewrite a declaration that
 // does not govern the reported version at all.
 //
-// A leading "v" on either side is ignored so "v20" still selects "20.11.0".
+// A release prefix on either side is ignored, so "v20" still selects "20.11.0"
+// and the Go toolchain's "go1.24" still selects "1.24.9"; see
+// [TrimVersionPrefix].
 func SelectorMatches(request, version string) bool {
-	request = trimVersionV(strings.TrimSpace(request))
-	version = trimVersionV(strings.TrimSpace(version))
+	request = TrimVersionPrefix(request)
+	version = TrimVersionPrefix(version)
 	if request == version {
 		return true
 	}
@@ -436,7 +438,7 @@ func SelectorMatches(request, version string) bool {
 }
 
 // SameVersion reports whether two version tokens name the same release,
-// ignoring a leading "v" on either side.
+// ignoring a release prefix on either side (see [TrimVersionPrefix]).
 //
 // The two sides reach this comparison from different vocabularies. Deputy
 // reports the Go runtime with the module convention it is published under
@@ -452,15 +454,42 @@ func SelectorMatches(request, version string) bool {
 // a declaration governs a release is [SelectorMatches]'s job, and using it for
 // equality would let a partial selector stand in for an exact version.
 func SameVersion(a, b string) bool {
-	return trimVersionV(strings.TrimSpace(a)) == trimVersionV(strings.TrimSpace(b))
+	return TrimVersionPrefix(a) == TrimVersionPrefix(b)
 }
 
-// trimVersionV drops a leading "v" or "V" from a version token when a digit
-// follows it, so "v1.24.3" and "1.24.3" compare equal while a tool named
-// "vault" keeps its name.
-func trimVersionV(s string) string {
-	if len(s) > 1 && (s[0] == 'v' || s[0] == 'V') && s[1] >= '0' && s[1] <= '9' {
-		return s[1:]
+// versionPrefixes are the release prefixes a version token may carry without
+// naming a different release. "v" is the module and tag convention Deputy
+// reports the Go runtime under ("v1.22.12"); "go" is the Go toolchain's own,
+// which mise accepts in a declaration (`go = "go1.24"`) and go.dev publishes
+// releases under ("go1.24.9"), while mise locks and installs the bare number.
+//
+// A token spelling the same release in a different vocabulary has to compare
+// equal, or the two sides of a fix disagree about what the config says: the
+// rewriter reads a declaration the finding does describe as some other version
+// and refuses to touch it, and the pruner reads a lock entry the fix made stale
+// as another tool's business and leaves it to be served back.
+var versionPrefixes = []string{"v", "V", "go"}
+
+// TrimVersionPrefix drops a release prefix from a version token, so "v1.24.3",
+// "go1.24.3", and "1.24.3" are one release. It is the one normalization behind
+// [SameVersion] and [SelectorMatches], so equality and selection cannot read a
+// spelling differently.
+//
+// A prefix is only dropped when a digit follows it, which is what keeps the
+// rule from reaching a name it does not govern: a tool called "vault" or
+// "golang" keeps its name, and only a token that goes on to spell a version
+// number is normalized. Tool context is deliberately not consulted: both
+// callers compare versions of one declaration, already matched by key, so no
+// two tools can be conflated here, and a rule that needed the tool would have
+// to be threaded through every comparison and would still have to guess for a
+// backend-qualified spelling of the Go toolchain.
+func TrimVersionPrefix(s string) string {
+	s = strings.TrimSpace(s)
+	for _, prefix := range versionPrefixes {
+		rest, ok := strings.CutPrefix(s, prefix)
+		if ok && rest != "" && rest[0] >= '0' && rest[0] <= '9' {
+			return rest
+		}
 	}
 	return s
 }
