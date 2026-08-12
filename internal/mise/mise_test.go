@@ -657,37 +657,55 @@ func TestDeclaredVersion(t *testing.T) {
 // SelectorMatches already ignores it.
 func TestSameVersion(t *testing.T) {
 	tests := []struct {
+		// tool is the [tools] key whose versions are compared; empty means an
+		// ordinary tool, whose versions are opaque release tags.
+		tool string
 		a, b string
 		want bool
 	}{
-		{"1.22.12", "1.22.12", true},
-		{"v1.22.12", "1.22.12", true},
-		{"1.22.12", "v1.22.12", true},
-		{"V1.22.12", "v1.22.12", true},
-		{"  v1.22.12 ", "1.22.12", true},
-		{"temurin-21.0.6+7", "temurin-21.0.6+7", true},
+		{a: "1.22.12", b: "1.22.12", want: true},
+		{a: "v1.22.12", b: "1.22.12", want: true},
+		{a: "1.22.12", b: "v1.22.12", want: true},
+		{a: "V1.22.12", b: "v1.22.12", want: true},
+		{a: "  v1.22.12 ", b: "1.22.12", want: true},
+		{a: "temurin-21.0.6+7", b: "temurin-21.0.6+7", want: true},
 		// Not equal: a partial selector is not the release beneath it, which
 		// is SelectorMatches's job and not this one.
-		{"20", "20.11.0", false},
-		{"1.22.12", "1.25.1", false},
-		{"v1.22.12", "1.22.13", false},
+		{a: "20", b: "20.11.0", want: false},
+		{a: "1.22.12", b: "1.25.1", want: false},
+		{a: "v1.22.12", b: "1.22.13", want: false},
 		// A leading "v" that is not a version prefix stays part of the name.
-		{"vault", "ault", false},
-		{"", "", true},
+		{a: "vault", b: "ault", want: false},
+		{a: "", b: "", want: true},
 		// The Go toolchain's own prefix, which mise accepts in a declaration
 		// and go.dev publishes releases under, while mise locks the bare
-		// number. Both spellings name one release.
-		{"go1.24.9", "1.24.9", true},
-		{"1.24.9", "go1.24.9", true},
-		{"go1.24.9", "v1.24.9", true},
-		{"go1.24.9", "1.24.8", false},
+		// number. Both spellings name one release, for that tool.
+		{tool: "go", a: "go1.24.9", b: "1.24.9", want: true},
+		{tool: "go", a: "1.24.9", b: "go1.24.9", want: true},
+		{tool: "golang", a: "go1.24.9", b: "1.24.9", want: true},
+		{tool: "core:go", a: "go1.24.9", b: "1.24.9", want: true},
+		{tool: "go", a: "go1.24.9", b: "v1.24.9", want: true},
+		{tool: "go", a: "go1.24.9", b: "1.24.8", want: false},
+		// For every other tool a version is an opaque release tag, and a
+		// project may publish both spellings as different artifacts. Calling
+		// them equal let a fix that asked for one report success against the
+		// other without writing anything.
+		{tool: "ubi:owner/repo", a: "go1.3.0", b: "1.3.0", want: false},
+		{tool: "ubi:owner/repo", a: "1.3.0", b: "go1.3.0", want: false},
+		{tool: "npm:go-stuff", a: "go1.3.0", b: "1.3.0", want: false},
+		// The go backend installs a Go module, whose versions are module
+		// versions, so it is not the toolchain either.
+		{tool: "go:github.com/owner/repo", a: "go1.3.0", b: "1.3.0", want: false},
+		// A "v" is a tag convention every tool shares, the go backend included.
+		{tool: "go:github.com/owner/repo", a: "v1.3.0", b: "1.3.0", want: true},
+		{tool: "ubi:owner/repo", a: "v1.3.0", b: "1.3.0", want: true},
 		// A "go" that is not a version prefix stays part of the name.
-		{"golang", "lang", false},
+		{tool: "go", a: "golang", b: "lang", want: false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.a+"/"+tt.b, func(t *testing.T) {
-			if got := SameVersion(tt.a, tt.b); got != tt.want {
-				t.Errorf("SameVersion(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		t.Run(tt.tool+" "+tt.a+"/"+tt.b, func(t *testing.T) {
+			if got := SameVersion(tt.tool, tt.a, tt.b); got != tt.want {
+				t.Errorf("SameVersion(%q, %q, %q) = %v, want %v", tt.tool, tt.a, tt.b, got, tt.want)
 			}
 		})
 	}
@@ -701,52 +719,58 @@ func TestSameVersion(t *testing.T) {
 // resolution is what this table records.
 func TestSelectorMatches(t *testing.T) {
 	tests := []struct {
-		name    string
+		name string
+		// tool is the [tools] key the versions belong to; empty means an
+		// ordinary tool, whose versions are opaque release tags.
+		tool    string
 		request string
 		version string
 		want    bool
 	}{
 		// node = "20.1" -> ls --current 20.1.0; lock --dry-run node@20.1.0.
-		{"partial governs its own line", "20.1", "20.1.0", true},
-		{"partial does not reach a longer neighbour", "20.1", "20.19.6", false},
+		{name: "partial governs its own line", request: "20.1", version: "20.1.0", want: true},
+		{name: "partial does not reach a longer neighbour", request: "20.1", version: "20.19.6", want: false},
 		// node = "20.11" -> ls --current 20.11.1.
-		{"minor selector", "20.11", "20.11.1", true},
-		{"minor selector stops at its line", "20.11", "20.19.6", false},
+		{name: "minor selector", request: "20.11", version: "20.11.1", want: true},
+		{name: "minor selector stops at its line", request: "20.11", version: "20.19.6", want: false},
 		// node = "20" -> ls --current 20.20.2.
-		{"major selector", "20", "20.20.2", true},
+		{name: "major selector", request: "20", version: "20.20.2", want: true},
 		// node = "2" -> ls --current reports "2", unresolved and missing.
-		{"a selector that resolves to nothing", "2", "26.7.0", false},
+		{name: "a selector that resolves to nothing", request: "2", version: "26.7.0", want: false},
 
-		{"exact", "20.11.0", "20.11.0", true},
-		{"vendor-prefixed exact", "temurin-21.0.6+7", "temurin-21.0.6+7", true},
-		{"vendor-prefixed partial", "temurin-21", "temurin-21.0.6+7", true},
-		{"v-prefixed request", "v20", "20.11.0", true},
-		{"v-prefixed version", "20", "v20.11.0", true},
-		{"surrounding space", " 20 ", "20.11.0", true},
+		{name: "exact", request: "20.11.0", version: "20.11.0", want: true},
+		{name: "vendor-prefixed exact", request: "temurin-21.0.6+7", version: "temurin-21.0.6+7", want: true},
+		{name: "vendor-prefixed partial", request: "temurin-21", version: "temurin-21.0.6+7", want: true},
+		{name: "v-prefixed request", request: "v20", version: "20.11.0", want: true},
+		{name: "v-prefixed version", request: "20", version: "v20.11.0", want: true},
+		{name: "surrounding space", request: " 20 ", version: "20.11.0", want: true},
 
-		{"different line", "22", "20.11.0", false},
-		{"stale exact version", "1.25.1", "1.22.12", false},
-		{"request longer than the version", "20.11.0", "20.11", false},
-		{"another vendor", "zulu-21.0.6+7", "temurin-21.0.6+7", false},
-		{"vendor-prefixed on another line", "temurin-22", "temurin-21.0.6+7", false},
-		{"a v that is not a version prefix", "vault", "1.0.0", false},
+		{name: "different line", request: "22", version: "20.11.0", want: false},
+		{name: "stale exact version", request: "1.25.1", version: "1.22.12", want: false},
+		{name: "request longer than the version", request: "20.11.0", version: "20.11", want: false},
+		{name: "another vendor", request: "zulu-21.0.6+7", version: "temurin-21.0.6+7", want: false},
+		{name: "vendor-prefixed on another line", request: "temurin-22", version: "temurin-21.0.6+7", want: false},
+		{name: "a v that is not a version prefix", request: "vault", version: "1.0.0", want: false},
 		// mise accepts `go = "go1.24"` and locks it as 1.24.9, so the selector
 		// has to govern the release it resolves to. Reading the prefix as part
 		// of the version made remediation refuse the fix it had just planned
 		// from that locked version.
-		{"go-prefixed request", "go1.24", "1.24.9", true},
-		{"go-prefixed request and version", "go1.24", "go1.24.9", true},
-		{"go-prefixed version", "1.24", "go1.24.9", true},
-		{"go-prefixed request off the line", "go1.23", "1.24.9", false},
-		{"a go that is not a version prefix", "golang", "1.24.9", false},
+		{name: "go-prefixed request", tool: "go", request: "go1.24", version: "1.24.9", want: true},
+		{name: "go-prefixed request and version", tool: "go", request: "go1.24", version: "go1.24.9", want: true},
+		{name: "go-prefixed version", tool: "go", request: "1.24", version: "go1.24.9", want: true},
+		{name: "go-prefixed request off the line", tool: "go", request: "go1.23", version: "1.24.9", want: false},
+		{name: "a go that is not a version prefix", tool: "go", request: "golang", version: "1.24.9", want: false},
+		// Another tool's tags are opaque, so the prefix is part of the version.
+		{name: "go-prefixed tag of an ordinary tool", tool: "ubi:owner/repo", request: "go1.24", version: "1.24.9", want: false},
+		{name: "go-prefixed tag selecting its own line", tool: "ubi:owner/repo", request: "go1.24", version: "go1.24.9", want: true},
 		// An empty request is not a licence to match; callers that mean
 		// "no version named" go through DeclaredVersion first.
-		{"empty request", "", "20.11.0", false},
+		{name: "empty request", request: "", version: "20.11.0", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := SelectorMatches(tt.request, tt.version); got != tt.want {
-				t.Errorf("SelectorMatches(%q, %q) = %v, want %v", tt.request, tt.version, got, tt.want)
+			if got := SelectorMatches(tt.tool, tt.request, tt.version); got != tt.want {
+				t.Errorf("SelectorMatches(%q, %q, %q) = %v, want %v", tt.tool, tt.request, tt.version, got, tt.want)
 			}
 		})
 	}

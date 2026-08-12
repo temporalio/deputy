@@ -232,7 +232,7 @@ func (r *nativeResolver) latestPackage(ctx context.Context, toolKey string, coor
 	if err != nil {
 		return "", fmt.Errorf("deps.dev package lookup for %s: %w", toolKey, err)
 	}
-	version, err := newestVersion(pkg.GetVersions(), coord.semverSystem, prefix)
+	version, err := newestVersion(toolKey, pkg.GetVersions(), coord.semverSystem, prefix)
 	if err != nil {
 		return "", fmt.Errorf("resolving %s@%s: %w", toolKey, prefix, err)
 	}
@@ -339,7 +339,7 @@ func (r *nativeResolver) latestGoTool(ctx context.Context, toolKey, importPath, 
 			}
 			return "", fmt.Errorf("deps.dev Go package lookup for %s candidate %s: %w", toolKey, modulePath, err)
 		}
-		version, err := newestVersion(pkg.GetVersions(), depssemver.Go, prefix)
+		version, err := newestVersion(toolKey, pkg.GetVersions(), depssemver.Go, prefix)
 		if err != nil {
 			if version, ok, proxyErr := r.latestGoToolProxyQuery(ctx, modulePath, prefix); ok {
 				if proxyErr != nil {
@@ -404,7 +404,7 @@ func (r *nativeResolver) latestGitHubReleaseStrip(ctx context.Context, toolKey, 
 		return "", fmt.Errorf("GitHub release metadata lookup for %s: %w", toolKey, err)
 	}
 	if strings.EqualFold(owner, "ClickHouse") && strings.EqualFold(repo, "ClickHouse") {
-		version, err := newestClickHouseRelease(list, prefix)
+		version, err := newestClickHouseRelease(toolKey, list, prefix)
 		if err != nil {
 			return "", fmt.Errorf("resolving %s@%s from GitHub releases for %s/%s: %w", toolKey, prefix, owner, repo, err)
 		}
@@ -500,7 +500,7 @@ func githubReleaseTagQueryPrefix(owner, repo, prefix string) string {
 // newestClickHouseRelease selects the newest stable ClickHouse release. The
 // project encodes stability in tag suffixes such as "-stable", which are not
 // semver prereleases.
-func newestClickHouseRelease(list []releases.Release, prefix string) (string, error) {
+func newestClickHouseRelease(toolKey string, list []releases.Release, prefix string) (string, error) {
 	prefix = prefixSelector(prefix)
 	sys := depssemver.DefaultSystem
 	var best string
@@ -514,7 +514,7 @@ func newestClickHouseRelease(list []releases.Release, prefix string) (string, er
 			continue
 		}
 		comparable := strings.TrimSuffix(version, "-stable")
-		if !misecfg.IsConcreteVersion(comparable) || !versionMatchesPrefix(comparable, prefix) {
+		if !misecfg.IsConcreteVersion(comparable) || !versionMatchesPrefix(toolKey, comparable, prefix) {
 			continue
 		}
 		if best == "" || sys.Compare(comparable, bestComparable) > 0 {
@@ -971,9 +971,9 @@ func googleCloudSDKVersionFromSelector(selector string) (string, bool) {
 
 // newestVersion selects the newest deps.dev package version matching a mise
 // selector, including prefix: and sub- scopes.
-func newestVersion(versions []*pb.Package_Version, sys depssemver.System, prefix string) (string, error) {
+func newestVersion(toolKey string, versions []*pb.Package_Version, sys depssemver.System, prefix string) (string, error) {
 	if sub, base, ok := subSelector(prefix); ok {
-		baseVersion, err := newestVersion(versions, sys, base)
+		baseVersion, err := newestVersion(toolKey, versions, sys, base)
 		if err != nil {
 			return "", err
 		}
@@ -981,7 +981,7 @@ func newestVersion(versions []*pb.Package_Version, sys depssemver.System, prefix
 		if err != nil {
 			return "", err
 		}
-		return newestVersion(versions, sys, derived)
+		return newestVersion(toolKey, versions, sys, derived)
 	}
 	prefix = prefixSelector(prefix)
 	prefix = strings.TrimSpace(prefix)
@@ -998,7 +998,7 @@ func newestVersion(versions []*pb.Package_Version, sys depssemver.System, prefix
 	var best string
 	for _, version := range versions {
 		v := versionString(version)
-		if !usableVersion(v, allowPrerelease) || !versionMatchesPrefix(v, prefix) {
+		if !usableVersion(v, allowPrerelease) || !versionMatchesPrefix(toolKey, v, prefix) {
 			continue
 		}
 		if best == "" || sys.Compare(v, best) > 0 {
@@ -1057,12 +1057,12 @@ func isPrerelease(version string) bool {
 // such as "1.22-rc1" that a request for 1.22 still selects, and filtering a
 // candidate list is not the same job as deciding whether a declaration has
 // gone stale.
-func versionMatchesPrefix(version, prefix string) bool {
+func versionMatchesPrefix(toolKey, version, prefix string) bool {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" || strings.EqualFold(prefix, "latest") {
 		return true
 	}
-	if misecfg.SelectorMatches(prefix, version) {
+	if misecfg.SelectorMatches(toolKey, prefix, version) {
 		return true
 	}
 	v := strings.TrimPrefix(strings.TrimSpace(version), "v")

@@ -341,7 +341,7 @@ func lockedVersionForRef(lock *mise.Lockfile, tool mise.ToolSpec, request string
 		if !mise.MayBorrowSoleLockEntry(name, claims) {
 			continue
 		}
-		if lt := lock.Sole(name); lt != nil && lockedVersionSatisfiesRequest(lt.Version, request) {
+		if lt := lock.Sole(name); lt != nil && lockedVersionSatisfiesRequest(tool.Key, lt.Version, request) {
 			return lt.Version
 		}
 	}
@@ -350,7 +350,7 @@ func lockedVersionForRef(lock *mise.Lockfile, tool mise.ToolSpec, request string
 
 // lockedVersionSatisfiesRequest reports whether a sole lockfile entry is
 // compatible with a declared selector without consulting upstream metadata.
-func lockedVersionSatisfiesRequest(locked, request string) bool {
+func lockedVersionSatisfiesRequest(toolKey, locked, request string) bool {
 	if !mise.IsConcreteVersion(locked) {
 		return false
 	}
@@ -359,7 +359,7 @@ func lockedVersionSatisfiesRequest(locked, request string) bool {
 		return false
 	}
 	if prefix, ok := strings.CutPrefix(request, "prefix:"); ok {
-		return versionHasPrefix(locked, prefix)
+		return versionHasPrefix(toolKey, locked, prefix)
 	}
 	if strings.HasPrefix(request, "sub-") {
 		return true
@@ -376,7 +376,7 @@ func lockedVersionSatisfiesRequest(locked, request string) bool {
 	if strings.ContainsAny(request, "^~*<>= ") || strings.Contains(request, "..") {
 		return false
 	}
-	return versionHasPrefix(locked, request)
+	return versionHasPrefix(toolKey, locked, request)
 }
 
 // versionHasPrefix reports whether a fuzzy request selects a concrete version,
@@ -391,8 +391,8 @@ func lockedVersionSatisfiesRequest(locked, request string) bool {
 // normalizes it, so discovery and remediation cannot disagree about whether
 // "go1.24" selects 1.24.9: they did, and a fix Deputy planned from a discovered
 // version came back as "could not rewrite".
-func versionHasPrefix(version, prefix string) bool {
-	return mise.SelectorMatches(prefix, version)
+func versionHasPrefix(toolKey, version, prefix string) bool {
+	return mise.SelectorMatches(toolKey, prefix, version)
 }
 
 // Resolve implements pin.Strategy. It resolves a fuzzy version to an exact one.

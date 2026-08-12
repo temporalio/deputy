@@ -424,11 +424,12 @@ func DeclaredVersion(request string) (version string, ok bool) {
 // does not govern the reported version at all.
 //
 // A release prefix on either side is ignored, so "v20" still selects "20.11.0"
-// and the Go toolchain's "go1.24" still selects "1.24.9"; see
-// [TrimVersionPrefix].
-func SelectorMatches(request, version string) bool {
-	request = TrimVersionPrefix(request)
-	version = TrimVersionPrefix(version)
+// and, for the Go toolchain, "go1.24" still selects "1.24.9"; which prefixes
+// those are depends on the tool, so toolKey is the [tools] key the versions
+// belong to (see [TrimVersionPrefix]).
+func SelectorMatches(toolKey, request, version string) bool {
+	request = TrimVersionPrefix(toolKey, request)
+	version = TrimVersionPrefix(toolKey, version)
 	if request == version {
 		return true
 	}
@@ -438,7 +439,9 @@ func SelectorMatches(request, version string) bool {
 }
 
 // SameVersion reports whether two version tokens name the same release,
-// ignoring a release prefix on either side (see [TrimVersionPrefix]).
+// ignoring a release prefix on either side. Which prefixes those are depends on
+// the tool, so toolKey is the [tools] key whose versions are being compared
+// (see [TrimVersionPrefix]).
 //
 // The two sides reach this comparison from different vocabularies. Deputy
 // reports the Go runtime with the module convention it is published under
@@ -453,45 +456,77 @@ func SelectorMatches(request, version string) bool {
 // here even though the first request resolves to the second; deciding whether
 // a declaration governs a release is [SelectorMatches]'s job, and using it for
 // equality would let a partial selector stand in for an exact version.
-func SameVersion(a, b string) bool {
-	return TrimVersionPrefix(a) == TrimVersionPrefix(b)
+func SameVersion(toolKey, a, b string) bool {
+	return TrimVersionPrefix(toolKey, a) == TrimVersionPrefix(toolKey, b)
 }
 
-// versionPrefixes are the release prefixes a version token may carry without
-// naming a different release. "v" is the module and tag convention Deputy
-// reports the Go runtime under ("v1.22.12"); "go" is the Go toolchain's own,
-// which mise accepts in a declaration (`go = "go1.24"`) and go.dev publishes
-// releases under ("go1.24.9"), while mise locks and installs the bare number.
+// tagPrefixes are the release prefixes any tool's version token may carry
+// without naming a different release: the "v" of a git tag or Go module version
+// ("v1.22.12"), which Deputy reports the Go runtime under and which mise itself
+// ignores when it compares a request to a release.
 //
 // A token spelling the same release in a different vocabulary has to compare
 // equal, or the two sides of a fix disagree about what the config says: the
 // rewriter reads a declaration the finding does describe as some other version
 // and refuses to touch it, and the pruner reads a lock entry the fix made stale
 // as another tool's business and leaves it to be served back.
-var versionPrefixes = []string{"v", "V", "go"}
+var tagPrefixes = []string{"v", "V"}
 
-// TrimVersionPrefix drops a release prefix from a version token, so "v1.24.3",
-// "go1.24.3", and "1.24.3" are one release. It is the one normalization behind
+// goToolchainPrefixes are release prefixes only the Go toolchain carries. mise
+// accepts the Go project's own spelling in a declaration (`go = "go1.24"`) and
+// go.dev publishes releases as "go1.24.9", while mise locks and installs the
+// bare number, so for that one tool the two spell one release.
+//
+// No other tool gets this rule, because for everything else a version is an
+// opaque release tag: a ubi tool can publish both "go1.3.0" and "1.3.0" as
+// different artifacts, and calling them equal let a fix that asked for one
+// report success against the other without writing anything.
+var goToolchainPrefixes = []string{"go", "Go", "GO"}
+
+// TrimVersionPrefix drops a release prefix from a version token, so "v1.24.3"
+// and "1.24.3" are one release for any tool, and "go1.24.3" is that release too
+// when toolKey names the Go toolchain. It is the one normalization behind
 // [SameVersion] and [SelectorMatches], so equality and selection cannot read a
 // spelling differently.
 //
-// A prefix is only dropped when a digit follows it, which is what keeps the
-// rule from reaching a name it does not govern: a tool called "vault" or
-// "golang" keeps its name, and only a token that goes on to spell a version
-// number is normalized. Tool context is deliberately not consulted: both
-// callers compare versions of one declaration, already matched by key, so no
-// two tools can be conflated here, and a rule that needed the tool would have
-// to be threaded through every comparison and would still have to guess for a
-// backend-qualified spelling of the Go toolchain.
-func TrimVersionPrefix(s string) string {
+// A prefix is only dropped when a digit follows it, which keeps the rule from
+// reaching a name it does not govern: a tool called "vault" or "golang" keeps
+// its name, and only a token that goes on to spell a version number is
+// normalized. That guard alone is not enough for "go", because a version is
+// only a version number for tools whose releases are numbered; hence the tool.
+func TrimVersionPrefix(toolKey, s string) string {
 	s = strings.TrimSpace(s)
-	for _, prefix := range versionPrefixes {
+	prefixes := tagPrefixes
+	if IsGoToolchain(toolKey) {
+		prefixes = append(slices.Clone(tagPrefixes), goToolchainPrefixes...)
+	}
+	for _, prefix := range prefixes {
 		rest, ok := strings.CutPrefix(s, prefix)
 		if ok && rest != "" && rest[0] >= '0' && rest[0] <= '9' {
 			return rest
 		}
 	}
 	return s
+}
+
+// IsGoToolchain reports whether a [tools] key names the Go toolchain itself,
+// the runtime whose releases are spelled "go1.24.9": mise declares it as `go`
+// or `golang` with no backend, or through the core backend that serves it.
+//
+// The go backend is deliberately not it. `go:github.com/foo/bar` installs a Go
+// module with `go install`, and its versions are module versions ("v1.2.3"), so
+// a "go" prefix there would be part of a tag rather than the toolchain's
+// spelling of a release.
+func IsGoToolchain(toolKey string) bool {
+	backend, name := SplitBackend(toolKey)
+	if backend != "" && backend != "core" {
+		return false
+	}
+	switch strings.ToLower(name) {
+	case "go", "golang":
+		return true
+	}
+	return false
 }
 
 // trimSelectorWrapper strips one leading mise selector wrapper from a version

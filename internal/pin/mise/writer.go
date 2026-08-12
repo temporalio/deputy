@@ -55,8 +55,8 @@ func RewriteToolVersion(root *os.Root, relPath, tool string, currentVersions []s
 	if err := validateMiseUpdate(pin.Update{Name: tool, PinnedValue: newVersion}); err != nil {
 		return err
 	}
-	replace := func(value, pinned string, sole bool) (string, bool) {
-		return replaceEntryVersion(value, currentVersions, pinned, sole)
+	replace := func(toolKey, value, pinned string, sole bool) (string, bool) {
+		return replaceEntryVersion(toolKey, value, currentVersions, pinned, sole)
 	}
 	err := rewriteToolsTable(root, relPath, map[string]string{tool: newVersion}, replace)
 	if err == nil {
@@ -86,7 +86,7 @@ func alreadyAtVersion(root *os.Root, relPath, tool string, currentVersions []str
 		if spec.Key != tool {
 			continue
 		}
-		if !declaresVersion(spec.Versions, newVersion) {
+		if !declaresVersion(tool, spec.Versions, newVersion) {
 			return false
 		}
 		if len(currentVersions) == 0 {
@@ -100,7 +100,7 @@ func alreadyAtVersion(root *os.Root, relPath, tool string, currentVersions []str
 		// so this guards against a partially written config rather than a
 		// state the happy path can produce.
 		for _, current := range currentVersions {
-			if declaresVersion(spec.Versions, current) {
+			if declaresVersion(tool, spec.Versions, current) {
 				return false
 			}
 		}
@@ -122,9 +122,9 @@ func alreadyAtVersion(root *os.Root, relPath, tool string, currentVersions []str
 // the work that is left: the stale sibling lock entry survives, lock resolution
 // keeps serving the vulnerable version, and the next scan reports it against a
 // config that no longer declares it.
-func declaresVersion(versions []string, want string) bool {
+func declaresVersion(toolKey string, versions []string, want string) bool {
 	return slices.ContainsFunc(versions, func(v string) bool {
-		return mise.SameVersion(v, want)
+		return mise.SameVersion(toolKey, v, want)
 	})
 }
 
@@ -136,7 +136,7 @@ func declaresVersion(versions []string, want string) bool {
 // whether this value is the tool's sole declaration, and reports the new value
 // text and whether it changed. Entries in want that no replace call rewrote
 // produce an error so callers never silently skip a tool.
-func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, replace func(value, pinned string, sole bool) (string, bool)) error {
+func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, replace func(toolKey, value, pinned string, sole bool) (string, bool)) error {
 	applied := make(map[string]bool, len(want))
 
 	rootFS := root.FS()
@@ -258,7 +258,7 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 			}
 		case toolKey != "":
 			if pinned, ok := want[toolKey]; ok {
-				if nv, changed := replace(value, pinned, entries[toolKey] <= 1); changed {
+				if nv, changed := replace(toolKey, value, pinned, entries[toolKey] <= 1); changed {
 					newValue = nv
 					rewrote = append(rewrote, toolKey)
 				}
@@ -313,8 +313,8 @@ func publishConfig(root *os.Root, relPath, content string, perm os.FileMode) err
 // left for a manual pin. That is exactly replaceEntryVersion with no known
 // vulnerable versions, so it delegates rather than duplicating the TOML value
 // handling.
-func replaceVersionInValue(value, pinned string, sole bool) (string, bool) {
-	return replaceEntryVersion(value, nil, pinned, sole)
+func replaceVersionInValue(toolKey, value, pinned string, sole bool) (string, bool) {
+	return replaceEntryVersion(toolKey, value, nil, pinned, sole)
 }
 
 // replaceEntryVersion rewrites the version in one declaration of a tool. sole
@@ -330,11 +330,11 @@ func replaceVersionInValue(value, pinned string, sole bool) (string, bool) {
 // that selector meant. With no current version to pick an entry out, nothing
 // is rewritten and the caller fails closed, rather than collapsing two
 // requested toolchains into one version declared twice.
-func replaceEntryVersion(value string, currents []string, pinned string, sole bool) (string, bool) {
-	if !sole && !namesCurrentVersion(value, currents) {
+func replaceEntryVersion(toolKey, value string, currents []string, pinned string, sole bool) (string, bool) {
+	if !sole && !namesCurrentVersion(toolKey, value, currents) {
 		return value, false
 	}
-	return replaceVersionInValueTargeting(value, currents, pinned)
+	return replaceVersionInValueTargeting(toolKey, value, currents, pinned)
 }
 
 // namesCurrentVersion reports whether a declaration or array element spells one
@@ -342,10 +342,10 @@ func replaceEntryVersion(value string, currents []string, pinned string, sole bo
 // the plan's spelling of a version ("v1.22.12") matches the config's. It is the
 // one definition of "this is the declaration the finding is about" that both
 // array elements and repeated tool entries are matched by.
-func namesCurrentVersion(value string, currents []string) bool {
+func namesCurrentVersion(toolKey, value string, currents []string) bool {
 	return slices.ContainsFunc(elementVersions(value), func(v string) bool {
 		return slices.ContainsFunc(currents, func(current string) bool {
-			return mise.SameVersion(current, v)
+			return mise.SameVersion(toolKey, current, v)
 		})
 	})
 }
@@ -370,11 +370,11 @@ func namesCurrentVersion(value string, currents []string) bool {
 // letting the caller fail closed instead of guessing. The value may span
 // multiple lines; only version tokens are rewritten, so line structure and
 // comments survive.
-func replaceVersionInValueTargeting(value string, currents []string, pinned string) (string, bool) {
+func replaceVersionInValueTargeting(toolKey, value string, currents []string, pinned string) (string, bool) {
 	// Arrays first: element-wise, so an array value can never fall through to
 	// the inline-table or scalar paths.
 	if spans, ok := arrayElementSpans(value); ok {
-		return replaceArrayElements(value, spans, currents, pinned)
+		return replaceArrayElements(toolKey, value, spans, currents, pinned)
 	}
 
 	// Inline table: replace only the version field, which may itself be an
@@ -384,7 +384,7 @@ func replaceVersionInValueTargeting(value string, currents []string, pinned stri
 		if !found {
 			return value, false
 		}
-		sub, changed := replaceVersionInValueTargeting(table[start:end], currents, pinned)
+		sub, changed := replaceVersionInValueTargeting(toolKey, table[start:end], currents, pinned)
 		if !changed {
 			return value, false
 		}
@@ -406,7 +406,7 @@ func replaceVersionInValueTargeting(value string, currents []string, pinned stri
 		// corrupting a config mise reads perfectly well.
 		return value, false
 	}
-	if !selectorTargetsCurrent(unquoteKey(token), currents) {
+	if !selectorTargetsCurrent(toolKey, unquoteKey(token), currents) {
 		return value, false
 	}
 	newValue := lead + `"` + pinned + `"` + trail
@@ -474,7 +474,7 @@ func isTomlSpace(c byte) bool {
 // here on the token's first character would misread a vendor-prefixed exact
 // release ("temurin-21.0.6+7") as a floating selector and let a stale plan
 // downgrade an already-updated toolchain.
-func selectorTargetsCurrent(declared string, currents []string) bool {
+func selectorTargetsCurrent(toolKey, declared string, currents []string) bool {
 	if len(currents) == 0 {
 		return true
 	}
@@ -483,7 +483,7 @@ func selectorTargetsCurrent(declared string, currents []string) bool {
 		return true
 	}
 	return slices.ContainsFunc(currents, func(current string) bool {
-		return mise.SelectorMatches(version, current)
+		return mise.SelectorMatches(toolKey, version, current)
 	})
 }
 
@@ -499,7 +499,7 @@ func selectorTargetsCurrent(declared string, currents []string) bool {
 // that a current version satisfies, the same rule the scalar path applies (see
 // selectorTargetsCurrent); an element declaring no version at all keeps the
 // older unconditional behavior, since there is nothing to compare.
-func replaceArrayElements(value string, spans [][2]int, currents []string, pinned string) (string, bool) {
+func replaceArrayElements(toolKey, value string, spans [][2]int, currents []string, pinned string) (string, bool) {
 	quoted := `"` + pinned + `"`
 	sole := len(spans) == 1
 
@@ -509,13 +509,13 @@ func replaceArrayElements(value string, spans [][2]int, currents []string, pinne
 	changed := false
 	for _, span := range spans {
 		elem := value[span[0]:span[1]]
-		if !namesCurrentVersion(elem, currents) &&
-			!(sole && soleElementTargetsCurrent(elementVersions(elem), currents)) {
+		if !namesCurrentVersion(toolKey, elem, currents) &&
+			!(sole && soleElementTargetsCurrent(toolKey, elementVersions(elem), currents)) {
 			continue
 		}
 		repl := quoted
 		if _, isArray := arrayElementSpans(elem); isArray || isInlineTable(elem) {
-			sub, ok := replaceVersionInValueTargeting(elem, currents, pinned)
+			sub, ok := replaceVersionInValueTargeting(toolKey, elem, currents, pinned)
 			if !ok {
 				continue
 			}
@@ -539,12 +539,12 @@ func replaceArrayElements(value string, spans [][2]int, currents []string, pinne
 // has nothing to contradict the finding and stays replaceable; otherwise at
 // least one of its declared versions must be a selector the finding's current
 // versions satisfy.
-func soleElementTargetsCurrent(versions, currents []string) bool {
+func soleElementTargetsCurrent(toolKey string, versions, currents []string) bool {
 	if len(versions) == 0 {
 		return true
 	}
 	return slices.ContainsFunc(versions, func(v string) bool {
-		return selectorTargetsCurrent(v, currents)
+		return selectorTargetsCurrent(toolKey, v, currents)
 	})
 }
 
@@ -685,13 +685,13 @@ func tomlDelimitersBalanced(s string) bool {
 // declare go's version.
 // A field of the root inline table is a whole declaration on its own: a TOML
 // table cannot repeat a key, so the value is passed to replace as a sole one.
-func replaceInlineToolValue(s, tool, pinned string, replace func(value, pinned string, sole bool) (string, bool)) (string, bool) {
+func replaceInlineToolValue(s, tool, pinned string, replace func(toolKey, value, pinned string, sole bool) (string, bool)) (string, bool) {
 	out, changed := s, false
 	inlineTableFields(s, func(key []string, vstart, vend int) bool {
 		if name, ok := toolsTableKey(key); !ok || name != tool {
 			return true
 		}
-		if sub, ok := replace(s[vstart:vend], pinned, true); ok {
+		if sub, ok := replace(tool, s[vstart:vend], pinned, true); ok {
 			out, changed = s[:vstart]+sub+s[vend:], true
 		}
 		return false

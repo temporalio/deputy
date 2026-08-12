@@ -649,10 +649,10 @@ func pruneStaleMiseLock(root *os.Root, configRelPath, tool string, currentVersio
 	stale := func(version string) bool {
 		if len(currentVersions) > 0 && !exclusive {
 			return slices.ContainsFunc(currentVersions, func(current string) bool {
-				return mise.SameVersion(current, version)
+				return mise.SameVersion(tool, current, version)
 			})
 		}
-		return !mise.SameVersion(version, newVersion)
+		return !mise.SameVersion(tool, version, newVersion)
 	}
 	pruned, changed := mise.PruneLockedVersions(data, keys, stale)
 	if !changed {
@@ -689,7 +689,7 @@ func declaresOnlyNewVersion(root *os.Root, configRelPath, tool, newVersion strin
 		if spec.Key != tool {
 			continue
 		}
-		return len(spec.Versions) == 1 && mise.SameVersion(spec.Versions[0], newVersion)
+		return len(spec.Versions) == 1 && mise.SameVersion(tool, spec.Versions[0], newVersion)
 	}
 	return false
 }

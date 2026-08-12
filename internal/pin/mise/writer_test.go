@@ -194,7 +194,9 @@ func TestReplaceVersionInValue(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Every value here is the tool's sole declaration; the
 			// repeated-entry form has its own test.
-			got, changed := replaceVersionInValue(tt.value, tt.pinned, true)
+			// The tool is node here: these rows are about TOML value shapes,
+			// not about a tool's version vocabulary.
+			got, changed := replaceVersionInValue("node", tt.value, tt.pinned, true)
 			if got != tt.want || changed != tt.wantChanged {
 				t.Errorf("replaceVersionInValue(%q,%q) = (%q,%v), want (%q,%v)", tt.value, tt.pinned, got, changed, tt.want, tt.wantChanged)
 			}
@@ -271,7 +273,7 @@ func TestSelectorTargetsCurrent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := selectorTargetsCurrent(tt.declared, tt.currents); got != tt.want {
+			if got := selectorTargetsCurrent("node", tt.declared, tt.currents); got != tt.want {
 				t.Errorf("selectorTargetsCurrent(%q, %v) = %v, want %v", tt.declared, tt.currents, got, tt.want)
 			}
 		})
@@ -1964,6 +1966,125 @@ go = "1.22.12"
 			}
 			if string(got) != tt.want {
 				t.Errorf("rewrite mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRewriteToolVersionScopesGoPrefixToTheToolchain pins whose versions the Go
+// project's "go1.24" spelling belongs to. For the toolchain it is one release
+// written two ways, so a fix planned from a locked 1.24.9 has to reach a config
+// declaring go1.24. For every other tool a version is an opaque release tag: a
+// project can publish both "go1.3.0" and "1.3.0" as different artifacts, and
+// reading them as one release let the rewriter treat a config at 1.3.0 as
+// already carrying a fix that asked for go1.3.0, reporting success without
+// writing the requested tag. A silent no-op fix is worse than a refused one.
+func TestRewriteToolVersionScopesGoPrefixToTheToolchain(t *testing.T) {
+	tests := []struct {
+		name     string
+		tool     string
+		input    string
+		currents []string
+		version  string
+		// want is the expected file; wantErr means the rewrite must refuse
+		// rather than claim success.
+		want    string
+		wantErr bool
+	}{
+		{
+			// The toolchain: the declaration spells the release the Go way and
+			// the plan the mise way.
+			name: "the toolchain reaches a go-prefixed declaration",
+			tool: "go",
+			input: `[tools]
+go = "go1.24"
+`,
+			currents: []string{"1.24.9"}, version: "1.24.10",
+			want: `[tools]
+go = "1.24.10"
+`,
+		},
+		{
+			// Already applied, spelled the Go way: still a no-op, and rightly.
+			name: "the toolchain already at the target, spelled the Go way",
+			tool: "go",
+			input: `[tools]
+go = "go1.24.10"
+`,
+			currents: []string{"1.24.9"}, version: "1.24.10",
+			want: `[tools]
+go = "go1.24.10"
+`,
+		},
+		{
+			// The reported defect: the requested tag is never written and the
+			// rewrite must say so instead of reporting success.
+			name: "an opaque tag is not the same release as its go-prefixed spelling",
+			tool: "ubi:owner/repo",
+			input: `[tools]
+"ubi:owner/repo" = "1.3.0"
+`,
+			currents: []string{"1.2.0"}, version: "go1.3.0",
+			want: `[tools]
+"ubi:owner/repo" = "1.3.0"
+`,
+			wantErr: true,
+		},
+		{
+			// The same tool, asked for the tag it actually declares: the fix
+			// applies, so the scoping does not cost an ordinary tool anything.
+			name: "an opaque tag is rewritten when the plan names it",
+			tool: "ubi:owner/repo",
+			input: `[tools]
+"ubi:owner/repo" = "go1.2.0"
+`,
+			currents: []string{"go1.2.0"}, version: "go1.3.0",
+			want: `[tools]
+"ubi:owner/repo" = "go1.3.0"
+`,
+		},
+		{
+			// The go backend installs a Go module, whose versions are module
+			// versions, so it does not get the toolchain's spelling either.
+			name: "the go backend is not the toolchain",
+			tool: "go:github.com/owner/repo",
+			input: `[tools]
+"go:github.com/owner/repo" = "1.3.0"
+`,
+			currents: []string{"1.2.0"}, version: "go1.3.0",
+			want: `[tools]
+"go:github.com/owner/repo" = "1.3.0"
+`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "mise.toml")
+			if err := os.WriteFile(path, []byte(tt.input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			err = RewriteToolVersion(root, "mise.toml", tt.tool, tt.currents, tt.version)
+			if tt.wantErr && err == nil {
+				t.Error("the rewrite reported success without writing the requested version")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("RewriteToolVersion: %v", err)
+			}
+			got, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if string(got) != tt.want {
+				t.Errorf("config mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
 			}
 		})
 	}
