@@ -13,8 +13,10 @@ func TestJSONBundleDeterministicOrder(t *testing.T) {
 	raw := Bundle{
 		SchemaVersion: bundleSchemaVersion,
 		Policies: []BundlePolicy{
-			{Name: "p1", Source: `//! policy.name = "p1"
-true ? [{"action":"warn"}] : []`},
+			{
+				Metadata: Metadata{Name: "p1"},
+				Source:   `true ? [{"action":"warn"}] : []`,
+			},
 		},
 	}
 	data, err := json.Marshal(raw)

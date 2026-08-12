@@ -6,21 +6,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/parser"
 )
-
-func TestExtractPolicyName(t *testing.T) {
-	src := `//! policy.name = "foo-policy"
-true`
-	if got := extractPolicyName(src); got != "foo-policy" {
-		t.Fatalf("extractPolicyName() = %q, want foo-policy", got)
-	}
-}
 
 func TestBuildBundle(t *testing.T) {
 	dir := t.TempDir()
@@ -107,8 +98,8 @@ func TestLoadStructuredBundle(t *testing.T) {
 				t.Fatalf("expected 1 source, got %d", len(sources))
 			}
 			body := sources[0].Body
-			if !strings.Contains(body, "policy.name") {
-				t.Fatalf("metadata missing from body: %s", body)
+			if sources[0].Metadata.Name == "" {
+				t.Fatalf("metadata missing from source: %+v", sources[0])
 			}
 			if err := Compile(body, nil); err != nil {
 				t.Fatalf("compiled structured policy invalid: %v", err)

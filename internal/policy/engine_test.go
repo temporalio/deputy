@@ -151,42 +151,37 @@ func TestEvaluateAll_DenyWithReason(t *testing.T) {
 
 func TestEvaluateAll_CommandFiltering(t *testing.T) {
 	tests := []struct {
-		name       string
-		policyBody string
-		command    string
-		wantSkip   bool
+		name     string
+		meta     Metadata
+		command  string
+		wantSkip bool
 	}{
 		{
-			name:       "no command restriction, always runs",
-			policyBody: `[{"action": "allow"}]`,
-			command:    "scan",
-			wantSkip:   false,
-		},
-		{
-			name: "command matches restriction",
-			policyBody: `//! policy.commands = scan
-[{"action": "allow"}]`,
+			name:     "no command restriction, always runs",
 			command:  "scan",
 			wantSkip: false,
 		},
 		{
-			name: "command does not match restriction",
-			policyBody: `//! policy.commands = proxy
-[{"action": "deny"}]`,
+			name:     "command matches restriction",
+			meta:     Metadata{Commands: []string{"scan"}},
+			command:  "scan",
+			wantSkip: false,
+		},
+		{
+			name:     "command does not match restriction",
+			meta:     Metadata{Commands: []string{"proxy"}},
 			command:  "scan",
 			wantSkip: true,
 		},
 		{
-			name: "legacy exec restriction matches sandbox command",
-			policyBody: `//! policy.commands = exec
-[{"action": "allow"}]`,
+			name:     "legacy exec restriction matches sandbox command",
+			meta:     Metadata{Commands: []string{"exec"}},
 			command:  "sandbox",
 			wantSkip: false,
 		},
 		{
-			name: "legacy exec request matches sandbox restriction",
-			policyBody: `//! policy.commands = sandbox
-[{"action": "allow"}]`,
+			name:     "legacy exec request matches sandbox restriction",
+			meta:     Metadata{Commands: []string{"sandbox"}},
 			command:  "exec",
 			wantSkip: false,
 		},
@@ -194,7 +189,7 @@ func TestEvaluateAll_CommandFiltering(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			sources := []Source{{Name: "test", Body: tc.policyBody}}
+			sources := []Source{{Name: "test", Body: `[{"action": "allow"}]`, Metadata: tc.meta}}
 			eng, err := NewEngine(sources)
 			if err != nil {
 				t.Fatalf("NewEngine() error: %v", err)
@@ -241,27 +236,24 @@ func TestEvaluateAllMap_NormalizesCommandInEnv(t *testing.T) {
 func TestEvaluateAll_EntrypointFiltering(t *testing.T) {
 	tests := []struct {
 		name       string
-		policyBody string
+		meta       Metadata
 		entrypoint string
 		wantSkip   bool
 	}{
 		{
 			name:       "no entrypoint restriction, always runs",
-			policyBody: `[{"action": "allow"}]`,
 			entrypoint: "go_artifact_request",
 			wantSkip:   false,
 		},
 		{
-			name: "entrypoint matches restriction",
-			policyBody: `//! policy.entrypoints = go_artifact_request
-[{"action": "allow"}]`,
+			name:       "entrypoint matches restriction",
+			meta:       Metadata{Entrypoints: []Entrypoint{EntrypointGoArtifactRequest}},
 			entrypoint: "go_artifact_request",
 			wantSkip:   false,
 		},
 		{
-			name: "entrypoint does not match restriction",
-			policyBody: `//! policy.entrypoints = npm_artifact_request
-[{"action": "deny"}]`,
+			name:       "entrypoint does not match restriction",
+			meta:       Metadata{Entrypoints: []Entrypoint{EntrypointNpmArtifactRequest}},
 			entrypoint: "go_artifact_request",
 			wantSkip:   true,
 		},
@@ -269,7 +261,7 @@ func TestEvaluateAll_EntrypointFiltering(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			sources := []Source{{Name: "test", Body: tc.policyBody}}
+			sources := []Source{{Name: "test", Body: `[{"action": "allow"}]`, Metadata: tc.meta}}
 			eng, err := NewEngine(sources)
 			if err != nil {
 				t.Fatalf("NewEngine() error: %v", err)
@@ -291,10 +283,11 @@ func TestEvaluateAll_EntrypointFiltering(t *testing.T) {
 }
 
 func TestEvaluateAll_AdvisoryMode(t *testing.T) {
-	policyBody := `//! policy.mode = advisory
-[{"action": "deny", "reason": "should become warn"}]`
-
-	sources := []Source{{Name: "advisory-test", Body: policyBody}}
+	sources := []Source{{
+		Name:     "advisory-test",
+		Body:     `[{"action": "deny", "reason": "should become warn"}]`,
+		Metadata: Metadata{Mode: ModeAdvisory},
+	}}
 	eng, err := NewEngine(sources)
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
@@ -314,10 +307,11 @@ func TestEvaluateAll_AdvisoryMode(t *testing.T) {
 }
 
 func TestEvaluateAll_MultipleAdvisoryActions(t *testing.T) {
-	policyBody := `//! policy.mode = advisory
-[{"action": "deny", "reason": "first"}, {"action": "deny", "reason": "second"}, {"action": "warn", "reason": "third"}]`
-
-	sources := []Source{{Name: "multi-advisory", Body: policyBody}}
+	sources := []Source{{
+		Name:     "multi-advisory",
+		Body:     `[{"action": "deny", "reason": "first"}, {"action": "deny", "reason": "second"}, {"action": "warn", "reason": "third"}]`,
+		Metadata: Metadata{Mode: ModeAdvisory},
+	}}
 	eng, err := NewEngine(sources)
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
@@ -438,40 +432,42 @@ func TestNewEngine_UndeclaredVariableRejected(t *testing.T) {
 func TestNewEngine_InvalidEntrypointRejected(t *testing.T) {
 	tests := []struct {
 		name       string
-		policyBody string
+		meta       Metadata
 		wantErr    bool
 		errContain string
 	}{
 		{
-			name: "valid entrypoint is allowed",
-			policyBody: `//! policy.entrypoints = scan_report
-[{"action": "allow"}]`,
+			name:    "valid entrypoint is allowed",
+			meta:    Metadata{Entrypoints: []Entrypoint{EntrypointScanReport}},
 			wantErr: false,
 		},
 		{
-			name: "invalid entrypoint is rejected",
-			policyBody: `//! policy.entrypoints = malicious_entrypoint
-[{"action": "allow"}]`,
+			name:       "invalid entrypoint is rejected",
+			meta:       Metadata{Entrypoints: []Entrypoint{"malicious_entrypoint"}},
 			wantErr:    true,
 			errContain: "invalid entrypoint",
 		},
 		{
-			name: "mixed valid and invalid entrypoints is rejected",
-			policyBody: `//! policy.entrypoints = scan_report, fake_entrypoint
-[{"action": "allow"}]`,
+			name:       "mixed valid and invalid entrypoints is rejected",
+			meta:       Metadata{Entrypoints: []Entrypoint{EntrypointScanReport, "fake_entrypoint"}},
 			wantErr:    true,
 			errContain: "invalid entrypoint",
 		},
 		{
-			name:       "no entrypoint restriction is allowed",
-			policyBody: `[{"action": "allow"}]`,
-			wantErr:    false,
+			name:       "surrounding whitespace does not smuggle an unknown entrypoint",
+			meta:       Metadata{Entrypoints: []Entrypoint{" fake_entrypoint "}},
+			wantErr:    true,
+			errContain: "invalid entrypoint",
+		},
+		{
+			name:    "no entrypoint restriction is allowed",
+			wantErr: false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			sources := []Source{{Name: "test-policy", Body: tc.policyBody}}
+			sources := []Source{{Name: "test-policy", Body: `[{"action": "allow"}]`, Metadata: tc.meta}}
 			_, err := NewEngine(sources)
 			if tc.wantErr {
 				if err == nil {

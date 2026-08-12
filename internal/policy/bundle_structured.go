@@ -164,6 +164,10 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 			}
 			seenNames[pol.Name] = struct{}{}
 		}
+		meta, err := pol.metadata()
+		if err != nil {
+			return nil, false, fmt.Errorf("%s/%s: %w", path, pol.Name, err)
+		}
 		src, err := pol.toCELSource()
 		if err != nil {
 			return nil, false, fmt.Errorf("%s/%s: %w", path, pol.Name, err)
@@ -173,8 +177,9 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 			name = path
 		}
 		sources = append(sources, Source{
-			Name: fmt.Sprintf("%s::%s", path, name),
-			Body: src,
+			Name:     fmt.Sprintf("%s::%s", path, name),
+			Body:     src,
+			Metadata: meta,
 		})
 	}
 	return sources, true, nil
@@ -207,37 +212,53 @@ func ParseStructuredSources(data []byte, virtualPath string) ([]Source, error) {
 	return sources, nil
 }
 
-// toCELSource compiles the structured policy into a raw CEL source string.
-// It generates the necessary metadata comments and constructs the rule evaluation logic.
-func (p structuredPolicy) toCELSource() (string, error) {
-	if len(p.Rules) == 0 {
-		return "", fmt.Errorf("policy must contain at least one rule")
+// metadata validates what the policy declares about itself and returns it in
+// canonical form: entrypoints must be known, commands must be known and are
+// normalized and deduplicated, and the mode must be one Deputy can apply.
+//
+// The result travels to the engine as typed data on [Source], so nothing about
+// a policy's identity or scoping is encoded into, or recovered from, its CEL
+// program text.
+func (p structuredPolicy) metadata() (Metadata, error) {
+	meta := Metadata{
+		Name:        p.Name,
+		Description: p.Description,
+		Ecosystems:  slices.Clone(p.Ecosystems),
 	}
 	for _, ep := range p.Entrypoints {
 		if !IsAllowedEntrypoint(ep) {
-			return "", fmt.Errorf("invalid entrypoint %q", ep)
+			return Metadata{}, fmt.Errorf("invalid entrypoint %q", ep)
 		}
+		meta.Entrypoints = append(meta.Entrypoints, Entrypoint(ep))
 	}
-	normalizedCommands := make([]string, 0, len(p.Commands))
-	seenCommands := map[string]struct{}{}
+	seenCommands := make(map[string]struct{}, len(p.Commands))
 	for _, cmd := range p.Commands {
 		if !IsAllowedCommand(cmd) {
-			return "", fmt.Errorf("invalid command %q", cmd)
+			return Metadata{}, fmt.Errorf("invalid command %q", cmd)
 		}
 		normalized := NormalizeCommand(cmd)
-		if _, ok := seenCommands[normalized]; ok {
+		if _, dup := seenCommands[normalized]; dup {
 			continue
 		}
 		seenCommands[normalized] = struct{}{}
-		normalizedCommands = append(normalizedCommands, normalized)
+		meta.Commands = append(meta.Commands, normalized)
 	}
-	p.Commands = normalizedCommands
 	if p.Mode != "" {
-		mode := strings.ToLower(strings.TrimSpace(p.Mode))
-		if mode != "advisory" && mode != "enforce" {
-			return "", fmt.Errorf("invalid mode %q (expected advisory|enforce)", p.Mode)
+		mode := normalizeMode(Mode(p.Mode))
+		if mode == "" || !mode.IsValid() {
+			return Metadata{}, fmt.Errorf("invalid mode %q (expected advisory|enforce)", p.Mode)
 		}
-		p.Mode = mode
+		meta.Mode = mode
+	}
+	return meta, nil
+}
+
+// toCELSource compiles the structured policy's rules into a raw CEL source
+// string. Ecosystem scoping becomes part of each rule's guard; the rest of the
+// policy's metadata travels separately (see [structuredPolicy.metadata]).
+func (p structuredPolicy) toCELSource() (string, error) {
+	if len(p.Rules) == 0 {
+		return "", fmt.Errorf("policy must contain at least one rule")
 	}
 	var builder strings.Builder
 	builder.WriteString("[]")
@@ -268,29 +289,7 @@ func (p structuredPolicy) toCELSource() (string, error) {
 			body = fmt.Sprintf("([%s]).map(%s, %s)[0]", expr, name, body)
 		}
 	}
-	metadata := []string{}
-	if p.Name != "" {
-		metadata = append(metadata, fmt.Sprintf("//! policy.name = \"%s\"", escapeComment(p.Name)))
-	}
-	if p.Description != "" {
-		metadata = append(metadata, fmt.Sprintf("//! policy.description = \"%s\"", escapeComment(p.Description)))
-	}
-	if len(p.Entrypoints) > 0 {
-		metadata = append(metadata, fmt.Sprintf("//! policy.entrypoints = \"%s\"", strings.Join(p.Entrypoints, ",")))
-	}
-	if len(p.Commands) > 0 {
-		metadata = append(metadata, fmt.Sprintf("//! policy.commands = \"%s\"", strings.Join(p.Commands, ",")))
-	}
-	if p.Mode != "" && p.Mode != "enforce" {
-		metadata = append(metadata, fmt.Sprintf("//! policy.mode = \"%s\"", p.Mode))
-	}
-	if len(p.Ecosystems) > 0 {
-		metadata = append(metadata, fmt.Sprintf("//! policy.ecosystems = \"%s\"", strings.Join(p.Ecosystems, ",")))
-	}
-	if len(metadata) == 0 {
-		return body, nil
-	}
-	return strings.Join(metadata, "\n") + "\n" + body, nil
+	return body, nil
 }
 
 // toRuleExpr converts a structured rule into a CEL expression string.
@@ -332,15 +331,4 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 		return "", fmt.Errorf("marshal action: %w", err)
 	}
 	return fmt.Sprintf("((%s) ? [%s] : [])", when, string(actionJSON)), nil
-}
-
-// escapeComment escapes characters in a string to make it safe for inclusion
-// in a generated CEL comment. Multi-line strings (from YAML | or >) must have
-// newlines escaped to avoid breaking the single-line comment format.
-func escapeComment(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	s = strings.ReplaceAll(s, "\r", "\\r")
-	return s
 }

@@ -36,7 +36,7 @@ type compiledPolicy struct {
 	program     celProgram              // program is the compiled CEL executable.
 	entrypoints collections.Set[string] // entrypoints is the set of entrypoints this policy applies to.
 	commands    collections.Set[string] // commands is the set of commands this policy applies to.
-	mode        string                  // mode defines the execution mode (e.g., "enforce", "audit").
+	mode        Mode                    // mode selects how the policy's decisions are applied.
 }
 
 // celProgram is the minimal interface we need from cel.Program for testing/abstraction.
@@ -55,37 +55,44 @@ func NewEngine(sources []Source) (*Engine, error) {
 		if err != nil {
 			return nil, err
 		}
-		meta := parsePolicyMetadata(src.Body)
 
 		// Validate entrypoints at load time - reject unknown entrypoints
-		if err := validateEntrypoints(meta.Entrypoints, src.Name); err != nil {
+		if err := validateEntrypoints(src.Metadata.Entrypoints, src.Name); err != nil {
 			return nil, err
 		}
 
 		compiled = append(compiled, compiledPolicy{
 			source:      src,
 			program:     prog,
-			entrypoints: collections.NewSetFunc(meta.Entrypoints, strings.TrimSpace),
-			commands:    collections.NewSetFunc(meta.Commands, NormalizeCommand),
-			mode:        meta.Mode,
+			entrypoints: collections.NewSetFunc(src.Metadata.Entrypoints, trimmedEntrypoint),
+			commands:    collections.NewSetFunc(src.Metadata.Commands, NormalizeCommand),
+			mode:        src.Metadata.Mode,
 		})
 	}
 	return &Engine{compiled: compiled}, nil
 }
 
 // validateEntrypoints checks that all entrypoints are known canonical values.
-// This prevents typos and injection of arbitrary entrypoint names.
-func validateEntrypoints(entrypoints []string, policyName string) error {
+// This prevents typos and injection of arbitrary entrypoint names. Empty
+// entries are ignored, matching the set the engine builds for filtering.
+func validateEntrypoints(entrypoints []Entrypoint, policyName string) error {
 	for _, ep := range entrypoints {
-		ep = strings.TrimSpace(ep)
-		if ep == "" {
+		trimmed := trimmedEntrypoint(ep)
+		if trimmed == "" {
 			continue
 		}
-		if !IsAllowedEntrypoint(ep) {
-			return fmt.Errorf("%s: invalid entrypoint %q (not in allowed set)", policyName, ep)
+		if !IsAllowedEntrypoint(trimmed) {
+			return fmt.Errorf("%s: invalid entrypoint %q (not in allowed set)", policyName, trimmed)
 		}
 	}
 	return nil
+}
+
+// trimmedEntrypoint returns the entrypoint's name without surrounding
+// whitespace, the form both entrypoint validation and the filtering set use so
+// they cannot disagree about which declarations count.
+func trimmedEntrypoint(ep Entrypoint) string {
+	return strings.TrimSpace(ep.String())
 }
 
 // NewEngineFromPaths loads sources from disk and builds a compiled engine.
@@ -176,7 +183,7 @@ func (e *Engine) EvaluateAll(ctx context.Context, input proto.Message, command, 
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", pol.source.Name, err)
 		}
-		if strings.EqualFold(pol.mode, "advisory") {
+		if pol.mode.IsAdvisory() {
 			normalized = downgradeAdvisory(normalized)
 		}
 		// Record individual policy result as span event
@@ -282,7 +289,7 @@ func (e *Engine) EvaluateAllMap(ctx context.Context, payload map[string]any, com
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", pol.source.Name, err)
 		}
-		if strings.EqualFold(pol.mode, "advisory") {
+		if pol.mode.IsAdvisory() {
 			normalized = downgradeAdvisory(normalized)
 		}
 		// Record individual policy result as span event
