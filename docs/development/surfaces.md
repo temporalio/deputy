@@ -44,9 +44,11 @@ Handler bodies are not part of this. The behavior behind an endpoint (`internal/
 
 The CLI, the TUI, PR comments, human-readable reports.
 
-These need affordances the proto cannot carry: short flag names, sensible defaults, progressive disclosure, color, summary versus detail. The contract still derives (which fields exist, their types, their validation, their help text), but the affordance is designed by hand.
+These need affordances the proto cannot carry: short flag names, sensible defaults, progressive disclosure, color, summary versus detail. The split that makes them tractable is that the contract derives (which fields exist, their types, their validation) while the affordance is designed by hand.
 
-**Rule:** derive the contract, hand-write the ergonomics, and add a correspondence test so the two cannot separate.
+**Direction, not fact, for the CLI.** Nothing derives. `internal/cli/cmd/scan.go` declares each Cobra flag by hand with its own default and help string, including prose that restates a domain the proto already owns: `--source` spells out the target kinds and `--ecosystems` spells out the ecosystem list. `scanFlags.toScanRequest` in `internal/cli/cmd/scan_flags.go` then copies the parsed flags into `ScanOptions` field by field. Nothing compares the two ends. `TestScanFlags_ScanOptions` checks that the ecosystems slice survives that copy, which tests one field's plumbing, not the correspondence. Add a field to `ScanOptions` or tighten a protovalidate constraint on one and the CLI is unchanged and every test still passes.
+
+**Rule:** derive the contract, hand-write the ergonomics, and add a correspondence test so the two cannot separate. There is no such test in the tree to copy, so the first surface to follow this rule builds the pattern.
 
 ### 3. A language over the domain
 
@@ -185,7 +187,7 @@ Ecosystem-specific name and version normalization still has to happen before the
 
 1. Model it in proto first. It is the domain, not a serialization detail.
 2. Regenerate the direct projections, the pluginrpc bindings alongside the ConnectRPC and MCP ones. If the change touched a contract a plugin implements, run `buf breaking` yourself before it lands; no CI job will.
-3. Decide the ergonomic affordance for the CLI deliberately, and add the correspondence test.
+3. Decide the ergonomic affordance for the CLI deliberately, and write the correspondence test with it. Expect to design that test rather than copy one.
 4. For the DSL, derive the vocabulary. Apply the admission test before adding a helper.
 5. If it crosses the proxy, decide what the extension band says.
 6. If it is configurable, add the field to `internal/config.Config` and let the reference and the environment variable list follow from it, rather than editing the struct, the loader, and the docs separately.
