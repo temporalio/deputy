@@ -46,11 +46,13 @@ Handler bodies are not part of this. The behavior behind an endpoint (`internal/
 
 ### 2. Ergonomic projections
 
-The CLI, the TUI, PR comments, human-readable reports.
+The CLI, the TUI, PR comments, human-readable reports, and the public Go SDK.
 
 These need affordances the proto cannot carry: short flag names, sensible defaults, progressive disclosure, color, summary versus detail. The split that makes them tractable is that the contract derives (which fields exist, their types, their validation) while the affordance is designed by hand.
 
 **Direction:** for the CLI, nothing derives. `internal/cli/cmd/scan.go` declares each Cobra flag by hand with its own default and help string, including prose that restates a domain the proto already owns: `--source` spells out the target kinds and `--ecosystems` spells out the ecosystem list. `scanFlags.toScanRequest` in `internal/cli/cmd/scan_flags.go` then copies the parsed flags into `scanv1.ScanOptions` field by field. Nothing compares the two ends, and nothing exercises that copy either: `toScanRequest` appears in no test, and `TestScanFlags_ScanOptions` is named for a different type, calling `scanFlags.scanOptions()` and asserting on the `internal/inventory.ScanOptions` it returns, so it never reaches the proto at all. Add a field to `scanv1.ScanOptions` or tighten a protovalidate constraint on one and the CLI is unchanged and every test still passes.
+
+The Go SDK in [`sdk`](../../sdk) is the same kind of surface aimed at a program instead of a person, and its affordances are mode selection and short call shapes. Its types cannot drift: they are aliases of the generated messages. Its operations can. `Client.Scan`, `GenerateSBOM`, `EvaluatePolicy`, and their siblings are hand-written wrappers, each naming one procedure and filling in one request literal, so a new RPC gets no method and a new request field gets no way in until someone adds it. `DiffPackages` takes a base and a target and offers no parameter for the `DiffOptions` its request carries. **Direction** here too: the SDK's tests cover mode selection, and nothing relates the wrapper set to the service contract it adapts.
 
 **Rule:** derive the contract, hand-write the ergonomics, and add a correspondence test so the two cannot separate. There is no such test in the tree to copy, so the first surface to follow this rule builds the pattern.
 
@@ -191,7 +193,7 @@ Ecosystem-specific name and version normalization still has to happen before the
 
 1. Model it in proto first. It is the domain, not a serialization detail.
 2. Regenerate every direct projection in the same change: the ConnectRPC and MCP bindings, the pluginrpc ones, and the embedded descriptor set. Skip one and the descriptor guards keep inspecting the previous generation, where they pass. If the change touched a contract something outside this repository speaks, a plugin's or a public service's, run `buf breaking` yourself before it lands; nothing in CI runs buf.
-3. Decide the ergonomic affordance for the CLI deliberately, and write the correspondence test with it. Expect to design that test rather than copy one.
+3. Decide the ergonomic affordance deliberately, for the CLI and for the [`sdk`](../../sdk) wrapper if the capability is a new procedure or a new request field, and write the correspondence test with it. Expect to design that test rather than copy one.
 4. For the DSL, derive the vocabulary. Apply the admission test before adding a helper.
 5. If it crosses the proxy, decide what the extension band says.
 6. If it is configurable, add the field to `internal/config.Config`, give it a default wherever its section is defaulted, then edit the matching `*FromEnv` loader if it takes an environment variable, then edit the tables in [`docs/reference/configuration.md`](../reference/configuration.md). Separate edits, none derived from another, until the mechanism in *Choosing a mechanism* is built. Skip the loader and the setting has no environment binding; skip the tables and it is undocumented. Either way nothing fails.
