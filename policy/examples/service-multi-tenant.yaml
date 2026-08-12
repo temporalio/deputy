@@ -20,10 +20,11 @@
 #
 # SECURITY CONSIDERATIONS:
 #
-# 1. Tenant Isolation: The tenant-isolation policy below uses path-based matching.
-#    For strict isolation, ensure your target naming convention includes the tenant
-#    as a distinct path component (e.g., "github.com/acme-corp/repo") rather than
-#    a substring. The policy uses matches() with word boundaries for safety.
+# 1. Tenant Isolation: The tenant-isolation policies below compare whole path
+#    components. For strict isolation, ensure your target naming convention
+#    includes the tenant as a distinct path component (e.g.,
+#    "github.com/acme-corp/repo") rather than a substring. Diffs are covered by
+#    a separate rule because they name two targets and both must be authorized.
 #
 # 2. Required Claims: Consider adding 'tenant' to auth.required_claims in your
 #    server config to ensure all authenticated requests have a tenant claim.
@@ -50,28 +51,47 @@ policies:
         remediation: "Ensure your identity provider includes a 'tenant' claim in tokens"
 
   # Tenant isolation - users can only access their tenant's resources
-  # Uses path-based matching with word boundaries for security
+  # Compares whole path components literally, never as a substring or regex
   - name: tenant-isolation
     description: |
       Restricts users to resources within their tenant namespace.
-      Uses regex matching with word boundaries to prevent bypass via substring matching.
-      Example: tenant "acme" can access "github.com/acme/repo" but NOT "github.com/acme-competitor/repo"
+      Splits the target on "/" and compares components to the tenant claim
+      literally, so a tenant cannot be matched as a substring of a longer name
+      and a claim containing regex metacharacters cannot alter the test.
+      Example: tenant "acme" can access "github.com/acme/repo" but NOT
+      "github.com/acme-corp-archive/repo".
     entrypoints:
       - service_scan_request
       - service_sbom_request
-      - service_diff_request
       - service_secrets_request
     rules:
       - action: deny
         when: |
           !jwt.anonymous &&
-          has(jwt.tenant) &&
-          jwt.tenant != "" &&
-          has(request.target) &&
-          request.target != "" &&
-          !request.target.matches("(^|[/:])" + jwt.tenant + "([/:]|$)")
+          jwt.?tenant.orValue("") != "" &&
+          !request.?target.orValue("").split("/").exists(c, c == jwt.tenant)
         reason: "Cross-tenant access denied - target does not belong to your tenant"
         remediation: "You can only access resources within your tenant namespace"
+
+  # Tenant isolation for diffs, which name two independent resources
+  - name: tenant-isolation-diff
+    description: |
+      A diff compares two targets, so both sides need authorizing. This rule is
+      separate from tenant-isolation because base_target and target_target exist
+      only on service_diff_request, and request.target reports the base side
+      alone, which would let an authorized base carry another tenant's target.
+    entrypoints:
+      - service_diff_request
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          jwt.?tenant.orValue("") != "" &&
+          ![base_target, target_target].all(t,
+            t.display_path.split("/").exists(c, c == jwt.tenant)
+          )
+        reason: "Cross-tenant diff denied - both sides must belong to your tenant"
+        remediation: "You can only diff resources within your tenant namespace"
 
   # Require authentication for all operations
   - name: require-authentication

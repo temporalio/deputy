@@ -240,22 +240,31 @@ policies:
     rules:
       - action: deny
         when: |
-          has(jwt.tenant) && jwt.tenant != "" && !(
-            base_target.display_path.matches("(^|[/:])" + jwt.tenant + "([/:]|$)") &&
-            target_target.display_path.matches("(^|[/:])" + jwt.tenant + "([/:]|$)")
+          jwt.?tenant.orValue("") != "" &&
+          ![base_target, target_target].all(t,
+            t.display_path.split("/").exists(c, c == jwt.tenant)
           )
         reason: "Cross-tenant diff denied"
 ```
 
-Match the tenant as a whole path component, as above, rather than with
-`contains`. A substring test lets tenant `acme` reach
-`github.com/acme-corp-archive/...` on either side, and an empty `jwt.tenant`
-makes `contains` true for every path, so the rule silently stops denying
-anything. Keep the explicit `jwt.tenant != ""` even with component matching:
-there an empty claim leaves the outcome depending on whether the path happens to
-start with a separator, which is arbitrary rather than safe. Requests that should
-carry a tenant but do not are better rejected outright, either by a separate rule
-or by listing `tenant` in `auth.required_claims`.
+`[base_target, target_target].all(t, ...)` states the both-sides requirement once
+instead of repeating the test per side, and `jwt.?tenant.orValue("")` replaces
+`has(jwt.tenant) && jwt.tenant != ""` with the optional selector.
+
+Compare whole path components literally, as above. Two shortcuts fail here:
+
+- `display_path.contains(jwt.tenant)` accepts the tenant anywhere in the path,
+  so tenant `acme` reaches `github.com/acme-corp-archive/...`, and an empty
+  claim makes it true for every path, retiring the rule entirely.
+- Interpolating the claim into a regex, as in
+  `matches("(^|[/:])" + jwt.tenant + "([/:]|$)")`, fixes the substring case but
+  lets the claim change the pattern. Tenant `acme.com` then matches
+  `github.com/acmeXcom/repo`, because `.` is a wildcard.
+
+Splitting on `/` and comparing with `==` avoids both, since nothing in the claim
+is interpreted. Keep the explicit `jwt.tenant != ""` regardless: requests that
+should carry a tenant but do not are better rejected outright, either by a
+separate rule or by listing `tenant` in `auth.required_claims`.
 
 A policy runs on an operation when it declares that operation's entrypoint, or
 when it declares no `entrypoints` at all. A policy scoped to
