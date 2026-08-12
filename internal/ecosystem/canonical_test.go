@@ -152,3 +152,48 @@ func TestCanonicalResolvesRuntimeRegistrations(t *testing.T) {
 		})
 	}
 }
+
+// TestRuntimeRegistrationSpellingsResolve pins the promise [Canonical] makes for
+// a runtime registration: every spelling that names it resolves, case and
+// separators included, exactly as they do for a built-in ecosystem. A plugin
+// spells its aliases and its display name however reads best, and the registry
+// is what has to fold them, since the resolver normalizes before it asks and a
+// verbatim index can only answer one spelling.
+//
+// [Registry.Lookup] is exercised beside the resolver because it is exported, so
+// an index built by one rule and probed by another is a bug either way in.
+func TestRuntimeRegistrationSpellingsResolve(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(Registration{
+		Ecosystem:   Ecosystem("acme-artifacts"),
+		DisplayName: "Acme Registry",
+		Description: "Ecosystem contributed by an extractor plugin",
+		Aliases:     []string{"Acme Registry", "ACME_ARTIFACTS", "acme"},
+	})
+
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "token", raw: "acme-artifacts"},
+		{name: "display name", raw: "Acme Registry"},
+		{name: "display name lowercased", raw: "acme registry"},
+		{name: "display name hyphenated", raw: "acme-registry"},
+		{name: "alias as declared", raw: "ACME_ARTIFACTS"},
+		{name: "alias lowercased", raw: "acme_artifacts"},
+		{name: "alias upper case", raw: "ACME"},
+		{name: "alias with surrounding space", raw: " acme "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, known := canonicalIn(reg, tt.raw)
+			if !known || got != "acme-artifacts" {
+				t.Errorf("canonicalIn(registry, %q) = (%q, %t), want (%q, true)", tt.raw, got, known, "acme-artifacts")
+			}
+			if found := reg.Lookup(tt.raw); found == nil {
+				t.Errorf("Lookup(%q) = nil, want the acme-artifacts registration", tt.raw)
+			}
+		})
+	}
+}
