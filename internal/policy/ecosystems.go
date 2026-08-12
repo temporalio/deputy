@@ -220,17 +220,24 @@ func messageCarriesEcosystem(md protoreflect.MessageDescriptor, seen map[protore
 // resolved before its name and version fields, because the ecosystem selects
 // which normalizer those fields get.
 //
-// inherited is the ecosystem resolved by an enclosing object. An object that
-// does not identify an ecosystem of its own belongs to the one that contains
-// it: an advisory's fixed versions are versions of the finding's package, and
-// the finding names the ecosystem through that package. An object with its own
-// ecosystem overrides the inherited one for itself and everything below it.
+// An object names its ecosystem in one of four ways, tried from the most
+// specific to the least: an "ecosystem" field of its own, a nested package that
+// has one, its own package URL, or the ecosystem of the object that contains it.
+//
+// inherited is that last one. An object that does not identify an ecosystem at
+// all belongs to the one that contains it: an advisory's fixed versions are
+// versions of the finding's package, and the finding names the ecosystem
+// through that package. An object with an ecosystem of its own overrides the
+// inherited one for itself and everything below it.
 func canonicalizeEcosystemValue(value any, inherited ecosystem.Ecosystem) {
 	switch v := value.(type) {
 	case map[string]any:
 		eco, ok := canonicalizeOwnEcosystem(v)
 		if !ok {
 			eco, ok = nestedPackageEcosystem(v)
+		}
+		if !ok {
+			eco, ok = packageURLEcosystem(v)
 		}
 		if !ok && inherited != "" {
 			eco, ok = inherited, true
@@ -359,6 +366,41 @@ func nestedPackageEcosystem(m map[string]any) (eco ecosystem.Ecosystem, ok bool)
 		}
 		if token := NormalizeEcosystem(raw); token != "" {
 			return ecosystem.Ecosystem(token), true
+		}
+	}
+	return "", false
+}
+
+// packageURLEcosystem resolves the ecosystem of an object that spells its own
+// identity as a package URL and names no ecosystem anywhere: a remediation step
+// is the case that needs it, since deputy.fix.v1.RemediationCommand carries the
+// package it fixes, that package's URL, and the versions on both sides of the
+// fix, and declares no ecosystem field at all. With nothing to resolve, identity
+// normalization never ran for a fix plan, so a Go step reached policies as
+// "1.44.0" beside a target version of "v1.44.1" and a deny written against the
+// canonical identity did not fire.
+//
+// A package URL answers the question itself, which is what makes this safe
+// without schema support ([canonicalizePackageReference] relies on the same
+// property). Resolution goes through [ecosystem.FromPURLType], so a URL of a
+// type no registration claims leaves the object unresolved rather than folded by
+// a guessed ecosystem's rules.
+//
+// The PURL is deliberately not consulted before an ecosystem field: an object
+// that declares one is stating which rules apply to it, and a package whose
+// ecosystem is Cargo may legitimately carry a pkg:github reference as its URL.
+func packageURLEcosystem(m map[string]any) (eco ecosystem.Ecosystem, ok bool) {
+	for _, key := range packagePURLKeys {
+		raw, isString := m[key].(string)
+		if !isString || raw == "" {
+			continue
+		}
+		parsed, err := purlx.ParseLoose(raw)
+		if err != nil {
+			continue
+		}
+		if eco, known := ecosystem.FromPURLType(parsed.Type); known {
+			return eco, true
 		}
 	}
 	return "", false
