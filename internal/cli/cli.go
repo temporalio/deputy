@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -189,13 +190,12 @@ COMMAND OVERVIEW:
 • server:  Run the Deputy API server
 
 CONNECTION MODES:
-Deputy can operate in three modes:
+Deputy can operate in two modes:
 • In-process (default): Direct execution with zero network overhead
-• Local daemon: Connect to a running 'deputy server' via Unix socket
 • Remote: Connect to a remote Deputy server via HTTP/2
 
-Mode is auto-detected (remote if DEPUTY_SERVER is set, daemon if socket exists),
-or can be forced with --server or --daemon flags.
+Remote mode is selected with the --server flag or the DEPUTY_SERVER environment
+variable; the flag takes precedence when both are set.
 
 DEFAULT EXECUTION:
 Running 'deputy' without arguments defaults to 'deputy diff' if inside a Git repository.`,
@@ -248,19 +248,27 @@ CONNECTION MODES:
   # Connect to a remote server
   deputy --server https://deputy.example.com:8090 scan
 
-  # Connect to a local daemon
-  deputy --daemon /tmp/deputy.sock scan
-
   # Start a server for others to connect to
   deputy server --addr :8090`,
 	}
 
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", logLevel, "Logging level: debug, info, warn, error (default: warn). Override with DEPUTY_LOG_LEVEL")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", logFormat, "Logging format (text, json). Override with DEPUTY_LOG_FORMAT")
-	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "", "Connect to remote Deputy server (e.g., https://deputy.example.com:8090). Override with DEPUTY_SERVER")
-	rootCmd.PersistentFlags().StringVar(&daemonSocket, "daemon", "", "Connect to local daemon via Unix socket path (reserved for future use)")
-	rootCmd.PersistentFlags().StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with remote server. Override with DEPUTY_AUTH_TOKEN")
+	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "", "Connect to remote Deputy server (e.g., https://deputy.example.com:8090). Takes precedence over DEPUTY_SERVER; --server= (empty) forces in-process mode")
+	rootCmd.PersistentFlags().StringVar(&daemonSocket, "daemon", "", "Reserved for future daemon support; has no effect as of August 2026")
+	// Hidden while reserved: the flag stays parseable so scripts written against
+	// it keep working when daemon mode lands, without adding help-text noise for
+	// a mode that does not exist yet.
+	_ = rootCmd.PersistentFlags().MarkHidden("daemon")
+	rootCmd.PersistentFlags().StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with remote server. Takes precedence over DEPUTY_AUTH_TOKEN; --auth-token= (empty) sends no token")
 	rootCmd.PersistentFlags().StringVar(&noCache, "no-cache", "", "Bypass cache and fetch fresh data. Use 'true' for all caches, or comma-separated source names (e.g., 'osv,kev')")
+
+	// Commands are registered before cobra parses the persistent flags, so the
+	// connection settings resolve from the environment here and are re-resolved
+	// in PersistentPreRunE once the flag values are known.
+	deps := &cmd.Dependencies{}
+	cmd.RegisterCommands(rootCmd, deps)
+
 	rootCmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
 		if err := configureLogging(logLevel, logFormat); err != nil {
 			return err
@@ -272,15 +280,30 @@ CONNECTION MODES:
 			c.SetContext(ctx)
 		}
 
+		// Re-apply the service connection now that persistent flags are
+		// parsed: a flag the user set, even to an empty value, beats its
+		// environment variable, and the environment variable beats the
+		// in-process default. An explicitly empty --server forces in-process
+		// mode and an explicitly empty --auth-token clears any token from
+		// the environment, so cobra's Changed state is what distinguishes
+		// "omitted" from "set to empty".
+		serverSet := c.Flags().Changed("server")
+		tokenSet := c.Flags().Changed("auth-token")
+		if serverSet || tokenSet {
+			if serverSet {
+				deps.ServerAddress = serverAddr
+			}
+			if tokenSet {
+				deps.AuthToken = authToken
+			}
+			if err := deps.ApplyConnection(); err != nil {
+				return fmt.Errorf("configure server connection: %w", err)
+			}
+		}
+
 		return nil
 	}
 
-	// Register commands with server address from flags
-	// Clients will be created by RegisterCommands based on environment/flags
-	cmd.RegisterCommands(rootCmd, cmd.Dependencies{
-		ServerAddress: serverAddr,
-		AuthToken:     authToken,
-	})
 	return rootCmd
 }
 

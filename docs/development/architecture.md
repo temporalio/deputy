@@ -104,13 +104,14 @@ Commands communicate with Deputy's core services through a unified client interf
 | Mode | Transport | Use Case |
 |------|-----------|----------|
 | **In-Process** | Direct function calls | CLI usage (default, zero overhead) |
-| **Local Daemon** | Unix socket | Shared caching, faster repeat scans |
 | **Remote Server** | HTTP/2 (ConnectRPC) | Enterprise features, centralized policy |
+| **Local Daemon** | Reserved, not yet implemented | Shared caching, faster repeat scans |
 
-Mode selection is automatic:
-1. If `DEPUTY_SERVER` is set → Remote mode
-2. If daemon socket exists → Daemon mode
-3. Otherwise → In-process mode (default)
+Mode selection:
+1. If `--server` or `DEPUTY_SERVER` is set (the flag takes precedence) → Remote mode
+2. Otherwise → In-process mode (default)
+
+Daemon mode is reserved: the `--daemon` flag exists but has no effect as of August 2026.
 
 The public SDK (`sdk/`) wraps this client for external Go consumers.
 

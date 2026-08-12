@@ -17,13 +17,13 @@ deputy server [flags]
 
 ## Connection Modes
 
-Deputy supports three execution modes:
+Deputy supports two execution modes as of August 2026, with a third reserved:
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
 | **In-process** | Direct function calls (default) | CLI usage, zero overhead |
-| **Local daemon** | Unix socket connection | Shared caching, faster repeat scans |
 | **Remote server** | HTTP/2 (ConnectRPC) | Team deployments, enterprise features |
+| **Local daemon** | Reserved, not yet implemented (the `--daemon` flag has no effect as of August 2026) | Shared caching, faster repeat scans |
 
 The `server` command starts Deputy in remote server mode, listening for client connections.
 
@@ -74,10 +74,19 @@ Once the server is running, clients can connect:
 # CLI with --server flag
 $ deputy --server http://localhost:8090 scan github.com/owner/repo
 
-# Or set environment variable
+# Authenticated call against a server with --auth-mode required
+$ deputy --server https://deputy.example.com:8090 --auth-token "$TOKEN" scan github.com/owner/repo
+
+# Or set environment variables
 $ export DEPUTY_SERVER=http://localhost:8090
+$ export DEPUTY_AUTH_TOKEN="$TOKEN"
 $ deputy scan github.com/owner/repo
 ```
+
+Connection settings resolve with flag-first precedence: `--server` beats
+`DEPUTY_SERVER` and `--auth-token` beats `DEPUTY_AUTH_TOKEN` when both are set.
+If neither the flag nor the environment variable is set, Deputy runs in-process
+(local mode).
 
 ### SDK Usage
 

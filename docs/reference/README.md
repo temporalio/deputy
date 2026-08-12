@@ -64,7 +64,8 @@ Stable, "look it up" documentation for Deputy configuration.
 
 | Variable | Description |
 | --- | --- |
-| `DEPUTY_SERVER` | Remote Deputy server address (e.g., `http://localhost:8090`) |
+| `DEPUTY_SERVER` | Remote Deputy server address (e.g., `http://localhost:8090`); the `--server` flag takes precedence |
+| `DEPUTY_AUTH_TOKEN` | Bearer token for authenticating with a remote server; the `--auth-token` flag takes precedence |
 | `DEPUTY_SERVER_ADDR` | Address to bind `deputy server` (default: `127.0.0.1:8090`) |
 | `DEPUTY_SERVER_AUTH_MODE` | Authentication mode (`required`, `disabled`) |
 | `DEPUTY_SERVER_AUTH_JWKS_URL` | JWKS endpoint URL |
