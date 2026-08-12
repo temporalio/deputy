@@ -7,6 +7,84 @@ import (
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 )
 
+// TestShippedTenantIsolationSkipsTargetlessProcedures pins the other half of the
+// contract: several procedures the single-target rule covers name no resource at
+// all (SecretsService Verify, ListDetectors, RegisterDetector, and SBOMService
+// Diff), so request.target is empty for them. A tenant rule that treats an empty
+// target as failing its allowlist denies those operations unconditionally, which
+// is how an isolation rule turns into an outage. They are governed by
+// require-tenant-claim and secrets-requires-security-team instead.
+func TestShippedTenantIsolationSkipsTargetlessProcedures(t *testing.T) {
+	sources, err := LoadSources([]string{findExample(t, "service-multi-tenant.yaml")})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	engine, err := NewEngine(sources)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		target     string
+		wantDenied bool
+	}{
+		{
+			name:       "procedure that names no resource",
+			target:     "",
+			wantDenied: false,
+		},
+		{
+			name:       "resource inside the tenant namespace",
+			target:     "github.com/acme/repo",
+			wantDenied: false,
+		},
+		{
+			name:       "resource belonging to another tenant",
+			target:     "github.com/other/repo",
+			wantDenied: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Only the tenant rule is under test, so the caller satisfies every
+			// other rule in the file.
+			input := &policyv1.ServiceSbomRequestPolicyInput{
+				Jwt: &policyv1.JWTClaims{
+					Sub:          "user@example.com",
+					CustomClaims: map[string]string{"tenant": "acme"},
+				},
+				Request: &policyv1.ServiceRequest{
+					Procedure: "/deputy.sbom.v1.SBOMService/Diff",
+					Target:    tt.target,
+				},
+				Env: &policyv1.Environment{
+					Command:    "server",
+					Entrypoint: string(EntrypointServiceSBOMRequest),
+				},
+			}
+
+			actions, err := engine.EvaluateAll(t.Context(), input, "server", string(EntrypointServiceSBOMRequest))
+			if err != nil {
+				t.Fatalf("EvaluateAll: %v", err)
+			}
+
+			denied := false
+			var by string
+			for _, action := range actions {
+				if ActionTypeIs(action.Type, ActionDeny) {
+					denied = true
+					by = action.Source
+				}
+			}
+			if denied != tt.wantDenied {
+				t.Errorf("denied = %v (by %s), want %v", denied, by, tt.wantDenied)
+			}
+		})
+	}
+}
+
 // TestShippedTenantIsolationAuthorizesBothDiffSides pins the security property
 // of the shipped multi-tenant example, which operators are invited to copy.
 //
@@ -75,11 +153,31 @@ func TestShippedTenantIsolationAuthorizesBothDiffSides(t *testing.T) {
 			wantDenied: true,
 		},
 		{
-			// An omitted side must fail the allowlist rather than pass it.
+			// An omitted side must fail the allowlist rather than pass it. A
+			// diff always names two resources, so a missing one is malformed,
+			// unlike the targetless procedures covered by the single-target
+			// rule.
 			name:       "empty base side",
 			tenant:     "acme",
 			base:       "",
 			target:     "github.com/acme/repo",
+			wantDenied: true,
+		},
+		{
+			// SCP-style git targets are reachable when SSH egress is allowed.
+			// Splitting on "/" alone leaves "git@github.com:acme", which denied
+			// the tenant its own repositories.
+			name:       "SCP-style targets in the tenant namespace",
+			tenant:     "acme",
+			base:       "git@github.com:acme/repo",
+			target:     "git@github.com:acme/other",
+			wantDenied: false,
+		},
+		{
+			name:       "SCP-style target belonging to another tenant",
+			tenant:     "acme",
+			base:       "git@github.com:acme/repo",
+			target:     "git@github.com:other/repo",
 			wantDenied: true,
 		},
 	}

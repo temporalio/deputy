@@ -55,11 +55,21 @@ policies:
   - name: tenant-isolation
     description: |
       Restricts users to resources within their tenant namespace.
-      Splits the target on "/" and compares components to the tenant claim
-      literally, so a tenant cannot be matched as a substring of a longer name
-      and a claim containing regex metacharacters cannot alter the test.
+      Compares whole path components to the tenant claim literally, so a tenant
+      cannot be matched as a substring of a longer name and a claim containing
+      regex metacharacters cannot alter the test.
       Example: tenant "acme" can access "github.com/acme/repo" but NOT
       "github.com/acme-corp-archive/repo".
+
+      ":" is folded to "/" before splitting so SCP-style git targets such as
+      "git@github.com:acme/repo" and tagged image references such as
+      "ghcr.io/acme/app:v1" yield "acme" as a component.
+
+      The nonempty guard on request.target is required, not defensive: several
+      procedures this rule covers name no resource at all (SecretsService
+      Verify, ListDetectors, RegisterDetector, and SBOMService Diff), and
+      without it they would be denied unconditionally. Those procedures are
+      governed by require-tenant-claim and secrets-requires-security-team.
     entrypoints:
       - service_scan_request
       - service_sbom_request
@@ -69,7 +79,8 @@ policies:
         when: |
           !jwt.anonymous &&
           jwt.?tenant.orValue("") != "" &&
-          !request.?target.orValue("").split("/").exists(c, c == jwt.tenant)
+          request.?target.orValue("") != "" &&
+          !request.target.replace(":", "/").split("/").exists(c, c == jwt.tenant)
         reason: "Cross-tenant access denied - target does not belong to your tenant"
         remediation: "You can only access resources within your tenant namespace"
 
@@ -80,6 +91,10 @@ policies:
       separate from tenant-isolation because base_target and target_target exist
       only on service_diff_request, and request.target reports the base side
       alone, which would let an authorized base carry another tenant's target.
+
+      Unlike the single-target rule, an empty side denies here rather than
+      skipping the check: a diff always names two resources, so a missing side
+      is a malformed request, not a procedure without a target.
     entrypoints:
       - service_diff_request
     rules:
@@ -88,7 +103,7 @@ policies:
           !jwt.anonymous &&
           jwt.?tenant.orValue("") != "" &&
           ![base_target, target_target].all(t,
-            t.display_path.split("/").exists(c, c == jwt.tenant)
+            t.display_path.replace(":", "/").split("/").exists(c, c == jwt.tenant)
           )
         reason: "Cross-tenant diff denied - both sides must belong to your tenant"
         remediation: "You can only diff resources within your tenant namespace"

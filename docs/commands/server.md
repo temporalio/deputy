@@ -283,11 +283,17 @@ policies:
     rules:
       - action: deny
         when: |
-          has(jwt.tenant) &&
-          has(request.target) &&
-          !request.target.contains(jwt.tenant)
+          jwt.?tenant.orValue("") != "" &&
+          request.?target.orValue("") != "" &&
+          !request.target.replace(":", "/").split("/").exists(c, c == jwt.tenant)
         reason: "Cross-tenant access denied"
 ```
+
+The `":"` is folded to `"/"` so an SCP-style target such as
+`git@github.com:acme/repo` still yields `acme` as a component. Keep the
+non-empty check on `request.target`: some procedures name no resource at all
+(`SecretsService` `Verify`, `ListDetectors`, `RegisterDetector`, and
+`SBOMService` `Diff`), and without it this rule denies them unconditionally.
 
 See [AGENTS.md](../../AGENTS.md#server-authentication--multi-tenancy) for comprehensive multi-tenant configuration.
 
