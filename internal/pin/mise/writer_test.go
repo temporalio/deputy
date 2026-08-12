@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/temporalio/deputy/internal/mise"
@@ -1692,4 +1693,145 @@ func TestValidateMiseUpdate(t *testing.T) {
 			t.Errorf("expected error for %+v", u)
 		}
 	}
+}
+
+// TestRewriteConfigIsPublishedAtomically pins how a rewritten config reaches
+// disk. A manifest is a hand-written file Deputy was asked to edit, so a
+// truncate-then-refill write is a data-loss path: an interrupt, a short write,
+// or a full disk leaves the declarations gone, the fix reported as failed, and
+// nothing to retry from. Replacing the file closes that window, which the
+// sibling lockfile pruning already did.
+//
+// The window is measured rather than argued about: a reader loops over the file
+// while it is rewritten repeatedly, and every read must see one whole version of
+// the config. Truncating in place made that reader see an empty or partial file
+// hundreds of times per run.
+func TestRewriteConfigIsPublishedAtomically(t *testing.T) {
+	// Large enough that a reader lands inside the write window, small enough to
+	// stay quick.
+	body := func(version string) string {
+		return "[tools]\ngo = \"" + version + "\"\n" +
+			strings.Repeat("# "+strings.Repeat("x", 4096)+"\n", 64)
+	}
+	const first, second = "1.22.12", "1.24.3"
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "mise.toml")
+	if err := os.WriteFile(configPath, []byte(body(first)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+
+	whole := map[string]bool{body(first): true, body(second): true}
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	var mu sync.Mutex
+	var torn []int
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			data, err := os.ReadFile(configPath)
+			if err != nil {
+				continue
+			}
+			if !whole[string(data)] {
+				mu.Lock()
+				torn = append(torn, len(data))
+				mu.Unlock()
+			}
+		}
+	}()
+
+	versions := []string{second, first}
+	for i := range 200 {
+		if err := rewriteMiseVersions(root, "mise.toml", []pin.Update{{Name: "go", PinnedValue: versions[i%2]}}); err != nil {
+			t.Fatalf("rewrite %d: %v", i, err)
+		}
+	}
+	close(stop)
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(torn) > 0 {
+		t.Errorf("%d reads saw a partially written config, first at %d bytes (whole is %d)",
+			len(torn), torn[0], len(body(first)))
+	}
+}
+
+// TestRewriteConfigFailureLeavesTheOriginal pins that a config Deputy could not
+// publish is a config it did not touch. A directory no temporary can be created
+// in is the deterministic stand-in for the full disk or interrupt that a
+// truncate-then-refill write would answer by emptying the file.
+func TestRewriteConfigFailureLeavesTheOriginal(t *testing.T) {
+	const original = "[tools]\ngo = \"1.22.12\"\n"
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "mise.toml")
+	if err := os.WriteFile(configPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	makeDirUnwritable(t, dir)
+
+	if err := RewriteToolVersion(root, "mise.toml", "go", []string{"1.22.12"}, "1.24.3"); err == nil {
+		t.Fatal("expected the blocked publication to fail the rewrite")
+	}
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf("failed rewrite damaged the config:\n--- got ---\n%s\n--- want ---\n%s", got, original)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".mise.toml.deputy-") {
+			t.Errorf("temporary file left behind: %s", entry.Name())
+		}
+	}
+}
+
+// makeDirUnwritable strips the write bit from dir for the rest of the test,
+// restoring it afterwards, and skips the test when the caller can create files
+// there anyway.
+//
+// Mode bits do not bind a process holding CAP_DAC_OVERRIDE, which is every
+// process in the root-by-default containers CI and isolated agents run in. A
+// test that chmods a directory to 0555 and then asserts a write failed is
+// asserting something untrue there, so the probe measures whether the bits bind
+// on this host instead of guessing from the UID.
+func makeDirUnwritable(t *testing.T, dir string) {
+	t.Helper()
+
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	probe := filepath.Join(dir, ".deputy-write-probe")
+	f, err := os.OpenFile(probe, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	_ = f.Close()
+	_ = os.Remove(probe)
+	t.Skip("mode bits do not bind this process, cannot make a directory unwritable")
 }

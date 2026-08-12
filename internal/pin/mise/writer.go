@@ -271,15 +271,24 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 		return nil
 	}
 
-	f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
-	if err != nil {
+	return publishConfig(root, relPath, strings.Join(lines, "\n"), info.Mode().Perm())
+}
+
+// publishConfig writes the rewritten config back, replacing the file rather
+// than truncating and refilling it in place. A config is a hand-written file
+// Deputy was asked to edit, not one it can regenerate: truncating first means a
+// full disk, a short write, or an interrupt leaves the manifest empty or
+// half-parsed, the caller reports a failed fix, and the user's declarations are
+// gone with no way to retry. A concurrent reader (mise itself, or an editor)
+// sees the same empty window even when nothing fails.
+//
+// It is [mise.ReplaceFileAtomically], the same publication the sibling lockfile
+// pruning uses, so both halves of one fix are equally safe to interrupt.
+func publishConfig(root *os.Root, relPath, content string, perm os.FileMode) error {
+	if err := mise.ReplaceFileAtomically(root, relPath, []byte(content), perm); err != nil {
 		return fmt.Errorf("writing %s: %w", relPath, err)
 	}
-	_, writeErr := f.Write([]byte(strings.Join(lines, "\n")))
-	if closeErr := f.Close(); writeErr == nil {
-		writeErr = closeErr
-	}
-	return writeErr
+	return nil
 }
 
 // replaceVersionInValue replaces the version in a [tools] value (the text after
@@ -997,15 +1006,7 @@ func rewriteToolVersions(root *os.Root, relPath string, updates []pin.Update) er
 		return nil
 	}
 
-	f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
-	if err != nil {
-		return fmt.Errorf("writing %s: %w", relPath, err)
-	}
-	_, writeErr := f.Write([]byte(strings.Join(lines, "\n")))
-	if closeErr := f.Close(); writeErr == nil {
-		writeErr = closeErr
-	}
-	return writeErr
+	return publishConfig(root, relPath, strings.Join(lines, "\n"), info.Mode().Perm())
 }
 
 // tomlHeader parses a TOML table header line into its key-path segments, with

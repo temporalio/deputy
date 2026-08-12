@@ -1550,7 +1550,7 @@ func TestApplyMiseUpdateMatchesVPrefixedCurrentVersion(t *testing.T) {
 
 // TestApplyMiseUpdateRetryAfterLockFailure pins recovery from a partial
 // apply. The config is written before the lockfile is pruned, so a lockfile
-// failure leaves the config edited and the lock stale; re-running the same
+// failure can leave the config edited and the lock stale; re-running the same
 // command must recognize the config edit as already applied and finish the
 // pruning rather than failing with "could not rewrite".
 //
@@ -1558,7 +1558,10 @@ func TestApplyMiseUpdateMatchesVPrefixedCurrentVersion(t *testing.T) {
 // deterministic and holds for any user, so the recovery path keeps its
 // coverage where the suite runs as root; the second is the read-only directory
 // an operator is likeliest to actually hit, which only blocks anyone whose
-// privileges do not bypass mode bits.
+// privileges do not bypass mode bits. How far the blocked apply got is a
+// parameter too: both files are now published by replacing them, so a directory
+// nothing can be created in stops the config edit as well, and the retry starts
+// from an untouched repository rather than a half-applied one.
 func TestApplyMiseUpdateRetryAfterLockFailure(t *testing.T) {
 	t.Parallel()
 
@@ -1570,11 +1573,15 @@ func TestApplyMiseUpdateRetryAfterLockFailure(t *testing.T) {
 		// operator would before retrying.
 		block  func(t *testing.T, dir, lockPath string)
 		repair func(t *testing.T, dir, lockPath string)
+		// wantConfigEdited says whether the blocked apply still got as far as
+		// publishing the config edit.
+		wantConfigEdited bool
 	}{
 		{
 			// The lockfile resolves out of the repository, which os.Root
 			// refuses to follow. Reads through the repository root fail while
-			// the config, an ordinary file, is still rewritten in place.
+			// the config, an ordinary file in a writable directory, is still
+			// rewritten.
 			name: "lockfile escaping the repository",
 			block: func(t *testing.T, dir, lockPath string) {
 				t.Helper()
@@ -1598,11 +1605,13 @@ func TestApplyMiseUpdateRetryAfterLockFailure(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
+			wantConfigEdited: true,
 		},
 		{
-			// A read-only directory blocks the lockfile replacement (its
-			// temporary sibling cannot be created) while still allowing the
-			// in-place config rewrite.
+			// A read-only directory blocks both replacements, since neither can
+			// create its temporary sibling there. Nothing is published, which is
+			// the point of publishing by rename: the config the operator wrote
+			// is still theirs after a failed fix.
 			name: "read-only directory",
 			block: func(t *testing.T, dir, lockPath string) {
 				t.Helper()
@@ -1640,8 +1649,8 @@ func TestApplyMiseUpdateRetryAfterLockFailure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(config), "1.24.3") {
-				t.Fatalf("config should already carry the fix:\n%s", config)
+			if got := strings.Contains(string(config), "1.24.3"); got != tt.wantConfigEdited {
+				t.Fatalf("config carries the fix = %v, want %v:\n%s", got, tt.wantConfigEdited, config)
 			}
 			// The failure must leave the lockfile exactly as it was, never
 			// truncated.
