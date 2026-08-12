@@ -317,10 +317,14 @@ func canonicalizePackageReferences(value any) {
 // whose type a registration claims, and it is then folded by that ecosystem's
 // own rules rather than by an inherited guess. Everything else, including a
 // package URL of a type Deputy has no rules for, comes back byte for byte.
+//
+// Whether a string is a package URL is the parser's answer, not a prefix test's.
+// The purl scheme is case-insensitive and [purlx.ParseLoose] also tolerates
+// surrounding whitespace, so a byte-exact "pkg:" test called
+// "PKG:golang/example.com/mod@1.2.3" prose while [canonicalizePURL] canonicalized
+// the same string as an identity. A rule as ordinary as "node.purl in roots" was
+// then false for no reason but the casing of a scheme.
 func canonicalizePackageReference(raw string) string {
-	if !strings.HasPrefix(raw, "pkg:") {
-		return raw
-	}
 	parsed, err := purlx.ParseLoose(raw)
 	if err != nil {
 		return raw
