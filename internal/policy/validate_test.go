@@ -1802,6 +1802,57 @@ policies:
 `,
 			wantCodes: []string{"empty-var-name", "invalid-action"},
 		},
+		{
+			// A name the policy cannot bind is a defect of that one var, so the
+			// vars under it are still compiled: reporting them a lint run later
+			// makes the author fix a file one name at a time.
+			name: "a var with no name beside a var that does not compile",
+			bundle: `
+policies:
+  - name: unnamed-var-and-bad-var
+    vars:
+      "": '1'
+      threshold: '1 +'
+    rules:
+      - when: "threshold > 0"
+        action: deny
+        reason: "r"
+`,
+			wantCodes: []string{"empty-var-name", "cel-error"},
+		},
+		{
+			name: "a duplicate var name beside a var that does not compile",
+			bundle: `
+policies:
+  - name: duplicate-var-and-bad-var
+    vars:
+      blocked: '["a"]'
+      blocked: '["b"]'
+      threshold: '1 +'
+    rules:
+      - when: "threshold > 0"
+        action: deny
+        reason: "r"
+`,
+			wantCodes: []string{"duplicate-var", "cel-error"},
+		},
+		{
+			name: "two var names the policy cannot bind beside a var that does not compile",
+			bundle: `
+policies:
+  - name: two-bad-names-and-bad-var
+    vars:
+      "": '1'
+      blocked: '["a"]'
+      blocked: '["b"]'
+      threshold: '1 +'
+    rules:
+      - when: "threshold > 0"
+        action: deny
+        reason: "r"
+`,
+			wantCodes: []string{"empty-var-name", "duplicate-var", "cel-error"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

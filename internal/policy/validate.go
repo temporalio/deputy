@@ -425,20 +425,35 @@ func expandedPolicyIssues(item *yaml.Node, source string, extraVars []string, lo
 // failure outright is not the same thing. It withheld any var-shape defect the
 // walk does not model, and left the one it does to a bundle-wide backstop that an
 // unrelated located error stops before it runs.
+//
+// A name the policy cannot bind is reported and then set aside, so the vars
+// beneath it are still compiled. It is the defect of one var, and stopping at it
+// asked about the vars only in a policy whose every name is already right, which
+// cost the author a lint run per mistyped name. Setting one aside is not
+// forgiving it: the name is reported here, the walk locates it as an error of its
+// own, and every reader that runs the policy refuses it outright.
 func varCompileIssues(pol structuredPolicy, item *yaml.Node, source string, extraVars []string, located []Issue) []Issue {
 	if len(pol.Vars) == 0 {
 		return nil
 	}
+	bound, unbindable := pol.Vars.bindable()
+	var issues []Issue
+	for _, err := range unbindable {
+		issues = append(issues, backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, err), source, item, located)...)
+	}
+	// pol is a copy, so narrowing its vars to the ones the policy can bind asks
+	// the compiler about exactly the names the expansion would put in scope.
+	pol.Vars = bound
 	body, err := pol.wrapVars("[]")
 	if err != nil {
-		return backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, err), source, item, located)
+		return append(issues, backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, err), source, item, located)...)
 	}
 	if err := Compile(body, extraVars); err != nil {
 		issue := issueAt(item, IssueError, "cel-error", err.Error())
 		issue.Policy = strings.TrimSpace(pol.Name)
-		return []Issue{issue}
+		issues = append(issues, issue)
 	}
-	return nil
+	return issues
 }
 
 // backstopIssue renders a load failure as an issue, or nothing when a located
@@ -551,11 +566,11 @@ func validateVars(item *yaml.Node) []Issue {
 		key := node.Content[i]
 		name := varKeyName(key)
 		if name == "" {
-			issues = append(issues, issueAt(key, IssueError, "empty-var-name", "vars must have non-empty names"))
+			issues = append(issues, issueAt(key, IssueError, "empty-var-name", emptyVarNameMessage))
 			continue
 		}
 		if _, dup := seen[name]; dup {
-			issues = append(issues, issueAt(key, IssueError, "duplicate-var", fmt.Sprintf("duplicate var name %q", name)))
+			issues = append(issues, issueAt(key, IssueError, "duplicate-var", fmt.Sprintf(duplicateVarNameFormat, name)))
 		}
 		seen[name] = struct{}{}
 	}

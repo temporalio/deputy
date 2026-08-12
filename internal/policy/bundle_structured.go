@@ -130,6 +130,45 @@ func (o *orderedVars) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// bindable splits a policy's vars into the ones it can bind, in author order,
+// and an error for every name it cannot. A name binds nothing when it is empty,
+// and a repeated name binds once: the later declaration shadows the earlier, so
+// only one of the two can survive and the surviving one is the declaration the
+// expansion would bind.
+//
+// Splitting rather than refusing at the first bad name is what lets validation
+// report every name defect and still compile the vars beneath them. A reader that
+// runs the policy must refuse it instead (see wrapVars): a var the author named
+// twice is a var Deputy cannot say which value it holds, and a dropped
+// declaration is not something to run.
+// Names are compared normalized, as CEL binds them and as the node walk reports
+// them, so " blocked " and "blocked" are the one name they read as and the walk's
+// wording of each defect is the wording reported here.
+func (o orderedVars) bindable() (orderedVars, []error) {
+	binds := make(map[string]int, len(o))
+	for i, kv := range o {
+		if name := normalizeVarName(kv.Name); name != "" {
+			binds[name] = i
+		}
+	}
+	var (
+		bound      orderedVars
+		unbindable []error
+	)
+	for i, kv := range o {
+		name := normalizeVarName(kv.Name)
+		switch {
+		case name == "":
+			unbindable = append(unbindable, errors.New(emptyVarNameMessage))
+		case binds[name] != i:
+			unbindable = append(unbindable, fmt.Errorf(duplicateVarNameFormat, name))
+		default:
+			bound = append(bound, kv)
+		}
+	}
+	return bound, unbindable
+}
+
 // Names returns the ordered variable names.
 func (o orderedVars) Names() []string {
 	if len(o) == 0 {
@@ -172,6 +211,15 @@ func (b *structuredBundle) normalizeNames() {
 // restatement of it; one constant is what keeps the two readers from drifting
 // into reporting one mistake twice.
 const policyNeedsRuleMessage = "policy must contain at least one rule"
+
+// Messages for a vars mapping a policy cannot bind. The node walk locates both
+// defects from the document, in its own words, and validation folds the loader's
+// restatement of them by matching the wording, so one spelling of each is what
+// keeps a single mistake from being reported twice.
+const (
+	emptyVarNameMessage    = "vars must have non-empty names"
+	duplicateVarNameFormat = "duplicate var name %q"
+)
 
 // tryParseStructuredBundle attempts to parse a byte slice as a structured YAML bundle.
 // It returns the generated CEL sources if successful, or a boolean indicating
@@ -364,19 +412,16 @@ func (p structuredPolicy) toCELSource() (string, error) {
 // wrong or right on their own: validation wraps an empty body with it to report
 // vars that do not compile in a policy whose rules the walk has already found a
 // defect in, which the whole-policy expansion cannot do.
+//
+// A name the policy cannot bind refuses the whole policy, which is what a reader
+// that runs it must do; validation reports every one of them and compiles what is
+// left (see bindable).
 func (p structuredPolicy) wrapVars(body string) (string, error) {
 	if len(p.Vars) == 0 {
 		return body, nil
 	}
-	seen := map[string]struct{}{}
-	for _, kv := range p.Vars {
-		if strings.TrimSpace(kv.Name) == "" {
-			return "", fmt.Errorf("vars must have non-empty names")
-		}
-		if _, ok := seen[kv.Name]; ok {
-			return "", fmt.Errorf("duplicate var name %q", kv.Name)
-		}
-		seen[kv.Name] = struct{}{}
+	if _, unbindable := p.Vars.bindable(); len(unbindable) > 0 {
+		return "", unbindable[0]
 	}
 	for _, v := range slices.Backward(p.Vars) {
 		body = fmt.Sprintf("([%s]).map(%s, %s)[0]", v.exprString(), v.Name, body)
