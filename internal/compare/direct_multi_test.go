@@ -692,3 +692,194 @@ criterion = "0.5"
 		})
 	}
 }
+
+// TestCargoAliasesScopeToTheirWorkspaceRoot pins a rename to the workspace that
+// declared it. One repository can hold several independent Cargo workspaces, and
+// an alias means whatever the member's own root says it means: two roots are
+// free to spell the same alias differently, or to spell one as a rename and the
+// other as an ordinary crate of that name. Resolving renames repository-wide
+// conflated those, so a member inheriting from its own root got a crate no
+// manifest of its workspace ever named, and the rename its root did declare was
+// lost to whichever root the walk reached last.
+func TestCargoAliasesScopeToTheirWorkspaceRoot(t *testing.T) {
+	tests := []struct {
+		name      string
+		manifests map[string]string
+		want      map[string]bool
+		notDirect []string
+	}{
+		{
+			// Both roots offer "fast", and each names a different crate. The
+			// member that inherits it gets the crate its own root names.
+			name: "sibling roots spelling one alias differently keep their own crate",
+			manifests: map[string]string{
+				"crates/Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+fast = { package = "serde", version = "1.0" }
+`,
+				"crates/member/Cargo.toml": `[package]
+name = "crates-member"
+
+[dependencies]
+fast = { workspace = true }
+`,
+				"tools/Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+fast = { package = "rand", version = "0.8" }
+`,
+				"tools/member/Cargo.toml": `[package]
+name = "tools-member"
+
+[dependencies]
+fast = { workspace = true }
+`,
+			},
+			want: map[string]bool{"fast": true, "serde": true, "rand": true},
+		},
+		{
+			// Only one root renames "fast"; nobody in that workspace inherits
+			// it. The other root offers a crate that is really called fast, and
+			// its member takes that. Nothing here depends on serde.
+			name: "a rename is not lent to a member of another root",
+			manifests: map[string]string{
+				"crates/Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+fast = { package = "serde", version = "1.0" }
+`,
+				"crates/member/Cargo.toml": `[package]
+name = "crates-member"
+
+[dependencies]
+anyhow = "1.0"
+`,
+				"tools/Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+fast = "0.1"
+`,
+				"tools/member/Cargo.toml": `[package]
+name = "tools-member"
+
+[dependencies]
+fast = { workspace = true }
+`,
+			},
+			want:      map[string]bool{"anyhow": true, "fast": true},
+			notDirect: []string{"serde"},
+		},
+		{
+			// The nearest root is the one that answers. An inner workspace that
+			// declares the name without renaming it must stop the lookup, not
+			// hand it on to an outer root that renames it.
+			name: "a nested root without the rename does not reach the outer root's",
+			manifests: map[string]string{
+				"Cargo.toml": `[workspace]
+members = ["app"]
+
+[workspace.dependencies]
+shared = { package = "serde", version = "1.0" }
+`,
+				"app/Cargo.toml": `[package]
+name = "app"
+
+[dependencies]
+anyhow = "1.0"
+`,
+				"nested/Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+shared = "0.4"
+`,
+				"nested/member/Cargo.toml": `[package]
+name = "nested-member"
+
+[dependencies]
+shared = { workspace = true }
+`,
+			},
+			want:      map[string]bool{"anyhow": true, "shared": true},
+			notDirect: []string{"serde"},
+		},
+		{
+			// A root that is not the repository root still governs its members,
+			// so scoping must not amount to resolving nothing.
+			name: "a rename declared by a nested root resolves for that root's member",
+			manifests: map[string]string{
+				"crates/Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+my-serde = { package = "serde", version = "1.0" }
+`,
+				"crates/member/Cargo.toml": `[package]
+name = "crates-member"
+
+[dependencies]
+my-serde = { workspace = true }
+`,
+			},
+			want: map[string]bool{"my_serde": true, "serde": true},
+		},
+		{
+			// A root manifest is allowed to be a package too, and it inherits
+			// from itself, so the governing root has to be found at the
+			// member's own directory as well as above it.
+			name: "a root inheriting its own rename resolves against itself",
+			manifests: map[string]string{
+				"Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+my-serde = { package = "serde", version = "1.0" }
+
+[package]
+name = "root-package"
+
+[dependencies]
+my-serde = { workspace = true }
+`,
+			},
+			want: map[string]bool{"my_serde": true, "serde": true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ws, err := workspace.NewTempDir("cmp-cargo-roots")
+			if err != nil {
+				t.Fatalf("workspace: %v", err)
+			}
+			defer ws.Close()
+			for name, contents := range tt.manifests {
+				if dir := path.Dir(name); dir != "." {
+					if err := ws.MkdirAll(dir, 0o755); err != nil {
+						t.Fatalf("mkdir %s: %v", dir, err)
+					}
+				}
+				if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+					t.Fatalf("write %s: %v", name, err)
+				}
+			}
+
+			direct := CollectDirectDependenciesFromWorkspace(ws)
+			for crate, want := range tt.want {
+				if direct[crate] != want {
+					t.Errorf("direct[%q] = %v, want %v (collected %v)", crate, direct[crate], want, direct)
+				}
+			}
+			for _, crate := range tt.notDirect {
+				if direct[crate] {
+					t.Errorf("direct[%q] = true, want it absent (collected %v)", crate, direct)
+				}
+			}
+		})
+	}
+}

@@ -31,14 +31,19 @@ var manifestDirectDepParsers = map[string]func([]byte) map[string]bool{
 }
 
 // manifestWorkspaceAliasParsers maps manifest basenames to the parser that
-// extracts the renames a workspace declares for its members to inherit, keyed
-// by the name a member inherits them under. A workspace dependency table is a
-// menu, not a dependency list, so nothing in it is direct until a member takes
-// it. What a member's manifest cannot spell is a rename, because it names the
-// alias and the workspace names the crate, so the renames are carried to the
-// end of the walk and applied to the aliases members actually took. Ecosystems
-// with no inheritance mechanism have no entry here.
-var manifestWorkspaceAliasParsers = map[string]func([]byte) map[string]string{
+// extracts the renames a workspace root declares for its members to inherit,
+// keyed by the name a member inherits them under, and reports whether the
+// manifest declares a workspace at all. A workspace dependency table is a menu,
+// not a dependency list, so nothing in it is direct until a member takes it.
+// What a member's manifest cannot spell is a rename, because it names the alias
+// and the workspace names the crate, so the renames are carried to the end of
+// the walk and applied to the aliases members of that root actually took.
+// Ecosystems with no inheritance mechanism have no entry here.
+//
+// Root-ness is reported separately from the renames because a root that renames
+// nothing still bounds its members' inheritance, see
+// [manifestScan.governingRenames].
+var manifestWorkspaceAliasParsers = map[string]func([]byte) (map[string]string, bool){
 	"Cargo.toml": getCargoWorkspaceAliases,
 }
 
@@ -53,16 +58,32 @@ var manifestWorkspaceInheritanceParsers = map[string]func([]byte) map[string]boo
 	"Cargo.toml": getCargoInheritedDeps,
 }
 
+// manifestScope identifies the inheritance scope a manifest takes part in: the
+// directory it sits in, and the kind of manifest it is. Both halves matter. A
+// rename is offered by one workspace root to the members under it, so the
+// directory is what tells a member's root from some other root in the same
+// repository, and the kind is what keeps a member of one ecosystem from
+// resolving against a root declared by another that happens to share a
+// directory.
+type manifestScope struct {
+	kind string
+	dir  string
+}
+
 // manifestScan accumulates what a walk over a tree's manifests learns. direct
-// is the answer callers want. inherited and aliases are the two halves of a
+// is the answer callers want. inherited and roots are the two halves of a
 // workspace rename that no single manifest holds, since the member records the
-// alias it took and the root records the crate that alias means, so they are
+// alias it took and its root records the crate that alias means, so they are
 // carried until the walk ends and folded in by resolve. Both walks fill one of
 // these, which is what stops either from collecting half the answer.
+//
+// Both are keyed by scope rather than pooled per repository: one repository can
+// hold several independent workspace roots, and an alias means whatever the
+// member's own root says it means.
 type manifestScan struct {
 	direct    map[string]bool
-	inherited map[string]bool
-	aliases   map[string]string
+	inherited map[manifestScope]map[string]bool
+	roots     map[manifestScope]map[string]string
 }
 
 // newManifestScan starts a scan from the direct dependencies already collected
@@ -71,8 +92,54 @@ type manifestScan struct {
 func newManifestScan(direct map[string]bool) *manifestScan {
 	return &manifestScan{
 		direct:    direct,
-		inherited: make(map[string]bool),
-		aliases:   make(map[string]string),
+		inherited: make(map[manifestScope]map[string]bool),
+		roots:     make(map[manifestScope]map[string]string),
+	}
+}
+
+// recordWorkspaceRoot notes that the manifest at a scope declares a workspace,
+// along with the renames it offers its members. A root is recorded even when it
+// renames nothing, because its presence is what stops its members from
+// resolving against a root further up.
+func (s *manifestScan) recordWorkspaceRoot(scope manifestScope, renames map[string]string) {
+	root, ok := s.roots[scope]
+	if !ok {
+		root = make(map[string]string, len(renames))
+		s.roots[scope] = root
+	}
+	maps.Copy(root, renames)
+}
+
+// recordInherited notes the dependency keys the manifest at a scope takes from
+// its workspace.
+func (s *manifestScan) recordInherited(scope manifestScope, keys map[string]bool) {
+	taken, ok := s.inherited[scope]
+	if !ok {
+		taken = make(map[string]bool, len(keys))
+		s.inherited[scope] = taken
+	}
+	maps.Copy(taken, keys)
+}
+
+// governingRenames returns the renames offered by the workspace root a scope
+// inherits from: the manifest of the same kind in the nearest directory at or
+// above it that declared a workspace. The search stops at the first root it
+// finds, whether or not that root spells the alias being resolved, because a
+// nearer root is the only one a member can inherit from and reaching past it
+// would attribute a crate the member's own workspace never named.
+//
+// A scope with no root above it resolves nothing, rather than falling back to
+// some other root's renames. That leaves a member whose root sits outside the
+// scanned tree with the alias it wrote and without the crate behind it, which is
+// the direction that cannot invent a dependency.
+func (s *manifestScan) governingRenames(scope manifestScope) (map[string]string, bool) {
+	for dir := scope.dir; ; dir = path.Dir(dir) {
+		if renames, ok := s.roots[manifestScope{kind: scope.kind, dir: dir}]; ok {
+			return renames, true
+		}
+		if parent := path.Dir(dir); parent == dir {
+			return nil, false
+		}
 	}
 }
 
@@ -85,21 +152,31 @@ func newManifestScan(direct map[string]bool) *manifestScan {
 // Inheritance is what is tested, not the presence of the alias in the direct
 // set. A member is free to declare a local dependency under the same name as an
 // alias nobody took, and the name alone cannot tell the two apart.
+//
+// Each member resolves against its own workspace root, so two roots that spell
+// one alias differently stay apart and neither lends its renames to the other's
+// members.
 func (s *manifestScan) resolve() map[string]bool {
-	for alias, crate := range s.aliases {
-		if s.inherited[alias] {
-			s.direct[crate] = true
+	for scope, taken := range s.inherited {
+		renames, ok := s.governingRenames(scope)
+		if !ok {
+			continue
+		}
+		for alias := range taken {
+			if crate, ok := renames[alias]; ok {
+				s.direct[crate] = true
+			}
 		}
 	}
 	return s.direct
 }
 
 // collectManifestDependencies applies whichever parsers are registered for a
-// manifest's basename to its contents, accumulating direct dependencies and
-// workspace aliases. Both collection paths go through it so the workspace walk
-// and the commit-tree walk cannot drift in coverage. The contents are read
-// through read only once a parser wants them, and a file that fails to read is
-// skipped best-effort.
+// manifest's basename to its contents, accumulating direct dependencies and the
+// two halves of a workspace rename under the scope the manifest occupies. Both
+// collection paths go through it so the workspace walk and the commit-tree walk
+// cannot drift in coverage. The contents are read through read only once a
+// parser wants them, and a file that fails to read is skipped best-effort.
 func collectManifestDependencies(name string, read func() ([]byte, error), scan *manifestScan) {
 	base := path.Base(name)
 	parseDeps, hasDeps := manifestDirectDepParsers[base]
@@ -115,14 +192,19 @@ func collectManifestDependencies(name string, read func() ([]byte, error), scan 
 	if err != nil {
 		return
 	}
+	scope := manifestScope{kind: base, dir: path.Dir(path.Clean(name))}
 	if hasDeps {
 		mergeDirectDependencies(scan.direct, parseDeps(data))
 	}
 	if hasAliases {
-		maps.Copy(scan.aliases, parseAliases(data))
+		if renames, isRoot := parseAliases(data); isRoot {
+			scan.recordWorkspaceRoot(scope, renames)
+		}
 	}
 	if hasInherited {
-		maps.Copy(scan.inherited, parseInherited(data))
+		if keys := parseInherited(data); len(keys) > 0 {
+			scan.recordInherited(scope, keys)
+		}
 	}
 }
 
@@ -307,10 +389,14 @@ func (t cargoDependencyTables) tables() []map[string]any {
 // available for inheritance, and a member has to reference it with
 // "workspace = true" before anything depends on it. See
 // [getCargoWorkspaceAliases].
+//
+// Workspace is a pointer so that declaring a workspace can be told from not
+// declaring one: a root that lists members and renames nothing decodes to an
+// empty table, and that is still the root its members inherit from.
 type cargoManifest struct {
 	cargoDependencyTables
 	Target    map[string]cargoDependencyTables `toml:"target"`
-	Workspace cargoDependencyTables            `toml:"workspace"`
+	Workspace *cargoDependencyTables           `toml:"workspace"`
 }
 
 // packageTables returns every dependency table the manifest declares for
@@ -382,20 +468,28 @@ func getCargoInheritedDeps(data []byte) map[string]bool {
 }
 
 // getCargoWorkspaceAliases returns the crate each [workspace.dependencies]
-// entry renames, keyed by the name a member inherits it under. Only renamed
-// entries are returned: a member that writes "serde.workspace = true" records
-// "serde" from its own manifest already, while one that writes
-// "my-serde.workspace = true" records a key crates.io has never heard of, and
-// only the workspace manifest knows it means "serde".
+// entry renames, keyed by the name a member inherits it under, and whether the
+// manifest declares a workspace at all. Only renamed entries are returned: a
+// member that writes "serde.workspace = true" records "serde" from its own
+// manifest already, while one that writes "my-serde.workspace = true" records a
+// key crates.io has never heard of, and only the workspace manifest knows it
+// means "serde".
+//
+// The second result is reported for every root, renames or none, because a root
+// is also a boundary: its members inherit from it and never from a root above
+// it. A manifest that declares no workspace is not a root and offers nothing.
 //
 // The entries themselves are deliberately not dependencies. Including the whole
 // table marked a crate direct because its version happened to be declared
 // centrally, even when no member inherited it and the lockfile only carries it
 // as somebody else's transitive dependency.
-func getCargoWorkspaceAliases(data []byte) map[string]string {
+func getCargoWorkspaceAliases(data []byte) (map[string]string, bool) {
 	var manifest cargoManifest
 	if err := toml.Unmarshal(data, &manifest); err != nil {
-		return nil
+		return nil, false
+	}
+	if manifest.Workspace == nil {
+		return nil, false
 	}
 	aliases := make(map[string]string)
 	for _, table := range manifest.Workspace.tables() {
@@ -413,7 +507,7 @@ func getCargoWorkspaceAliases(data []byte) map[string]string {
 			aliases[alias] = crate
 		}
 	}
-	return aliases
+	return aliases, true
 }
 
 // recordCargoDependency records the crate names a single Cargo.toml dependency
