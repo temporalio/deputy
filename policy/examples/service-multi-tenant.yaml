@@ -38,6 +38,7 @@ policies:
     description: Ensure all authenticated users have a tenant identifier
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
       - service_diff_request
       - service_secrets_request
@@ -78,6 +79,7 @@ policies:
       governed by require-tenant-claim and secrets-requires-security-team.
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
       - service_secrets_request
     rules:
@@ -158,6 +160,7 @@ policies:
   - name: service-account-scopes
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
       - service_diff_request
       - service_secrets_request

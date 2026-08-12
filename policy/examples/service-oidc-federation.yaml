@@ -40,6 +40,7 @@ policies:
     description: Only allow workflows from trusted GitHub organizations
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
       - service_secrets_request
     rules:
@@ -123,6 +124,7 @@ policies:
     description: Only allow GitLab projects from trusted namespaces
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
     rules:
       - action: deny
@@ -159,6 +161,7 @@ policies:
     description: Only allow specific GCP service accounts
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
       - service_secrets_request
     rules:
@@ -177,6 +180,7 @@ policies:
     description: Restrict to service accounts from specific GCP projects
     entrypoints:
       - service_scan_request
+      - service_list_request
     rules:
       - action: deny
         when: |
@@ -198,6 +202,7 @@ policies:
     description: Restrict based on AWS account ID in assumed role claims
     entrypoints:
       - service_scan_request
+      - service_list_request
     rules:
       - action: deny
         when: |
@@ -226,6 +231,7 @@ policies:
     description: Only allow tokens from specific Azure AD tenants
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
     rules:
       - action: deny
@@ -268,6 +274,7 @@ policies:
     description: Only allow workloads from specific Kubernetes namespaces
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
     rules:
       - action: deny
@@ -335,6 +342,7 @@ policies:
       Determines identity type from token claims and applies appropriate rules.
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
     rules:
       # GitHub Actions: allow from trusted repos

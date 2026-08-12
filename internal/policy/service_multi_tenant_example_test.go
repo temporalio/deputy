@@ -7,6 +7,79 @@ import (
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 )
 
+// TestShippedTenantIsolationCoversListRequests pins that enumerating a resource
+// is subject to the same tenant check as scanning it.
+//
+// Listing takes a target and reports what is inside it, so leaving it out of the
+// isolation rule lets a tenant enumerate another tenant's repository. It was left
+// out: before entrypoints were forwarded to the engine, the empty entrypoint
+// disabled filtering and every rule ran on every mapped procedure, so the
+// entrypoint lists in this file were never load-bearing and nothing noticed the
+// omission.
+func TestShippedTenantIsolationCoversListRequests(t *testing.T) {
+	sources, err := LoadSources([]string{findExample(t, "service-multi-tenant.yaml")})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	engine, err := NewEngine(sources)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		target     string
+		wantDenied bool
+	}{
+		{
+			name:       "listing a resource the tenant owns",
+			target:     "github.com/acme/repo",
+			wantDenied: false,
+		},
+		{
+			name:       "listing another tenant's resource",
+			target:     "github.com/other/repo",
+			wantDenied: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &policyv1.ServiceListRequestPolicyInput{
+				Jwt: &policyv1.JWTClaims{
+					Sub:          "user@example.com",
+					CustomClaims: map[string]string{"tenant": "acme"},
+				},
+				Request: &policyv1.ServiceRequest{
+					Procedure: "/deputy.list.v1.ListService/ListPackages",
+					Target:    tt.target,
+				},
+				Env: &policyv1.Environment{
+					Command:    "server",
+					Entrypoint: string(EntrypointServiceListRequest),
+				},
+			}
+
+			actions, err := engine.EvaluateAll(t.Context(), input, "server", string(EntrypointServiceListRequest))
+			if err != nil {
+				t.Fatalf("EvaluateAll: %v", err)
+			}
+
+			denied := false
+			var by string
+			for _, action := range actions {
+				if ActionTypeIs(action.Type, ActionDeny) {
+					denied = true
+					by = action.Source
+				}
+			}
+			if denied != tt.wantDenied {
+				t.Errorf("denied = %v (by %s), want %v", denied, by, tt.wantDenied)
+			}
+		})
+	}
+}
+
 // TestShippedTenantIsolationSkipsTargetlessProcedures pins the other half of the
 // contract: several procedures the single-target rule covers name no resource at
 // all (SecretsService Verify, ListDetectors, RegisterDetector, and SBOMService
