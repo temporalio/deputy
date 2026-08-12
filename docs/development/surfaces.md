@@ -85,19 +85,9 @@ Nothing currently ties the reference to the struct. No test reads `configuration
 
 ## Why this matters, empirically
 
-Auditing every surface split it cleanly by direction, if not by outcome. Every derived surface was faithful to its source. Most hand-maintained ones had drifted. Faithful is not the same as correct, and the difference is the whole point of the next section:
+Auditing the surfaces split them by direction, if not by outcome. Derived surfaces were faithful to their source. Hand-maintained ones had mostly drifted, offering functions nothing registers, fields that exist on no message, and configuration sections that do not exist. Faithful is not the same as correct, and the difference is the whole point of the next section.
 
-| Surface | Source | Outcome |
-| --- | --- | --- |
-| MCP tool schemas | descriptors | correct |
-| Policy entrypoint reference | descriptors, via `bindings.go` | see below |
-| Helper catalog | hand | correct, all 50 entries compile |
-| Entrypoint helper lists | hand, via `helpers.go` | advertises `hasFix()`, `inKEV()`, `epssScore()`, which nothing registers |
-| REPL schema | hand | offers a function registered nowhere |
-| LSP completions | hand | offers fields that exist on no message |
-| Config reference | hand | documents an entire section that does not exist |
-
-One nuance decides the whole design. The policy entrypoint reference **is** generated, and it was still publishing variables that crash the proxy, because the source it derived from was wrong. The same generated file also advertises three scan helpers, `hasFix()`, `inKEV()`, and `epssScore()`, that no CEL environment registers (#180). Generation was faithful in both cases. `helpersByCategory` in `internal/policy/helpers.go` is a hand list, and it was copied accurately.
+The case that decides the design is the policy entrypoint reference. It **is** generated, and it was still publishing variables that crash the proxy, because the source it derived from was wrong. The same generated file advertises scan helpers that no CEL environment registers (#180). Generation was faithful both times; `helpersByCategory` in `internal/policy/helpers.go` is a hand list, and it was copied accurately.
 
 > Generation propagates correctness and incorrectness equally. Deriving from a wrong root is not better than copying by hand.
 
@@ -107,15 +97,15 @@ On `main` there is no such test. [`internal/policy/bindings_test.go`](../../inte
 
 A first version is in review, comparing each profile against the names the CEL environment declares. It catches the variables no entrypoint can use, `licenses` among them, but it cannot be the whole contract. The environment is one flat list shared by every entrypoint and every variable in it is `DynType`, so a name it declares may still be unbound at the entrypoint advertising it.
 
-The payload is the real root, and the thing to get right is that **a root is an evaluation route, not an entrypoint**. Trying to file each of the 37 profiles under one payload kind is the mistake, because a profile can be reached by more than one route with a different payload shape on each.
+The payload is the real root, and the thing to get right is that **a root is an evaluation route, not an entrypoint**. Filing each profile under one payload kind is the mistake, because a profile can be reached by more than one route with a different payload shape on each.
 
-`scan_report` is the example. It has a typed root, `PolicyHandler.buildActivation` in [`internal/server/policy_handler.go`](../../internal/server/policy_handler.go) hands `Engine.EvaluateAll` a `*ScanReportPolicyInput` for `PolicyService.Evaluate`, which is mounted in `services.go`. It also has a map-backed root, `internal/cli/cmd/scan.go` assembling a map for the CLI. Both are live. A guard that assumes one payload per profile checks one of them and leaves the other unguarded.
+`scan_report` is the example. It has a typed root through `PolicyHandler.buildActivation` in [`internal/server/policy_handler.go`](../../internal/server/policy_handler.go), which hands `Engine.EvaluateAll` a `*ScanReportPolicyInput`, and a map-backed root in `internal/cli/cmd/scan.go`. Both are live. A guard assuming one payload per profile checks one and leaves the other unguarded.
 
-The routes are:
+Routes come in three kinds:
 
-- **Typed proto.** `buildPolicyInput` for the five proxy entrypoints, `buildPolicyPayload` for the service entrypoints, and `buildActivation` for `PolicyService.Evaluate`. The payload can be checked against a descriptor directly, but a route is the payload *and* the command and entrypoint it evaluates under, and only two of the three pass them. `internal/proxy/policy.go` evaluates with `("proxy", entrypoint)` and `internal/server/policy_handler.go` with `(command, entrypoint)`, so the `entrypoints:` and `commands:` filters on a policy apply. The service interceptor in [`internal/server/server.go`](../../internal/server/server.go) calls the package-level `policy.EvaluateAll`, which hands `Engine.EvaluateAll` `("", "")`, and `shouldSkip` applies each filter only when its argument is non-empty. A policy restricted to `service_secrets_request` therefore also runs on scan, list, and every other service procedure, silently: the filter is not overridden, it is never consulted. A descriptor-only guard cannot see this, so the inventory has to record the filter arguments beside the payload, and the interceptor has to pass through the entrypoint it has already selected.
-- **Map assembled at the call site**, via `EvaluateAllMap`. Not only the CLI: `internal/cli/cmd/policy_runtime.go` is one caller and `internal/sandbox/manager.go` is another, so `sandbox_execution` is map-backed and has nothing to do with the CLI. Here the guard is two-part: the profile against the descriptor where a typed input exists, plus a test that the assembled map supplies what the descriptor declares.
-- **No route at all.** Seven profiles have no evaluator anywhere: `secrets_report`, `secrets_finding`, `graph_report`, `graph_node`, `graph_edge`, `sandbox_command`, and `sandbox_network` (#189). They are still published in the generated reference and offered by the MCP tool, so a policy written against one lints clean and never runs. A contract test pointed at all 37 would go looking for seven builders that do not exist, which is why the inventory is a prerequisite for the guard rather than a detail of it.
+- **Typed proto**, built by a payload builder such as `buildPolicyInput` or `buildPolicyPayload`. The payload can be checked against a descriptor, but a route is the payload *and* the command and entrypoint it evaluates under, and not every route passes them. The service interceptor in [`internal/server/server.go`](../../internal/server/server.go) reaches `Engine.EvaluateAll` with `("", "")`, and `shouldSkip` applies each filter only when its argument is non-empty, so a policy restricted to one entrypoint also runs on every other service procedure. The filter is not overridden, it is never consulted. A descriptor-only guard cannot see this, so a route has to record its filter arguments beside its payload.
+- **Map assembled at the call site**, via `EvaluateAllMap`. Not only the CLI: `internal/sandbox/manager.go` is a caller too, so `sandbox_execution` is map-backed and has nothing to do with the CLI. The guard here is two-part: the profile against the descriptor where a typed input exists, plus a test that the assembled map supplies what the descriptor declares.
+- **No route at all.** Some profiles have no evaluator anywhere, yet are still published in the generated reference and offered by the MCP tool, so a policy written against one lints clean and never runs (#189). A contract test pointed at every declared profile would go looking for builders that do not exist, which is why knowing which profiles are live is a prerequisite for the guard rather than a detail of it.
 
 `PolicyService.Evaluate` shows why even a typed route needs more than its payload descriptor. Two of its advertised inputs are not honored: `EvaluateRequest.custom_payload` (field 99) has no case in `buildActivation`, so selecting it returns `no evaluation input provided`, and `EvaluateRequest.entrypoints` (field 20) is never read at all, so a caller asking to evaluate a specific entrypoint gets whichever one the input variant implies. A descriptor check sees both fields and concludes the route is fine.
 
@@ -123,7 +113,9 @@ The routes are:
 
 One more thing a descriptor check has to handle before it can be written: **the profile vocabulary and the descriptor vocabulary are not the same**. `imageVars` in `bindings.go` advertises both `image` and `image_info`, `scan.go` supplies both deliberately for compatibility, and the proto declares only `image`. A guard comparing names to descriptor fields would fail on a runtime binding that is correct. So the design needs either an explicit derived alias mapping, or a migration of the runtime and profile onto the descriptor vocabulary first. That choice is part of the work, not a detail to discover during it.
 
-Two warnings for anyone repeating this audit. Neither obvious search gives the right answer: grepping the `Entrypoint*` Go constants misses entrypoints named by string literal, and grepping the string literals turns up doc comments and REPL strings that are not evaluators. And enumerating evaluation routes is not the same as enumerating entrypoints. Three successive counts here were wrong, each for one of those reasons.
+A warning for anyone repeating this audit, learned the hard way. No obvious search answers it. Grepping the `Entrypoint*` Go constants misses entrypoints named by string literal; grepping the literals turns up doc comments and REPL strings that are not evaluators; and enumerating entrypoints is not the same as enumerating routes, since one profile can have several and some have none.
+
+That difficulty is the argument of this section turned on itself. **This document states rules; it deliberately carries no inventory.** Every count written here was wrong within a week, because a hand-maintained list of a moving tree is exactly the defect the rest of the page warns about. Current findings live in the issues referenced above, where they can be closed. The inventory should eventually be derived rather than written (#195), and until it is, treat any specific list in prose as out of date.
 
 ## Identity
 
@@ -133,7 +125,7 @@ A package coordinate has more than one legitimate spelling. `Go` is the display 
 
 It is not finished. `Registration` carries no normalization rules and no purl type, and the package-level `Parse`, `All`, `NormalizeName`, and `NormalizeVersion` are still hardcoded switches in `ecosystem.go`. `Parse` does not even consult the `Aliases` a registration declares. So adding an ecosystem today means a registry entry *and* several edits elsewhere, and an entry added on its own will be invisible to parsing and enumeration.
 
-The failures were never missing machinery. `Ecosystem.NormalizeVersion` exists and five packages call it; the policy path did not, so a rule matching `^v1\.` never fired where versions arrived unprefixed. Correctness was opt-in per caller, and that drifts as callers multiply.
+The failures were never missing machinery. `Ecosystem.NormalizeVersion` exists and several packages call it; the policy path did not, so a rule matching `^v1\.` never fired where versions arrived unprefixed. Correctness was opt-in per caller, and that drifts as callers multiply.
 
 **Rules to design toward.** None of them holds everywhere today, and each names a specific gap:
 
