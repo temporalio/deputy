@@ -1,0 +1,19 @@
+# Packages under internal/ that no other package imports, as measured by
+# go/types. Each entry is code only its own tests reach, which is why
+# unused-symbol analysis does not flag it.
+#
+# This file is generated. Regenerate it with:
+#
+#	go run ./internal/surface/cmd -baseline
+#
+# Entries should only ever be removed. A new entry means a package was added
+# or orphaned with nothing importing it; wire it up or delete it rather than
+# recording it here.
+internal/cache/lockfile
+internal/demo
+internal/filtering
+internal/options
+internal/sandbox/sandboxtest
+internal/sbom/vex
+internal/vulnerability/affected/cpe
+internal/vulnerability/suppression
