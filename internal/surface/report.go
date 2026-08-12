@@ -33,6 +33,13 @@ type Report struct {
 
 	// InterfaceTotal counts the exported interfaces examined.
 	InterfaceTotal int
+
+	// Constrained lists the Go files this platform's build constraints excluded
+	// from the load, relative to the module root. Nothing in them is
+	// type-checked, so a reference made only from one of them is invisible to
+	// every check and any finding could in principle be wrong because of it.
+	// Auditing on another platform, or with the relevant tags, closes the gap.
+	Constrained []string
 }
 
 // Reach describes how far a declaration's references travel. It is the axis
@@ -168,6 +175,6 @@ type InterfaceFinding struct {
 }
 
 // sortedKeys returns a map's keys in ascending order, for deterministic output.
-func sortedKeys[K interface{ ~string }, V any](m map[K]V) []K {
+func sortedKeys[K ~string, V any](m map[K]V) []K {
 	return slices.Sorted(maps.Keys(m))
 }
