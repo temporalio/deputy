@@ -24,7 +24,13 @@ A **Rule** is never labelled: a rule is what to do, not a report on what the cod
 
 ConnectRPC service contracts and their transport bindings, MCP tool schemas, the generated policy input reference.
 
-These are the domain re-encoded. They should be generated, and drift is a bug rather than a maintenance chore. Buf emits the Connect bindings under [`gen/deputy`](../../gen/deputy), `internal/mcp/protoschema` derives every MCP tool schema from descriptors, and `internal/docsgen` renders the policy entrypoint reference from proto comments. All three hold up well.
+These are the domain re-encoded. They should be generated, and drift is a bug rather than a maintenance chore. They do not all stand on the same footing, and the difference is what a reader needs:
+
+- MCP tool schemas are **guarded** by construction. `internal/mcp/protoschema` computes them from descriptors as the server describes a tool, so there is no committed copy that can drift, and `TestToolSchemasFreeOfClientRejectedKeywords` walks `Server.registeredTools` to hold the result inside the MCP client constraints.
+- The Connect bindings under [`gen/deputy`](../../gen/deputy) are **convention**. Buf emits them, but the output is committed and no CI job regenerates and diffs the tree, so a proto edited without regenerating fails nothing. `TestEmbeddedDescriptorSetMatchesGeneratedCode` compares the embedded descriptor set against the generated packages, which passes when both are equally stale.
+- The policy entrypoint reference is **guarded** by `TestPolicyInputsDocIsGenerated`, and it is not a descriptor projection.
+
+That last one is worth naming precisely, because calling it descriptor-derived hides the drift this page later audits. `PolicyEntrypointsMarkdown` is a joined projection: the entrypoint list, each entrypoint's description, its required and optional variables and their types, and its helper list all come from hand-maintained Go registries in `internal/policy` (`AllEntrypoints`, `BindingProfiles`, `EntrypointHelpers`, and the variable metadata behind `VariableInfoOrDefault`), while descriptors supply only the field tables for proto-backed variable types and the comments in them. The drift test holds the rendering to those sources. It cannot see that a source is wrong, which is exactly how the reference came to publish variables the runtime cannot supply.
 
 Handler bodies are not part of this. The behavior behind an endpoint (`internal/server/scan_handler.go` and its siblings) is written by hand, as it should be. What is generated is the contract the handler implements, and what this rule forbids is a second, hand-written copy of that contract living somewhere else.
 
