@@ -453,6 +453,46 @@ func TestCanonicalizeIdentityFields(t *testing.T) {
 			payload: map[string]any{"pkg": map[string]any{"ecosystem": "go", "version": "1.0.0"}, "version": "2.0.0"},
 			want:    map[string]any{"pkg": map[string]any{"ecosystem": "go", "version": "v1.0.0"}, "version": "2.0.0"},
 		},
+		{
+			// A remediation step names a manager, not an ecosystem, and holds no
+			// nested package. Its package URL is the only thing in it that says
+			// which ecosystem's rules apply.
+			name: "a step resolves its ecosystem from its own package url",
+			payload: map[string]any{"step": map[string]any{
+				"manager": "go", "package": "example.com/m", "version": "1.2.3",
+				"target_version": "1.3.0", "purl": "pkg:golang/example.com/m@1.2.3",
+			}},
+			want: map[string]any{"step": map[string]any{
+				"manager": "go", "package": "example.com/m", "version": "v1.2.3",
+				"target_version": "v1.3.0", "purl": "pkg:golang/example.com/m@v1.2.3",
+			}},
+		},
+		{
+			// The type has to be one a registration claims. Deputy has no
+			// folding rules for anything else, and applying some other
+			// ecosystem's would rewrite an identity it does not own.
+			name: "a package url of an unclaimed type leaves the object unresolved",
+			payload: map[string]any{"step": map[string]any{
+				"package": "Thing", "version": "1.2.3", "purl": "pkg:acme-internal/Thing@1.2.3",
+			}},
+			want: map[string]any{"step": map[string]any{
+				"package": "Thing", "version": "1.2.3", "purl": "pkg:acme-internal/Thing@1.2.3",
+			}},
+		},
+		{
+			// An object that declares an ecosystem is stating which rules apply
+			// to it, so the declaration outranks the URL: a crate may carry a
+			// pkg:github reference, and it stays a reference.
+			name: "a declared ecosystem outranks the package url beside it",
+			payload: map[string]any{"pkg": map[string]any{
+				"ecosystem": "Cargo", "name": "async-trait", "version": "1.2.3",
+				"purl": "pkg:github/actions/checkout@1.2.3",
+			}},
+			want: map[string]any{"pkg": map[string]any{
+				"ecosystem": "cargo", "name": "async-trait", "version": "1.2.3",
+				"purl": "pkg:github/actions/checkout@1.2.3",
+			}},
+		},
 	}
 
 	for _, tt := range tests {
