@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 )
@@ -210,6 +211,55 @@ func NameClaims(tools []ToolSpec) map[string]int {
 	return claims
 }
 
+// LockScope answers the lockfile-ownership questions over one filesystem,
+// enumerating that filesystem's mise configs at most once. The enumeration is
+// what [ConfigsSharingLock] needs and the only expensive part of it: a lockfile
+// link can come from any directory, so the tree is walked, and a walk per
+// config would pay for the same listing once per config rather than once per
+// scan. A directory of conf.d drop-ins locks into one file and therefore has
+// one set of claimant counts, so those are memoized per resolved lockfile too.
+//
+// A scope is a cache, so it is as current as the filesystem was when it was
+// created. Build one per scan, per pin walk, or per fix, and do not hold it
+// across an edit to the tree it describes. It is safe for concurrent use.
+type LockScope struct {
+	fsys fs.FS
+
+	mu          sync.Mutex
+	configPaths []string
+	configErr   error
+	walked      bool
+	claims      map[string]claimCounts
+}
+
+// claimCounts is a memoized [LockScope.Claims] answer, error included: a
+// filesystem that could not be listed cannot be listed differently on a second
+// ask, and a caller reading the error as "ownership unknown" must get the same
+// reading every time.
+type claimCounts struct {
+	counts map[string]int
+	err    error
+}
+
+// NewLockScope returns a scope over fsys. A nil filesystem is allowed and
+// every question asked of it fails, which is the reading a caller with no
+// filesystem should get rather than a silent "nobody else claims this".
+func NewLockScope(fsys fs.FS) *LockScope {
+	return &LockScope{fsys: fsys}
+}
+
+// configs returns every mise config in the scope's filesystem, walking for them
+// on the first call and returning the same answer, error included, thereafter.
+func (s *LockScope) configs() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.walked {
+		s.configPaths, s.configErr = allConfigPaths(s.fsys)
+		s.walked = true
+	}
+	return s.configPaths, s.configErr
+}
+
 // ConfigsSharingLock returns every mise config that locks into the same
 // lockfile as configPath, configPath included, in lexical order. A mise
 // directory's config.toml and all of its conf.d drop-ins write to one
@@ -227,31 +277,40 @@ func NameClaims(tools []ToolSpec) map[string]int {
 // beside the link would delete integrity metadata another directory still
 // needs.
 //
-// The candidates are the lockfile's own directory and the conf.d beside it,
-// the only two a lexical lock path can come from. When the lockfile is a
-// symlink its claimants can be anywhere, so the tree is walked instead; that
-// costs a traversal per config, which is why it is spent only on the configs
-// that are actually linked. A config whose lockfile is a regular file and
-// which some directory outside those two links into is the case this does not
-// see.
+// The candidates are every config in the tree, because a link into a lockfile
+// can come from anywhere and sharing has to read the same from either end of
+// it. Listing only the lockfile's directory and the conf.d beside it, the two
+// places a lexical lock path can come from, answers correctly when the starting
+// config is the one holding the link and wrongly when it is the one linked
+// into: the linking directory's declarations go uncounted, its share of the
+// lockfile reads as uncontested, and a fix to the host prunes an entry the
+// guest still needs. A lexical shortcut cannot tell those two apart, since
+// nothing in a regular file names the links pointing at it, so both sides pay
+// for the enumeration. [LockScope] spends it once per filesystem.
 //
 // An empty result means configPath has no lockfile at all (a .tool-versions
-// file, say). A read error other than a missing conf.d is returned, because a
-// config that cannot be listed is a config whose declarations cannot be
-// counted.
+// file, say). A read error is returned, because a config that cannot be listed
+// is a config whose declarations cannot be counted.
 func ConfigsSharingLock(fsys fs.FS, configPath string) ([]string, error) {
+	return NewLockScope(fsys).ConfigsSharingLock(configPath)
+}
+
+// ConfigsSharingLock is [ConfigsSharingLock] over a scope, so the enumeration
+// of the filesystem's configs is shared with every other question asked of it.
+func (s *LockScope) ConfigsSharingLock(configPath string) ([]string, error) {
 	lockPath := LockfilePath(configPath)
 	if lockPath == "" {
 		return nil, nil
 	}
-	if fsys == nil {
+	if s.fsys == nil {
 		return nil, fmt.Errorf("mise: no filesystem to resolve the configs sharing %s", lockPath)
 	}
-	target, linked, err := ResolveLinkedPath(fsys, lockPath)
+	fsys := s.fsys
+	target, _, err := ResolveLinkedPath(fsys, lockPath)
 	if err != nil {
 		return nil, err
 	}
-	candidates, err := lockSharingCandidates(fsys, lockPath, linked)
+	candidates, err := s.configs()
 	if err != nil {
 		return nil, err
 	}
@@ -288,37 +347,6 @@ func ConfigsSharingLock(fsys fs.FS, configPath string) ([]string, error) {
 	}
 	slices.Sort(shared)
 	return shared, nil
-}
-
-// lockSharingCandidates returns the paths that might be configs locking into
-// lockPath's target. When the lockfile sits at its own path, only its
-// directory and the conf.d beside it can send a config there, so those are
-// listed. A linked lockfile is shared by whoever links to it, which no
-// directory listing can name, so the tree is walked for every config in it.
-// The caller decides membership by resolving each candidate's own lockfile, so
-// a candidate listed here is a maybe, never a member.
-func lockSharingCandidates(fsys fs.FS, lockPath string, linked bool) ([]string, error) {
-	if linked {
-		return allConfigPaths(fsys)
-	}
-	lockDir := path.Dir(lockPath)
-	var out []string
-	for _, dir := range [...]string{lockDir, path.Join(lockDir, "conf.d")} {
-		entries, err := fs.ReadDir(fsys, dir)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("listing %s: %w", dir, err)
-		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			out = append(out, path.Join(dir, entry.Name()))
-		}
-	}
-	return out, nil
 }
 
 // allConfigPaths walks fsys for every mise config in it. A directory that
@@ -410,11 +438,49 @@ func ResolveLinkedPath(fsys fs.FS, relPath string) (target string, linked bool, 
 // treat every name as contested: prune nothing beyond the exact key, enrich
 // from nothing. An unparsable sharing config is such an error, because its
 // declarations are exactly the ones that would have contested a name.
+//
+// A caller asking this of more than one config should hold a [LockScope] and
+// ask it instead, so the configs of the filesystem are enumerated once.
 func LockClaims(fsys fs.FS, configPath string) (map[string]int, error) {
-	shared, err := ConfigsSharingLock(fsys, configPath)
+	return NewLockScope(fsys).Claims(configPath)
+}
+
+// Claims is [LockClaims] over a scope. Answers are memoized per resolved
+// lockfile, the unit they are a property of: every drop-in of a mise directory
+// locks into one file and so has one set of counts.
+//
+// The returned map is the scope's own and is read by every caller that asks for
+// the same lockfile, so it must not be modified.
+func (s *LockScope) Claims(configPath string) (map[string]int, error) {
+	shared, err := s.ConfigsSharingLock(configPath)
 	if err != nil {
 		return nil, err
 	}
+	// Configs that lock nowhere have no claims to count and no key to memoize
+	// them under, so they are answered without consulting the memo.
+	if len(shared) == 0 {
+		return nil, nil
+	}
+	key := strings.Join(shared, "\x00")
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cached, ok := s.claims[key]; ok {
+		return cached.counts, cached.err
+	}
+	counts, err := countClaims(s.fsys, shared)
+	if s.claims == nil {
+		s.claims = make(map[string]claimCounts)
+	}
+	s.claims[key] = claimCounts{counts: counts, err: err}
+	return counts, err
+}
+
+// countClaims sums [NameClaims] over the configs sharing one lockfile. A config
+// that cannot be read or parsed is an error rather than a zero contribution,
+// because the declarations it hides are exactly the ones that would have
+// contested a name.
+func countClaims(fsys fs.FS, shared []string) (map[string]int, error) {
 	claims := make(map[string]int)
 	for _, cfgPath := range shared {
 		data, err := fs.ReadFile(fsys, cfgPath)

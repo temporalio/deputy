@@ -219,7 +219,10 @@ func stringOptions(opts map[string]any) map[string]string {
 func (s *Strategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]pin.Ref, error) {
 	var refs []pin.Ref
 	seen := map[string]bool{}
-	claimsFor := lockClaimsCache(fsys)
+	// One scope for the whole walk: it enumerates the filesystem's configs once
+	// and memoizes the claimant counts per lockfile, so a directory of conf.d
+	// drop-ins is listed and parsed once rather than once per drop-in.
+	scope := mise.NewLockScope(fsys)
 
 	err := fs.WalkDir(fsys, ".", func(relPath string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -265,7 +268,7 @@ func (s *Strategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]pin.Ref, 
 		// declaration's.
 		var claims map[string]int
 		if lock != nil {
-			claims, err = claimsFor(relPath)
+			claims, err = scope.Claims(relPath)
 			if err != nil {
 				slog.DebugContext(ctx, "toolchain pin: lock ownership unresolved, ignoring lockfile", "path", relPath, "error", err)
 				lock = nil
@@ -309,27 +312,6 @@ func versionForRef(versions []string) string {
 		return versions[0]
 	default:
 		return strings.Join(versions, arraySentinel)
-	}
-}
-
-// lockClaimsCache returns a function giving the claimant counts that decide
-// lock ownership for a config, memoized per lockfile. A mise directory's
-// conf.d drop-ins share one mise.lock and therefore one set of counts, so a
-// walk over N of them parses those configs once rather than N times.
-func lockClaimsCache(fsys fs.FS) func(configPath string) (map[string]int, error) {
-	type result struct {
-		claims map[string]int
-		err    error
-	}
-	byLock := map[string]result{}
-	return func(configPath string) (map[string]int, error) {
-		lockPath := mise.LockfilePath(configPath)
-		if cached, ok := byLock[lockPath]; ok {
-			return cached.claims, cached.err
-		}
-		claims, err := mise.LockClaims(fsys, configPath)
-		byLock[lockPath] = result{claims: claims, err: err}
-		return claims, err
 	}
 }
 

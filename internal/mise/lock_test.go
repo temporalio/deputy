@@ -342,6 +342,12 @@ func TestConfigsSharingLockFollowsLinks(t *testing.T) {
 		"own/mise.toml":   {Data: []byte(decl)},
 		"own/mise.lock":   {Data: []byte("")},
 		"plain/mise.toml": {Data: []byte(decl)},
+		// host holds a regular lockfile that guest links into, so sharing has
+		// to be visible from the host side too.
+		"host/mise.toml":  {Data: []byte(decl)},
+		"host/mise.lock":  {Data: []byte("")},
+		"guest/mise.toml": {Data: []byte(decl)},
+		"guest/mise.lock": link("../host/mise.lock"),
 	}
 	tests := []struct {
 		name       string
@@ -372,6 +378,20 @@ func TestConfigsSharingLockFollowsLinks(t *testing.T) {
 			name:       "a config with no lockfile yet shares with nobody",
 			configPath: "plain/mise.toml",
 			want:       []string{"plain/mise.toml"},
+		},
+		{
+			// Sharing is a property of the file, so it reads the same from
+			// either end of the link. Starting at the host, whose lockfile is
+			// an ordinary file, the guest linking into it is still a claimant:
+			// a fix to the host publishes to the file the guest reads.
+			name:       "a regular lockfile is shared with whoever links into it",
+			configPath: "host/mise.toml",
+			want:       []string{"guest/mise.toml", "host/mise.toml"},
+		},
+		{
+			name:       "the linking config sees the same set",
+			configPath: "guest/mise.toml",
+			want:       []string{"guest/mise.toml", "host/mise.toml"},
 		},
 	}
 	for _, tt := range tests {
@@ -516,5 +536,97 @@ func TestLockClaims(t *testing.T) {
 				t.Errorf("LockClaims(%q) = %v, want %v", tt.config, got, tt.want)
 			}
 		})
+	}
+}
+
+// countingFS reports how many directory listings a caller made, so a test can
+// tell one walk of the tree from one walk per config.
+type countingFS struct {
+	fstest.MapFS
+	reads *int
+}
+
+// ReadDir counts the listing and forwards it.
+func (c countingFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	*c.reads++
+	return c.MapFS.ReadDir(name)
+}
+
+// TestLockScopeEnumeratesOnce pins that a scope pays for the enumeration of a
+// filesystem's configs once however many configs are asked about. Deciding who
+// shares a lockfile requires knowing every config in the tree, since a lockfile
+// link can come from any directory, and a walk per config would make a scan of
+// N configs walk the tree N times.
+func TestLockScopeEnumeratesOnce(t *testing.T) {
+	const decl = "[tools]\ngo = \"1.22.12\"\n"
+	files := fstest.MapFS{
+		"a/mise.toml": {Data: []byte(decl)},
+		"a/mise.lock": {Data: []byte("")},
+		"b/mise.toml": {Data: []byte(decl)},
+		"b/mise.lock": {Data: []byte("")},
+		"c/mise.toml": {Data: []byte(decl)},
+		"c/mise.lock": {Data: []byte("")},
+	}
+	configs := []string{"a/mise.toml", "b/mise.toml", "c/mise.toml"}
+
+	// One scope, every config: the tree is listed once and each config's own
+	// counts are memoized under the lockfile they belong to.
+	scopeReads := 0
+	scope := NewLockScope(countingFS{MapFS: files, reads: &scopeReads})
+	for _, cfgPath := range configs {
+		if _, err := scope.Claims(cfgPath); err != nil {
+			t.Fatalf("Claims(%q): %v", cfgPath, err)
+		}
+	}
+	if scopeReads == 0 {
+		t.Fatal("the scope never listed the tree, so it cannot have enumerated the configs")
+	}
+	// Asking again costs nothing.
+	before := scopeReads
+	if _, err := scope.Claims(configs[0]); err != nil {
+		t.Fatalf("Claims(%q): %v", configs[0], err)
+	}
+	if scopeReads != before {
+		t.Errorf("a repeated question relisted the tree: %d listings, want %d", scopeReads, before)
+	}
+
+	// The one-shot function builds a scope per call, so it pays per config.
+	// That is the cost the scope exists to collapse.
+	oneShotReads := 0
+	oneShot := countingFS{MapFS: files, reads: &oneShotReads}
+	for _, cfgPath := range configs {
+		if _, err := LockClaims(oneShot, cfgPath); err != nil {
+			t.Fatalf("LockClaims(%q): %v", cfgPath, err)
+		}
+	}
+	if oneShotReads != scopeReads*len(configs) {
+		t.Errorf("one-shot listings = %d, want %d (%d per config)", oneShotReads, scopeReads*len(configs), scopeReads)
+	}
+}
+
+// TestLockScopeClaimsAreSharedPerLockfile pins that the configs locking into one
+// file get one set of counts. A mise directory's drop-ins all write to one
+// mise.lock, so the answer is a property of the lockfile, and parsing them once
+// per drop-in would read the same declarations over again.
+func TestLockScopeClaimsAreSharedPerLockfile(t *testing.T) {
+	files := fstest.MapFS{
+		".config/mise/config.toml":   {Data: []byte("[tools]\n\"npm:foo\" = \"1.0.0\"\n")},
+		".config/mise/mise.lock":     {Data: []byte("")},
+		".config/mise/conf.d/a.toml": {Data: []byte("[tools]\n\"ubi:foo\" = \"1.0.0\"\n")},
+	}
+	scope := NewLockScope(files)
+	first, err := scope.Claims(".config/mise/config.toml")
+	if err != nil {
+		t.Fatalf("Claims: %v", err)
+	}
+	second, err := scope.Claims(".config/mise/conf.d/a.toml")
+	if err != nil {
+		t.Fatalf("Claims: %v", err)
+	}
+	if first["foo"] != 2 {
+		t.Errorf("claims[foo] = %d, want 2: both fragments claim the legacy name", first["foo"])
+	}
+	if !maps.Equal(first, second) {
+		t.Errorf("the drop-in got different counts: %v vs %v", second, first)
 	}
 }

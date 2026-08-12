@@ -206,7 +206,9 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
   parse counts as a claimant. Sharing is decided on the file a config's
   lockfile path resolves to, so directories whose `mise.lock` symlinks point at
   one shared file all count as claimants of its entries, matching where the fix
-  publishes its edit. An uncontested
+  publishes its edit. It reads the same from either end of a link: a config
+  whose `mise.lock` is an ordinary file shares it with every directory that
+  links into it. An uncontested
   legacy entry is pruned even when the exact key is locked too, because lock
   resolution would otherwise fall back to it and hand the fixed tool its old
   version back. After applying, run `mise install` to install the
