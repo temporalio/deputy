@@ -1300,6 +1300,59 @@ func TestGraphReferencesSpellTheNodeTheyName(t *testing.T) {
 	}
 }
 
+// TestReferencesAndIdentityAgreeOnTheScheme pins the two passes to one answer
+// about what a package URL is. A PURL scheme is case-insensitive and the parser
+// accepts it that way, so "PKG:golang/..." is a package URL and Deputy's own
+// leading-whitespace tolerance makes " pkg:golang/..." one too. The reference
+// pass used to decide with a byte-exact "pkg:" prefix test, so an object's
+// identity PURL was canonicalized while the same string in roots or on an edge
+// came back untouched, and "node.purl in roots" was false for no reason but
+// spelling.
+func TestReferencesAndIdentityAgreeOnTheScheme(t *testing.T) {
+	sources, err := ParseStructuredSources([]byte(`policies:
+  - name: root-membership
+    rules:
+      - action: deny
+        when: node.purl in roots && edge.to == node.purl
+        reason: matched
+`), "roots.yaml")
+	if err != nil {
+		t.Fatalf("ParseStructuredSources: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "canonical scheme", raw: "pkg:golang/example.com/mod@1.2.3"},
+		{name: "upper case scheme", raw: "PKG:golang/example.com/mod@1.2.3"},
+		{name: "mixed case scheme", raw: "Pkg:golang/example.com/mod@1.2.3"},
+		{name: "leading whitespace", raw: " pkg:golang/example.com/mod@1.2.3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := purlx.ParseLoose(tt.raw); err != nil {
+				t.Fatalf("fixture precondition: ParseLoose(%q) = %v, want a package URL", tt.raw, err)
+			}
+			payload := map[string]any{
+				"node":  map[string]any{"purl": tt.raw, "ecosystem": "Go", "version": "1.2.3"},
+				"roots": []any{tt.raw},
+				"edge":  map[string]any{"from": "pkg:golang/example.com/root@1.0.0", "to": tt.raw},
+			}
+			actions, err := EvaluateMap(t.Context(), sources, payload)
+			if err != nil {
+				t.Fatalf("EvaluateMap: %v", err)
+			}
+			if len(actions) != 1 || actions[0].Type != ActionDeny {
+				node := payload["node"].(map[string]any)
+				t.Fatalf("root membership rule did not fire for %q: actions=%v (node.purl=%v roots=%v edge.to=%v)",
+					tt.raw, actions, node["purl"], payload["roots"], payload["edge"].(map[string]any)["to"])
+			}
+		})
+	}
+}
+
 // TestPackageReferencesLeaveEverythingElseAlone pins the blast radius of the
 // reference pass, which is the half that widens the walk. It rewrites a string
 // only when the string is a package URL of a type a registration claims, so
