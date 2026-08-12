@@ -1835,3 +1835,136 @@ func makeDirUnwritable(t *testing.T, dir string) {
 	_ = os.Remove(probe)
 	t.Skip("mode bits do not bind this process, cannot make a directory unwritable")
 }
+
+// TestRewriteToolVersionLeavesMultilineStringsAlone pins the format-preservation
+// guarantee against TOML's multi-line strings. Their content is text, and it may
+// look like anything: a [settings] field holding release notes can contain a
+// `[tools]` line with versions written under it.
+//
+// A line-wise walk that skipped an out-of-scope assignment without skipping the
+// string it opened read that text as TOML on the next iteration, so the note's
+// contents became a tools table and a version fix rewrote prose the user never
+// asked Deputy to touch, silently and while reporting success. Every case here
+// is a config mise.Parse reads as declaring exactly one go, so the string is
+// nobody's declaration by any reading.
+func TestRewriteToolVersionLeavesMultilineStringsAlone(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		currents []string
+		version  string
+		want     string
+	}{
+		{
+			// The reported case: the note's own "go" line must survive untouched
+			// while the real declaration below it is updated.
+			name: "a tools table inside a settings string",
+			input: `[settings]
+release_notes = """
+[tools]
+go = "1.22.12"
+please do not edit this text
+"""
+
+[tools]
+go = "1.22.12"
+`,
+			currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[settings]
+release_notes = """
+[tools]
+go = "1.22.12"
+please do not edit this text
+"""
+
+[tools]
+go = "1.24.3"
+`,
+		},
+		{
+			// Entry headers inside a string are not declarations either, so they
+			// must not make a sole declaration look like a repeated one: counting
+			// them left the rewriter refusing a fix the config can take.
+			name: "entry headers inside a string do not inflate the arity",
+			input: `[settings]
+release_notes = """
+[[tools.go]]
+[[tools.go]]
+"""
+
+[tools]
+go = "1.24"
+`,
+			currents: []string{"1.24.9"}, version: "1.24.10",
+			want: `[settings]
+release_notes = """
+[[tools.go]]
+[[tools.go]]
+"""
+
+[tools]
+go = "1.24.10"
+`,
+		},
+		{
+			// A literal multi-line string is content just the same, and the
+			// declaration may sit above the string rather than below it.
+			name: "a literal string after the declaration",
+			input: `[tools]
+go = "1.22.12"
+
+[settings]
+notes = '''
+[tools]
+go = "1.22.12"
+'''
+`,
+			currents: []string{"1.22.12"}, version: "1.24.3",
+			want: `[tools]
+go = "1.24.3"
+
+[settings]
+notes = '''
+[tools]
+go = "1.22.12"
+'''
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The premise: mise reads one declaration here, so anything else
+			// the rewriter touches is text it had no business editing.
+			cfg, err := mise.Parse("mise.toml", []byte(tt.input))
+			if err != nil {
+				t.Fatalf("fixture does not parse: %v", err)
+			}
+			if len(cfg.Tools) != 1 || cfg.Tools[0].Key != "go" || len(cfg.Tools[0].Versions) != 1 {
+				t.Fatalf("fixture declares %+v, want a single go version", cfg.Tools)
+			}
+
+			dir := t.TempDir()
+			path := filepath.Join(dir, "mise.toml")
+			if err := os.WriteFile(path, []byte(tt.input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			if err := RewriteToolVersion(root, "mise.toml", "go", tt.currents, tt.version); err != nil {
+				t.Fatalf("RewriteToolVersion: %v", err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("rewrite mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+		})
+	}
+}

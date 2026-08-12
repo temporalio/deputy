@@ -159,6 +159,19 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
+		// How far this logical line reaches. A value that opens a multi-line
+		// string carries its continuation lines with it, and every path that
+		// skips this line has to skip those too: handing them to the next
+		// iteration reads string content as TOML, so a `[tools]` line inside a
+		// release note in [settings] opened a tools table and the versions
+		// written under it were rewritten as if they were declarations. The
+		// in-scope path below gathers its own value and needs no help.
+		logicalEnd := mise.MultilineStringEndLine(lines, i)
+		if logicalEnd < 0 {
+			// A string that never closes is malformed TOML; leave the rest of
+			// the file alone rather than guess where its content ends.
+			break
+		}
 		if header, isArray, ok := tomlHeader(trimmed); ok {
 			// Track whether we're inside the [tools] table, or in a
 			// [tools.<tool>] table where the version is a child key. Root
@@ -177,14 +190,17 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 			continue
 		}
 		if (!inRoot && !inTools && toolTable == "") || trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			i = logicalEnd
 			continue
 		}
 		eq, ok := tomlAssignmentIndex(line)
 		if !ok {
+			i = logicalEnd
 			continue
 		}
 		segs := mise.SplitKeyPath(strings.TrimSpace(line[:eq]))
 		if len(segs) == 0 {
+			i = logicalEnd
 			continue
 		}
 
@@ -1047,14 +1063,22 @@ func tomlHeader(line string) (segs []string, isArray bool, ok bool) {
 // several declarations rather than the whole of one, and has to be rewritten
 // under the multi-version rule.
 //
-// The scan is over raw lines, so a header spelled inside a multi-line string
-// is counted too. That can only overstate a declaration's arity, which makes
-// the rewriter refuse an edit it might have made; understating it would let
-// one entry's pin overwrite another's version.
+// A header spelled inside a multi-line string is content, not a declaration, so
+// the scan steps over such strings the way the rewriter's own walk does.
+// Counting them would only ever overstate a declaration's arity, which is safe
+// but wrong in a visible way: the rewriter would refuse a fix the config can
+// take because prose in a release note mentions the tool twice.
 func arrayToolEntryCounts(lines []string) map[string]int {
 	counts := make(map[string]int)
-	for _, line := range lines {
-		header, isArray, ok := tomlHeader(line)
+	for i := 0; i < len(lines); i++ {
+		if stop := mise.MultilineStringEndLine(lines, i); stop != i {
+			if stop < 0 {
+				break
+			}
+			i = stop
+			continue
+		}
+		header, isArray, ok := tomlHeader(lines[i])
 		if !ok || !isArray || len(header) != 2 || header[0] != "tools" {
 			continue
 		}
