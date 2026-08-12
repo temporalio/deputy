@@ -585,6 +585,64 @@ my-serde = { workspace = true }
 			notDirect: []string{"spare_alias", "anyhow"},
 		},
 		{
+			// The alias and the member's own dependency share a name, which is
+			// all a check on the collected key set can see. Only the member's
+			// entry says whether it inherited, and this one says it did not.
+			name: "a member's own dependency sharing an alias name inherits nothing",
+			manifests: map[string]string{
+				"Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+my-serde = { package = "serde", version = "1.0" }
+`,
+				"member/Cargo.toml": `[package]
+name = "member"
+
+[dependencies]
+my-serde = { path = "../my-serde" }
+`,
+			},
+			want:      map[string]bool{"my_serde": true},
+			notDirect: []string{"serde"},
+		},
+		{
+			name: "an alias inherited with the bare workspace key still resolves",
+			manifests: map[string]string{
+				"Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+my-serde = { package = "serde", version = "1.0" }
+`,
+				"member/Cargo.toml": `[package]
+name = "member"
+
+[dependencies]
+my-serde.workspace = true
+`,
+			},
+			want: map[string]bool{"my_serde": true, "serde": true},
+		},
+		{
+			name: "an alias inherited in a target table still resolves",
+			manifests: map[string]string{
+				"Cargo.toml": `[workspace]
+members = ["member"]
+
+[workspace.dependencies]
+my-winapi = { package = "winapi", version = "0.3" }
+`,
+				"member/Cargo.toml": `[package]
+name = "member"
+
+[target.'cfg(windows)'.dependencies]
+my-winapi = { workspace = true }
+`,
+			},
+			want: map[string]bool{"my_winapi": true, "winapi": true},
+		},
+		{
 			name: "a member declaring its own dependency needs no workspace table",
 			manifests: map[string]string{
 				"Cargo.toml": `[workspace]

@@ -34,13 +34,64 @@ var manifestDirectDepParsers = map[string]func([]byte) map[string]bool{
 // extracts the renames a workspace declares for its members to inherit, keyed
 // by the name a member inherits them under. A workspace dependency table is a
 // menu, not a dependency list, so nothing in it is direct until a member takes
-// it; a member's own manifest records that. What a member's manifest cannot
-// spell is a rename, because it names the alias and the workspace names the
-// crate, so the renames are carried to the end of the walk and applied to the
-// aliases members actually took. Ecosystems with no inheritance mechanism have
-// no entry here.
+// it. What a member's manifest cannot spell is a rename, because it names the
+// alias and the workspace names the crate, so the renames are carried to the
+// end of the walk and applied to the aliases members actually took. Ecosystems
+// with no inheritance mechanism have no entry here.
 var manifestWorkspaceAliasParsers = map[string]func([]byte) map[string]string{
 	"Cargo.toml": getCargoWorkspaceAliases,
+}
+
+// manifestWorkspaceInheritanceParsers maps manifest basenames to the parser
+// that reports which of a manifest's own dependency keys are inherited from its
+// workspace rather than declared locally. Taking the offer is what makes a
+// workspace entry a dependency of anything, and it is the only thing that says
+// so: the key a member writes for an inherited dependency is spelled exactly
+// like the key it writes for a local one. Ecosystems with no inheritance
+// mechanism have no entry here.
+var manifestWorkspaceInheritanceParsers = map[string]func([]byte) map[string]bool{
+	"Cargo.toml": getCargoInheritedDeps,
+}
+
+// manifestScan accumulates what a walk over a tree's manifests learns. direct
+// is the answer callers want. inherited and aliases are the two halves of a
+// workspace rename that no single manifest holds, since the member records the
+// alias it took and the root records the crate that alias means, so they are
+// carried until the walk ends and folded in by resolve. Both walks fill one of
+// these, which is what stops either from collecting half the answer.
+type manifestScan struct {
+	direct    map[string]bool
+	inherited map[string]bool
+	aliases   map[string]string
+}
+
+// newManifestScan starts a scan from the direct dependencies already collected
+// for Go, whose manifest is walked separately for its module root and stdlib
+// pseudo-dependency handling.
+func newManifestScan(direct map[string]bool) *manifestScan {
+	return &manifestScan{
+		direct:    direct,
+		inherited: make(map[string]bool),
+		aliases:   make(map[string]string),
+	}
+}
+
+// resolve records the crate behind every workspace rename a member actually
+// inherited and returns the direct set. An alias no member inherited stays out,
+// which is the whole point: a version declared centrally for inheritance is not
+// by itself a dependency of anything, and counting it as one marks a transitive
+// lockfile package direct in the SBOM and in pkg.direct.
+//
+// Inheritance is what is tested, not the presence of the alias in the direct
+// set. A member is free to declare a local dependency under the same name as an
+// alias nobody took, and the name alone cannot tell the two apart.
+func (s *manifestScan) resolve() map[string]bool {
+	for alias, crate := range s.aliases {
+		if s.inherited[alias] {
+			s.direct[crate] = true
+		}
+	}
+	return s.direct
 }
 
 // collectManifestDependencies applies whichever parsers are registered for a
@@ -49,11 +100,12 @@ var manifestWorkspaceAliasParsers = map[string]func([]byte) map[string]string{
 // and the commit-tree walk cannot drift in coverage. The contents are read
 // through read only once a parser wants them, and a file that fails to read is
 // skipped best-effort.
-func collectManifestDependencies(name string, read func() ([]byte, error), direct map[string]bool, aliases map[string]string) {
+func collectManifestDependencies(name string, read func() ([]byte, error), scan *manifestScan) {
 	base := path.Base(name)
 	parseDeps, hasDeps := manifestDirectDepParsers[base]
 	parseAliases, hasAliases := manifestWorkspaceAliasParsers[base]
-	if !hasDeps && !hasAliases {
+	parseInherited, hasInherited := manifestWorkspaceInheritanceParsers[base]
+	if !hasDeps && !hasAliases && !hasInherited {
 		return
 	}
 	if isVendoredManifestPath(name) {
@@ -64,23 +116,13 @@ func collectManifestDependencies(name string, read func() ([]byte, error), direc
 		return
 	}
 	if hasDeps {
-		mergeDirectDependencies(direct, parseDeps(data))
+		mergeDirectDependencies(scan.direct, parseDeps(data))
 	}
 	if hasAliases {
-		maps.Copy(aliases, parseAliases(data))
+		maps.Copy(scan.aliases, parseAliases(data))
 	}
-}
-
-// resolveWorkspaceAliases records the crate behind every workspace rename a
-// member actually inherited. An alias no member names stays out of the direct
-// set, which is the whole point: a version declared centrally for inheritance
-// is not by itself a dependency of anything, and counting it as one marks a
-// transitive lockfile package direct in the SBOM and in pkg.direct.
-func resolveWorkspaceAliases(direct map[string]bool, aliases map[string]string) {
-	for alias, crate := range aliases {
-		if direct[alias] {
-			direct[crate] = true
-		}
+	if hasInherited {
+		maps.Copy(scan.inherited, parseInherited(data))
 	}
 }
 
@@ -125,8 +167,7 @@ func CollectDirectDependenciesFromWorkspace(ws workspace.FS) map[string]bool {
 	}
 
 	// Start with Go direct dependencies (handles stdlib specially)
-	direct := CollectGoDirectModulesFromWorkspace(ws)
-	aliases := make(map[string]string)
+	scan := newManifestScan(CollectGoDirectModulesFromWorkspace(ws))
 
 	// Walk workspace looking for other ecosystem manifests
 	_ = fs.WalkDir(ws, ".", func(p string, d fs.DirEntry, err error) error {
@@ -140,15 +181,13 @@ func CollectDirectDependenciesFromWorkspace(ws workspace.FS) map[string]bool {
 			}
 			return nil
 		}
-		collectManifestDependencies(p, func() ([]byte, error) { return ws.ReadFile(p) }, direct, aliases)
+		collectManifestDependencies(p, func() ([]byte, error) { return ws.ReadFile(p) }, scan)
 		return nil
 	})
 
 	// A workspace rename resolves only once the whole tree has been seen: the
 	// member that inherits the alias and the root that defines it are two files.
-	resolveWorkspaceAliases(direct, aliases)
-
-	return direct
+	return scan.resolve()
 }
 
 // CollectDirectDependenciesFromCommit extracts direct dependencies from
@@ -174,7 +213,7 @@ func CollectDirectDependenciesFromCommit(repo *git.Repository, hash plumbing.Has
 	if err != nil {
 		return nil, fmt.Errorf("getting tree for commit %s: %w", hash, err)
 	}
-	aliases := make(map[string]string)
+	scan := newManifestScan(direct)
 	err = tree.Files().ForEach(func(f *object.File) error {
 		collectManifestDependencies(f.Name, func() ([]byte, error) {
 			contents, err := f.Contents()
@@ -182,14 +221,13 @@ func CollectDirectDependenciesFromCommit(repo *git.Repository, hash plumbing.Has
 				return nil, err
 			}
 			return []byte(contents), nil
-		}, direct, aliases)
+		}, scan)
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("walking commit tree: %w", err)
 	}
-	resolveWorkspaceAliases(direct, aliases)
-	return direct, nil
+	return scan.resolve(), nil
 }
 
 // getNpmDirectDeps extracts direct dependencies from package.json.
@@ -275,6 +313,22 @@ type cargoManifest struct {
 	Workspace cargoDependencyTables            `toml:"workspace"`
 }
 
+// packageTables returns every dependency table the manifest declares for
+// itself: its own, plus the per-target tables a platform-conditional dependency
+// lives in. The workspace tables are not among them, since an entry there is a
+// version offered for inheritance rather than a dependency.
+//
+// Both readers of a member's dependencies go through it, so a table one of them
+// reaches cannot be a table the other misses.
+func (m cargoManifest) packageTables() []map[string]any {
+	tables := make([]map[string]any, 0, 3*(1+len(m.Target)))
+	tables = append(tables, m.cargoDependencyTables.tables()...)
+	for _, target := range m.Target {
+		tables = append(tables, target.tables()...)
+	}
+	return tables
+}
+
 // getCargoDirectDeps extracts direct dependencies from Cargo.toml, keyed by the
 // crate names a scanned package can be reported under. A manifest that does not
 // parse as TOML yields nothing: Cargo would not build it either.
@@ -286,19 +340,45 @@ func getCargoDirectDeps(data []byte) map[string]bool {
 		return deps
 	}
 
-	sections := []cargoDependencyTables{manifest.cargoDependencyTables}
-	for _, target := range manifest.Target {
-		sections = append(sections, target)
-	}
-	for _, section := range sections {
-		for _, table := range section.tables() {
-			for name, entry := range table {
-				recordCargoDependency(deps, name, entry)
-			}
+	for _, table := range manifest.packageTables() {
+		for name, entry := range table {
+			recordCargoDependency(deps, name, entry)
 		}
 	}
 
 	return deps
+}
+
+// getCargoInheritedDeps returns the dependency keys a Cargo.toml takes from its
+// workspace, folded the way every other Cargo key here is. Cargo spells that as
+// "workspace = true" on the entry, either inline or as "name.workspace = true",
+// which decode to the same table.
+//
+// It is what a workspace rename resolves against. The alternative, asking
+// whether the alias is in the collected direct set, cannot tell an inherited
+// dependency from a local one the member happens to have given the same name,
+// and marked the renamed crate direct on the strength of the name alone.
+func getCargoInheritedDeps(data []byte) map[string]bool {
+	var manifest cargoManifest
+	if err := toml.Unmarshal(data, &manifest); err != nil {
+		return nil
+	}
+	inherited := make(map[string]bool)
+	for _, table := range manifest.packageTables() {
+		for name, entry := range table {
+			details, isTable := entry.(map[string]any)
+			if !isTable {
+				continue
+			}
+			if takesWorkspaceEntry, _ := details["workspace"].(bool); !takesWorkspaceEntry {
+				continue
+			}
+			if key := ecosystem.Cargo.NameEquivalenceKey(name); key != "" {
+				inherited[key] = true
+			}
+		}
+	}
+	return inherited
 }
 
 // getCargoWorkspaceAliases returns the crate each [workspace.dependencies]
