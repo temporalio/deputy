@@ -3177,3 +3177,102 @@ func scannedVersion(t *testing.T, dir, configRel, tool string) string {
 	t.Fatalf("the extractor reported no package for %q", tool)
 	return ""
 }
+
+// TestSafeJoinPathBoundary pins containment on the path component rather than on
+// the text. Two dots begin a legitimate directory name: Kubernetes projects a
+// secret or configmap into "..data", so a repository scanned from such a mount
+// declares "..data/mise.toml", and a prefix test made Deputy refuse the fix
+// command it had itself generated for a config it had itself scanned.
+//
+// The other direction has to keep holding, so every genuine escape is here too:
+// containment is the reason this function exists.
+func TestSafeJoinPathBoundary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		rel  string
+		// wantRel is the path, relative to the base, that the call must return;
+		// empty means the call must be refused.
+		wantRel string
+	}{
+		{name: "an ordinary file", rel: "mise.toml", wantRel: "mise.toml"},
+		{name: "a nested file", rel: "sub/mise.toml", wantRel: "sub/mise.toml"},
+		{name: "a projected mount directory", rel: "..data/mise.toml", wantRel: "..data/mise.toml"},
+		{name: "a directory named with two dots", rel: "..config/tools/mise.toml", wantRel: "..config/tools/mise.toml"},
+		{name: "a file named with two dots", rel: "..mise.toml", wantRel: "..mise.toml"},
+		{name: "a dot segment that stays inside", rel: "sub/../mise.toml", wantRel: "mise.toml"},
+		{name: "a projected mount reached through a dot segment", rel: "sub/../..data/mise.toml", wantRel: "..data/mise.toml"},
+
+		{name: "the parent directory", rel: ".."},
+		{name: "a parent-relative file", rel: "../escape.toml"},
+		{name: "a deeper escape", rel: "../../escape.toml"},
+		{name: "an escape through an interior dot segment", rel: "sub/../../escape.toml"},
+		{name: "an escape into a two-dot directory outside", rel: "../..data/mise.toml"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			base := t.TempDir()
+			got, err := safeJoinPath(base, tt.rel)
+			if tt.wantRel == "" {
+				if err == nil {
+					t.Fatalf("safeJoinPath(%q) = %q, want a refusal", tt.rel, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("safeJoinPath(%q): %v", tt.rel, err)
+			}
+			// The base is compared after symlink resolution, since a temporary
+			// directory may itself be reached through one.
+			realBase, err := filepath.EvalSymlinks(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := filepath.Join(realBase, filepath.FromSlash(tt.wantRel)); got != want {
+				t.Errorf("safeJoinPath(%q) = %q, want %q", tt.rel, got, want)
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdateInProjectedMount pins the end of that story: a config in a
+// "..data" mount is one Deputy scans, so the fix it generates for it has to
+// apply. The command names the config exactly as the scan reported it.
+func TestApplyMiseUpdateInProjectedMount(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	mount := filepath.Join(dir, "..data")
+	if err := os.MkdirAll(mount, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mount, "mise.toml"), []byte("[tools]\ngo = \"1.22.12\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mount, "mise.lock"), []byte("[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ApplyDeputyCommand(dir, "deputy:mise:update ..data/mise.toml go 1.24.3 1.22.12"); err != nil {
+		t.Fatalf("ApplyDeputyCommand: %v", err)
+	}
+	config, err := os.ReadFile(filepath.Join(mount, "mise.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(config), "1.24.3") {
+		t.Errorf("the config in the projected mount was not updated:\n%s", config)
+	}
+	// The lockfile half of the fix has to reach the mount too.
+	lock, err := os.ReadFile(filepath.Join(mount, "mise.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(lock), "1.22.12") {
+		t.Errorf("the stale lock entry survived in the projected mount:\n%s", lock)
+	}
+}

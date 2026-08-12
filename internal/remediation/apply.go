@@ -152,10 +152,10 @@ func treesOverlap(a, b string) bool {
 }
 
 // contains reports whether sub is dir or sits beneath it. The answer comes from
-// [filepath.Rel] rather than a string prefix, so a sibling whose name merely
-// starts with the directory's ("/w/repo" and "/w/repo-fork") is not read as
-// nested; only a path that climbs out of dir is outside it, and a directory may
-// legitimately be named "..data", as Kubernetes secret mounts are.
+// [filepath.Rel] and [escapesBase] rather than a string prefix, so a sibling
+// whose name merely starts with the directory's ("/w/repo" and "/w/repo-fork")
+// is not read as nested, and a directory legitimately named "..data", as
+// Kubernetes secret mounts are, is read as nested rather than as an escape.
 //
 // A pair of paths that cannot be related at all (separate volumes on Windows) is
 // reported as contained, keeping the answer conservative: two trees are only
@@ -165,7 +165,7 @@ func contains(dir, sub string) bool {
 	if err != nil {
 		return true
 	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return !escapesBase(rel)
 }
 
 // ApplyDeputyCommand executes a deputy-internal command.
@@ -279,7 +279,7 @@ func safeJoinPath(baseDir, relPath string) (string, error) {
 
 	// Check lexically first - catch obvious traversal without filesystem access
 	rel, err := filepath.Rel(absBase, joined)
-	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+	if err != nil || escapesBase(rel) {
 		return "", fmt.Errorf("path traversal detected: %s escapes base directory", relPath)
 	}
 
@@ -301,11 +301,27 @@ func safeJoinPath(baseDir, relPath string) (string, error) {
 
 	// Final containment check after symlink resolution
 	finalRel, err := filepath.Rel(absBase, realJoined)
-	if err != nil || strings.HasPrefix(finalRel, "..") || finalRel == ".." {
+	if err != nil || escapesBase(finalRel) {
 		return "", fmt.Errorf("path escapes base directory after symlink resolution")
 	}
 
 	return realJoined, nil
+}
+
+// escapesBase reports whether a path relative to a base directory leaves it,
+// which is true only when its first component is the parent directory. The test
+// is on the component and not on the text, because a name may begin with two
+// dots and still be an ordinary directory: Kubernetes mounts a projected secret
+// or configmap through "..data", so a repository scanned from such a mount
+// declares "..data/mise.toml" and a prefix test refused Deputy's own generated
+// fix command.
+//
+// A genuine escape still is one. "..", anything under "../", and a Windows
+// "..\" are all rejected, and [filepath.Rel] has already cleaned the path, so
+// an interior "a/../.." has been reduced to whatever it really names before it
+// reaches here.
+func escapesBase(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // repoRelPath returns declared as a slash-separated path relative to repoDir,
@@ -328,7 +344,7 @@ func repoRelPath(repoDir, declared string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("computing relative path: %w", err)
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if escapesBase(rel) {
 		return "", fmt.Errorf("path traversal detected: %s escapes base directory", declared)
 	}
 	return filepath.ToSlash(rel), nil
