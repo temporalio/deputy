@@ -115,7 +115,7 @@ func canonicalizeEcosystemPayload(payload map[string]any) {
 			canonicalizeEcosystemValue(value, "")
 		}
 		if !isCallerExtendedVariable(name) {
-			canonicalizePackageReferences(value)
+			payload[name] = canonicalizePackageReferences(value)
 		}
 	}
 }
@@ -285,27 +285,48 @@ func canonicalizeEcosystemValue(value any, inherited ecosystem.Ecosystem) {
 // of the object that carries it, and that object's own ecosystem decides how to
 // fold it, which is the stricter rule. A package whose ecosystem is Cargo but
 // whose purl is a pkg:github reference must come back untouched.
-func canonicalizePackageReferences(value any) {
+//
+// It returns the value to store in place of the one it was given, because not
+// every list can be rewritten through the reference it arrived by. A repeated
+// proto field reaches the walk as []any, but a payload a caller assembled itself
+// commonly carries []string: "deputy scan --input" injects the scanned SBOM's
+// PURLs that way, and the graph entrypoints name the direct dependencies that way
+// in "roots". Descending into map[string]any and []any alone skipped those lists
+// whole, so a policy comparing a package against the list it belongs to read two
+// spellings of one identity. A []string comes back as a new slice: the engine's
+// payload clone is shallow and [convertProtosInMap] passes a scalar slice through
+// by reference, so the list a caller still holds must not be rewritten under it.
+//
+// A typed string map (map[string]string) is deliberately not descended into. That
+// is the shape caller- and source-supplied data arrives in, and the
+// descriptor-derived [isFreeFormMap] skip cannot see inside a map keyed by an
+// arbitrary string, so rewriting there would risk exactly the caller data this
+// pass is careful to leave alone.
+func canonicalizePackageReferences(value any) any {
 	switch v := value.(type) {
+	case string:
+		return canonicalizePackageReference(v)
 	case map[string]any:
 		for key, child := range v {
 			if isFreeFormMap(key) || slices.Contains(packagePURLKeys, key) {
 				continue
 			}
-			if raw, isString := child.(string); isString {
-				v[key] = canonicalizePackageReference(raw)
-				continue
-			}
-			canonicalizePackageReferences(child)
+			v[key] = canonicalizePackageReferences(child)
 		}
+		return v
 	case []any:
 		for i, elem := range v {
-			if raw, isString := elem.(string); isString {
-				v[i] = canonicalizePackageReference(raw)
-				continue
-			}
-			canonicalizePackageReferences(elem)
+			v[i] = canonicalizePackageReferences(elem)
 		}
+		return v
+	case []string:
+		out := make([]string, len(v))
+		for i, raw := range v {
+			out[i] = canonicalizePackageReference(raw)
+		}
+		return out
+	default:
+		return value
 	}
 }
 

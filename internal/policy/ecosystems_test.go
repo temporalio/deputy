@@ -1418,6 +1418,73 @@ func TestHandBuiltVersionListsNormalize(t *testing.T) {
 	}
 }
 
+// TestPurlListsInTypedContainersAreCanonicalized pins the reference pass to the
+// shape a caller actually hands it. "deputy scan --input" injects the SBOM's
+// PURLs beside the packages it scanned as a []string ("sbom.purls", documented as
+// normalized to canonical form), and the graph entrypoints name the direct
+// dependencies the same way in "roots". The walk descended into map[string]any
+// and []any only, so a typed string slice was skipped whole and a policy
+// comparing a package against the list it belongs to read two spellings of one
+// identity.
+//
+// The caller's slice is asserted unchanged: convertProtosInMap rebuilds a []any
+// on the way in but passes a []string through by reference, so the list a caller
+// still holds must not be rewritten under it.
+func TestPurlListsInTypedContainersAreCanonicalized(t *testing.T) {
+	const (
+		raw       = "pkg:golang/example.com/mod@1.2.3"
+		canonical = "pkg:golang/example.com/mod@v1.2.3"
+	)
+	identity := func() map[string]any {
+		return map[string]any{"ecosystem": "Go", "name": "example.com/mod", "version": "1.2.3", "purl": raw}
+	}
+
+	tests := []struct {
+		name    string
+		body    string
+		payload func(purls []string) map[string]any
+	}{
+		{
+			name: "the scanned sbom's purl list",
+			body: `pkg.purl in sbom.purls
+  ? [{"action": "deny", "reason": "matched"}]
+  : [{"action": "allow"}]`,
+			payload: func(purls []string) map[string]any {
+				return map[string]any{"pkg": identity(), "sbom": map[string]any{"purls": purls}}
+			},
+		},
+		{
+			name: "the graph's roots",
+			body: `node.purl in roots
+  ? [{"action": "deny", "reason": "matched"}]
+  : [{"action": "allow"}]`,
+			payload: func(purls []string) map[string]any {
+				return map[string]any{"node": identity(), "roots": purls}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eng, err := NewEngine([]Source{{Name: "purl-membership", Body: tt.body}})
+			if err != nil {
+				t.Fatalf("NewEngine() error: %v", err)
+			}
+			purls := []string{raw}
+			actions, err := eng.EvaluateAllMap(t.Context(), tt.payload(purls), "scan", "")
+			if err != nil {
+				t.Fatalf("EvaluateAllMap: %v", err)
+			}
+			if len(actions) != 1 || actions[0].Type != ActionDeny {
+				t.Errorf("membership rule did not fire: actions=%v (list %v, identity canonicalizes to %q)", actions, purls, canonical)
+			}
+			if !slices.Equal(purls, []string{raw}) {
+				t.Errorf("caller's purl list was rewritten in place: %v", purls)
+			}
+		})
+	}
+}
+
 // TestPackageReferencesLeaveEverythingElseAlone pins the blast radius of the
 // reference pass, which is the half that widens the walk. It rewrites a string
 // only when the string is a package URL of a type a registration claims, so
