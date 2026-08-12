@@ -107,9 +107,19 @@ The payload is the real root, and the thing to get right is that **a root is an 
 
 Routes come in three kinds:
 
-- **Typed proto**, built by a payload builder such as `buildPolicyInput` or `buildPolicyPayload`. The payload can be checked against a descriptor, but a route is the payload *and* the command and entrypoint it evaluates under, and not every route passes them. The service interceptor in [`internal/server/server.go`](../../internal/server/server.go) reaches `Engine.EvaluateAll` with `("", "")`, and `shouldSkip` applies each filter only when its argument is non-empty, so a policy restricted to one entrypoint also runs on every other service procedure. The filter is not overridden, it is never consulted. A descriptor-only guard cannot see this, so a route has to record its filter arguments beside its payload.
+- **Typed proto**, built by a payload builder such as `buildPolicyInput` or `buildPolicyPayload`. The payload can be checked against a descriptor, but a route is the payload *and* the command and entrypoint it evaluates under, and not every route passes them. The package-level convenience `policy.EvaluateAll(ctx, sources, input)` in [`internal/policy/actions.go`](../../internal/policy/actions.go) takes no command or entrypoint and forwards `("", "")` to the method of the same name, and `shouldSkip` applies each filter only when its argument is non-empty. So every caller of the wrapper evaluates with both filters unset, the service interceptor in [`internal/server/server.go`](../../internal/server/server.go) among them: a policy restricted to one entrypoint also runs on every other service procedure. The filter is not overridden, it is never consulted. A descriptor-only guard cannot see this, so a route has to record its filter arguments beside its payload.
 - **Map assembled at the call site**, via `EvaluateAllMap`. Not only the CLI: `internal/sandbox/manager.go` is a caller too, so `sandbox_execution` is map-backed and has nothing to do with the CLI. The guard here is two-part: the profile against the descriptor where a typed input exists, plus a test that the assembled map supplies what the descriptor declares.
 - **No route at all.** Some profiles have no evaluator anywhere, yet are still published in the generated reference and offered by the MCP tool, so a policy written against one lints clean and never runs (#189). A contract test pointed at every declared profile would go looking for builders that do not exist, which is why knowing which profiles are live is a prerequisite for the guard rather than a detail of it.
+
+The policy tooling sits outside those kinds, and a guard cannot be built on it. `policy simulate` and `policy test` wrap whatever JSON they are handed in a `structpb.Struct` and go through the package-level wrapper, so the payload answers to no profile and no descriptor, and the filters are unset like every other caller of it. A bundle scoped to `oci_artifact_request` still fires against a payload whose `env.entrypoint` is `scan_vulnerability`:
+
+```
+$ deputy policy simulate --policy p.yaml --input in.json
+Input 0:
+  DENY from p.yaml::only-oci: fired despite the entrypoint filter
+```
+
+That makes them good for exercising an expression and misleading as a check that a policy will behave the same in production. A route contract belongs at the route, not in the tool an author reaches for.
 
 `PolicyService.Evaluate` shows why even a typed route needs more than its payload descriptor. Two of its advertised inputs are not honored: `EvaluateRequest.custom_payload` (field 99) has no case in `buildActivation`, so selecting it returns `no evaluation input provided`, and `EvaluateRequest.entrypoints` (field 20) is never read at all, so a caller asking to evaluate a specific entrypoint gets whichever one the input variant implies. A descriptor check sees both fields and concludes the route is fine.
 
