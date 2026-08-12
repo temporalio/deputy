@@ -79,6 +79,11 @@ func (d *Dependencies) ApplyConnection() error {
 		slog.Debug("clients initialized", "mode", "in-process")
 	}
 
+	// Copy in place rather than reassigning d.Clients: RegisterCommands hands
+	// the pointer to every command at registration time, which happens before
+	// cobra parses flags, so those commands would keep the pre-flag clients if
+	// this rebound the field. Pointer identity is the contract, see
+	// TestApplyConnectionKeepsClientsPointer.
 	if d.Clients == nil {
 		d.Clients = clients
 	} else {
