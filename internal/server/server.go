@@ -384,9 +384,24 @@ func New(cfg Config) (*Server, error) {
 	// Note: Authentication is now handled at the HTTP layer via authn middleware.
 	// Claims are accessible via jwt.ClaimsFromAuthn(ctx) in handlers and interceptors.
 
-	// Add policy interceptor if policies are configured
+	// Add policy interceptor if policies are configured. The engine is compiled
+	// once here rather than per request: policies are read at startup and never
+	// reloaded, so recompiling every CEL source on each RPC only bought latency,
+	// and a malformed bundle now fails startup instead of every request.
 	if len(policies) > 0 {
-		interceptors = append(interceptors, policyInterceptor(policies))
+		policyEngine, err := policy.NewEngine(policies)
+		if err != nil {
+			if allowInsecure(cfg) {
+				logs.Warn(context.Background(), "policy compilation failed; continuing without policies (insecure override)",
+					"error", err,
+					"paths", cfg.Policies,
+				)
+			} else {
+				return nil, fmt.Errorf("compile policies: %w", err)
+			}
+		} else {
+			interceptors = append(interceptors, policyInterceptor(policyEngine))
+		}
 	}
 
 	// Create service handlers
@@ -1089,7 +1104,7 @@ const serverPolicyCommand = "server"
 // loaded policy would run at every mapped procedure: a policy declaring
 // entrypoints: [service_scan_request] would deny diff requests, and a policy
 // declaring commands: [scan] would run against server payloads it was never
-// written for. Compiling per request matches the helper it replaces.
+// written for.
 //
 // Both arguments must stay non-empty. Over-application is not merely noisy
 // here: policyInterceptor turns any evaluation error into CodeInternal, so one
@@ -1097,11 +1112,7 @@ const serverPolicyCommand = "server"
 // payload fails every mapped RPC closed. The command is always "server", which
 // is what buildPolicyPayload reports as env.command, so a policy's declared
 // scope and the scope it is filtered by cannot disagree.
-func evaluateServicePolicies(ctx context.Context, policies []policy.Source, entrypoint policy.Entrypoint, payload proto.Message) ([]policy.Action, error) {
-	engine, err := policy.NewEngine(policies)
-	if err != nil {
-		return nil, fmt.Errorf("compile policies: %w", err)
-	}
+func evaluateServicePolicies(ctx context.Context, engine *policy.Engine, entrypoint policy.Entrypoint, payload proto.Message) ([]policy.Action, error) {
 	return engine.EvaluateAll(ctx, payload, serverPolicyCommand, entrypoint.String())
 }
 
@@ -1110,7 +1121,7 @@ func evaluateServicePolicies(ctx context.Context, policies []policy.Source, entr
 // evaluates policies with JWT claims (jwt.*), request metadata, and target
 // information. Procedures with no mapping, and every streaming procedure, are
 // passed through unevaluated (see procedureToEntrypoint and #194).
-func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
+func policyInterceptor(engine *policy.Engine) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			procedure := req.Spec().Procedure
@@ -1126,7 +1137,7 @@ func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
 			payload := buildPolicyPayload(ctx, req, entrypoint)
 
 			// Evaluate policies that declare this entrypoint
-			actions, err := evaluateServicePolicies(ctx, policies, entrypoint, payload)
+			actions, err := evaluateServicePolicies(ctx, engine, entrypoint, payload)
 			if err != nil {
 				logs.Error(ctx, "policy evaluation failed",
 					"procedure", procedure,
