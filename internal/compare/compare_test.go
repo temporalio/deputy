@@ -1043,6 +1043,18 @@ func TestWorkspaceAndCommitWalksAgree(t *testing.T) {
 			},
 		},
 		{
+			// Two independent roots spelling one alias differently. Each walk
+			// keys a rename by the directory of the root that declared it, and a
+			// commit path and a workspace path have to agree on that key too.
+			name: "renames in two workspace roots",
+			manifests: map[string]string{
+				"crates/Cargo.toml":        "[workspace]\nmembers = [\"member\"]\n\n[workspace.dependencies]\nfast = { package = \"serde\", version = \"1.0\" }\n",
+				"crates/member/Cargo.toml": "[package]\nname = \"crates-member\"\n\n[dependencies]\nfast = { workspace = true }\n",
+				"tools/Cargo.toml":         "[workspace]\nmembers = [\"member\"]\n\n[workspace.dependencies]\nfast = { package = \"rand\", version = \"0.8\" }\n",
+				"tools/member/Cargo.toml":  "[package]\nname = \"tools-member\"\n\n[dependencies]\nfast = { workspace = true }\n",
+			},
+		},
+		{
 			name: "manifests from several ecosystems",
 			manifests: map[string]string{
 				"go.mod":           "module example.com/app\n\nrequire github.com/some/dependency v1.2.3\n",
