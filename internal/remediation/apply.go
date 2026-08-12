@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/pin"
@@ -24,13 +25,43 @@ func IsDeputyInternalCommand(cmd string) bool {
 	return strings.HasPrefix(cmd, "deputy:")
 }
 
+// fileEdits serializes the file edits [ApplyDeputyCommand] performs within a
+// process. Every one of them reads a file, computes a new version of it, and
+// publishes that, so two overlapping edits read the same bytes, compute two
+// independent results, and write them one over the other. The loser's change is
+// silently gone while both report success: two fixes for tools declared in one
+// mise.toml, or for tools whose configs share a mise.lock, leave one tool
+// unedited or one stale lock entry alive, and the next scan reports the fix as
+// ineffective at the version it just removed.
+//
+// One lock covers all of them rather than one per file, because the files
+// alias. A mise.lock reached through a symlink belongs to every directory that
+// links to it, so keying on the config would not order two configs sharing a
+// lockfile; a config reached through a symlink is one file under two names, so
+// keying on the manifest path would not order those either; and taking a lock
+// per resource invites a deadlock over their order. An edit is a handful of
+// operations on files of a few kilobytes and every caller applies its plan's
+// steps one at a time, so finer granularity would buy nothing.
+//
+// The guard is process-local. Two `deputy fix` runs over one working tree still
+// race, on these files and on the working tree itself, and ordering those would
+// take a filesystem lock that Deputy does not take.
+var fileEdits sync.Mutex
+
 // ApplyDeputyCommand executes a deputy-internal command.
 // Returns an error if the command is not recognized or fails.
+//
+// The edit is serialized against every other one in the process by [fileEdits],
+// so a command reads the file its predecessor wrote rather than the bytes they
+// both started from.
 func ApplyDeputyCommand(repoDir, cmd string) error {
 	parts, err := ParseCommandArgs(cmd)
 	if err != nil {
 		return fmt.Errorf("invalid command: %w", err)
 	}
+
+	fileEdits.Lock()
+	defer fileEdits.Unlock()
 
 	switch parts[0] {
 	case "deputy:action:update":

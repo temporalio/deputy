@@ -2385,3 +2385,141 @@ checksum = "sha256:legacyfoo"
 		})
 	}
 }
+
+// TestApplyDeputyCommandConcurrentEditsBothLand pins that two edits applied at
+// the same time do not overwrite each other. Every deputy: command is a
+// read-modify-write, so without ordering both read the same original bytes,
+// compute independent results, and publish them one over the other: the loser's
+// edit is gone while both applications report success. For a lockfile prune that
+// means a stale entry survives, lock resolution serves it back, and the fix
+// reads as ineffective at the version it just removed.
+//
+// The versions are the ones mise 2026.7.3 resolves for these lines, so the
+// fixtures are edits Deputy could really generate.
+func TestApplyDeputyCommandConcurrentEditsBothLand(t *testing.T) {
+	const sharedLock = `[[tools.node]]
+version = "20.11.0"
+backend = "core:node"
+
+[[tools.go]]
+version = "1.22.12"
+backend = "core:go"
+`
+	tests := []struct {
+		name  string
+		files map[string]string
+		// links maps a link path to its target, relative to the link.
+		links    map[string]string
+		commands []string
+		// present and absent are substrings a file must and must not hold once
+		// both edits have been applied.
+		present map[string][]string
+		absent  map[string][]string
+	}{
+		{
+			name: "two configs sharing one lockfile",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\nnode = \"20.11.0\"\n",
+				"b/mise.toml": "[tools]\ngo = \"1.22.12\"\n",
+				"shared.lock": sharedLock,
+			},
+			links: map[string]string{
+				"a/mise.lock": "../shared.lock",
+				"b/mise.lock": "../shared.lock",
+			},
+			commands: []string{
+				"deputy:mise:update a/mise.toml node 20.19.6 20.11.0",
+				"deputy:mise:update b/mise.toml go 1.24.3 1.22.12",
+			},
+			present: map[string][]string{
+				"a/mise.toml": {"20.19.6"},
+				"b/mise.toml": {"1.24.3"},
+			},
+			absent: map[string][]string{"shared.lock": {"20.11.0", "1.22.12"}},
+		},
+		{
+			name: "two tools in one config",
+			files: map[string]string{
+				"mise.toml": "[tools]\nnode = \"20.11.0\"\ngo = \"1.22.12\"\n",
+				"mise.lock": sharedLock,
+			},
+			commands: []string{
+				"deputy:mise:update mise.toml node 20.19.6 20.11.0",
+				"deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			},
+			present: map[string][]string{"mise.toml": {"20.19.6", "1.24.3"}},
+			absent:  map[string][]string{"mise.lock": {"20.11.0", "1.22.12"}},
+		},
+	}
+
+	// A lost update needs the two applies to overlap, so the case is repeated:
+	// one pass could schedule them apart and pass on a build with no ordering
+	// at all.
+	const rounds = 20
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for range rounds {
+				dir := t.TempDir()
+				for rel, content := range tt.files {
+					full := filepath.Join(dir, filepath.FromSlash(rel))
+					if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for rel, target := range tt.links {
+					full := filepath.Join(dir, filepath.FromSlash(rel))
+					if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Symlink(filepath.FromSlash(target), full); err != nil {
+						t.Skipf("symlinks unavailable: %v", err)
+					}
+				}
+
+				var wg sync.WaitGroup
+				errs := make([]error, len(tt.commands))
+				for i, cmd := range tt.commands {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						errs[i] = ApplyDeputyCommand(dir, cmd)
+					}()
+				}
+				wg.Wait()
+				for i, err := range errs {
+					if err != nil {
+						t.Fatalf("%s: %v", tt.commands[i], err)
+					}
+				}
+
+				read := func(rel string) string {
+					t.Helper()
+					data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+					if err != nil {
+						t.Fatal(err)
+					}
+					return string(data)
+				}
+				for rel, wants := range tt.present {
+					got := read(rel)
+					for _, want := range wants {
+						if !strings.Contains(got, want) {
+							t.Fatalf("%s lost the edit that writes %q:\n%s", rel, want, got)
+						}
+					}
+				}
+				for rel, unwanted := range tt.absent {
+					got := read(rel)
+					for _, gone := range unwanted {
+						if strings.Contains(got, gone) {
+							t.Fatalf("%s kept %q, so one prune was overwritten:\n%s", rel, gone, got)
+						}
+					}
+				}
+			}
+		})
+	}
+}
