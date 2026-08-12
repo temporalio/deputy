@@ -46,7 +46,9 @@ The first clause is narrower than it sounds, which is worth stating because the 
 
 `imageRef()` earns its place under the second clause. Resolving an implicit `docker.io` and telling a registry port from a tag is expressible with string operations, but a hand-rolled version that splits on `:` treats `localhost:5000/app` as a tag, and the resulting rule does not match and does not error. In a security control, a wrong answer that looks like a clean pass is the failure mode worth spending surface area to prevent.
 
-`isCritical()` earns nothing: it abbreviates `== severity.critical`, and no shipped policy uses it.
+`pathLength()` earns nothing. Its binding returns the list's `Size()`, so it is `size(p)` spelled longer, and the expression it replaces is already clear.
+
+`isCritical()` reads like the same case and is not, which is the trap worth naming: apply the test to the binding, not to the name. It is not `== severity.critical`. It walks `advisory.severity.level` itself and accepts the level as either a number or a string, so on a map-backed payload carrying `"CRITICAL"` the helper returns true where the equality returns false. Whether the normalization earns its place under the second clause is a real question; deleting it as an abbreviation would change which findings match.
 
 `age()` is the case worth naming, because it looks like it earns its place and does not. It is `now() - timestamp(x)` with one overload missing, so `age(image.metadata.created)` fails at evaluation where the expression it abbreviates succeeds (#179). An abbreviation narrower than the thing it abbreviates is worse than no helper, because it looks like the safe choice.
 
