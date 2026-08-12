@@ -119,3 +119,53 @@ func TestScalibrGroupNamesSurviveCanonicalization(t *testing.T) {
 		})
 	}
 }
+
+// TestEverySpellingOfAnEcosystemResolvesToTheSamePlugins pins the filter to the
+// vocabulary, not to a copy of part of it. Every string that names an ecosystem
+// (its canonical token, its display name, and each alias, taken from
+// ecosystem.Spellings) has to reach the same scanners, because a caller that
+// spells an ecosystem the way Deputy itself renders it is naming the same
+// ecosystem.
+//
+// The internal plugins are where this broke. Their routing kept a hand-written
+// alias set beside the registry's, so "GitHub Actions", the display form this
+// PR's own contract emits, and the "github-action" and "githubaction" aliases
+// reached neither the internal plugin nor a SCALIBR group, and the scan failed
+// with an unknown-plugin error instead of scanning workflows.
+func TestEverySpellingOfAnEcosystemResolvesToTheSamePlugins(t *testing.T) {
+	cap := &plugin.Capabilities{OS: plugin.OSLinux}
+	for _, token := range ecosystem.CanonicalEcosystems() {
+		eco := ecosystem.Ecosystem(token)
+		spellings := ecosystem.Spellings(eco)
+		if len(spellings) == 0 {
+			t.Fatalf("ecosystem %q reports no spellings", token)
+		}
+		want, err := resolvePlugins(ScanOptions{Ecosystems: []string{token}}, cap)
+		if err != nil {
+			t.Fatalf("resolvePlugins(%q): %v", token, err)
+		}
+		for _, spelling := range spellings {
+			t.Run(token+"/"+spelling, func(t *testing.T) {
+				got, err := resolvePlugins(ScanOptions{Ecosystems: []string{spelling}}, cap)
+				if err != nil {
+					t.Fatalf("resolvePlugins(%q): %v", spelling, err)
+				}
+				if !slices.Equal(pluginNames(got), pluginNames(want)) {
+					t.Errorf("resolvePlugins(%q) = %v, want the plugins %q resolves to: %v",
+						spelling, pluginNames(got), token, pluginNames(want))
+				}
+			})
+		}
+	}
+}
+
+// pluginNames returns the sorted plugin names, so two resolutions of one
+// ecosystem are compared by what they scan rather than by plugin order.
+func pluginNames(plugins []plugin.Plugin) []string {
+	names := make([]string, 0, len(plugins))
+	for _, p := range plugins {
+		names = append(names, p.Name())
+	}
+	slices.Sort(names)
+	return names
+}

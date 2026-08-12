@@ -128,6 +128,25 @@ func Display(eco Ecosystem) string {
 	return string(eco)
 }
 
+// Spellings returns every string that names eco: its canonical token, its
+// display name, and each alias, as declared. It is the same set
+// [Registry.Register] indexes, for both the registered ecosystems and the
+// registry-less canonical tokens, so a surface that has to accept every spelling
+// of an ecosystem derives the list from here rather than keeping a copy that
+// answers only the spellings someone remembered. An ecosystem Deputy does not
+// know spells nothing, so the result is nil.
+func Spellings(eco Ecosystem) []string {
+	if reg := Default().Get(eco); reg != nil {
+		return reg.Spellings()
+	}
+	for _, reg := range extraCanonicalEcosystems {
+		if reg.Ecosystem == eco {
+			return reg.Spellings()
+		}
+	}
+	return nil
+}
+
 // PURLType returns the package-url type that identifies eco inside a PURL. It
 // is the registry's [ProjectionPURLType], for both the ecosystems [Default]
 // carries and the registry-less canonical tokens, so no surface has to keep its
