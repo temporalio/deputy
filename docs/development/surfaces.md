@@ -8,6 +8,16 @@ This note fixes those rules so a new capability can be designed once and project
 
 The protos in [`api/deputy`](../../api/deputy) are the domain. Everything a user or an integrator touches is either derived from them, adapted from them, or built on top of them. Which of the three decides how much may be hand-written and what test guards the edge.
 
+### How to read a claim on this page
+
+The failure this page has repeated is stating an aspiration in the present tense, so a reader takes an edge to be held when nothing holds it. Every claim about what the repository does therefore carries one of three labels:
+
+- **Guarded.** It holds, and a named test fails when it stops holding. The test is named where the claim is made.
+- **Convention.** It holds because someone maintained it. Nothing fails when it stops.
+- **Direction.** It does not hold. The gap is named, with its issue where one is open.
+
+A **Rule** is never labelled: a rule is what to do, not a report on what the code does. Where the code does not follow one yet, the text above it says so with a label. Unlabelled prose describes code as written, not a property anything preserves.
+
 ## Four kinds of surface
 
 ### 1. Direct projections
@@ -35,7 +45,7 @@ The CEL policy DSL.
 This is the one surface that genuinely is not a projection. It has three parts, and they do not share an owner:
 
 - **Grammar** has two layers. The expression sublanguage is CEL's and is not ours to design. The bundle grammar wrapped around it is entirely ours: `policies`, `vars`, `rules`, actions, modes, entrypoint and command filters, variable ordering, and the validation that rejects a malformed bundle. It lives in [`internal/policy/source.go`](../../internal/policy/source.go) and [`internal/policy/bundle_structured.go`](../../internal/policy/bundle_structured.go) and is specified in [`docs/reference/policy-spec.md`](../reference/policy-spec.md). Most DSL features land in that layer, which means parsing, validation, compatibility, and spec work, not just a CEL expression.
-- **Vocabulary** is entirely ours and should derive from descriptors: the variables bound at each entrypoint, the fields reachable on them, the enum values. It does not (#182). `severityConstants` and `scopeConstants` in [`internal/policy/evaluator.go`](../../internal/policy/evaluator.go) are hand-written, and they disagree with each other: `severity.critical` is lowercase and `scope.RUNTIME` is uppercase (#182). The cost of that shows in the tooling. The LSP taught uppercase for both until #144, so accepting a severity completion produced a policy that failed at evaluation with `no such key: CRITICAL`; the fix was to have the completion read the runtime map (`policy.SeverityConstantNames`) instead of a second list. Scope is still the second list, spelled out in `internal/policy/lsp/completions.go`, correct only because nobody has changed `scopeConstants` since. Both enums exist in proto, but they do not derive the same way, and that difference is the work rather than a detail of it. `severityConstants` binds real `SeverityLevel` values from [`api/deputy/vulnerability/v1/vulnerability.proto`](../../api/deputy/vulnerability/v1/vulnerability.proto), so its values come from the descriptor unchanged. Its keys do not, and that is the part to write down: the descriptor spells the members `SEVERITY_LEVEL_CRITICAL` while the public vocabulary is `severity.critical`, so the projection is an explicit prefix strip and lowercasing. A generator that maps the descriptor names straight across regenerates the spelling #144 removed, and the failure is at evaluation, not compile: `severity.CRITICAL` fails with `no such key: CRITICAL`. `scopeConstants` does not derive at all: the policy-facing field is `string scope` on `GraphEdge` in [`api/deputy/policy/v1/policy.proto`](../../api/deputy/policy/v1/policy.proto), the `Scope` enum lives on the separate graph service model in [`api/deputy/graph/v1/service.proto`](../../api/deputy/graph/v1/service.proto), and the runtime binds `scope.RUNTIME` to the string `"runtime"`. Generating the enum's numeric value would break every comparison written against those strings, and generating a lowercase string means an explicit `SCOPE_RUNTIME` -> `"runtime"` projection that the policy descriptor does not express. Deriving this vocabulary means picking that projection deliberately, or moving the policy input onto the enum first.
+- **Vocabulary** is entirely ours and should derive from descriptors: the variables bound at each entrypoint, the fields reachable on them, the enum values. That is **direction**, not description; it does not derive (#182). `severityConstants` and `scopeConstants` in [`internal/policy/evaluator.go`](../../internal/policy/evaluator.go) are hand-written, and they disagree with each other: `severity.critical` is lowercase and `scope.RUNTIME` is uppercase (#182). The cost of that shows in the tooling. The LSP taught uppercase for both until #144, so accepting a severity completion produced a policy that failed at evaluation with `no such key: CRITICAL`; the fix was to have the completion read the runtime map (`policy.SeverityConstantNames`) instead of a second list. Scope is still the second list, spelled out in `internal/policy/lsp/completions.go`, correct only because nobody has changed `scopeConstants` since. Both enums exist in proto, but they do not derive the same way, and that difference is the work rather than a detail of it. `severityConstants` binds real `SeverityLevel` values from [`api/deputy/vulnerability/v1/vulnerability.proto`](../../api/deputy/vulnerability/v1/vulnerability.proto), so its values come from the descriptor unchanged. Its keys do not, and that is the part to write down: the descriptor spells the members `SEVERITY_LEVEL_CRITICAL` while the public vocabulary is `severity.critical`, so the projection is an explicit prefix strip and lowercasing. A generator that maps the descriptor names straight across regenerates the spelling #144 removed, and the failure is at evaluation, not compile: `severity.CRITICAL` fails with `no such key: CRITICAL`. `scopeConstants` does not derive at all: the policy-facing field is `string scope` on `GraphEdge` in [`api/deputy/policy/v1/policy.proto`](../../api/deputy/policy/v1/policy.proto), the `Scope` enum lives on the separate graph service model in [`api/deputy/graph/v1/service.proto`](../../api/deputy/graph/v1/service.proto), and the runtime binds `scope.RUNTIME` to the string `"runtime"`. Generating the enum's numeric value would break every comparison written against those strings, and generating a lowercase string means an explicit `SCOPE_RUNTIME` -> `"runtime"` projection that the policy descriptor does not express. Deriving this vocabulary means picking that projection deliberately, or moving the policy input onto the enum first.
 - **Standard library** is the affordance layer: helpers that express something the language cannot.
 
 The standard library needs an admission test, because every addition is surface area a human or a model must learn, and unused surface actively misleads:
@@ -60,7 +70,7 @@ The package-manager proxies.
 
 Deputy does not design the npm registry protocol, the Go module proxy protocol, or the OCI distribution spec. It conforms to them. These are adapters with conformance tests, not design surfaces.
 
-They carry one thing that *is* ours: the extension band, the `X-Deputy-*` response headers. These are domain objects projected onto HTTP, and they should be derived and validated like any other projection rather than assembled from string literals.
+They carry one thing that *is* ours: the extension band, the `X-Deputy-*` response headers. These are domain objects projected onto HTTP, and they should be derived and validated like any other projection. **Direction:** no message describes them. They are written at the point of use, some through named constants and some as bare literals (`w.Header().Set("X-Deputy-Name", meta.Name)` in `internal/proxy/policy.go`), and nothing checks a writer against a reader.
 
 The prefix is not one contract though, and treating it as one is how a derived replacement would conflate them. There are at least four families, from independent sources:
 
@@ -85,6 +95,8 @@ Nothing ties the reference to the struct. No test reads `configuration.md`, whic
 
 **Rule:** the same as any other ergonomic projection. The struct is the contract until the contract moves to proto, so derive the reference tables from it and add a correspondence test that fails when a documented key has no field, or a field no documented key. Adding a setting should be one edit, not three.
 
+**Direction, all of it.** No generator renders those tables and no test reads them, so adding a setting is three edits until someone builds the mechanism in *Choosing a mechanism*.
+
 The environment variables are the harder half and need a step first: the binding has to exist as data before it can be derived. It is control flow instead, an `if os.Getenv(...)` per variable in `loadFromEnv`, and the name is not a function of the field. `DEPUTY_PROXY_ADDR` sets `proxy.listen_addr` and `DEPUTY_OSV_CONCURRENCY` sets `performance.osv_concurrency`, so neither the key nor the section survives the mapping, and some variables have no `Config` field at all: `DEPUTY_SERVER` is read in `internal/cli/cmd/register.go` and `DEPUTY_OSV_BASE_URL` in `internal/analysis/osv/client.go`, by the code that wants them. Give the bindings a representation the loader and the docs can share, then derive the list from that.
 
 ## Why this matters, empirically
@@ -97,7 +109,7 @@ The case that decides the design is the policy entrypoint reference. It **is** g
 
 So generation is necessary and not sufficient. The root needs a contract test: one that fails when a binding profile declares a variable the runtime cannot supply.
 
-The first version of that test landed in #138. [`internal/policy/bindings_test.go`](../../internal/policy/bindings_test.go) compares each profile against the names the CEL environment declares, and pins the names that still fail in `undeclaredBindingVars` so the gap is enforced at its current size and cannot grow quietly.
+The first version of that test landed in #138, and it is the one part of this that is **guarded**. [`internal/policy/bindings_test.go`](../../internal/policy/bindings_test.go) compares each profile against the names the CEL environment declares, and pins the names that still fail in `undeclaredBindingVars` so the gap is enforced at its current size and cannot grow quietly.
 
 It is not the whole contract, and the test says so itself. The environment is one flat list shared by every entrypoint and every variable in it is `DynType`, so a name it declares may still be unbound at the entrypoint advertising it. Declared is not bound, and the profile can also advertise a name no message carries: `go_artifact_request` offers an optional `licenses` that `GoArtifactRequestPolicyInput` has no field for.
 
@@ -141,7 +153,7 @@ It is not finished. `Registration` carries no normalization rules and no purl ty
 
 The failures were never missing machinery. `Ecosystem.NormalizeVersion` exists and several packages call it; the policy path did not, so a rule matching `^v1\.` never fired where versions arrived unprefixed. Correctness was opt-in per caller, and that drifts as callers multiply.
 
-**Rules to design toward.** None of them holds everywhere yet, and each names a specific gap:
+**Rules to design toward.** Every one of them is **direction**, and each names its gap:
 
 - Exactly one canonical form crosses a boundary, and the boundary normalizes rather than trusting its callers. The policy boundary does not: `buildPolicyInput` in [`internal/proxy/handler.go`](../../internal/proxy/handler.go) copies the requested name and version into the payload exactly as they arrived. #168 moves that normalization onto the three CEL payload boundaries, which is the shape this rule asks for.
 - Projections live in the registry. Adding an ecosystem should be one entry, and nothing else should need editing. Until `Parse`, `All`, and the normalization methods read from the registry, adding one still means updating those too.
