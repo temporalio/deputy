@@ -630,3 +630,111 @@ func TestLockScopeClaimsAreSharedPerLockfile(t *testing.T) {
 		t.Errorf("the drop-in got different counts: %v vs %v", second, first)
 	}
 }
+
+// TestLockClaimsSeparatesRefusalFromFailure pins which unresolvable candidate
+// stops ownership discovery and which one is simply not a claimant. A candidate
+// whose lock path leaves the tree locks somewhere Deputy does not scan, so it
+// cannot be locking into the file being asked about; treating that refusal as a
+// failure let one config's link erase ownership for the whole repository, and
+// both readers of a lockfile answer unresolved ownership by setting the lockfile
+// aside, so every scan lost its exact locked versions and checksums.
+//
+// A candidate Deputy could not read is the opposite statement and stays
+// fail-closed, a chain too long to walk included: resolution stopped before
+// learning where it ends, and it could still have ended on this very file.
+func TestLockClaimsSeparatesRefusalFromFailure(t *testing.T) {
+	const goDecl = "[tools]\ngo = \"1.24\"\n"
+	const nodeDecl = "[tools]\nnode = \"20\"\n"
+	link := func(to string) *fstest.MapFile {
+		return &fstest.MapFile{Mode: fs.ModeSymlink, Data: []byte(to)}
+	}
+
+	tests := []struct {
+		name    string
+		files   fstest.MapFS
+		config  string
+		want    map[string]int
+		wantErr bool
+	}{
+		{
+			name: "a candidate linking to an absolute path is not a claimant",
+			files: fstest.MapFS{
+				"a/mise.toml": {Data: []byte(goDecl)},
+				"a/mise.lock": {Data: []byte("")},
+				"b/mise.toml": {Data: []byte(nodeDecl)},
+				"b/mise.lock": link("/etc/mise.lock"),
+			},
+			config: "a/mise.toml",
+			want:   map[string]int{"go": 1},
+		},
+		{
+			name: "a candidate linking above the root is not a claimant",
+			files: fstest.MapFS{
+				"a/mise.toml": {Data: []byte(goDecl)},
+				"a/mise.lock": {Data: []byte("")},
+				"b/mise.toml": {Data: []byte(nodeDecl)},
+				"b/mise.lock": link("../../outside.lock"),
+			},
+			config: "a/mise.toml",
+			want:   map[string]int{"go": 1},
+		},
+		{
+			// The skip is about where a candidate locks, not about ignoring
+			// links: one that lands on this config's lockfile still claims it.
+			name: "a candidate linking to this lockfile is a claimant",
+			files: fstest.MapFS{
+				"a/mise.toml": {Data: []byte(goDecl)},
+				"a/mise.lock": {Data: []byte("")},
+				"b/mise.toml": {Data: []byte(goDecl)},
+				"b/mise.lock": link("../a/mise.lock"),
+			},
+			config: "a/mise.toml",
+			want:   map[string]int{"go": 2},
+		},
+		{
+			// Resolution stopped before it learned where this chain ends, so
+			// nothing about it rules out this lockfile.
+			name: "a candidate whose links loop is an error",
+			files: fstest.MapFS{
+				"a/mise.toml":  {Data: []byte(goDecl)},
+				"a/mise.lock":  {Data: []byte("")},
+				"b/mise.toml":  {Data: []byte(nodeDecl)},
+				"b/mise.lock":  link("other.lock"),
+				"b/other.lock": link("mise.lock"),
+			},
+			config:  "a/mise.toml",
+			wantErr: true,
+		},
+		{
+			// The config being asked about is held to the strict rule: a
+			// lockfile outside the tree has no in-tree claimants to count.
+			name: "the examined config's own escaping link is an error",
+			files: fstest.MapFS{
+				"a/mise.toml": {Data: []byte(goDecl)},
+				"a/mise.lock": link("/etc/mise.lock"),
+				"b/mise.toml": {Data: []byte(nodeDecl)},
+				"b/mise.lock": {Data: []byte("")},
+			},
+			config:  "a/mise.toml",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LockClaims(tt.files, tt.config)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("LockClaims(%q) = %v, want an error", tt.config, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LockClaims(%q): %v", tt.config, err)
+			}
+			if !maps.Equal(got, tt.want) {
+				t.Errorf("LockClaims(%q) = %v, want %v", tt.config, got, tt.want)
+			}
+		})
+	}
+}

@@ -316,3 +316,92 @@ func TestExtractDoesNotBorrowAcrossSharedLockConfigs(t *testing.T) {
 		})
 	}
 }
+
+// TestExtractKeepsLockWhenAnotherConfigLocksOutsideTheTree pins the blast radius
+// of an unresolvable neighbour. Enrichment needs to know who else could own a
+// lock entry, and with that unresolved it sets the lockfile aside entirely, so
+// the reported version falls back to the fuzzy declaration and the integrity
+// metadata is lost. A config elsewhere in the repository whose own lockfile
+// points outside the tree says nothing about this config's entries: it locks
+// somewhere Deputy does not scan, so it cannot be a claimant here, and one such
+// link must not cost every scan in the repository its exact locked versions.
+func TestExtractKeepsLockWhenAnotherConfigLocksOutsideTheTree(t *testing.T) {
+	const lock = "[[tools.go]]\nversion = \"1.24.9\"\nbackend = \"core:go\"\n\n" +
+		"[tools.go.platforms.linux-x64]\nchecksum = \"sha256:goodgo\"\n"
+	link := func(to string) *fstest.MapFile {
+		return &fstest.MapFile{Mode: fs.ModeSymlink, Data: []byte(to)}
+	}
+
+	tests := []struct {
+		name  string
+		files fstest.MapFS
+		// want is the version the extractor reports for the go declaration and
+		// wantChecksum the integrity metadata it carries.
+		want         string
+		wantChecksum string
+	}{
+		{
+			name: "a neighbour locking to an absolute path outside the tree",
+			files: fstest.MapFS{
+				"a/mise.toml": {Data: []byte("[tools]\ngo = \"1.24\"\n")},
+				"a/mise.lock": {Data: []byte(lock)},
+				"b/mise.toml": {Data: []byte("[tools]\nnode = \"20\"\n")},
+				"b/mise.lock": link("/var/tmp/shared.lock"),
+			},
+			want:         "1.24.9",
+			wantChecksum: "sha256:goodgo",
+		},
+		{
+			name: "a neighbour locking above the root",
+			files: fstest.MapFS{
+				"a/mise.toml": {Data: []byte("[tools]\ngo = \"1.24\"\n")},
+				"a/mise.lock": {Data: []byte(lock)},
+				"b/mise.toml": {Data: []byte("[tools]\nnode = \"20\"\n")},
+				"b/mise.lock": link("../../outside.lock"),
+			},
+			want:         "1.24.9",
+			wantChecksum: "sha256:goodgo",
+		},
+		{
+			// Ownership still decides: a neighbour that really does lock into
+			// this file and declares the same tool contests the entry, so the
+			// declaration is reported as written.
+			name: "a neighbour locking into this file still contests it",
+			files: fstest.MapFS{
+				"a/mise.toml": {Data: []byte("[tools]\ngo = \"1.24\"\n")},
+				"a/mise.lock": {Data: []byte(lock)},
+				"b/mise.toml": {Data: []byte("[tools]\ngo = \"1.23\"\n")},
+				"b/mise.lock": link("../a/mise.lock"),
+			},
+			want: "1.24",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const cfgPath = "a/mise.toml"
+			f, err := tt.files.Open(cfgPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv, err := New().Extract(t.Context(), &filesystem.ScanInput{Path: cfgPath, Reader: f, FS: tt.files})
+			if err != nil {
+				t.Fatalf("Extract: %v", err)
+			}
+			if len(inv.Packages) != 1 {
+				t.Fatalf("got %d packages, want 1", len(inv.Packages))
+			}
+			pkg := inv.Packages[0]
+			if got := pkg.Version; got != tt.want {
+				t.Errorf("go version = %q, want %q", got, tt.want)
+			}
+			md, ok := pkg.Metadata.(*mise.Metadata)
+			if !ok {
+				t.Fatalf("metadata is %T, want *mise.Metadata", pkg.Metadata)
+			}
+			if got := md.Checksums["linux-x64"]; got != tt.wantChecksum {
+				t.Errorf("linux-x64 checksum = %q, want %q", got, tt.wantChecksum)
+			}
+		})
+	}
+}

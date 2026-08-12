@@ -290,7 +290,13 @@ func (s *LockScope) configs() ([]string, error) {
 //
 // An empty result means configPath has no lockfile at all (a .tool-versions
 // file, say). A read error is returned, because a config that cannot be listed
-// is a config whose declarations cannot be counted.
+// is a config whose declarations cannot be counted. A candidate whose own lock
+// path leaves the tree ([ErrLinkLeavesTree]) is skipped instead: it locks
+// somewhere Deputy does not scan, so it cannot be locking into the file being
+// asked about, and one such link would otherwise erase ownership for every
+// config in the repository. configPath's own lock path is still resolved
+// strictly, since a lockfile outside the tree has no in-tree claimants to
+// count.
 func ConfigsSharingLock(fsys fs.FS, configPath string) ([]string, error) {
 	return NewLockScope(fsys).ConfigsSharingLock(configPath)
 }
@@ -327,6 +333,21 @@ func (s *LockScope) ConfigsSharingLock(configPath string) ([]string, error) {
 		}
 		candidateTarget, _, err := ResolveLinkedPath(fsys, candidateLock)
 		if err != nil {
+			if errors.Is(err, ErrLinkLeavesTree) {
+				// This candidate locks somewhere Deputy does not scan, so it
+				// cannot be locking into the in-tree file whose claimants are
+				// being counted: skipping it is a statement about that
+				// candidate, not a guess about an unknown. Aborting instead
+				// would let one config's bad link erase ownership for every
+				// config in the repository, and both readers of a lockfile
+				// answer unresolved ownership by dropping the lockfile
+				// entirely, so a single link would cost every scan its exact
+				// locked versions and checksums.
+				continue
+			}
+			// Anything else is "this candidate could not be read", which is not
+			// the same statement: the declarations it hides are exactly the ones
+			// that would have contested a name, so ownership stays unresolved.
 			return nil, fmt.Errorf("resolving the lockfile of %s: %w", candidate, err)
 		}
 		if candidateTarget != target {
@@ -373,6 +394,21 @@ func allConfigPaths(fsys fs.FS) ([]string, error) {
 	return out, nil
 }
 
+// ErrLinkLeavesTree marks a resolution that stopped because the chain pointed
+// out of the tree being scanned, by an absolute path or by climbing above the
+// root. It is a refusal, not a failure: the path is knowably outside Deputy's
+// containment, and every part of Deputy treats such a path as out of scope,
+// from the os.Root that will not open it to the writer that will not publish
+// an edit through it.
+//
+// Callers separate it from an I/O failure because the two say different things.
+// "This link leaves the tree" rules a candidate out of sharing an in-tree file;
+// "I could not read this link" rules nothing out and has to stay fail-closed.
+// A chain that exceeds [maxLinkHops] is deliberately not this error: Deputy
+// stopped walking before learning where it ends, and it could still have ended
+// on the file in question.
+var ErrLinkLeavesTree = errors.New("link leaves the tree being scanned")
+
 // maxLinkHops bounds symlink resolution so a cyclic or absurdly deep chain
 // ends in an error instead of looping. The limit is generous next to any real
 // repository layout; the operating system's own limit is typically far lower.
@@ -412,11 +448,11 @@ func ResolveLinkedPath(fsys fs.FS, relPath string) (target string, linked bool, 
 			return "", false, fmt.Errorf("reading link %s: %w", relPath, err)
 		}
 		if filepath.IsAbs(text) {
-			return "", false, fmt.Errorf("refusing to follow %s: it links to the absolute path %s", relPath, text)
+			return "", false, fmt.Errorf("refusing to follow %s: it links to the absolute path %s: %w", relPath, text, ErrLinkLeavesTree)
 		}
 		next := path.Join(path.Dir(relPath), filepath.ToSlash(text))
 		if next == ".." || strings.HasPrefix(next, "../") {
-			return "", false, fmt.Errorf("refusing to follow %s: it links outside the repository via %s", relPath, text)
+			return "", false, fmt.Errorf("refusing to follow %s: it links outside the repository via %s: %w", relPath, text, ErrLinkLeavesTree)
 		}
 		relPath, linked = next, true
 	}
