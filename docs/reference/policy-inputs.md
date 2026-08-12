@@ -930,8 +930,9 @@ For container images, `target.provenance` commonly includes: `registry`, `reposi
 
 When scanning SBOMs, Deputy injects `sbom.purls`, a list of PURL strings found in
 the SBOM input (including container image PURLs with qualifiers such as platform).
-PURLs are normalized to canonical form when possible; use `purl()` to parse fields
-in CEL:
+Every entry is canonicalized the same way a package's own `purl` is, so
+`pkg.purl in sbom.purls` holds for a package the SBOM carries; use `purl()` to
+parse fields in CEL:
 
 ```json
 {
