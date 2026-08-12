@@ -2080,6 +2080,117 @@ policies:
 	}
 }
 
+// TestValidateBundleChecksBundleShapesBesideAReference pins that a reference the
+// format refuses does not withhold the bundle-level shapes only decoding finds. An
+// alias or a merge key is a refusal like any other: the author has to remove it,
+// and being told nothing else about the file until they do costs a lint run per
+// defect. The decoder resolves what no reader of a bundle may, but an anchor is
+// defined in the same document, so every line it names is a line the author wrote.
+//
+// The last case is the same bundle without the reference, so what the reference was
+// withholding is what the assertion turns on.
+func TestValidateBundleChecksBundleShapesBesideAReference(t *testing.T) {
+	cases := []struct {
+		name      string
+		bundle    string
+		wantCodes []string
+		wantText  []string
+	}{
+		{
+			name: "an alias elsewhere in the document",
+			bundle: `
+unused: &u 1
+also: *u
+
+metadata: []
+
+policies:
+  - name: plain
+    rules:
+      - when: "true"
+        action: deny
+        reason: r
+`,
+			wantCodes: []string{"yaml-anchor", "bundle-error"},
+			wantText:  []string{"line 5: cannot unmarshal"},
+		},
+		{
+			name: "a merge key elsewhere in the document",
+			bundle: `
+base: &b
+  k: 1
+also:
+  <<: *b
+
+metadata: []
+
+policies:
+  - name: plain
+    rules:
+      - when: "true"
+        action: deny
+        reason: r
+`,
+			wantCodes: []string{"yaml-merge-key", "bundle-error"},
+			wantText:  []string{"line 7: cannot unmarshal"},
+		},
+		{
+			name: "a policy list inherited through an alias holding a policy with no rules",
+			bundle: `
+base: &b
+  - name: inherited
+
+policies: *b
+`,
+			wantCodes: []string{"yaml-anchor", "bundle-error"},
+			wantText:  []string{policyNeedsRuleMessage},
+		},
+		{
+			name: "the same bundle shape without any reference",
+			bundle: `
+metadata: []
+
+policies:
+  - name: plain
+    rules:
+      - when: "true"
+        action: deny
+        reason: r
+`,
+			wantCodes: []string{"bundle-error"},
+			wantText:  []string{"line 2: cannot unmarshal"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := ValidateBundle(tc.bundle, ValidateOptions{Source: "bundle.yaml"})
+			if err != nil {
+				t.Fatalf("ValidateBundle: %v", err)
+			}
+			for _, want := range tc.wantCodes {
+				if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == want }) {
+					t.Fatalf("expected an issue with code %q, got %v", want, issues)
+				}
+			}
+			var reported strings.Builder
+			for _, issue := range issues {
+				reported.WriteString(issue.Message)
+				reported.WriteString("\n")
+			}
+			for _, want := range tc.wantText {
+				if !strings.Contains(reported.String(), want) {
+					t.Fatalf("expected the report to mention %q, got %v", want, issues)
+				}
+			}
+			for _, issue := range issues {
+				if issue.Line <= 0 {
+					t.Fatalf("issue %v should name the line it is on", issue)
+				}
+			}
+		})
+	}
+}
+
 // TestValidateBundleReadsPoliciesSuppliedByAMergeKey pins the one case where a
 // missing policies key is not missing: a root merge key supplies it. The merge
 // key is refused, and saying the list is absent as well would name a mistake the

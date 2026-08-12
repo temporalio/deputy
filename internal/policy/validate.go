@@ -296,12 +296,17 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	// on its own and adds only what is not already reported. It is the decode
 	// alone: routing it through the loader would stop at the loader's refusal of
 	// an anchor this run has already located and named a line for, and hide the
-	// bundle-level shape behind it. A document that says part of itself elsewhere
-	// is skipped, since the decoder would resolve what no reader of a bundle may.
-	if !resolvesElsewhere(root) {
-		if _, _, err := decodeStructuredBundle([]byte(text), source, true); err != nil {
-			issues = append(issues, backstopIssue(err, source, doc, issues)...)
-		}
+	// bundle-level shape behind it.
+	//
+	// A document that says part of itself elsewhere is decoded too, references and
+	// all. The decoder resolves what no reader of a bundle may, which is why
+	// nothing here acts on the resolved value, but it is still the only reader that
+	// can find these shapes, and an anchor is defined in the document it is used
+	// in, so every line it names is a line the author wrote. Skipping it let one
+	// alias withhold every bundle-level shape in the file until the alias was
+	// removed and lint rerun.
+	if _, _, err := decodeStructuredBundle([]byte(text), source, true); err != nil {
+		issues = append(issues, backstopIssue(err, source, doc, issues)...)
 	}
 	return issues, nil
 }

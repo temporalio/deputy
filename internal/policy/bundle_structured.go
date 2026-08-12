@@ -274,10 +274,10 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 // located every anchor in the document itself, and the refusal stops at the
 // first one, so going through it would hide the bundle-level shapes that nothing
 // but decoding finds and cost the author a lint run. It is safe there because
-// validation skips this whenever the document holds an alias or a merge key, the
-// constructs that would make the decoder read something other than what the
-// document says. Every other caller loads a bundle to run it and must refuse
-// them, so it calls tryParseStructuredBundle.
+// validation acts on nothing the decoder resolves: it reports the shapes the
+// decode refuses, each on the line the decoder names, which for a reference is
+// where the anchor it reads is written. Every other caller loads a bundle to run
+// it and must refuse those constructs, so it calls tryParseStructuredBundle.
 func decodeStructuredBundle(data []byte, path string, isBundle bool) ([]Source, bool, error) {
 	var bundle structuredBundle
 	if err := yaml.Unmarshal(data, &bundle); err != nil {
