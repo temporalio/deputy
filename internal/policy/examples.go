@@ -178,7 +178,7 @@ func generateVariableValue(ep Entrypoint, varName string, level ExampleLevel, re
 	case "jwt":
 		return generateJWT(level), "JWT claims (anonymous if no auth)"
 	case "target":
-		return generateTarget(level), "scan target metadata"
+		return generateTarget(ep, level), "scan target metadata"
 	case "base_target":
 		return generateDiffTarget(level, "base"), "the base side of the diff"
 	case "target_target":
@@ -524,8 +524,22 @@ func exampleTarget(level ExampleLevel, displayPath, ref, commit string) map[stri
 	return mustProtoToMap(target)
 }
 
-// generateTarget creates target metadata.
-func generateTarget(level ExampleLevel) map[string]any {
+// serviceTarget builds the target fixture for a service entrypoint, where the
+// server names a resource with a string and nothing else. buildPolicyPayload
+// wraps that string as a Target carrying only display_path, so populating a
+// kind, ref, commit, or origin here would let a policy pass a fixture and then
+// never match a real request.
+func serviceTarget(displayPath string) map[string]any {
+	return mustProtoToMap(&targetv1.Target{DisplayPath: displayPath})
+}
+
+// generateTarget creates target metadata. Service entrypoints receive the
+// display-path-only shape their payload actually carries; CLI entrypoints
+// resolve a real target and see the fuller message.
+func generateTarget(ep Entrypoint, level ExampleLevel) map[string]any {
+	if ep.Category() == "server" {
+		return serviceTarget("/path/to/project")
+	}
 	return exampleTarget(level, "/path/to/project", "main", "abc123def456")
 }
 
@@ -533,11 +547,14 @@ func generateTarget(level ExampleLevel) map[string]any {
 // sides get distinct values because a diff compares independent resources, and
 // a fixture that repeated one value would let a policy checking only one side
 // pass against it.
+//
+// Diff sides only ever occur on a service entrypoint, so both carry just a
+// display path, matching diffSideTarget in the server.
 func generateDiffTarget(level ExampleLevel, side string) map[string]any {
 	if side == "base" {
-		return exampleTarget(level, "/path/to/base", "main", "abc123def456")
+		return serviceTarget("/path/to/base")
 	}
-	return exampleTarget(level, "/path/to/target", "feature-branch", "789fed654cba")
+	return serviceTarget("/path/to/target")
 }
 
 // generateImageInfo creates container image information.
