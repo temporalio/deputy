@@ -23,3 +23,5 @@ go.work.sum
 
 # env file
 .env
+# Claude Code runtime state. Written while a session runs, per machine.
+.claude/scheduled_tasks.lock
