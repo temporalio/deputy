@@ -347,6 +347,87 @@ func TestPruneLockedVersionsReadsVersionKeyLikeTheParser(t *testing.T) {
 	}
 }
 
+// TestPruneLockedVersionsReadsHeaderKeyLikeTheParser pins that the pruner finds
+// the end of a lock table header outside the header's quoted key segments. A
+// mise tool key carries option syntax in brackets, and TOML lets any of those
+// characters sit inside a quoted key, so the first "]]" in the line is not
+// necessarily the one closing the header.
+//
+// Cutting the header at it fails in both directions. The entry whose key holds
+// the delimiters is never recognized, so its stale version survives a fix that
+// reports success and the next scan reports the vulnerable version again. Worse,
+// an unrecognized header does not end the preceding entry either, so pruning a
+// neighbour swallows the whole entry after it and deletes the integrity metadata
+// of a tool nobody edited.
+//
+// Every key here is one [Parse] and [ParseLock] decode, which the cases assert
+// before pruning: the pruner has to act on the lockfiles Deputy itself reads.
+func TestPruneLockedVersionsReadsHeaderKeyLikeTheParser(t *testing.T) {
+	const bracketed = `ubi:owner/repo[opt=[x]]`
+	bracketedEntry := "[[tools.\"" + bracketed + "\"]]\n" +
+		"version = \"1.22.12\"\nbackend = \"ubi:owner/repo\"\n\n" +
+		"[tools.\"" + bracketed + "\".\"platforms.linux-x64\"]\nchecksum = \"sha256:bracketed\"\n"
+	const nodeEntry = "[[tools.node]]\nversion = \"20.11.0\"\nbackend = \"core:node\"\n"
+
+	tests := []struct {
+		name     string
+		lock     string
+		toolKeys []string
+		stale    string
+		want     string
+	}{
+		{
+			// The entry Deputy has to prune is the one with the bracketed key.
+			name:     "delimiters inside the pruned entry's key",
+			lock:     bracketedEntry + "\n" + nodeEntry,
+			toolKeys: []string{bracketed, "owner/repo"},
+			stale:    "1.22.12",
+			want:     nodeEntry,
+		},
+		{
+			// The bracketed key belongs to the following entry, which must
+			// survive intact: its header ends the entry being pruned.
+			name:     "delimiters inside the following entry's key",
+			lock:     nodeEntry + "\n" + bracketedEntry,
+			toolKeys: []string{"node"},
+			stale:    "20.11.0",
+			want:     bracketedEntry,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lf, err := ParseLock("mise.lock", []byte(tt.lock))
+			if err != nil {
+				t.Fatalf("ParseLock: %v", err)
+			}
+			if len(lf.Tools[bracketed]) != 1 {
+				t.Fatalf("ParseLock read %d entries for %q, want 1", len(lf.Tools[bracketed]), bracketed)
+			}
+			cfg, err := Parse("mise.toml", []byte("[tools]\n\""+bracketed+"\" = \"1.22.12\"\n"))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(cfg.Tools) != 1 || cfg.Tools[0].Key != bracketed {
+				t.Fatalf("Parse read tools %+v, want the single key %q", cfg.Tools, bracketed)
+			}
+
+			got, changed := PruneLockedVersions([]byte(tt.lock), tt.toolKeys, func(v string) bool {
+				return v == tt.stale
+			})
+			if !changed {
+				t.Fatalf("expected the stale entry to be pruned:\n%s", got)
+			}
+			if string(got) != tt.want {
+				t.Errorf("prune mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+			if _, err := ParseLock("mise.lock", got); err != nil {
+				t.Errorf("pruned lockfile no longer parses: %v", err)
+			}
+		})
+	}
+}
+
 func TestSplitKeyPath(t *testing.T) {
 	tests := []struct {
 		key  string

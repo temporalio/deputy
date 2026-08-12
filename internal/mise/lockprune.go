@@ -131,21 +131,51 @@ func lockHeaderPath(line string) (segs []string, isArray bool, ok bool) {
 		open, closing = "[[", "]]"
 	}
 	s = strings.TrimPrefix(s, open)
-	// Allow a trailing comment after the header.
-	if idx := strings.Index(s, closing); idx >= 0 {
-		rest := strings.TrimSpace(s[idx+len(closing):])
-		if rest != "" && !strings.HasPrefix(rest, "#") {
-			return nil, false, false
-		}
-		s = s[:idx]
-	} else {
+	idx := headerKeyPathEnd(s, closing)
+	if idx < 0 {
 		return nil, false, false
 	}
+	// Allow a trailing comment after the header.
+	if rest := strings.TrimSpace(s[idx+len(closing):]); rest != "" && !strings.HasPrefix(rest, "#") {
+		return nil, false, false
+	}
+	s = s[:idx]
 	segs = SplitKeyPath(strings.TrimSpace(s))
 	if len(segs) == 0 {
 		return nil, false, false
 	}
 	return segs, isArray, true
+}
+
+// headerKeyPathEnd returns the offset of the delimiter that closes a TOML table
+// header's key path, given the text after the opening bracket(s) and the closing
+// delimiter to look for. Quoted key segments are stepped over whole, so a
+// delimiter written inside one is read as the content it is: mise tool keys
+// carry option syntax in brackets ("ubi:owner/repo[opt=[x]]"), and a lockfile
+// quotes such a key exactly as the config does.
+//
+// Taking the first occurrence instead misreads those headers twice over. The
+// entry is not recognized as the tool's, so its stale version is never pruned
+// and lock resolution keeps serving it; and the header no longer ends the
+// preceding entry, so pruning a neighbour deletes this entry along with it. It
+// returns -1 when no closing delimiter follows the key path, which is not a
+// header line.
+func headerKeyPathEnd(s, closing string) int {
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' || c == '\'':
+			end, ok := TOMLStringEnd(s, i)
+			if !ok {
+				// An unterminated key segment is not a key path any parser
+				// reads, so there is no header end to find in it.
+				return -1
+			}
+			i = end - 1
+		case strings.HasPrefix(s[i:], closing):
+			return i
+		}
+	}
+	return -1
 }
 
 // lockEntryVersion extracts the version value from a `version = "..."` line at
