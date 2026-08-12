@@ -189,11 +189,18 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 	if err := bundleRefusalError(data, path); err != nil {
 		return nil, false, err
 	}
-	return decodeStructuredBundle(data, path)
+	return decodeStructuredBundle(data, path, LooksLikeStructuredBundle(data))
 }
 
 // decodeStructuredBundle turns an authored bundle into policy sources, without
 // the refusal of YAML anchors that loading one puts in front of the decoder.
+//
+// isBundle is the caller's answer to whether the data is an authored bundle at
+// all, which decides what a decode failure means: a policy the author wrote,
+// reported so they are told which field is wrong, or a file that was never a
+// bundle, left for the caller's other formats. Taking the answer rather than
+// asking again is what keeps a caller that has already committed to the document
+// being a bundle, as validation has, from being told it is not one.
 //
 // Only validation reads a bundle this way, for its last backstop: it has already
 // located every anchor in the document itself, and the refusal stops at the
@@ -203,10 +210,10 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 // constructs that would make the decoder read something other than what the
 // document says. Every other caller loads a bundle to run it and must refuse
 // them, so it calls tryParseStructuredBundle.
-func decodeStructuredBundle(data []byte, path string) ([]Source, bool, error) {
+func decodeStructuredBundle(data []byte, path string, isBundle bool) ([]Source, bool, error) {
 	var bundle structuredBundle
 	if err := yaml.Unmarshal(data, &bundle); err != nil {
-		if LooksLikeStructuredBundle(data) {
+		if isBundle {
 			return nil, false, fmt.Errorf("%s: %w", path, err)
 		}
 		return nil, false, nil

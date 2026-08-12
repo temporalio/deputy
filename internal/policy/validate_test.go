@@ -1186,6 +1186,22 @@ policies:
     rules: "when true deny"
 `,
 		},
+		{
+			name:   "policies written as a mapping",
+			bundle: "\npolicies: {}\n",
+		},
+		{
+			name:   "policies written as a scalar",
+			bundle: "\npolicies: none\n",
+		},
+		{
+			name:   "an empty policies list",
+			bundle: "\npolicies: []\n",
+		},
+		{
+			name:   "a policies entry that is not a policy",
+			bundle: "\npolicies:\n  - not-a-policy\n",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1230,6 +1246,36 @@ policies:
 			wantCodes:  []string{"rules-not-list", "bundle-error"},
 			wantText:   []string{"line 2: cannot unmarshal"},
 			denyText:   []string{"structuredRule"},
+		},
+		{
+			name: "bundle metadata of the wrong type beside a non-list policies value",
+			bundle: `
+metadata: []
+policies: {}
+`,
+			wantIssues: 2,
+			wantCodes:  []string{"policies-not-list", "bundle-error"},
+			wantText:   []string{"line 2: cannot unmarshal"},
+			denyText:   []string{"structuredPolicy"},
+		},
+		{
+			name: "bundle metadata of the wrong type beside an empty policies list",
+			bundle: `
+metadata: []
+policies: []
+`,
+			wantIssues: 2,
+			wantCodes:  []string{"empty-policies", "bundle-error"},
+			wantText:   []string{"line 2: cannot unmarshal"},
+		},
+		{
+			name: "bundle metadata of the wrong type beside a missing policies list",
+			bundle: `
+metadata: []
+`,
+			wantIssues: 2,
+			wantCodes:  []string{"missing-policies", "bundle-error"},
+			wantText:   []string{"line 2: cannot unmarshal"},
 		},
 		{
 			name: "two policies whose fields the decoder refuses",

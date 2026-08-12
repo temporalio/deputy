@@ -282,33 +282,62 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 	// run. What a later check does skip is the node it cannot read, which is a
 	// reference and not every node an anchor names (see resolvesElsewhere).
 	issues = append(issues, refusedConstructIssues(root)...)
+	source := cmp.Or(opts.Source, "policy")
+	// What the policies list is wrong about, and what each policy it holds is
+	// wrong about, are reported without returning, so the bundle-level backstop
+	// below still runs. A list the walk cannot iterate says nothing about the
+	// bundle metadata beside it, and returning here made the author fix the list
+	// and lint again to be told about the rest.
+	issues = append(issues, policiesListIssues(doc, source, opts)...)
+	// Decoding the whole bundle is the last backstop, for the shapes that belong
+	// to no single policy, such as bundle metadata of the wrong type. It stops at
+	// its first failure, which is why it runs after every policy has been expanded
+	// on its own and adds only what is not already reported. It is the decode
+	// alone: routing it through the loader would stop at the loader's refusal of
+	// an anchor this run has already located and named a line for, and hide the
+	// bundle-level shape behind it. A document that says part of itself elsewhere
+	// is skipped, since the decoder would resolve what no reader of a bundle may.
+	if !resolvesElsewhere(root) {
+		if _, _, err := decodeStructuredBundle([]byte(text), source, true); err != nil {
+			issues = append(issues, backstopIssue(err, source, doc, issues)...)
+		}
+	}
+	return issues, nil
+}
+
+// policiesListIssues reports what the bundle's policies list is wrong about, and
+// what each policy it holds is wrong about. It is everything ValidateBundle can
+// say by walking the document, split out from the bundle-level decode so that
+// neither withholds the other: a defect in the list itself is the one place a
+// walk cannot go further, and it used to end the whole run.
+func policiesListIssues(doc *yaml.Node, source string, opts ValidateOptions) []Issue {
 	policiesNode := MappingValue(doc, bundlePoliciesKey)
-	if policiesNode == nil {
+	switch {
+	case policiesNode == nil:
 		// A root merge key supplies the whole list, so a document carrying one is
 		// not missing it and the merge key is the only mistake to report. Nothing
 		// else the document does can put the key here, so an anchor elsewhere does
 		// not withhold this.
-		if !hasMergeKey(doc) {
-			issues = append(issues, issueAt(doc, IssueError, "missing-policies", "missing required 'policies' list"))
+		if hasMergeKey(doc) {
+			return nil
 		}
-		return issues, nil
-	}
-	if policiesNode.Kind != yaml.SequenceNode {
+		return []Issue{issueAt(doc, IssueError, "missing-policies", "missing required 'policies' list")}
+	case policiesNode.Kind == yaml.AliasNode:
 		// An aliased list is a list once resolved, so saying it is not one would
-		// describe the alias rather than the mistake. A value written directly is
-		// the mistake, whatever the document does elsewhere.
-		if policiesNode.Kind != yaml.AliasNode {
-			issues = append(issues, issueAt(policiesNode, IssueError, "policies-not-list", "'policies' must be a list"))
-		}
-		return issues, nil
+		// describe the alias rather than the mistake. The alias itself is already
+		// reported as a refused construct.
+		return nil
+	case policiesNode.Kind != yaml.SequenceNode:
+		// A value written directly is the mistake, whatever the document does
+		// elsewhere.
+		return []Issue{issueAt(policiesNode, IssueError, "policies-not-list", "'policies' must be a list")}
+	case len(policiesNode.Content) == 0:
+		// An empty list is reported here rather than left to the loader backstop,
+		// so the diagnostic names the line the author has to fill in.
+		return []Issue{issueAt(policiesNode, IssueError, "empty-policies", "'policies' must contain at least one policy")}
 	}
-	// An empty list is reported here rather than left to the loader backstop, so
-	// the diagnostic names the line the author has to fill in.
-	if len(policiesNode.Content) == 0 {
-		return append(issues, issueAt(policiesNode, IssueError, "empty-policies", "'policies' must contain at least one policy")), nil
-	}
+	var issues []Issue
 	seenNames := map[string]struct{}{}
-	source := cmp.Or(opts.Source, "policy")
 	for _, item := range policiesNode.Content {
 		// Skip a policy the walk cannot read: an alias or a merge key beneath it
 		// puts part of the policy somewhere else, so every further message would
@@ -326,20 +355,7 @@ func ValidateBundle(text string, opts ValidateOptions) ([]Issue, error) {
 		issues = append(issues, located...)
 		issues = append(issues, expandedPolicyIssues(item, source, opts.ExtraVars, located)...)
 	}
-	// Decoding the whole bundle is the last backstop, for the shapes that belong
-	// to no single policy, such as bundle metadata of the wrong type. It stops at
-	// its first failure, which is why it runs after every policy has been expanded
-	// on its own and adds only what is not already reported. It is the decode
-	// alone: routing it through the loader would stop at the loader's refusal of
-	// an anchor this run has already located and named a line for, and hide the
-	// bundle-level shape behind it. A document that says part of itself elsewhere
-	// is skipped, since the decoder would resolve what no reader of a bundle may.
-	if !resolvesElsewhere(root) {
-		if _, _, err := decodeStructuredBundle([]byte(text), source); err != nil {
-			issues = append(issues, backstopIssue(err, source, doc, issues)...)
-		}
-	}
-	return issues, nil
+	return issues
 }
 
 // expandedPolicyIssues reports what only expanding one policy can find. Two
@@ -672,21 +688,31 @@ func loaderMessage(err error, source string, located []Issue) (string, bool) {
 		if strings.Contains(issue.Message, detail) || strings.Contains(detail, issue.Message) {
 			return message, true
 		}
-		if detail == policyNeedsRuleMessage && slices.Contains(ruleShapeCodes, issue.Code) {
+		if detail == policyNeedsRuleMessage && slices.Contains(valueShapeCodes, issue.Code) {
 			return message, true
 		}
 	}
 	return message, false
 }
 
-// ruleShapeCodes are the codes the node walk reports for a policy whose rules it
-// cannot read as a list of rules: absent, not a list, or empty. Every reader of
-// a bundle refuses such a policy, so each of these codes means the loader is
-// about to say the same thing in its own words, either as its refusal of a
-// policy with no rules to run or as the decoder's complaint about the value's
-// type. Neither wording contains the walk's, so the codes are what lets the
-// backstop recognize the restatement and leave one mistake as one issue.
-var ruleShapeCodes = []string{"missing-rules", "rules-not-list", "empty-rules"}
+// valueShapeCodes are the codes the node walk reports for a value that is not the
+// shape a bundle needs: a policies list that is not a list, an entry of it that
+// is not a policy, and rules the walk cannot read as a list of rules. Every
+// reader of a bundle refuses each of them, so every one of these codes means the
+// loader is about to say the same thing in its own words, either as its refusal
+// of a policy with no rules to run or as the decoder's complaint about the
+// value's type. Neither wording contains the walk's, so the codes are what lets
+// the backstop recognize the restatement and leave one mistake as one issue.
+//
+// TestValidateBundleReportsEachDefectOnce drives one bundle per shape check, so a
+// check added without its code here fails rather than reporting twice.
+var valueShapeCodes = []string{
+	"policies-not-list",
+	"policy-not-mapping",
+	"missing-rules",
+	"rules-not-list",
+	"empty-rules",
+}
 
 // unlocatedDecodeMessage returns the loader's failure with the decoder
 // complaints a located issue already reports removed, and false when that leaves
@@ -726,7 +752,8 @@ func unlocatedDecodeMessage(err error, located []Issue) (string, bool) {
 // decode from restating what it found. Otherwise only a rule shape is folded: a
 // rules value the walk calls "not a list" is a value the decoder cannot
 // unmarshal into its rule slice, one mistake in two vocabularies, and the line
-// the decoder names is the line the walk located it on.
+// the decoder names is the line the walk located it on. The same holds one level
+// up, for the policies list and for an entry of it that is not a policy.
 func coversComplaint(issue Issue, complaint string) bool {
 	if issue.Severity == IssueHint {
 		return false
@@ -735,7 +762,7 @@ func coversComplaint(issue Issue, complaint string) bool {
 		return true
 	}
 	line := lineFromYAMLError(complaint)
-	return line > 0 && line == issue.Line && slices.Contains(ruleShapeCodes, issue.Code)
+	return line > 0 && line == issue.Line && slices.Contains(valueShapeCodes, issue.Code)
 }
 
 // lineFromYAMLError returns the 1-based line a YAML decode error names, or zero
