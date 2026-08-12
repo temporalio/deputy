@@ -190,7 +190,7 @@ Ecosystem-specific name and version normalization still has to happen before the
 3. Decide the ergonomic affordance for the CLI deliberately, and write the correspondence test with it. Expect to design that test rather than copy one.
 4. For the DSL, derive the vocabulary. Apply the admission test before adding a helper.
 5. If it crosses the proxy, decide what the extension band says.
-6. If it is configurable, add the field to `internal/config.Config` and let the reference and the environment variable list follow from it, rather than editing the struct, the loader, and the docs separately.
+6. If it is configurable, add the field to `internal/config.Config`, then edit `loadFromEnv` if it takes an environment variable, then edit the tables in [`docs/reference/configuration.md`](../reference/configuration.md). Three edits, none derived from another, until the mechanism in *Choosing a mechanism* is built. Skipping the second or third loses the binding or the documentation silently, and no test notices.
 7. Add the contract test at the root, not only at the leaves.
 
 If a capability has to be typed into more than one place, that is the signal something should be derived that is not.
