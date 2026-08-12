@@ -398,6 +398,41 @@ func multilineStringEnd(s string, i int) (end int, ok bool) {
 	return 0, false
 }
 
+// DecodeBareValue returns the text a TOML parser produces for an unquoted
+// scalar value token, so `1.220` reads as 1.22 and `1_000` as 1000, exactly as
+// the decoder behind [Parse] read them. ok is false for a token that is not a
+// bare scalar the parser accepts, or is one it produces no version text for (a
+// date, say), leaving the caller comparing the text as written.
+//
+// mise accepts a version written as a bare number, and [Parse] reports it
+// through the same formatting this uses, so the version Deputy inventories for
+// `go = 1.220` is 1.22. A rewriter comparing the token as written sees a
+// different version than the finding names and refuses a fix for a declaration
+// Deputy itself reported, which is the reader and the writer disagreeing about
+// one config.
+//
+// The value is decoded on its own, and anything that decodes to more than a
+// single value is refused, so text smuggled in after the token cannot be read
+// as if it were part of the version.
+func DecodeBareValue(token string) (string, bool) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", false
+	}
+	var decoded map[string]any
+	if _, err := toml.Decode("v = "+token+"\n", &decoded); err != nil {
+		return "", false
+	}
+	if len(decoded) != 1 {
+		return "", false
+	}
+	text := coerceScalar(decoded["v"])
+	if text == "" {
+		return "", false
+	}
+	return text, true
+}
+
 // SplitKeyPath splits a TOML key path into its dotted segments, unquoting
 // quoted segments, so `tools."npm:lodash".version` yields
 // [tools npm:lodash version]. It returns nil for anything that is not a

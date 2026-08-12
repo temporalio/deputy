@@ -2089,3 +2089,105 @@ go = "go1.24.10"
 		})
 	}
 }
+
+// TestRewriteToolVersionReadsBareNumberDeclarations pins the rewriter against a
+// version written as a bare TOML number. mise accepts one, and mise.Parse
+// reports it through the decoder's own formatting, which is not the text in the
+// file: `go = 1.220` and `go = 1.22_0` are both the number 1.22, and `node =
+// 0x14` is 20. A rewriter comparing the token as written therefore saw a
+// different version than the finding named and refused a fix for a declaration
+// Deputy itself had inventoried.
+//
+// The declaration is replaced with a quoted version, which is what every other
+// shape produces and what mise reads back identically.
+func TestRewriteToolVersionReadsBareNumberDeclarations(t *testing.T) {
+	tests := []struct {
+		name string
+		tool string
+		// declaration is the line under [tools]; parsed is the version
+		// mise.Parse reports for it, which is what a plan carries.
+		declaration string
+		parsed      string
+		current     string
+		version     string
+		want        string
+	}{
+		{
+			name: "a bare minor version", tool: "go",
+			declaration: "go = 1.22", parsed: "1.22",
+			current: "1.22.12", version: "1.24.3",
+			want: `go = "1.24.3"`,
+		},
+		{
+			name: "a bare integer", tool: "node",
+			declaration: "node = 20", parsed: "20",
+			current: "20.11.0", version: "20.11.1",
+			want: `node = "20.11.1"`,
+		},
+		{
+			// The formatting the decoder applies drops the trailing zero, so the
+			// text and the inventoried version differ.
+			name: "a trailing zero the decoder drops", tool: "go",
+			declaration: "go = 1.220", parsed: "1.22",
+			current: "1.22.12", version: "1.24.3",
+			want: `go = "1.24.3"`,
+		},
+		{
+			name: "digit separators", tool: "go",
+			declaration: "go = 1.22_0", parsed: "1.22",
+			current: "1.22.12", version: "1.24.3",
+			want: `go = "1.24.3"`,
+		},
+		{
+			name: "a hexadecimal integer", tool: "node",
+			declaration: "node = 0x14", parsed: "20",
+			current: "20.11.0", version: "20.11.1",
+			want: `node = "20.11.1"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := "[tools]\n" + tt.declaration + "\n"
+			// The premise: this is a declaration Deputy inventories, and at the
+			// version the plan is written in.
+			cfg, err := mise.Parse("mise.toml", []byte(input))
+			if err != nil {
+				t.Fatalf("fixture does not parse: %v", err)
+			}
+			if len(cfg.Tools) != 1 || cfg.Tools[0].Versions[0] != tt.parsed {
+				t.Fatalf("fixture inventories %+v, want a single %q", cfg.Tools, tt.parsed)
+			}
+
+			dir := t.TempDir()
+			path := filepath.Join(dir, "mise.toml")
+			if err := os.WriteFile(path, []byte(input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			if err := RewriteToolVersion(root, "mise.toml", tt.tool, []string{tt.current}, tt.version); err != nil {
+				t.Fatalf("RewriteToolVersion: %v", err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := "[tools]\n" + tt.want + "\n"; string(got) != want {
+				t.Errorf("rewrite mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+			// And the result is still a config mise reads, at the new version.
+			after, err := mise.Parse("mise.toml", got)
+			if err != nil {
+				t.Fatalf("rewritten config does not parse: %v", err)
+			}
+			if after.Tools[0].Versions[0] != tt.version {
+				t.Errorf("rewritten config declares %q, want %q", after.Tools[0].Versions[0], tt.version)
+			}
+		})
+	}
+}

@@ -406,7 +406,7 @@ func replaceVersionInValueTargeting(toolKey, value string, currents []string, pi
 		// corrupting a config mise reads perfectly well.
 		return value, false
 	}
-	if !selectorTargetsCurrent(toolKey, unquoteKey(token), currents) {
+	if !selectorTargetsCurrent(toolKey, valueText(token), currents) {
 		return value, false
 	}
 	newValue := lead + `"` + pinned + `"` + trail
@@ -573,7 +573,7 @@ func elementVersions(elem string) []string {
 	}
 	valuePart, _ := splitTomlComment(elem)
 	if v := strings.TrimSpace(valuePart); v != "" {
-		return []string{unquoteKey(v)}
+		return []string{valueText(v)}
 	}
 	return nil
 }
@@ -1108,12 +1108,21 @@ func splitTomlComment(s string) (before, comment string) {
 	return s, ""
 }
 
-// unquoteKey reads a quoted TOML token as the text a TOML parser produces for
-// it, escapes and all. It defers to [mise.UnquoteTOMLString] so the version
-// tokens compared here are read exactly as the parser behind mise.Parse read
-// the versions they are compared against.
-func unquoteKey(k string) string {
-	return mise.UnquoteTOMLString(k)
+// valueText reads a TOML value token as the text a TOML parser produces for it,
+// escapes and all, so the version tokens compared here are read exactly as the
+// parser behind mise.Parse read the versions they are compared against.
+//
+// Both spellings of a scalar go through their own reader: a quoted token through
+// [mise.UnquoteTOMLString], and a bare one through [mise.DecodeBareValue],
+// because mise accepts a version written as a bare number and the parser reports
+// `go = 1.220` as 1.22. Comparing that token as written made the rewriter refuse
+// a fix for a declaration Deputy had just inventoried. A bare token the decoder
+// does not recognize is compared as written, which is what it always was.
+func valueText(token string) string {
+	if decoded, ok := mise.DecodeBareValue(token); ok {
+		return decoded
+	}
+	return mise.UnquoteTOMLString(token)
 }
 
 func unappliedUpdatesError(relPath string, want map[string]string, applied map[string]bool) error {
