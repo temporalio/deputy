@@ -2,6 +2,7 @@ package surface
 
 import (
 	"bufio"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -62,7 +63,7 @@ func (p *program) unreachablePackages() []PackageFinding {
 		// A documentation-only package (a doc.go introducing a subtree, with no
 		// declarations at all) has nothing to import. Reporting it as
 		// unreachable would be true and useless.
-		if plain.Types.Scope().Len() == 0 {
+		if declaresNothing(plain) {
 			continue
 		}
 
@@ -76,6 +77,31 @@ func (p *program) unreachablePackages() []PackageFinding {
 		out = append(out, f)
 	}
 	return out
+}
+
+// declaresNothing reports whether a package declares nothing at all: a doc.go
+// that introduces a subtree and holds only a package clause and its comment.
+// Such a package has no surface to import and reporting it as unreachable would
+// be true and useless.
+//
+// The question is asked of the declarations rather than of the package scope,
+// because go/types puts neither an init function nor a blank-named declaration in
+// that scope. A package whose only content is func init() therefore has an empty
+// scope while being the most important kind of orphan there is: it exists purely
+// to run, and nothing importing it means it never runs. Reading emptiness off the
+// scope filed those packages under documentation, which dropped them from the
+// report and, because the baseline is generated from the report, from the ratchet
+// as well. A check cannot be allowed to shrink its own ratchet.
+func declaresNothing(pkg *packages.Package) bool {
+	for _, file := range pkg.Syntax {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.IMPORT {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // constrainedImports returns the import paths named by files the build
