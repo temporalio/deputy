@@ -68,7 +68,7 @@ Typical workflow:
 ```bash
 deputy policy lint policy/block-critical.yaml
 deputy policy test policy/
-deputy policy bundle --out policy/corp.bundle.json policy/*.yaml
+deputy policy bundle --output policy/corp.bundle.json policy/*.yaml
 deputy scan --policy policy/corp.bundle.json
 ```
 

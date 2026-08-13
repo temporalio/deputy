@@ -109,7 +109,7 @@ jobs:
 
       # Or use a bundled policy
       - run: |
-          deputy policy bundle --out corp.bundle.json policy/*.yaml
+          deputy policy bundle --output corp.bundle.json policy/*.yaml
           deputy scan --policy corp.bundle.json
 ```
 
