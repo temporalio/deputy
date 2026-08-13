@@ -171,11 +171,11 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	// Every exported declaration under internal/, and nothing from the excluded
 	// trees: 15 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
 	// NamedInAssetAndLiteral, Orphaned, ForForeignTests, ForOwnBlackBoxTest, Run, Make, RunAnon,
-	// RunStringish, RunConstrained, Awkward), 20 types (Never, Stringish, Decoy,
+	// RunStringish, RunConstrained, Awkward), 21 types (Never, Stringish, Decoy,
 	// Scannable, Tagged, Handled, AnonReached, ConstraintReached, NotAProto,
 	// registered.BlankImportedOnly, testonly.Shared, testonly.Decoyed, testonly.Holder,
 	// ifaces.Shared plus 6
-	// interfaces), and 18 methods (Never.Method, Stringish.String, Decoy.Read,
+	// interfaces plus Sentinel), and 19 methods (Never.Method, Stringish.String, Decoy.Read,
 	// Scannable.Scan, Holder.Shared, AnonReached.Anon,
 	// ConstraintReached.Constrained, NotAProto.ProtoReflect, the four Handled
 	// methods, plus one per interface). Vars and consts are zero, which also pins that
@@ -183,8 +183,8 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	// type declared inside used.localTagged is not one either.
 	want := map[SymbolKind]int{
 		KindFunc:   15,
-		KindType:   20,
-		KindMethod: 18,
+		KindType:   21,
+		KindMethod: 19,
 		KindVar:    0,
 		KindConst:  0,
 	}
@@ -279,8 +279,8 @@ func TestDynamicDoubtOnNameInStringLiteral(t *testing.T) {
 func TestUnusedInterfacesDistinguishDependencyFromMention(t *testing.T) {
 	report := analyzeFixture(t)
 
-	if report.InterfaceTotal != 6 {
-		t.Errorf("InterfaceTotal = %d, want 6", report.InterfaceTotal)
+	if report.InterfaceTotal != 7 {
+		t.Errorf("InterfaceTotal = %d, want 7", report.InterfaceTotal)
 	}
 
 	var got []string
@@ -289,18 +289,22 @@ func TestUnusedInterfacesDistinguishDependencyFromMention(t *testing.T) {
 		got = append(got, f.Name)
 		roles[f.Name] = f.Roles
 	}
-	want := []string{"Bare", "Returned", "SelfAccepting"}
+	want := []string{"Bare", "Returned", "SelfAccepting", "Sentinel"}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("interface findings mismatch (-want +got):\n%s", diff)
 	}
 
 	// The roles explain each finding, so they have to be right too.
 	wantRoles := map[string][]string{
-		"Bare":          {roleAssertion},
-		"Returned":      {roleResult},
+		"Bare":     {roleAssertion},
+		"Returned": {roleResult},
+		// Sentinel is only ever a var's type and an expression switch's case value.
+		// An expression switch case is a *ast.CaseClause exactly as a type switch
+		// case is, so reading its expressions as types credited an assertion nobody
+		// wrote and told a reviewer the interface was being asserted on.
+		"Sentinel":      {roleVar},
 		"SelfAccepting": {roleMethodParam},
 	}
-
 	if diff := cmp.Diff(wantRoles, roles); diff != "" {
 		t.Errorf("interface roles mismatch (-want +got):\n%s", diff)
 	}
