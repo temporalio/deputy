@@ -498,13 +498,15 @@ func convertSingularNumbers(v any, fd protoreflect.FieldDescriptor) any {
 	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind,
 		protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
 		return parseQuotedInteger(v)
+	case protoreflect.DoubleKind, protoreflect.FloatKind:
+		return parseFloat(v)
 	case protoreflect.StringKind, protoreflect.BytesKind, protoreflect.BoolKind:
 		// A declared string stays a string, and so does the base64 text of a
 		// bytes field.
 		return v
 	default:
-		// The 32-bit integer kinds, float, double, and enums (UseEnumNumbers)
-		// all arrive as JSON numbers.
+		// The 32-bit integer kinds and enums (UseEnumNumbers) arrive as JSON
+		// numbers.
 		return convertJSONNumber(v)
 	}
 }
@@ -595,6 +597,31 @@ func convertJSONNumber(v any) any {
 	}
 	if f, err := n.Float64(); err == nil {
 		return f
+	}
+	return v
+}
+
+// parseFloat converts the protojson form of a float or double field to a
+// float64, whatever the value looks like.
+//
+// Two shapes reach here. protojson writes a whole-numbered double without a
+// decimal point, so 9.0 arrives as the JSON number 9, and reading that as an
+// int64 would leave the Go type dependent on the data: 9.8 would be a double
+// while 9.0 was an integer, and a policy dividing a CVSS score would get
+// integer division for exactly the scores that are whole. protojson also writes
+// the three values JSON cannot spell, NaN, Infinity and -Infinity, as strings,
+// and a score comparison has to behave the same for all three rather than for
+// the one the shape guess happened to parse.
+func parseFloat(v any) any {
+	switch val := v.(type) {
+	case string:
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return f
+		}
+	case json.Number:
+		if f, err := val.Float64(); err == nil {
+			return f
+		}
 	}
 	return v
 }

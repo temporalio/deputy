@@ -3,6 +3,7 @@ package policy
 import (
 	"encoding/base64"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	triagev1 "github.com/temporalio/deputy/gen/deputy/triage/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 )
 
 // payloadAt resolves a path through a ProtoToMap payload, so a case can name one
@@ -186,6 +188,40 @@ func TestProtoToMapConvertsByDeclaredType(t *testing.T) {
 			want: "1.20",
 		},
 		{
+			name: "raw score text stays a string beside the scored double",
+			msg:  &vulnerabilityv1.Severity{Score: 9.8, Raw: "9.8"},
+			path: []any{"raw"},
+			want: "9.8",
+		},
+		{
+			name: "declared double holds a number",
+			msg:  &vulnerabilityv1.Severity{Score: 9.8, Raw: "9.8"},
+			path: []any{"score"},
+			want: 9.8,
+		},
+		{
+			// protojson writes a whole-numbered double with no decimal point, so
+			// this is where reading the value's shape would leave the Go type
+			// depending on the score: 9.8 a double, 9.0 an integer, and score / 2
+			// integer division for half the CVSS scale.
+			name: "whole numbered double is still a double",
+			msg:  &vulnerabilityv1.Severity{Score: 9},
+			path: []any{"score"},
+			want: float64(9),
+		},
+		{
+			name: "infinite double holds a number",
+			msg:  &vulnerabilityv1.Severity{Score: math.Inf(1)},
+			path: []any{"score"},
+			want: math.Inf(1),
+		},
+		{
+			name: "negative infinite double holds a number",
+			msg:  &vulnerabilityv1.Severity{Score: math.Inf(-1)},
+			path: []any{"score"},
+			want: math.Inf(-1),
+		},
+		{
 			name: "enum holds its number",
 			msg:  &targetv1.Target{Kind: targetv1.TargetKind_TARGET_KIND_DIR},
 			path: []any{"kind"},
@@ -248,6 +284,23 @@ func TestProtoToMapConvertsByDeclaredType(t *testing.T) {
 				t.Errorf("payload%v = %#v (%T), want %#v (%T)", tt.path, got, got, tt.want, tt.want)
 			}
 		})
+	}
+}
+
+// TestProtoToMapConvertsNaNScore covers the one float value that needs its own
+// test, because NaN never equals itself. A policy comparing a score has to get a
+// number rather than the text protojson writes for it.
+func TestProtoToMapConvertsNaNScore(t *testing.T) {
+	payload, err := ProtoToMap(&vulnerabilityv1.Severity{Score: math.NaN()})
+	if err != nil {
+		t.Fatalf("ProtoToMap: %v", err)
+	}
+	score, ok := payload["score"].(float64)
+	if !ok {
+		t.Fatalf("payload[score] = %#v (%T), want a float64", payload["score"], payload["score"])
+	}
+	if !math.IsNaN(score) {
+		t.Errorf("payload[score] = %v, want NaN", score)
 	}
 }
 
