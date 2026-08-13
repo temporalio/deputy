@@ -622,3 +622,70 @@ func TestProtoRoundTripKeepsUnresolvedNamesDirect(t *testing.T) {
 		}
 	}
 }
+
+// TestNpmWorkspaceDuplicateVersionsClassifySeparately drives the workspace case
+// through the real collector, which is where the interaction lives: the manifest
+// walk visits every member's package.json and contributes a bare name, so without
+// a version marker from the lockfile the lookup falls back to that name and marks
+// both copies direct. The member manifests are written deliberately for that
+// reason.
+func TestNpmWorkspaceDuplicateVersionsClassifySeparately(t *testing.T) {
+	files := map[string]string{
+		"package.json":              `{"name":"monorepo","workspaces":["packages/*"]}`,
+		"packages/api/package.json": `{"name":"@acme/api","version":"1.0.0","dependencies":{"lodash":"^4.17.21"}}`,
+		"packages/web/package.json": `{"name":"@acme/web","version":"1.0.0","dependencies":{"legacy-thing":"^1.0.0"}}`,
+		"package-lock.json": `{
+  "name": "monorepo",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "monorepo", "workspaces": ["packages/*"]},
+    "packages/api": {"name": "@acme/api", "version": "1.0.0", "dependencies": {"lodash": "^4.17.21"}},
+    "packages/web": {"name": "@acme/web", "version": "1.0.0", "dependencies": {"legacy-thing": "^1.0.0"}},
+    "node_modules/@acme/api": {"resolved": "packages/api", "link": true},
+    "node_modules/@acme/web": {"resolved": "packages/web", "link": true},
+    "node_modules/lodash": {"version": "4.17.21"},
+    "node_modules/legacy-thing": {"version": "1.0.0", "dependencies": {"lodash": "3.10.1"}},
+    "packages/web/node_modules/lodash": {"version": "3.10.1"}
+  }
+}`,
+	}
+
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+	for name, contents := range files {
+		if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	direct := compare.CollectDirectDependenciesFromWorkspace(ws)
+
+	tests := []struct {
+		name string
+		pkg  *extractor.Package
+		want bool
+	}{
+		{
+			name: "the version a member declares is direct",
+			pkg:  &extractor.Package{Name: "lodash", Version: "4.17.21", PURLType: "npm"},
+			want: true,
+		},
+		{
+			name: "the copy nested in another member is not direct",
+			pkg:  &extractor.Package{Name: "lodash", Version: "3.10.1", PURLType: "npm"},
+			want: false,
+		},
+		{
+			name: "the other member's own declaration is direct",
+			pkg:  &extractor.Package{Name: "legacy-thing", Version: "1.0.0", PURLType: "npm"},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExtractorPackageIsDirect(tt.pkg, direct); got != tt.want {
+				t.Errorf("ExtractorPackageIsDirect(%s@%s) = %v, want %v (collected %v)",
+					tt.pkg.Name, tt.pkg.Version, got, tt.want, direct)
+			}
+		})
+	}
+}

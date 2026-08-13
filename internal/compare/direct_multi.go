@@ -466,19 +466,110 @@ func getNpmDirectDeps(data []byte) map[string]bool {
 
 // npmLockfile is the slice of package-lock.json that says which version each of
 // the project's declarations resolved to. Only the v2/v3 "packages" object can
-// answer that: its "" entry holds the root's own dependency tables, and every
-// other key is an install path, so the entry at "node_modules/<name>" is the copy
-// npm gave the root. A v1 lockfile has a flat "dependencies" tree whose top level
-// mixes the root's dependencies with hoisted transitive ones, which cannot
-// distinguish the two, so it contributes nothing and the name-only answer stands.
+// answer that: its "" entry holds the root's own dependency tables and names its
+// workspace members, a member's entry holds that member's tables, and an install
+// path such as "node_modules/<name>" holds the copy that got installed there.
+// A v1 lockfile has a flat "dependencies" tree whose top level mixes the root's
+// dependencies with hoisted transitive ones, which cannot distinguish the two, so
+// it contributes nothing and the name-only answer stands.
 type npmLockfile struct {
-	Packages map[string]struct {
-		Name                 string            `json:"name"`
-		Version              string            `json:"version"`
-		Dependencies         map[string]string `json:"dependencies"`
-		DevDependencies      map[string]string `json:"devDependencies"`
-		OptionalDependencies map[string]string `json:"optionalDependencies"`
-	} `json:"packages"`
+	Packages map[string]npmLockEntry `json:"packages"`
+}
+
+// npmLockEntry is one entry of a v2/v3 lockfile's "packages" object. The same
+// shape serves the three kinds of entry the resolution needs: the root, whose
+// Workspaces names its members, a member, whose dependency tables are
+// declarations like the root's, and an installed copy, whose Version is the
+// answer a declaration resolves to. Name is set on an installed copy when the
+// directory it sits in is not the package's name, which is how an alias records
+// the package it actually is.
+type npmLockEntry struct {
+	Name                 string            `json:"name"`
+	Version              string            `json:"version"`
+	Workspaces           []string          `json:"workspaces"`
+	Dependencies         map[string]string `json:"dependencies"`
+	DevDependencies      map[string]string `json:"devDependencies"`
+	OptionalDependencies map[string]string `json:"optionalDependencies"`
+}
+
+// declarationTables returns the entry's dependency tables. Absent tables decode
+// to nil maps, which range over nothing, so callers need no presence checks.
+func (e npmLockEntry) declarationTables() []map[string]string {
+	return []map[string]string{e.Dependencies, e.DevDependencies, e.OptionalDependencies}
+}
+
+// npmDeclarationSites returns the lockfile keys whose dependency tables are the
+// project's own declarations: the root, plus every workspace member the root
+// claims. A member is as much the project as the root is, and npm keeps its
+// tables in the member's own entry rather than in the root's, so reading only the
+// root left every member's declaration resolving to nothing.
+//
+// Membership is taken from the root's "workspaces" globs rather than from the
+// shape of the key, because a path entry is not necessarily a member: a "file:"
+// dependency is a local package the project depends on, and its dependency
+// tables are its author's declarations, not the project's. A lockfile that
+// declares no workspaces therefore contributes only the root, and a member whose
+// glob this does not match resolves nothing and keeps the name-only answer.
+func npmDeclarationSites(lock npmLockfile, root npmLockEntry) []string {
+	sites := []string{""}
+	if len(root.Workspaces) == 0 {
+		return sites
+	}
+	for key := range lock.Packages {
+		if key == "" || strings.Contains(key, "node_modules/") {
+			continue
+		}
+		if isNpmWorkspaceMember(key, root.Workspaces) {
+			sites = append(sites, key)
+		}
+	}
+	slices.Sort(sites)
+	return sites
+}
+
+// isNpmWorkspaceMember reports whether a lockfile key is one of the members the
+// root's "workspaces" globs claim. A glob npm accepts but [path.Match] does not
+// ("packages/**") matches nothing here, which leaves those members with the
+// name-only answer rather than a wrong one.
+func isNpmWorkspaceMember(key string, globs []string) bool {
+	for _, glob := range globs {
+		glob = strings.TrimSuffix(strings.TrimSpace(glob), "/")
+		if glob == "" {
+			continue
+		}
+		if glob == key {
+			return true
+		}
+		if matched, err := path.Match(glob, key); err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveNpmInstall returns the entry for the copy of name that a declaration at
+// site resolves to: the nearest node_modules from site upward, which is npm's own
+// resolution order. A member that pins its own copy therefore resolves to the
+// copy nested beside it, and a member whose declaration was hoisted resolves to
+// the root's.
+func resolveNpmInstall(lock npmLockfile, site, name string) (npmLockEntry, bool) {
+	for dir := site; ; {
+		candidate := "node_modules/" + name
+		if dir != "" {
+			candidate = dir + "/" + candidate
+		}
+		if entry, ok := lock.Packages[candidate]; ok {
+			return entry, true
+		}
+		if dir == "" {
+			return npmLockEntry{}, false
+		}
+		if parent := path.Dir(dir); parent != dir && parent != "." {
+			dir = parent
+			continue
+		}
+		dir = ""
+	}
 }
 
 // getNpmLockDirectDeps records the resolved version of every dependency the
@@ -493,10 +584,21 @@ type npmLockfile struct {
 // were direct, so a direct-only view showed a transitive copy.
 //
 // A declaration whose version the lockfile does not give (a "file:" or "link"
-// entry, or a name with no top-level install path) is deliberately left without a
-// marker, so it falls back to the name-only answer rather than becoming
+// entry, or a name with no install path on the way up) is deliberately left
+// without a marker, so it falls back to the name-only answer rather than becoming
 // undeclared. Under-claiming a dependency the project really named is the one
-// direction this must not introduce.
+// direction this must not introduce. A dependency on another workspace member is
+// that case: its entry is a link with no version, so it stays direct by name.
+//
+// Every declaration site contributes, and what they contribute is a union, which
+// is the only answer a scan-wide bool can carry. Two members that declare
+// different versions of one package make both versions direct, because each is
+// declared by part of the project; a version one member declares and another
+// receives transitively is direct, for the same reason a single package's
+// declared dependency stays direct when something else also depends on it. Which
+// member a package is direct for is a per-member fact that "direct" cannot hold
+// today, and is the same gap as issue #246: the flag has one bit where the answer
+// has structure.
 func getNpmLockDirectDeps(data []byte) map[string]bool {
 	deps := make(map[string]bool)
 
@@ -509,18 +611,20 @@ func getNpmLockDirectDeps(data []byte) map[string]bool {
 		return deps
 	}
 
-	for _, table := range []map[string]string{root.Dependencies, root.DevDependencies, root.OptionalDependencies} {
-		for declared := range table {
-			installed, ok := lock.Packages["node_modules/"+declared]
-			if !ok || installed.Version == "" {
-				continue
+	for _, site := range npmDeclarationSites(lock, root) {
+		for _, table := range lock.Packages[site].declarationTables() {
+			for declared := range table {
+				installed, ok := resolveNpmInstall(lock, site, declared)
+				if !ok || installed.Version == "" {
+					continue
+				}
+				// An aliased entry is installed under the alias and records the
+				// package it actually is, which is the name every npm extractor
+				// reports and therefore the name the lookup will ask about.
+				name := cmp.Or(installed.Name, declared)
+				deps[DirectVersionMarker(name)] = true
+				deps[DirectVersionKey(name, installed.Version)] = true
 			}
-			// An aliased entry is installed under the alias and records the
-			// package it actually is, which is the name every npm extractor
-			// reports and therefore the name the lookup will ask about.
-			name := cmp.Or(installed.Name, declared)
-			deps[DirectVersionMarker(name)] = true
-			deps[DirectVersionKey(name, installed.Version)] = true
 		}
 	}
 	return deps

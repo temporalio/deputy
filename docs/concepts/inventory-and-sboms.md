@@ -40,7 +40,11 @@ A manifest names a version range, not a version, so a lockfile that carries two
 copies of a declared package needs the resolution to tell them apart. npm is the
 ecosystem where that is routine, and Deputy reads `package-lock.json` to mark only
 the version the declaration resolved to, so a nested copy of a declared name reads
-as transitive. Cargo can hold several versions of one crate the same way and is
+as transitive. In a workspace every member's own declarations count, resolved
+against the copy nearest to that member, and `direct` describes the scan as a
+whole: a package any member declares is direct, and two members declaring
+different versions make both direct. Which member a package is direct *for* is not
+something a boolean can say. Cargo can hold several versions of one crate the same way and is
 not resolved yet, so there a declared crate marks every copy of that name direct:
 [issue #279](https://github.com/temporalio/deputy/issues/279).
 

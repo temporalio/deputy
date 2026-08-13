@@ -1221,3 +1221,109 @@ func TestLookupDirectDoesNotReadTheMarkerAsAnAnswer(t *testing.T) {
 		t.Errorf("LookupDirect(lodash, 3.10.1) = %v, want false", got)
 	}
 }
+
+// npmWorkspaceLock is the shape npm writes for a workspace: each member's
+// dependency tables live in an entry keyed by the member's path, not under
+// node_modules, and a member's own package is linked into the root's node_modules.
+// A dependency resolves to the nearest node_modules on the way up, so the copy
+// hoisted to the root and the copy nested in a member are different entries.
+//
+// Here the api member declares lodash ^4.17.21, which hoists to the root, while
+// the web member depends on legacy-thing, which pins lodash 3.10.1 and gets it
+// nested. One name, two versions, one of them declared.
+const npmWorkspaceLock = `{
+  "name": "monorepo",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "monorepo", "workspaces": ["packages/*"]},
+    "packages/api": {"name": "@acme/api", "version": "1.0.0", "dependencies": {"lodash": "^4.17.21"}},
+    "packages/web": {"name": "@acme/web", "version": "1.0.0", "dependencies": {"legacy-thing": "^1.0.0"}, "devDependencies": {"vitest": "^1.0.0"}},
+    "node_modules/@acme/api": {"resolved": "packages/api", "link": true},
+    "node_modules/@acme/web": {"resolved": "packages/web", "link": true},
+    "node_modules/lodash": {"version": "4.17.21"},
+    "node_modules/legacy-thing": {"version": "1.0.0", "dependencies": {"lodash": "3.10.1"}},
+    "node_modules/vitest": {"version": "1.6.0"},
+    "packages/web/node_modules/lodash": {"version": "3.10.1"}
+  }
+}`
+
+// TestGetNpmLockDirectDepsWorkspaces pins the workspace half. A member's
+// dependency table is a declaration site exactly like the root's, and its
+// declarations resolve against the nearest node_modules, so a member that pins its
+// own copy of a package is resolved to that copy rather than to the root's.
+func TestGetNpmLockDirectDepsWorkspaces(t *testing.T) {
+	got := getNpmLockDirectDeps([]byte(npmWorkspaceLock))
+
+	want := map[string]bool{
+		// Declared by the api member, hoisted to the root.
+		"lodash@":        true,
+		"lodash@4.17.21": true,
+		// Declared by the web member.
+		"legacy-thing@":      true,
+		"legacy-thing@1.0.0": true,
+		"vitest@":            true,
+		"vitest@1.6.0":       true,
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("key %q = %v, want %v\ngot: %v", k, got[k], v, got)
+		}
+	}
+	// The nested copy is nobody's declaration, so it must not earn a key.
+	if got["lodash@3.10.1"] {
+		t.Errorf("the copy nested in a member was recorded as a declaration: %v", got)
+	}
+	if len(got) != len(want) {
+		t.Errorf("got %d keys, want %d\ngot: %v", len(got), len(want), got)
+	}
+}
+
+// TestGetNpmLockDirectDepsMemberPinsItsOwnCopy covers the case the hoisted fixture
+// cannot: a member whose own declaration is the nested copy. The resolution has to
+// walk up from the member rather than looking only at the root, or the member's
+// declared version reads as transitive while the root's reads as declared.
+func TestGetNpmLockDirectDepsMemberPinsItsOwnCopy(t *testing.T) {
+	const lock = `{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"workspaces": ["packages/*"], "dependencies": {"lodash": "^4.17.21"}},
+    "packages/legacy": {"name": "@acme/legacy", "dependencies": {"lodash": "^3.10.1"}},
+    "node_modules/lodash": {"version": "4.17.21"},
+    "packages/legacy/node_modules/lodash": {"version": "3.10.1"}
+  }
+}`
+	got := getNpmLockDirectDeps([]byte(lock))
+
+	// Both versions are declared, each by a different part of the project, so
+	// both are direct. Directness is a property of the whole scan.
+	for _, key := range []string{"lodash@", "lodash@4.17.21", "lodash@3.10.1"} {
+		if !got[key] {
+			t.Errorf("key %q = false, want true\ngot: %v", key, got)
+		}
+	}
+}
+
+// TestGetNpmLockDirectDepsIgnoresNonMemberLocalPackages pins the boundary of a
+// declaration site. A path entry that is not a workspace member is a local
+// package the project depends on, not part of it, so its own dependency tables
+// are its author's declarations and not the project's. The file: dependency in
+// SCALIBR's own fixture is the shape: it carries devDependencies of its own.
+func TestGetNpmLockDirectDepsIgnoresNonMemberLocalPackages(t *testing.T) {
+	const lock = `{
+  "lockfileVersion": 2,
+  "packages": {
+    "": {"dependencies": {"lodash": "^4.17.21"}, "devDependencies": {"etag": "file:./deps/etag"}},
+    "deps/etag": {"version": "1.8.0", "devDependencies": {"mocha": "1.21.5"}},
+    "node_modules/lodash": {"version": "4.17.21"},
+    "node_modules/mocha": {"version": "1.21.5"}
+  }
+}`
+	got := getNpmLockDirectDeps([]byte(lock))
+
+	if got["mocha@"] || got["mocha@1.21.5"] {
+		t.Errorf("a local dependency's own dev dependency was counted as the project's: %v", got)
+	}
+	if !got["lodash@4.17.21"] {
+		t.Errorf("the project's own declaration was lost: %v", got)
+	}
+}
