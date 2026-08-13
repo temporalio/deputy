@@ -48,6 +48,13 @@ func ecosystemFromPURLType(purlType string) string {
 // manifest. Both sides run one rule, so a Cargo crate a manifest spells
 // "serde-json" and a lockfile spells "serde_json" is one key, not two. The key
 // decides the lookup only; the package keeps the name it reported.
+//
+// npm resolves by name and version through [compare.LookupDirect], because a
+// declaration there names a range and a lockfile can hold several copies of the
+// name it resolves to. Cargo can hold several versions of one crate too, and its
+// lookup is still name-only, so a crate the manifest declares marks every copy of
+// that name direct. Resolving it needs Cargo.lock read against the root crate's
+// requirement, which no parser here does yet.
 func ExtractorPackageIsDirect(pkg *extractor.Package, direct map[string]bool) bool {
 	if pkg == nil {
 		return false
@@ -93,7 +100,10 @@ func ExtractorPackageIsDirect(pkg *extractor.Package, direct map[string]bool) bo
 		return direct[moduleRoot]
 	case "npm":
 		// npm: check package name (may include scope like @types/node).
-		return direct[purlx.NPMPackageName(purl.Namespace, purl.Name)]
+		// The version matters here, because one npm lockfile routinely carries
+		// two copies of a declared name and only one of them is the copy the
+		// declaration resolved to. See [compare.LookupDirect].
+		return compare.LookupDirect(direct, purlx.NPMPackageName(purl.Namespace, purl.Name), pkg.Version)
 	case "cargo":
 		return direct[ecosystem.Cargo.NameEquivalenceKey(purl.Name)]
 	case "pypi":

@@ -36,6 +36,14 @@ groups, and Poetry's named groups. Base images, workflow `uses`, and `mise` or
 `asdf` tools are direct by construction, since every one of them is written down
 in the file that declares it.
 
+A manifest names a version range, not a version, so a lockfile that carries two
+copies of a declared package needs the resolution to tell them apart. npm is the
+ecosystem where that is routine, and Deputy reads `package-lock.json` to mark only
+the version the declaration resolved to, so a nested copy of a declared name reads
+as transitive. Cargo can hold several versions of one crate the same way and is
+not resolved yet, so there a declared crate marks every copy of that name direct:
+[issue #279](https://github.com/temporalio/deputy/issues/279).
+
 Every other ecosystem Deputy inventories (Maven, RubyGems, NuGet, Hex, Pub,
 CocoaPods, Packagist, Hackage, CRAN, ConanCenter) has no manifest parser yet, and
 `direct` is a boolean, so its packages are reported as transitive whether they are
