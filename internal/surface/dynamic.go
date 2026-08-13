@@ -551,6 +551,11 @@ func hasEncodingTag(tag string) bool {
 // the audit rather than letting a report print for a run the user stopped. The
 // check comes before the tolerance for unreadable entries below, so an
 // unreadable tree cannot swallow a cancellation.
+//
+// Every other way of not reading something is recorded rather than tolerated. A
+// directory the walk cannot enter is the largest of them, because it costs the
+// whole subtree and not one file, and it is the case where continuing quietly
+// would let the report claim a coverage it does not have.
 func (d *dynamic) addAssets(ctx context.Context, root string) error {
 	if root == "" {
 		return nil
@@ -560,7 +565,11 @@ func (d *dynamic) addAssets(ctx context.Context, root string) error {
 			return ctxErr
 		}
 		if err != nil {
-			return nil //nolint:nilerr // an unreadable tree only costs evidence
+			// WalkDir does not descend into a directory it could not read, so
+			// nothing under this path was scanned. Keep walking the rest of the
+			// tree, but on the record.
+			d.skipAsset(path, root, fmt.Sprintf("could not be walked (%v), so nothing under it was scanned for names", err))
+			return nil //nolint:nilerr // recorded above; one unreadable tree must not end the scan
 		}
 		name := entry.Name()
 		if entry.IsDir() {
