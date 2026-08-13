@@ -68,27 +68,58 @@ func ProxyEntrypoint(eco string) Entrypoint {
 	return ep
 }
 
-// validateEcosystems canonicalizes an author-supplied ecosystem list, rejecting
-// unknown values and dropping duplicates that different aliases collapse into.
-// Order is preserved so generated CEL guards stay stable for a given source.
-func validateEcosystems(ecosystems []string) ([]string, error) {
+// validateEcosystems canonicalizes an author-supplied ecosystem list, dropping
+// duplicates that different aliases collapse into. Order is preserved so
+// generated CEL guards stay stable for a given source. The second result names
+// the values Deputy holds no registration for, in the spelling the author wrote,
+// for the caller to report.
+//
+// An unrecognized value is folded and kept rather than refused, because the set
+// of ecosystems a policy can usefully filter on is larger than the set Deputy
+// registers. A container scan reports OS packages under the ecosystem OSV
+// publishes advisories for them under, which is what
+// [canonicalizeEcosystemPayload] folds and hands to a rule: a Debian package
+// arrives as "debian:11", an Alpine one as "alpine:v3.19", a Red Hat one as
+// "red-hat", and any of the three as its bare package manager ("deb", "apk",
+// "rpm") when the image carries no os-release for the extractor to read. Every
+// one of those is a value a filter has to be able to name, and refusing them left
+// no accepted filter able to express an OS ecosystem at all while the payload
+// side went on producing them.
+//
+// Deputy's registry is deliberately not extended to cover them. The list would
+// have to hold every distribution OSV knows, which is upstream data with no
+// enumerable form in the schema bindings, so it would lag the next distribution
+// added and fail exactly this way again for it. Nor is the shape a usable signal:
+// a release-qualified name carries a colon, but "red-hat", "deb", "apk", and
+// "rpm" do not, so there is nothing in the string that separates an ecosystem
+// Deputy has not heard of from a typo.
+//
+// What is left is telling the author. A typo such as "gomdo" matches nothing at
+// scan time whether it loads or not, so reporting it keeps the feedback that
+// makes a mistake visible without turning a working policy into one that fails to
+// load. A blank entry stays an error: unlike an unrecognized name it is not a
+// spelling of anything, so there is no scanner output it could be waiting for.
+func validateEcosystems(ecosystems []string) (normalized []string, unrecognized []string, err error) {
 	if len(ecosystems) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	out := make([]string, 0, len(ecosystems))
 	seen := make(map[string]struct{}, len(ecosystems))
 	for _, eco := range ecosystems {
-		if !IsAllowedEcosystem(eco) {
-			return nil, fmt.Errorf("invalid ecosystem %q (expected one of: %s)", eco, strings.Join(AllowedEcosystems(), ", "))
+		token := NormalizeEcosystem(eco)
+		if token == "" {
+			return nil, nil, fmt.Errorf("invalid ecosystem %q (expected one of: %s, or an ecosystem a scanner reports, such as Debian:11)", eco, strings.Join(AllowedEcosystems(), ", "))
 		}
-		normalized := NormalizeEcosystem(eco)
-		if _, dup := seen[normalized]; dup {
+		if !IsAllowedEcosystem(eco) {
+			unrecognized = append(unrecognized, eco)
+		}
+		if _, dup := seen[token]; dup {
 			continue
 		}
-		seen[normalized] = struct{}{}
-		out = append(out, normalized)
+		seen[token] = struct{}{}
+		out = append(out, token)
 	}
-	return out, nil
+	return out, unrecognized, nil
 }
 
 // canonicalizeEcosystemPayload rewrites every ecosystem value in a CEL payload

@@ -3,6 +3,7 @@ package policy
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -232,9 +233,21 @@ func (p structuredPolicy) toCELSource() (string, error) {
 		normalizedCommands = append(normalizedCommands, normalized)
 	}
 	p.Commands = normalizedCommands
-	normalizedEcosystems, err := validateEcosystems(p.Ecosystems)
+	normalizedEcosystems, unrecognizedEcosystems, err := validateEcosystems(p.Ecosystems)
 	if err != nil {
 		return "", err
+	}
+	// Reported rather than refused: the value may be an ecosystem a scanner
+	// produces and Deputy holds no registration for, such as an OS package
+	// ecosystem, or it may be a typo. Neither can be told from the other by
+	// looking at the string, and only one of them is worth failing a load over.
+	// See [validateEcosystems].
+	if len(unrecognizedEcosystems) > 0 {
+		slog.Warn("policy names ecosystems deputy does not recognize; each will match only if a scanner reports exactly that value",
+			"policy", p.Name,
+			"ecosystems", unrecognizedEcosystems,
+			"known", AllowedEcosystems(),
+		)
 	}
 	p.Ecosystems = normalizedEcosystems
 	if p.Mode != "" {

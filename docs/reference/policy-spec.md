@@ -96,8 +96,9 @@ Canonical entrypoints (snake_case):
 - Policy names must be unique within a bundle.
 - String vars are CEL expressions; non-string values are treated as literals. Rules must include `action` and `when`.
 - `mode`, if set, must be `enforce` or `advisory`.
-- `ecosystems`, if set, must name known ecosystems. Values are case- and alias-insensitive (`Go`, `golang`, and `go` are all accepted) and are normalized to the canonical name; an unknown value is a load error naming the valid set.
-- Policies always see canonical ecosystem tokens, never display names such as `Go`, `PyPI`, or `GitHub Actions`. The token table is generated from the ecosystem registry in [policy inputs](policy-inputs.md#canonical-ecosystems).
+- `ecosystems`, if set, names the ecosystems a policy applies to. Values are case- and alias-insensitive (`Go`, `golang`, and `go` are all accepted) and are normalized to the canonical name, the same normalization the payload goes through, so a filter and a scanner's spelling meet on one value.
+- A value Deputy has no registration for is accepted and folded, not refused, because a scan reports more ecosystems than Deputy registers: an OS package arrives as `Debian:11`, `Alpine:v3.19`, or `Red Hat`, or as its bare package manager (`deb`, `apk`, `rpm`) when the image carries no `os-release`. Filtering on any of those works. Deputy logs a warning naming the values it does not recognize, so a typo such as `gomdo` is visible at load time even though it is not fatal. Only a blank entry is a load error, since it is not a spelling of anything.
+- Policies always see canonical ecosystem names, never display names such as `Go`, `PyPI`, or `GitHub Actions`. The table of names is generated from the ecosystem registry in [policy inputs](policy-inputs.md#canonical-ecosystems).
 
 ## Examples
 

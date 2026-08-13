@@ -46,24 +46,36 @@ func TestNormalizeEcosystem(t *testing.T) {
 
 func TestValidateEcosystems(t *testing.T) {
 	tests := []struct {
-		name    string
-		in      []string
-		want    []string
-		wantErr string
+		name        string
+		in          []string
+		want        []string
+		wantUnknown []string
+		wantErr     string
 	}{
 		{name: "nil", in: nil, want: nil},
 		{name: "canonical", in: []string{"go", "npm"}, want: []string{"go", "npm"}},
 		{name: "display casing normalizes", in: []string{"Go", "PyPI"}, want: []string{"go", "pypi"}},
 		{name: "aliases normalize", in: []string{"golang", "GitHub Actions"}, want: []string{"go", "github-actions"}},
 		{name: "duplicate spellings collapse", in: []string{"Go", "go", "golang"}, want: []string{"go"}},
-		{name: "unknown rejected", in: []string{"go", "kubernetes"}, wantErr: `invalid ecosystem "kubernetes"`},
-		{name: "os ecosystem rejected", in: []string{"Alpine:v3.19"}, wantErr: `invalid ecosystem "Alpine:v3.19"`},
+		// An ecosystem Deputy has no registration for is still a value a
+		// scanner can report, so a filter naming one is accepted and folded the
+		// same way the payload is. It is reported as unrecognized so an author
+		// hears about a typo, which is the whole point of looking at all.
+		{name: "os ecosystem accepted and folded", in: []string{"Alpine:v3.19"}, want: []string{"alpine:v3.19"}, wantUnknown: []string{"Alpine:v3.19"}},
+		{name: "os ecosystem with no release accepted", in: []string{"Red Hat"}, want: []string{"red-hat"}, wantUnknown: []string{"Red Hat"}},
+		{name: "os package manager accepted", in: []string{"deb", "apk", "rpm"}, want: []string{"deb", "apk", "rpm"}, wantUnknown: []string{"deb", "apk", "rpm"}},
+		{name: "osv ecosystem deputy has no registration for", in: []string{"kubernetes"}, want: []string{"kubernetes"}, wantUnknown: []string{"kubernetes"}},
+		{name: "typo is reported, not silently accepted", in: []string{"go", "gomdo"}, want: []string{"go", "gomdo"}, wantUnknown: []string{"gomdo"}},
+		{name: "canonical values are not reported", in: []string{"go", "Go", "golang"}, want: []string{"go"}},
+		// A blank entry cannot match anything a scanner reports, and unlike an
+		// unrecognized name there is no spelling it could be, so it stays an error.
 		{name: "empty rejected", in: []string{""}, wantErr: `invalid ecosystem ""`},
+		{name: "whitespace rejected", in: []string{"  "}, wantErr: `invalid ecosystem`},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := validateEcosystems(tt.in)
+			got, unknown, err := validateEcosystems(tt.in)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("validateEcosystems(%v) = %v, want error containing %q", tt.in, got, tt.wantErr)
@@ -81,6 +93,9 @@ func TestValidateEcosystems(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("validateEcosystems(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+			if !reflect.DeepEqual(unknown, tt.wantUnknown) {
+				t.Errorf("validateEcosystems(%v) unrecognized = %v, want %v", tt.in, unknown, tt.wantUnknown)
 			}
 		})
 	}
@@ -783,15 +798,26 @@ func TestStructuredBundleEcosystemValidation(t *testing.T) {
 			wantSkip: []string{`"Go"`, `"GitHub Actions"`},
 		},
 		{
-			name: "unknown ecosystem is a load error",
+			name: "an os ecosystem filter loads and reaches the generated guard",
 			bundle: `policies:
-  - name: bogus
-    ecosystems: ["kubernetes"]
+  - name: os
+    ecosystems: ["Debian:11", "deb"]
     rules:
       - action: deny
         when: pkg.name == "x"
 `,
-			wantErr: `invalid ecosystem "kubernetes"`,
+			wantCEL: []string{`"debian:11","deb"`},
+		},
+		{
+			name: "a blank ecosystem is still a load error",
+			bundle: `policies:
+  - name: bogus
+    ecosystems: [""]
+    rules:
+      - action: deny
+        when: pkg.name == "x"
+`,
+			wantErr: `invalid ecosystem ""`,
 		},
 	}
 
@@ -845,7 +871,7 @@ func TestValidateEcosystemsAcceptsScalibrEcosystems(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := validateEcosystems(tt.in)
+			got, _, err := validateEcosystems(tt.in)
 			if err != nil {
 				t.Fatalf("validateEcosystems(%v): %v", tt.in, err)
 			}
@@ -2082,4 +2108,71 @@ func TestReferenceKeysCoverSchema(t *testing.T) {
 func documentsPackageURL(comment string) bool {
 	lower := strings.ToLower(comment)
 	return strings.Contains(lower, "purl") || strings.Contains(lower, "package url")
+}
+
+// TestOSEcosystemGuardMatchesContainerSpelling closes the loop for the
+// ecosystems Deputy holds no registration for. Both directions matter: the
+// filter has to load, and the guard it generates has to match the spelling a
+// container scan actually reports.
+//
+// The spellings here are the ones an OS package produces, taken from what
+// extractor.Package.Ecosystem() returns for dpkg, apk, and rpm metadata: a
+// release-qualified name for Debian and Alpine, a bare name for Red Hat, and
+// the bare package manager when the image has no os-release to read, which is
+// the PURLType fallback in compare.summarizePackage.
+func TestOSEcosystemGuardMatchesContainerSpelling(t *testing.T) {
+	tests := []struct {
+		name      string
+		filter    string
+		reported  string
+		wantMatch bool
+	}{
+		{name: "debian release qualified", filter: "Debian:11", reported: "Debian:11", wantMatch: true},
+		{name: "debian written canonically", filter: "debian:11", reported: "Debian:11", wantMatch: true},
+		{name: "alpine release qualified", filter: "Alpine:v3.19", reported: "Alpine:v3.19", wantMatch: true},
+		{name: "red hat has no release suffix", filter: "Red Hat", reported: "Red Hat", wantMatch: true},
+		{name: "package manager fallback", filter: "deb", reported: "deb", wantMatch: true},
+		{name: "a different release does not match", filter: "Debian:11", reported: "Debian:12", wantMatch: false},
+		{name: "a different distro does not match", filter: "Debian:11", reported: "Alpine:v3.19", wantMatch: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bundle := fmt.Sprintf(`policies:
+  - name: os-scoped
+    ecosystems: [%q]
+    rules:
+      - action: deny
+        when: pkg.name != ""
+        reason: matched
+`, tt.filter)
+			sources, err := ParseStructuredSources([]byte(bundle), "os.yaml")
+			if err != nil {
+				t.Fatalf("ParseStructuredSources with ecosystems: [%q]: %v", tt.filter, err)
+			}
+			payload := map[string]any{
+				"pkg": map[string]any{
+					"name":      "openssl",
+					"ecosystem": tt.reported,
+					"version":   "1.1.1n-0+deb11u5",
+				},
+				// The generated guard reads request.?ecosystem before
+				// pkg.ecosystem, and a payload with no request root fails
+				// evaluation on any package the filter does not match rather
+				// than simply not matching. That is issue #284 and predates this
+				// branch, so request is supplied here to keep these cases about
+				// the ecosystem semantics they are testing.
+				"request": nil,
+			}
+			actions, err := EvaluateMap(t.Context(), sources, payload)
+			if err != nil {
+				t.Fatalf("EvaluateMap: %v", err)
+			}
+			matched := len(actions) == 1 && actions[0].Type == ActionDeny
+			if matched != tt.wantMatch {
+				t.Errorf("ecosystems: [%q] against a %q package matched=%v, want %v (actions=%v)",
+					tt.filter, tt.reported, matched, tt.wantMatch, actions)
+			}
+		})
+	}
 }
