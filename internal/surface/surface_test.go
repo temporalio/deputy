@@ -63,6 +63,7 @@ func TestAuditedPackagesExcludeGeneratedAndPublicTrees(t *testing.T) {
 		"fixture/internal/blackbox",
 		"fixture/internal/doconly",
 		"fixture/internal/ifaces",
+		"fixture/internal/initonly",
 		"fixture/internal/orphan",
 		"fixture/internal/testonly",
 		"fixture/internal/used",
@@ -72,20 +73,27 @@ func TestAuditedPackagesExcludeGeneratedAndPublicTrees(t *testing.T) {
 	}
 }
 
-// TestUnreachablePackagesFindTestOnlyReachability covers check 1 and the four
+// TestUnreachablePackagesFindTestOnlyReachability covers check 1 and the five
 // cases that make it worth having: a package reached only by its own in-package
 // test counts as unreachable, so does one reached only by its own black-box test
-// package, a package that declares nothing does not count at all, and a package
-// whose own import path ends in "_test" is one of these packages rather than
-// somebody's external test package. The TestFiles assertion below is where that
-// last one bites: misreading the path moves those test files onto a package that
-// does not exist, and this package's count drops to zero.
+// package, a package that declares nothing at all does not count, a package whose
+// only declaration is func init() does count even though its package scope is
+// just as empty, and a package whose own import path ends in "_test" is one of
+// these packages rather than somebody's external test package.
+//
+// The want list is the assertion for both of the awkward ones. internal/doconly
+// must stay out of it and internal/initonly must stay in, which is the whole
+// difference between "declares nothing" and "declares nothing the type checker
+// files in package scope". The TestFiles assertion is where the "_test" path
+// case bites: misreading the path moves those test files onto a package that does
+// not exist, and the real package's count drops to zero.
 func TestUnreachablePackagesFindTestOnlyReachability(t *testing.T) {
 	report := analyzeFixture(t)
 
 	want := []string{
 		filepath.Join("internal", "awkward_test"),
 		filepath.Join("internal", "blackbox"),
+		filepath.Join("internal", "initonly"),
 		filepath.Join("internal", "orphan"),
 	}
 	if diff := cmp.Diff(want, report.UnreachableDirs()); diff != "" {
