@@ -21,6 +21,18 @@ func NamedInString() string { return "named" }
 
 func selfReference() string { return "NamedInString" }
 
+// localTagged declares an encoding-tagged type inside a function body, where it
+// is nobody's surface and no finding can be about it. It deliberately shadows the
+// name of the package-level Never, which must stay free of the encoding doubt.
+func localTagged() any {
+	type Never struct {
+		Name string `json:"name"`
+	}
+	return Never{}
+}
+
+var _ = localTagged
+
 // Never is referenced nowhere at all and carries no doubt.
 type Never struct{}
 
