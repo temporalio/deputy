@@ -266,12 +266,11 @@ func canonicalizeEcosystemValue(value any, inherited ecosystem.Ecosystem) {
 
 // canonicalizePackageReferences rewrites the package URLs a payload carries as
 // references to a package rather than as one package's own identity. Graph data
-// is full of them: an edge names its endpoints by purl, the roots list names the
-// direct dependencies by purl, and a finding's path is a chain of them. None of
-// those objects declares an ecosystem, so the ecosystem walk never reaches them,
-// and a node whose purl gained a "v" prefix stopped matching the roots entry and
-// the edge that pointed at it. A rule as ordinary as "node.purl in roots" then
-// reads two identities where there is one.
+// is full of them: an edge names its endpoints by purl and the roots list names
+// the direct dependencies by purl. Neither object declares an ecosystem, so the
+// ecosystem walk never reaches them, and a node whose purl gained a "v" prefix
+// stopped matching the roots entry and the edge that pointed at it. A rule as
+// ordinary as "node.purl in roots" then reads two identities where there is one.
 //
 // This pass asks a different question from the ecosystem walk and so runs under
 // a different rule. Rewriting an ecosystem, a name, or a version needs to know
@@ -292,7 +291,10 @@ func canonicalizeEcosystemValue(value any, inherited ecosystem.Ecosystem) {
 // argument that is a package URL is ordinary for a supply-chain tool, so
 // canonicalizing it authorized one string and ran another. The walk therefore
 // descends looking for the keys [isPackageReferenceKey] recognizes and rewrites
-// nothing else.
+// nothing else. The same reasoning bounds the key list itself, since the walk
+// sees a key without the message it belongs to: a name that means a file path on
+// one message and a package URL on another is nobody's reference, and "path" is
+// that name.
 //
 // It returns the value to store in place of the one it was given, because not
 // every reference can be rewritten through the container it arrived in: a
@@ -340,9 +342,10 @@ func canonicalizePackageReferences(key string, value any) any {
 // one in place would rewrite a list the caller still holds.
 //
 // A value that is not a package URL is returned exactly as it arrived, which is
-// what leaves a manifest path in "path" and a module path in "from" byte for
-// byte: the key says the field may hold a reference, and the parser says whether
-// this value is one.
+// what leaves a module path in "from" byte for byte: the key says the field may
+// hold a reference, and the parser says whether this value is one. The parser is
+// the second gate and not the first, because a field whose contract is not a
+// reference has values that do parse, and those are the ones a rule names.
 func canonicalizeReferenceValue(value any) any {
 	switch v := value.(type) {
 	case string:
@@ -365,18 +368,28 @@ func canonicalizeReferenceValue(value any) any {
 
 // packageReferenceKeys are the payload fields that hold a package URL naming
 // some other object's package, rather than the identity of the object carrying
-// them: the graph's roots, an edge's two endpoints, a finding's dependency chain,
-// and the PURL list a scanned SBOM contributes to a scan payload.
+// them: the graph's roots, an edge's two endpoints, the PURL list a scanned SBOM
+// contributes to a scan payload, and the two risk summaries that list PURLs.
 //
 // The list is what bounds the rewrite. Deciding from the value instead, rewriting
 // any string that parses as a package URL, reached fields whose contract is not a
 // package reference at all and turned a sandbox argv into a string the caller
 // never asked to run.
+//
+// A name earns a place here only if it holds a reference in every message that
+// declares it, because the walk sees the key and not the message the key came
+// from. "path" did not: the descriptors declare it on more than thirty messages
+// and all but two of them are file or import paths, including the three that
+// reach a policy (deputy.policy.v1.RemediationCommand.path,
+// deputy.dependency.v1.ManifestRef.path, deputy.policy.v1.DockerfileInfo.path).
+// Listing it rewrote a path that parsed as a package URL before evaluation, so a
+// rule matching the path Deputy was given compared against a string Deputy
+// invented. Leaving the parser to reject ordinary paths is not the same
+// guarantee: the values it accepts are exactly the ones such a rule names.
 var packageReferenceKeys = []string{
 	"roots",
 	"from",
 	"to",
-	"path",
 	"purls",
 	"affected_packages",
 	"malicious_packages",
@@ -386,7 +399,9 @@ var packageReferenceKeys = []string{
 // references. Besides the named fields, any key ending in "_purl" or "_purls" is
 // one: that is how Deputy's protos spell a reference to another package
 // (root_purl, target_purl, matched_purls), so a field named the way the existing
-// ones are named is covered without being listed.
+// ones are named is covered without being listed. A suffixed name states its own
+// contract, which is why it needs none of the per-message agreement
+// [packageReferenceKeys] demands of a bare one.
 //
 // TestReferenceKeysCoverSchema derives the check from the descriptors: a string
 // field the protos document as holding a package URL has to be classified here or

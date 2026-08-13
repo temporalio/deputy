@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	fixv1 "github.com/temporalio/deputy/gen/deputy/fix/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/proto/descriptorset"
@@ -1249,6 +1251,12 @@ func TestPURLAgreesWithIdentityFields(t *testing.T) {
 // moved node.purl to "pkg:golang/example.com/mod@v1.2.3" and left roots and
 // edge.to on the unprefixed spelling, which quietly made "node.purl in roots"
 // and "edge.to == to_node.purl" false for every Go package.
+//
+// A finding's "path" is deliberately not among them. Deputy fills it with the
+// node names along the chain (report.computeGraphPath), and the same key names a
+// file path on every other message a policy reads, so it is not classified as a
+// package reference and arrives as it was given. See
+// [TestFilesystemPathsReachPolicyVerbatim].
 func TestGraphReferencesSpellTheNodeTheyName(t *testing.T) {
 	const (
 		rawRoot  = "pkg:golang/example.com/root@1.0.0"
@@ -1290,13 +1298,79 @@ func TestGraphReferencesSpellTheNodeTheyName(t *testing.T) {
 		{"edge.from", edge["from"], wantRoot},
 		{"edge.to", edge["to"], wantDep},
 		{"to_node.purl", payload["to_node"].(map[string]any)["purl"], wantDep},
-		{"vulnerability.path[0]", payload["vulnerability"].(map[string]any)["path"].([]any)[0], wantRoot},
-		{"vulnerability.path[1]", payload["vulnerability"].(map[string]any)["path"].([]any)[1], wantDep},
+		{"vulnerability.path[0]", payload["vulnerability"].(map[string]any)["path"].([]any)[0], rawRoot},
+		{"vulnerability.path[1]", payload["vulnerability"].(map[string]any)["path"].([]any)[1], rawDep},
 	}
 	for _, r := range reported {
 		if r.got != r.want {
 			t.Errorf("%s = %v, want %q", r.what, r.got, r.want)
 		}
+	}
+}
+
+// TestFilesystemPathsReachPolicyVerbatim pins the guarantee a path rule depends
+// on: the string a policy evaluates is the string Deputy was handed. Classifying
+// the bare name "path" as a package reference broke it, because the walk sees the
+// key without the message that declared it, and the descriptors give "path" a
+// file path on every message a policy reads it from: a remediation step's
+// manifest, a package's manifest refs, a scanned Dockerfile. Each of those was
+// rewritten as soon as its value parsed as a package URL, so an exact-match rule
+// on the requested path compared against a spelling Deputy invented, which is the
+// same failure as the sandbox argv (TestExecutionPolicyReadsTheRequestedArgv).
+//
+// The values here are paths that also parse as package URLs, because that is the
+// only case where the classification is load-bearing: the parser already leaves
+// an ordinary path alone, and a rule is written against the values it accepts.
+func TestFilesystemPathsReachPolicyVerbatim(t *testing.T) {
+	const requested = "pkg:golang/example.com/mod@1.2.3"
+	tests := []struct {
+		name    string
+		payload map[string]any
+		read    func(map[string]any) any
+	}{
+		{
+			name: "a remediation step's manifest path",
+			payload: map[string]any{
+				"step": &fixv1.RemediationCommand{
+					Manager: "go",
+					Command: "go get example.com/mod@v1.2.4",
+					Path:    requested,
+				},
+			},
+			read: func(p map[string]any) any { return p["step"].(map[string]any)["path"] },
+		},
+		{
+			name: "a manifest ref on the package a policy reads",
+			payload: map[string]any{
+				"pkg": &dependencyv1.Package{
+					Name:         "example.com/mod",
+					Version:      "1.2.3",
+					Ecosystem:    "Go",
+					ManifestRefs: []*dependencyv1.ManifestRef{{Path: requested}},
+				},
+			},
+			read: func(p map[string]any) any {
+				refs := p["pkg"].(map[string]any)["manifest_refs"].([]any)
+				return refs[0].(map[string]any)["path"]
+			},
+		},
+		{
+			// The Dockerfile payload is a hand-built map (dockerfile.Info.ToMap),
+			// so no descriptor stands between the key and the rewrite either.
+			name:    "the path of a scanned Dockerfile",
+			payload: map[string]any{"dockerfile": map[string]any{"path": requested, "stages": []any{}}},
+			read:    func(p map[string]any) any { return p["dockerfile"].(map[string]any)["path"] },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := convertProtosInMap(tt.payload)
+			canonicalizeEcosystemPayload(payload)
+			if got := tt.read(payload); got != requested {
+				t.Errorf("path reached the policy as %v, want the requested %q", got, requested)
+			}
+		})
 	}
 }
 
@@ -1865,6 +1939,7 @@ func TestDocumentedPayloadsAreCanonical(t *testing.T) {
 // hand back or match byte for byte, or a field folded as a package name because
 // it accepts a name just as readily as a PURL.
 var notPackageReference = map[string]string{
+	"path":          "a name the descriptors give a file path on every message a policy reads it from, so the walk cannot tell those from deputy.risk.v1.DependencyPath.path by the key alone",
 	"query":         "an MCP result echoes the target purl exactly as the caller requested it",
 	"package":       "a request input that accepts a name, name@version, or a PURL; folded as a package name",
 	"dependency":    "a request input that accepts a name, name@version, or a PURL",
