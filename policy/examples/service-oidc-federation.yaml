@@ -402,7 +402,8 @@ policies:
             (jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
              jwt.?idtyp.orValue("") == "app")
           ) &&
-          !(jwt.?iss.orValue("") == "https://acme.okta.com" &&
+          !((jwt.?iss.orValue("") == "https://acme.okta.com" ||
+             jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/")) &&
             jwt.?amr.orValue([]).exists(a, a in ["mfa", "otp", "hwk", "swk"]))
         reason: "Multi-factor authentication required for secrets scanning"
         remediation: "Re-authenticate with MFA enabled"
@@ -441,7 +442,8 @@ policies:
             (jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
              jwt.?idtyp.orValue("") == "app")
           ) &&
-          !(jwt.?iss.orValue("") == "https://acme.okta.com" &&
+          !((jwt.?iss.orValue("") == "https://acme.okta.com" ||
+             jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/")) &&
             jwt.?groups.orValue([]).exists(g, g in ["security-team", "sre-oncall", "platform-admins"]))
         reason: "Security group membership required"
         remediation: "Request access in #security-access channel"
@@ -474,6 +476,14 @@ policies:
       allowlist here would create a second copy to drift, which it did: an
       earlier version trusted two organizations while the allowlist accepted
       three, so the third was admitted by one rule and denied by the other.
+
+      The human branch is the exception and it needs a rule of its own, because
+      no other policy here gates general human access by group. It carries the
+      union of every group this file names anywhere. A broad gate has to admit
+      everyone a narrow gate admits, or the narrow gate is unreachable: when this
+      list held three groups and the secrets rule accepted sre-oncall, an
+      sre-oncall human was accepted for secrets and refused entry, so they could
+      not reach it at all.
     entrypoints:
       - service_scan_request
       - service_list_request
@@ -506,13 +516,21 @@ policies:
             // carry custom claims could otherwise mint this subject.
             (jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
              jwt.?sub.orValue("").startsWith("system:serviceaccount:")) ||
+            // A Deputy-issued service account; service-account-scopes picks the
+            // scopes. The human-only rules already recognize this shape, and
+            // omitting it here denied it everywhere.
+            (jwt.?iss.orValue("") == "https://deputy.acme-corp.internal" &&
+             jwt.?sub.orValue("").startsWith("sa:")) ||
             // A human from the corporate identity provider, with an authorized
             // group membership. The issuer is as load-bearing here as in every
             // machine branch: a group claim only means something when it comes
             // from the directory that assigns groups.
             (jwt.?iss.orValue("") == "https://acme.okta.com" &&
              jwt.?email.orValue("") != "" &&
-             jwt.?groups.orValue([]).exists(g, g in ["developers", "security-team", "platform"]))
+             jwt.?groups.orValue([]).exists(g, g in [
+               "developers", "security-team", "platform",
+               "sre-oncall", "platform-admins"
+             ]))
           )
         reason: "Identity not authorized"
         remediation: "Contact security team for access"

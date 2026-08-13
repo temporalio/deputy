@@ -444,8 +444,11 @@ func TestShippedOIDCFederationTrustsWhatItsGatesAccept(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		jwt        *policyv1.JWTClaims
+		name string
+		jwt  *policyv1.JWTClaims
+		// entrypoint defaults to scan, where the secrets-only rules stay out of
+		// the way. Cases about the secrets rules name it explicitly.
+		entrypoint Entrypoint
 		wantDenied bool
 	}{
 		{
@@ -503,6 +506,48 @@ func TestShippedOIDCFederationTrustsWhatItsGatesAccept(t *testing.T) {
 				},
 			},
 			wantDenied: true,
+		},
+		{
+			// Deputy's own service accounts are recognized by the human-only
+			// rules and were missing from the unified trusted list, so they were
+			// refused at every entrypoint.
+			name: "Deputy service account from the Deputy issuer",
+			jwt: &policyv1.JWTClaims{
+				Sub: "sa:deputy-scanner",
+				Iss: "https://deputy.acme-corp.internal",
+			},
+			wantDenied: false,
+		},
+		{
+			// An Azure human with an Azure factor. Pinning the MFA test to one
+			// directory refused every human from the other one.
+			name: "Azure human with an Azure MFA factor at secrets",
+			jwt: &policyv1.JWTClaims{
+				Sub: "azure-user-object-id",
+				Iss: "https://login.microsoftonline.com/12345678-1234-1234-1234-123456789abc/v2.0",
+				CustomClaims: map[string]string{
+					"tid":   "12345678-1234-1234-1234-123456789abc",
+					"email": "alice@acme-corp.com", "groups": "[security-team]",
+					"amr": "[pwd hwk]",
+				},
+			},
+			entrypoint: EntrypointServiceSecretsRequest,
+			wantDenied: false,
+		},
+		{
+			// A group the secrets rule accepts has to be one the broad gate
+			// accepts too, or the secrets rule is unreachable.
+			name: "sre-oncall human reaching secrets",
+			jwt: &policyv1.JWTClaims{
+				Sub: "bob@acme-corp.com",
+				Iss: "https://acme.okta.com",
+				CustomClaims: map[string]string{
+					"email": "bob@acme-corp.com", "groups": "[sre-oncall]",
+					"amr": "[pwd hwk]",
+				},
+			},
+			entrypoint: EntrypointServiceSecretsRequest,
+			wantDenied: false,
 		},
 		{
 			// A group claim only means something from the directory that assigns
@@ -606,10 +651,13 @@ func TestShippedOIDCFederationTrustsWhatItsGatesAccept(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Scanning, so the secrets-only rules stay out of the way.
-			build := serviceRequestInput[EntrypointServiceScanRequest]
-			input := build(tt.jwt, "/deputy.scan.v1.ScanService/ScanDirectory", "github.com/acme-security/scanner")
-			actions, err := engine.EvaluateAll(t.Context(), input, "server", string(EntrypointServiceScanRequest))
+			ep := tt.entrypoint
+			if ep == "" {
+				ep = EntrypointServiceScanRequest
+			}
+			build := serviceRequestInput[ep]
+			input := build(tt.jwt, "/deputy.test.v1.TestService/Probe", "github.com/acme-security/scanner")
+			actions, err := engine.EvaluateAll(t.Context(), input, "server", string(ep))
 			if err != nil {
 				t.Fatalf("EvaluateAll: %v", err)
 			}
