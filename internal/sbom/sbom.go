@@ -121,8 +121,11 @@ type Result struct {
 	// Direct marks which of Packages are direct dependencies, keyed the way
 	// [protoconv.ExtractorPackageIsDirect] expects: module roots for Go, the
 	// ecosystem's own normalized name for npm, Cargo, and PyPI, and PURL
-	// strings otherwise. It is nil when the target carries no manifest to
-	// derive directness from, such as a container image.
+	// strings otherwise, plus name and version for an npm package whose
+	// declaration a lockfile resolved. Read it through that function rather
+	// than by name, since which key holds an answer is its business. It is nil
+	// when the target carries no manifest to derive directness from, such as a
+	// container image.
 	Direct map[string]bool
 }
 

@@ -8,6 +8,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	protoconv "github.com/temporalio/deputy/internal/proto"
 )
 
 // directDepFixture is one ecosystem's manifest pair: the file that declares a
@@ -124,8 +125,24 @@ func TestSBOMMarksNonGoDirectDependencies(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Generate: %v", err)
 				}
-				if !result.Direct[fixture.pkgName] {
-					t.Errorf("direct dependency %q not marked direct; Direct = %v", fixture.pkgName, result.Direct)
+				// Asserted through the classification the SBOM itself performs
+				// rather than by looking a name up in the set. The set's keys
+				// are an internal layout: an npm entry is keyed by name and
+				// version once a lockfile resolves it, so a test that reads a
+				// bare name is testing the layout instead of the answer.
+				var found bool
+				for _, pkg := range result.Packages {
+					if pkg.Name != fixture.pkgName {
+						continue
+					}
+					found = true
+					if !protoconv.ExtractorPackageIsDirect(pkg, result.Direct) {
+						t.Errorf("direct dependency %s@%s not classified direct; Direct = %v",
+							pkg.Name, pkg.Version, result.Direct)
+					}
+				}
+				if !found {
+					t.Fatalf("inventory did not report %q at all", fixture.pkgName)
 				}
 			})
 		}

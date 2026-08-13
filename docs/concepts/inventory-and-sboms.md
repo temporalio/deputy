@@ -44,9 +44,18 @@ as transitive. In a workspace every member's own declarations count, resolved
 against the copy nearest to that member, and `direct` describes the scan as a
 whole: a package any member declares is direct, and two members declaring
 different versions make both direct. Which member a package is direct *for* is not
-something a boolean can say. Cargo can hold several versions of one crate the same way and is
-not resolved yet, so there a declared crate marks every copy of that name direct:
-[issue #279](https://github.com/temporalio/deputy/issues/279).
+something a boolean can say.
+
+That precision needs the resolution, so it holds per project and not per
+repository. A repository whose npm projects all commit a `package-lock.json` gets
+it throughout. One that mixes such a project with a Yarn or pnpm project declaring
+the same package does not: the unresolved project declares a name without a
+version, and that declaration is honored for every copy of the name in the scan,
+so a transitive copy elsewhere reads direct. Deputy prefers that to the
+alternative, which is reporting a dependency a project explicitly declared as
+transitive. Cargo can hold several versions of one crate the same way and is not
+resolved at all yet, so there a declared crate marks every copy of that name
+direct: [issue #279](https://github.com/temporalio/deputy/issues/279).
 
 Every other ecosystem Deputy inventories (Maven, RubyGems, NuGet, Hex, Pub,
 CocoaPods, Packagist, Hackage, CRAN, ConanCenter) has no manifest parser yet, and
