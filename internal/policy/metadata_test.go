@@ -353,7 +353,7 @@ func TestLoadSourcesRejectsBundleWithCommentMetadata(t *testing.T) {
 				if err == nil {
 					t.Fatal("LoadSources() error = nil, want a rebuild error")
 				}
-				if !strings.Contains(err.Error(), "rebuild the bundle") {
+				if !strings.Contains(err.Error(), "rebuild it from its policy sources") {
 					t.Errorf("LoadSources() error = %v, want it to ask for a rebuild", err)
 				}
 				return

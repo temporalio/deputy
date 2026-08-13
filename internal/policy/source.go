@@ -9,7 +9,14 @@ import (
 	"time"
 )
 
-const bundleSchemaVersion = "policy.deputy.sh/v1alpha1"
+// bundleSchemaVersion is the compiled bundle format this build writes and the
+// only one it reads. It changes whenever a bundle entry's fields change meaning,
+// so that a reader can refuse a bundle it would otherwise misread instead of
+// applying whichever parts it happens to recognize.
+//
+// v1alpha2 moved a policy's declared scoping out of `//! policy.*` comments in
+// the CEL body and into typed fields on the entry.
+const bundleSchemaVersion = "policy.deputy.sh/v1alpha2"
 
 // Source represents an individual CEL policy ready for evaluation.
 type Source struct {
@@ -36,6 +43,29 @@ type BundlePolicy struct {
 	Source string `json:"source"` // Source is the compiled CEL source code.
 }
 
+// checkSchemaVersion rejects a bundle written in a format this build does not
+// read. Recognizing the shape of a bundle is not the same as understanding it:
+// [tryParseBundle] answers the first question so a file can be routed to the
+// right parser, and this answers the second, because an entry's fields mean
+// whatever the format that wrote them says they mean.
+//
+// Both directions have to fail. An older bundle kept its policies' scoping in
+// CEL comments this build ignores, and a newer one may keep it somewhere this
+// build cannot see; either way the policy would load with no scoping at all and
+// run for every command and entrypoint, in enforce mode. Refusing the file and
+// naming the version to rebuild is the only outcome that cannot silently widen a
+// policy.
+//
+// The remedy names the policy sources on purpose: bundling a refused bundle
+// reaches this check again, since `deputy policy bundle` loads its inputs the
+// same way, so only the authored policies can produce a readable one.
+func (b *Bundle) checkSchemaVersion(path string) error {
+	if b.SchemaVersion == bundleSchemaVersion {
+		return nil
+	}
+	return fmt.Errorf("%s: bundle schema version %q is not the version this build reads (%s); rebuild it from its policy sources with `deputy policy bundle`", path, b.SchemaVersion, bundleSchemaVersion)
+}
+
 // legacyMetadataMarker is the comment prefix Deputy releases before typed
 // bundle metadata used to carry a policy's scoping inside its CEL body.
 const legacyMetadataMarker = "//! policy."
@@ -46,11 +76,16 @@ const legacyMetadataMarker = "//! policy."
 // name and nothing else) and run against every entrypoint and command instead
 // of the ones it was written for. Fail loudly and ask for a rebuild rather than
 // quietly widening the policy.
+//
+// A bundle built by an older release is refused by its schema version before it
+// reaches here (see [Bundle.checkSchemaVersion]); this catches the entry that
+// claims the current version while carrying a body from before it, which is what
+// hand-assembling or merging bundle files produces.
 func (p BundlePolicy) checkLegacyMetadata(path string) error {
 	if !startsWithLegacyMetadata(p.Source) {
 		return nil
 	}
-	return fmt.Errorf("%s: policy %q carries its metadata as %q comments; rebuild the bundle with `deputy policy bundle`", path, p.Name, legacyMetadataMarker)
+	return fmt.Errorf("%s: policy %q carries its metadata as %q comments; rebuild it from its policy sources with `deputy policy bundle`", path, p.Name, legacyMetadataMarker)
 }
 
 // startsWithLegacyMetadata reports whether body opens with the metadata comment
@@ -92,6 +127,9 @@ func LoadSources(paths []string) ([]Source, error) {
 		}
 		// Try JSON bundle format first (compiled bundles)
 		if bundle, ok := tryParseBundle(data); ok {
+			if err := bundle.checkSchemaVersion(path); err != nil {
+				return nil, err
+			}
 			for _, p := range bundle.Policies {
 				if err := p.checkLegacyMetadata(path); err != nil {
 					return nil, err
@@ -153,6 +191,11 @@ func BuildBundle(paths []string) (*Bundle, error) {
 	}, nil
 }
 
+// tryParseBundle reports whether data has the shape of a compiled bundle, which
+// is what routes a file to this parser rather than the authored YAML one. It
+// deliberately does not judge the format's version, so a bundle this build
+// cannot read fails with that as its reason instead of "unrecognized format";
+// see [Bundle.checkSchemaVersion].
 func tryParseBundle(data []byte) (*Bundle, bool) {
 	var b Bundle
 	if err := json.Unmarshal(data, &b); err != nil {
@@ -164,7 +207,8 @@ func tryParseBundle(data []byte) (*Bundle, bool) {
 	return &b, true
 }
 
-// LoadBundle reads a compiled JSON bundle file from disk.
+// LoadBundle reads a compiled JSON bundle file from disk, failing if it was
+// written in a format this build does not read.
 // For structured YAML policies, use LoadSources instead.
 func LoadBundle(path string) (*Bundle, error) {
 	data, err := os.ReadFile(path)
@@ -175,10 +219,17 @@ func LoadBundle(path string) (*Bundle, error) {
 	if !ok {
 		return nil, fmt.Errorf("%s: not a valid JSON bundle (expected 'schemaVersion' field and 'policies' array)", path)
 	}
+	if err := bundle.checkSchemaVersion(path); err != nil {
+		return nil, err
+	}
 	return bundle, nil
 }
 
-// ParseBundle attempts to parse the provided bytes as a policy bundle.
+// ParseBundle attempts to parse the provided bytes as a policy bundle. It
+// accepts any version, because a caller that only reports what a file contains
+// (such as `deputy policy inspect`) is more useful than one that refuses to look
+// at a bundle it cannot load. Callers that go on to evaluate the policies must
+// use [LoadBundle] or [LoadSources], which check the version.
 func ParseBundle(data []byte) (*Bundle, bool) {
 	return tryParseBundle(data)
 }

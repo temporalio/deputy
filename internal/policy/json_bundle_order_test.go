@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Ensure JSON bundles (v1alpha1) are parsed deterministically and coexist with structured bundles.
+// Ensure compiled JSON bundles are parsed deterministically and coexist with structured bundles.
 func TestJSONBundleDeterministicOrder(t *testing.T) {
 	tmp := t.TempDir()
 	raw := Bundle{

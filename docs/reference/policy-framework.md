@@ -250,7 +250,9 @@ You can also use `policies` (array) or inline `input_json` to avoid separate fil
 
 ## Bundles and distribution
 
-`deputy policy bundle` produces a JSON bundle with schema `policy.deputy.sh/v1alpha1`. Bundles can be loaded by any Deputy command via `--policy` or by the proxy server for runtime enforcement.
+`deputy policy bundle` produces a JSON bundle with schema `policy.deputy.sh/v1alpha2`. Bundles can be loaded by any Deputy command via `--policy` or by the proxy server for runtime enforcement.
+
+A bundle entry carries the policy's compiled CEL alongside the scoping the engine filters on (`entrypoints`, `commands`, `mode`), so the schema version changes whenever those fields change meaning. Deputy loads only the version it writes: a bundle built by a different release is refused with the version it was built for and the version to rebuild it as, rather than loaded with scoping it cannot find. Rebuild bundles from their authored policy files with `deputy policy bundle` when you upgrade Deputy: a refused bundle cannot be re-bundled into a readable one, because bundling loads its inputs the same way. Keep the sources you bundle from, and keep the bundle step in the same pipeline as the Deputy version that will enforce it.
 
 ## See also
 
