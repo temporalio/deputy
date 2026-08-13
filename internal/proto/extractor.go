@@ -256,10 +256,10 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 	isDirect := pkg.Direct
 
 	recordDirectKey(direct, pkg.Purl, isDirect)
-	recordDirectKey(direct, pkg.Name, isDirect)
 
 	parsed, err := purlx.ParseLoose(pkg.Purl)
 	if err != nil {
+		recordDirectKey(direct, pkg.Name, isDirect)
 		return
 	}
 	recordDirectKey(direct, parsed.String(), isDirect)
@@ -268,6 +268,21 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 	if parsed.Namespace != "" {
 		packageName = parsed.Namespace + "/" + parsed.Name
 	}
+
+	// An npm package carries its own version here, so its versioned key is the
+	// whole answer and no bare name is recorded beside it: a bare name is the key
+	// that answers for every copy of the name, which is exactly what a decoded
+	// response must not do once the versions are known. Every other ecosystem is
+	// keyed by name, so the name key is recorded for them as before.
+	if parsed.Type == "npm" && pkg.Version != "" {
+		npmName := parsed.Name
+		if parsed.Namespace != "" {
+			npmName = "@" + parsed.Namespace + "/" + parsed.Name
+		}
+		recordDirectKey(direct, compare.DirectVersionKey(npmName, pkg.Version), isDirect)
+		return
+	}
+	recordDirectKey(direct, pkg.Name, isDirect)
 
 	switch parsed.Type {
 	case "golang":
@@ -280,7 +295,6 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 	case "npm":
 		npmName := purlx.NPMPackageName(parsed.Namespace, parsed.Name)
 		recordDirectKey(direct, npmName, isDirect)
-		recordNpmVersionDirectness(direct, npmName, pkg.Version, isDirect)
 	case "cargo":
 		recordDirectKey(direct, ecosystem.Cargo.NameEquivalenceKey(parsed.Name), isDirect)
 	case "pypi":
@@ -288,33 +302,6 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 	default:
 		recordDirectKey(direct, packageName, isDirect)
 	}
-}
-
-// recordNpmVersionDirectness records the version keys the npm lookup consults,
-// so a directness decision made once survives being encoded as protos and
-// decoded again.
-//
-// The classification is version-sensitive for npm (see [compare.LookupDirect]),
-// and the proto carries each package's answer on the package itself. Recording
-// only the name collapsed the two copies a lockfile can hold of one declared
-// package, because [recordDirectKey] lets a direct win, so the transitive copy
-// came back direct on every surface that decodes a ScanResponse while the
-// in-process path had it right. A classification that depends on which surface
-// the caller arrived through cannot be reasoned about, so this is the half that
-// makes the two agree.
-//
-// Every npm package in the response gets its own version key, which is what
-// makes the marker safe to write here: the lookup only ever asks about packages
-// from this same set, so there is no name whose marker is set without its
-// versions being recorded. A package with no version is left with the name-only
-// answer, since a marker with nothing behind it would read as "resolved, and not
-// this one" for every copy of the name.
-func recordNpmVersionDirectness(direct map[string]bool, name, version string, isDirect bool) {
-	if strings.TrimSpace(name) == "" || strings.TrimSpace(version) == "" {
-		return
-	}
-	direct[compare.DirectVersionMarker(name)] = true
-	recordDirectKey(direct, compare.DirectVersionKey(name, version), isDirect)
 }
 
 func recordDirectKey(direct map[string]bool, key string, isDirect bool) {

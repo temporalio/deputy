@@ -29,16 +29,25 @@ import (
 // package-lock.json is a lockfile rather than a manifest, and it is here because
 // a declaration and its resolution live in different files: package.json names
 // the range, and only the lockfile says which version it resolved to. What it
-// contributes is keyed by [DirectVersionKey] and [DirectVersionMarker] rather
-// than by name, so it narrows the answer for the names it resolves without
-// changing it for anything else.
+// contributes is keyed by [DirectVersionKey], and the manifest beside it then
+// contributes a bare name only for the declarations it did not answer.
 var manifestDirectDepParsers = map[string]func([]byte) map[string]bool{
-	"package.json":      getNpmDirectDeps,
-	"package-lock.json": getNpmLockDirectDeps,
-	"Cargo.toml":        getCargoDirectDeps,
-	"pyproject.toml":    getPyprojectDirectDeps,
-	"requirements.txt":  getRequirementsDirectDeps,
+	npmManifestBase:    getNpmDirectDeps,
+	npmLockBase:        getNpmLockDirectDeps,
+	"Cargo.toml":       getCargoDirectDeps,
+	"pyproject.toml":   getPyprojectDirectDeps,
+	"requirements.txt": getRequirementsDirectDeps,
 }
+
+// npmManifestBase and npmLockBase are the two npm files whose contributions have
+// to be combined per project rather than merged on sight: the manifest declares
+// names and the lockfile says which versions they resolved to, so what the
+// manifest still needs to contribute depends on what the lockfile answered. See
+// [manifestScan.resolve].
+const (
+	npmManifestBase = "package.json"
+	npmLockBase     = "package-lock.json"
+)
 
 // DirectVersionKey is the key under which a declared dependency's resolved
 // version is recorded, for the ecosystems whose lockfile says which version a
@@ -49,43 +58,31 @@ func DirectVersionKey(name, version string) string {
 	return name + "@" + version
 }
 
-// DirectVersionMarker is the key that records that a name's versions were
-// resolved at all. It is what lets one bool map answer three states: a name with
-// resolved versions (marker present, only those versions direct), a name
-// declared but unresolved (marker absent, the name-only answer stands), and a
-// name nothing declares.
-//
-// The marker is why the resolution can be additive. Recording the resolved
-// versions alone could not narrow anything, since the name-only key is still
-// there and [mergeDirectDependencies] lets a true win; writing false against the
-// name instead would be swallowed by that same merge, and would also change the
-// answer for every reader that looks a bare name up.
-func DirectVersionMarker(name string) string {
-	return name + "@"
-}
-
 // LookupDirect reports whether a scanned package is a direct dependency, given
 // the name it goes by in its own ecosystem and the version it was found at.
 //
-// A name whose versions a lockfile resolved is direct only at those versions, so
-// a second copy of a declared package at a version nothing declared reads as
-// transitive, which is what it is. A name with no resolution keeps the name-only
-// answer, so a project with no committed lockfile, or in an ecosystem whose
-// lockfile Deputy does not read, classifies exactly as it did before.
+// Every entry in the set is a positive statement. A versioned key says "a project
+// declared this name and it resolved to this version"; a name key says "a project
+// declared this name, and which version that resolved to is not recorded". A
+// package is direct when either holds, which makes the answer monotone in the
+// set: adding an entry can make a package direct and can never take that away.
+//
+// Monotonicity is the property one flat map for a whole scan has to have, and it
+// is why there is no key meaning "versions were resolved for this name". That is a
+// statement about a project rather than about a package, and a scan-wide table
+// cannot say which project it came from, so reading it as though it held
+// everywhere denied another project's declaration: a repository with an npm-locked
+// project beside a Yarn one had the Yarn project's explicitly declared version
+// read as transitive. What a resolution suppresses is now decided where the
+// projects are still distinguishable, in [manifestScan.resolve], so nothing
+// reaching this function can contradict anything else in it.
 //
 // It is the one definition of the rule. [proto.ExtractorPackageIsDirect] calls
 // it rather than reimplementing the key construction, for the same reason the
 // name keys are folded on both sides by one function: two spellings of one rule
 // is how the manifest side and the lookup side come to disagree.
-// A package with no version is answered by name, which it has to be: the marker
-// is DirectVersionKey's key for an empty version, so consulting the versioned
-// answer for one would read the marker itself and report every copy of a resolved
-// name direct.
 func LookupDirect(direct map[string]bool, name, version string) bool {
-	if version != "" && direct[DirectVersionMarker(name)] {
-		return direct[DirectVersionKey(name, version)]
-	}
-	return direct[name]
+	return direct[DirectVersionKey(name, version)] || direct[name]
 }
 
 // goDirectDepManifest is the manifest [CollectGoDirectModulesFromWorkspace] and
@@ -176,10 +173,17 @@ type manifestScope struct {
 // Both are keyed by scope rather than pooled per repository: one repository can
 // hold several independent workspace roots, and an alias means whatever the
 // member's own root says it means.
+// npmDeclared and npmResolved are the same idea for npm, and the reason they are
+// scoped is that one repository can hold several npm projects with different
+// tooling. A package.json's names are deferred rather than merged on sight,
+// because whether a name needs its bare key depends on whether that project's own
+// lockfile resolved it, and the two files are read independently.
 type manifestScan struct {
-	direct    map[string]bool
-	inherited map[manifestScope]map[string]bool
-	roots     map[manifestScope]map[string]string
+	direct      map[string]bool
+	inherited   map[manifestScope]map[string]bool
+	roots       map[manifestScope]map[string]string
+	npmDeclared map[manifestScope]map[string]bool
+	npmResolved map[string]map[string]bool
 }
 
 // newManifestScan starts a scan from the direct dependencies already collected
@@ -187,9 +191,62 @@ type manifestScan struct {
 // pseudo-dependency handling.
 func newManifestScan(direct map[string]bool) *manifestScan {
 	return &manifestScan{
-		direct:    direct,
-		inherited: make(map[manifestScope]map[string]bool),
-		roots:     make(map[manifestScope]map[string]string),
+		direct:      direct,
+		inherited:   make(map[manifestScope]map[string]bool),
+		roots:       make(map[manifestScope]map[string]string),
+		npmDeclared: make(map[manifestScope]map[string]bool),
+		npmResolved: make(map[string]map[string]bool),
+	}
+}
+
+// recordNpmDeclarations defers the names a package.json declares until the walk
+// ends. A name gets a bare key only if nothing resolved it to a version, and the
+// lockfile that would have is a different file, possibly read later and possibly
+// in a directory above this one.
+func (s *manifestScan) recordNpmDeclarations(scope manifestScope, names map[string]bool) {
+	declared, ok := s.npmDeclared[scope]
+	if !ok {
+		declared = make(map[string]bool, len(names))
+		s.npmDeclared[scope] = declared
+	}
+	maps.Copy(declared, names)
+}
+
+// recordNpmResolutions notes which names the lockfile in a directory resolved to
+// a version, so a declaration under that directory knows its bare key is
+// unnecessary. The versioned keys themselves are positive facts and go straight
+// into the direct set.
+func (s *manifestScan) recordNpmResolutions(dir string, names map[string]bool) {
+	resolved, ok := s.npmResolved[dir]
+	if !ok {
+		resolved = make(map[string]bool, len(names))
+		s.npmResolved[dir] = resolved
+	}
+	maps.Copy(resolved, names)
+}
+
+// governingNpmResolutions returns the names resolved by the nearest npm lockfile
+// at or above dir, which is the lockfile that governs a manifest there: npm
+// workspace members keep their declarations in their own package.json while the
+// lockfile sits at the workspace root.
+//
+// The search stops at the first lockfile it finds, for the same reason
+// [manifestScan.governingRenames] does: a nearer lockfile is the only one that
+// resolves a project's declarations, and reaching past it would let an unrelated
+// project's resolutions decide what this one declared.
+// Directories are spelled as [path.Dir] gives them, so the tree root is "." and
+// the walk ends when it stops changing. Normalizing the root to "" instead left a
+// workspace member searching for a key the root lockfile never wrote.
+func (s *manifestScan) governingNpmResolutions(dir string) map[string]bool {
+	for {
+		if resolved, ok := s.npmResolved[dir]; ok {
+			return resolved
+		}
+		parent := path.Dir(dir)
+		if parent == dir {
+			return nil
+		}
+		dir = parent
 	}
 }
 
@@ -264,6 +321,32 @@ func (s *manifestScan) resolve() map[string]bool {
 			}
 		}
 	}
+
+	// An npm name gets a bare key only when the lockfile governing its project
+	// did not resolve it to a version. A resolved name already has its versioned
+	// key, and adding the bare one beside it would answer for every other copy
+	// of that name in the scan, which is the over-claiming the resolution exists
+	// to stop.
+	//
+	// Suppression is per name and per project, which is what keeps it from
+	// deciding anything about a project it did not read. A declaration the
+	// lockfile could not resolve keeps its bare key even when its neighbours in
+	// the same manifest were resolved, and a project with no lockfile at all
+	// keeps every one of them. The consequence, once a repository mixes an
+	// npm-locked project with a Yarn or pnpm one that declares the same name, is
+	// that the bare key from the unresolved project answers for every version of
+	// it, so a transitive copy in the locked project reads direct. That is
+	// over-claiming, which is the direction to fail in: the alternative denies a
+	// dependency a project explicitly declared.
+	for scope, declared := range s.npmDeclared {
+		resolved := s.governingNpmResolutions(scope.dir)
+		for name := range declared {
+			if resolved[name] {
+				continue
+			}
+			s.direct[name] = true
+		}
+	}
 	return s.direct
 }
 
@@ -290,7 +373,19 @@ func collectManifestDependencies(name string, read func() ([]byte, error), scan 
 	}
 	scope := manifestScope{kind: base, dir: path.Dir(path.Clean(name))}
 	if hasDeps {
-		mergeDirectDependencies(scan.direct, parseDeps(data))
+		parsed := parseDeps(data)
+		switch base {
+		case npmManifestBase:
+			// Deferred: whether these names need a bare key depends on the
+			// lockfile governing this directory, which is a file this call does
+			// not have. See [manifestScan.resolve].
+			scan.recordNpmDeclarations(scope, parsed)
+		case npmLockBase:
+			mergeDirectDependencies(scan.direct, parsed)
+			scan.recordNpmResolutions(scope.dir, npmResolvedNames(parsed))
+		default:
+			mergeDirectDependencies(scan.direct, parsed)
+		}
 	}
 	if hasAliases {
 		if renames, isRoot := parseAliases(data); isRoot {
@@ -573,8 +668,7 @@ func resolveNpmInstall(lock npmLockfile, site, name string) (npmLockEntry, bool)
 }
 
 // getNpmLockDirectDeps records the resolved version of every dependency the
-// project declares, keyed by [DirectVersionKey], along with the
-// [DirectVersionMarker] for each name it resolved.
+// project declares, keyed by [DirectVersionKey].
 //
 // This is what stops a lockfile's second copy of a declared package from reading
 // as direct. npm nests a version that conflicts with the root's, so a project
@@ -584,11 +678,11 @@ func resolveNpmInstall(lock npmLockfile, site, name string) (npmLockEntry, bool)
 // were direct, so a direct-only view showed a transitive copy.
 //
 // A declaration whose version the lockfile does not give (a "file:" or "link"
-// entry, or a name with no install path on the way up) is deliberately left
-// without a marker, so it falls back to the name-only answer rather than becoming
-// undeclared. Under-claiming a dependency the project really named is the one
-// direction this must not introduce. A dependency on another workspace member is
-// that case: its entry is a link with no version, so it stays direct by name.
+// entry, or a name with no install path on the way up) contributes no key here, so
+// [manifestScan.resolve] leaves it its bare name and it stays direct at whatever
+// version it was found. Under-claiming a dependency the project really named is
+// the one direction this must not introduce. A dependency on another workspace
+// member is that case: its entry is a link with no version.
 //
 // Every declaration site contributes, and what they contribute is a union, which
 // is the only answer a scan-wide bool can carry. Two members that declare
@@ -622,12 +716,25 @@ func getNpmLockDirectDeps(data []byte) map[string]bool {
 				// package it actually is, which is the name every npm extractor
 				// reports and therefore the name the lookup will ask about.
 				name := cmp.Or(installed.Name, declared)
-				deps[DirectVersionMarker(name)] = true
 				deps[DirectVersionKey(name, installed.Version)] = true
 			}
 		}
 	}
 	return deps
+}
+
+// npmResolvedNames returns the package names behind a set of versioned keys, so
+// the names a lockfile resolved are read back out of the keys it produced rather
+// than tracked a second time. The version is separated by the last "@", which is
+// never the one that opens a scope because a scope only leads the name.
+func npmResolvedNames(versionKeys map[string]bool) map[string]bool {
+	names := make(map[string]bool, len(versionKeys))
+	for key := range versionKeys {
+		if idx := strings.LastIndex(key, "@"); idx > 0 {
+			names[key[:idx]] = true
+		}
+	}
+	return names
 }
 
 // recordNpmDependency records the names a single package.json entry can be

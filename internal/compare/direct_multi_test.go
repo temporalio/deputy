@@ -1087,14 +1087,11 @@ func TestGetNpmLockDirectDeps(t *testing.T) {
 		want  map[string]bool
 	}{
 		{
-			name:  "resolved declarations and the marker for each",
+			name:  "one key per resolved declaration, and nothing else",
 			input: npmDuplicateVersionLock,
 			want: map[string]bool{
-				"lodash@":            true,
 				"lodash@4.17.21":     true,
-				"jest@":              true,
 				"jest@29.7.0":        true,
-				"legacy-thing@":      true,
 				"legacy-thing@1.0.0": true,
 			},
 		},
@@ -1107,7 +1104,7 @@ func TestGetNpmLockDirectDeps(t *testing.T) {
     "node_modules/my-lodash": {"name": "lodash", "version": "4.17.21"}
   }
 }`,
-			want: map[string]bool{"lodash@": true, "lodash@4.17.21": true},
+			want: map[string]bool{"lodash@4.17.21": true},
 		},
 		{
 			name: "a scoped package keeps its scope",
@@ -1118,7 +1115,7 @@ func TestGetNpmLockDirectDeps(t *testing.T) {
     "node_modules/@types/node": {"version": "20.11.5"}
   }
 }`,
-			want: map[string]bool{"@types/node@": true, "@types/node@20.11.5": true},
+			want: map[string]bool{"@types/node@20.11.5": true},
 		},
 		{
 			name: "a declaration with no resolvable version gets no marker",
@@ -1130,7 +1127,7 @@ func TestGetNpmLockDirectDeps(t *testing.T) {
     "node_modules/lodash": {"version": "4.17.21"}
   }
 }`,
-			want: map[string]bool{"lodash@": true, "lodash@4.17.21": true},
+			want: map[string]bool{"lodash@4.17.21": true},
 		},
 		{
 			name: "a v1 lockfile cannot distinguish top-level from hoisted",
@@ -1172,8 +1169,6 @@ func TestGetNpmLockDirectDeps(t *testing.T) {
 // so a project without a committed lockfile classifies exactly as before.
 func TestLookupDirectPrefersResolvedVersion(t *testing.T) {
 	resolved := map[string]bool{
-		"lodash":         true,
-		"lodash@":        true,
 		"lodash@4.17.21": true,
 		"tokio":          true,
 	}
@@ -1188,7 +1183,6 @@ func TestLookupDirectPrefersResolvedVersion(t *testing.T) {
 		{name: "a nested copy of a declared name is not", pkgName: "lodash", version: "3.10.1", want: false},
 		{name: "a name with no resolution falls back to the name", pkgName: "tokio", version: "1.26.0", want: true},
 		{name: "a name nothing declares is not direct", pkgName: "left-pad", version: "1.3.0", want: false},
-		{name: "a versionless copy of a declared name keeps the name answer", pkgName: "lodash", version: "", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1199,131 +1193,110 @@ func TestLookupDirectPrefersResolvedVersion(t *testing.T) {
 	}
 }
 
-// TestLookupDirectDoesNotReadTheMarkerAsAnAnswer pins the one collision in the
-// key scheme: DirectVersionMarker(name) and DirectVersionKey(name, "") are the
-// same string, so a versionless package must be answered by name. Reading the
-// versioned answer for one would find the marker, which is always true, and
-// report every copy of a resolved name direct however it was classified.
+// TestDirectSetIsPerProjectAcrossOneRepository pins the property a scan-wide
+// lookup table has to have: one project's resolution must not answer for another
+// project's declaration.
 //
-// The fixture is what a decoded ScanResponse produces when every copy of a name
-// is transitive: the name answers false while the marker still says the name's
-// versions were resolved.
-func TestLookupDirectDoesNotReadTheMarkerAsAnAnswer(t *testing.T) {
-	transitiveOnly := map[string]bool{
-		"lodash":        false,
-		"lodash@":       true,
-		"lodash@3.10.1": false,
-	}
-	if got := LookupDirect(transitiveOnly, "lodash", ""); got {
-		t.Errorf("LookupDirect(lodash, \"\") = %v, want false: the marker was read as the answer", got)
-	}
-	if got := LookupDirect(transitiveOnly, "lodash", "3.10.1"); got {
-		t.Errorf("LookupDirect(lodash, 3.10.1) = %v, want false", got)
-	}
-}
-
-// npmWorkspaceLock is the shape npm writes for a workspace: each member's
-// dependency tables live in an entry keyed by the member's path, not under
-// node_modules, and a member's own package is linked into the root's node_modules.
-// A dependency resolves to the nearest node_modules on the way up, so the copy
-// hoisted to the root and the copy nested in a member are different entries.
-//
-// Here the api member declares lodash ^4.17.21, which hoists to the root, while
-// the web member depends on legacy-thing, which pins lodash 3.10.1 and gets it
-// nested. One name, two versions, one of them declared.
-const npmWorkspaceLock = `{
-  "name": "monorepo",
+// A repository can hold an npm-locked project beside one Deputy cannot resolve
+// (Yarn, pnpm, or no lockfile at all). The locked project resolves lodash 4, and
+// the unlocked one declares lodash ^3. Both declarations are real, and a third
+// copy is nobody's declaration, so all three answers differ and every one of them
+// has to come out of the same flat map.
+func TestDirectSetIsPerProjectAcrossOneRepository(t *testing.T) {
+	files := map[string]string{
+		"locked/package.json": `{"name":"locked","dependencies":{"lodash":"^4.17.21","legacy-thing":"^1.0.0"}}`,
+		"locked/package-lock.json": `{
+  "name": "locked",
   "lockfileVersion": 3,
   "packages": {
-    "": {"name": "monorepo", "workspaces": ["packages/*"]},
-    "packages/api": {"name": "@acme/api", "version": "1.0.0", "dependencies": {"lodash": "^4.17.21"}},
-    "packages/web": {"name": "@acme/web", "version": "1.0.0", "dependencies": {"legacy-thing": "^1.0.0"}, "devDependencies": {"vitest": "^1.0.0"}},
-    "node_modules/@acme/api": {"resolved": "packages/api", "link": true},
-    "node_modules/@acme/web": {"resolved": "packages/web", "link": true},
+    "": {"name": "locked", "dependencies": {"lodash": "^4.17.21", "legacy-thing": "^1.0.0"}},
     "node_modules/lodash": {"version": "4.17.21"},
-    "node_modules/legacy-thing": {"version": "1.0.0", "dependencies": {"lodash": "3.10.1"}},
-    "node_modules/vitest": {"version": "1.6.0"},
-    "packages/web/node_modules/lodash": {"version": "3.10.1"}
+    "node_modules/legacy-thing": {"version": "1.0.0", "dependencies": {"lodash": "2.4.2"}},
+    "node_modules/legacy-thing/node_modules/lodash": {"version": "2.4.2"}
   }
-}`
-
-// TestGetNpmLockDirectDepsWorkspaces pins the workspace half. A member's
-// dependency table is a declaration site exactly like the root's, and its
-// declarations resolve against the nearest node_modules, so a member that pins its
-// own copy of a package is resolved to that copy rather than to the root's.
-func TestGetNpmLockDirectDepsWorkspaces(t *testing.T) {
-	got := getNpmLockDirectDeps([]byte(npmWorkspaceLock))
-
-	want := map[string]bool{
-		// Declared by the api member, hoisted to the root.
-		"lodash@":        true,
-		"lodash@4.17.21": true,
-		// Declared by the web member.
-		"legacy-thing@":      true,
-		"legacy-thing@1.0.0": true,
-		"vitest@":            true,
-		"vitest@1.6.0":       true,
+}`,
+		"unlocked/package.json": `{"name":"unlocked","dependencies":{"lodash":"^3.10.1"}}`,
+		"unlocked/yarn.lock":    "lodash@^3.10.1:\n  version \"3.10.1\"\n",
 	}
-	for k, v := range want {
-		if got[k] != v {
-			t.Errorf("key %q = %v, want %v\ngot: %v", k, got[k], v, got)
+
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+	for name, contents := range files {
+		if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	// The nested copy is nobody's declaration, so it must not earn a key.
-	if got["lodash@3.10.1"] {
-		t.Errorf("the copy nested in a member was recorded as a declaration: %v", got)
+	direct := CollectDirectDependenciesFromWorkspace(ws)
+
+	tests := []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{name: "the locked project's resolved version is direct", version: "4.17.21", want: true},
+		{name: "the unlocked project's declared version is direct", version: "3.10.1", want: true},
+		// The deliberate cost of getting the line above right. The unlocked
+		// project declares lodash and nothing here can say which version that
+		// resolved to, so its name key answers for every copy of the name in the
+		// scan, including the locked project's transitive one. Narrowing this
+		// would take knowing which project a scanned package belongs to, which
+		// the lookup is not given. Over-claiming one transitive copy is the
+		// better failure: the alternative denies a declaration a project made.
+		{name: "a copy only the locked project has is over-claimed, not denied", version: "2.4.2", want: true},
 	}
-	if len(got) != len(want) {
-		t.Errorf("got %d keys, want %d\ngot: %v", len(got), len(want), got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := LookupDirect(direct, "lodash", tt.version); got != tt.want {
+				t.Errorf("LookupDirect(lodash, %s) = %v, want %v\ncollected: %v",
+					tt.version, got, tt.want, direct)
+			}
+		})
 	}
 }
 
-// TestGetNpmLockDirectDepsMemberPinsItsOwnCopy covers the case the hoisted fixture
-// cannot: a member whose own declaration is the nested copy. The resolution has to
-// walk up from the member rather than looking only at the root, or the member's
-// declared version reads as transitive while the root's reads as declared.
-func TestGetNpmLockDirectDepsMemberPinsItsOwnCopy(t *testing.T) {
-	const lock = `{
-  "lockfileVersion": 3,
-  "packages": {
-    "": {"workspaces": ["packages/*"], "dependencies": {"lodash": "^4.17.21"}},
-    "packages/legacy": {"name": "@acme/legacy", "dependencies": {"lodash": "^3.10.1"}},
-    "node_modules/lodash": {"version": "4.17.21"},
-    "packages/legacy/node_modules/lodash": {"version": "3.10.1"}
-  }
-}`
-	got := getNpmLockDirectDeps([]byte(lock))
+// TestDirectSetIsMonotone pins the invariant that replaced the resolution
+// marker. Every entry is a positive statement about some project, so adding
+// entries can only make packages direct, never undo it. That is what makes one
+// flat map safe for a whole scan: a second project's contribution cannot deny the
+// first project's declaration, whatever order the walk visited them in.
+//
+// The marker broke exactly this. It meant "some project resolved versions for
+// this name", which read as though it held everywhere, so adding it took
+// directness away from a package another project had declared. Any future key
+// that is a statement about a project rather than about a package will fail here.
+func TestDirectSetIsMonotone(t *testing.T) {
+	// Every key any of the collectors can produce, from two projects that
+	// disagree about lodash.
+	contributions := []map[string]bool{
+		{"lodash@4.17.21": true},
+		{"lodash": true},
+		{"legacy-thing@1.0.0": true},
+		{"stdlib": true, "go": true},
+	}
+	probes := []struct{ name, version string }{
+		{"lodash", "4.17.21"},
+		{"lodash", "3.10.1"},
+		{"lodash", ""},
+		{"legacy-thing", "1.0.0"},
+		{"left-pad", "1.3.0"},
+	}
 
-	// Both versions are declared, each by a different part of the project, so
-	// both are direct. Directness is a property of the whole scan.
-	for _, key := range []string{"lodash@", "lodash@4.17.21", "lodash@3.10.1"} {
-		if !got[key] {
-			t.Errorf("key %q = false, want true\ngot: %v", key, got)
+	direct := make(map[string]bool)
+	was := make(map[string]bool, len(probes))
+	for _, p := range probes {
+		was[p.name+"\x00"+p.version] = LookupDirect(direct, p.name, p.version)
+	}
+
+	for i, contribution := range contributions {
+		mergeDirectDependencies(direct, contribution)
+		for _, p := range probes {
+			key := p.name + "\x00" + p.version
+			got := LookupDirect(direct, p.name, p.version)
+			if was[key] && !got {
+				t.Errorf("after contribution %d, %s@%s went from direct to indirect: an entry took directness away\nset: %v",
+					i, p.name, p.version, direct)
+			}
+			was[key] = got
 		}
-	}
-}
-
-// TestGetNpmLockDirectDepsIgnoresNonMemberLocalPackages pins the boundary of a
-// declaration site. A path entry that is not a workspace member is a local
-// package the project depends on, not part of it, so its own dependency tables
-// are its author's declarations and not the project's. The file: dependency in
-// SCALIBR's own fixture is the shape: it carries devDependencies of its own.
-func TestGetNpmLockDirectDepsIgnoresNonMemberLocalPackages(t *testing.T) {
-	const lock = `{
-  "lockfileVersion": 2,
-  "packages": {
-    "": {"dependencies": {"lodash": "^4.17.21"}, "devDependencies": {"etag": "file:./deps/etag"}},
-    "deps/etag": {"version": "1.8.0", "devDependencies": {"mocha": "1.21.5"}},
-    "node_modules/lodash": {"version": "4.17.21"},
-    "node_modules/mocha": {"version": "1.21.5"}
-  }
-}`
-	got := getNpmLockDirectDeps([]byte(lock))
-
-	if got["mocha@"] || got["mocha@1.21.5"] {
-		t.Errorf("a local dependency's own dev dependency was counted as the project's: %v", got)
-	}
-	if !got["lodash@4.17.21"] {
-		t.Errorf("the project's own declaration was lost: %v", got)
 	}
 }
