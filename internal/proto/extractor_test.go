@@ -1,9 +1,6 @@
 package proto
 
 import (
-	"bytes"
-	"log/slog"
-	"strings"
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
@@ -461,85 +458,4 @@ func TestEcosystemFromPURLType(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestUndeterminedDirectnessIsReported pins the answer a caller gets for an
-// ecosystem no direct-dependency collector reads. is_direct is a bool, so a
-// Maven dependency the project declares in its own pom.xml converts to
-// "indirect" exactly like a transitive one, and both the SBOM and a direct-only
-// sbom_component rule read that as settled. It cannot be settled from a manifest
-// nobody parses, so the conversion says so where the wrong answer is produced
-// rather than leaving the caller to infer it from a doc comment.
-//
-// The ecosystems left out matter as much as the ones reported. A container
-// image's OS packages have no manifest to declare anything, and a mise tool is
-// direct by construction, so neither is undetermined and neither should make
-// noise.
-func TestUndeterminedDirectnessIsReported(t *testing.T) {
-	maven := &extractor.Package{Name: "com.google.guava:guava", Version: "32.1.2-jre", PURLType: "maven", Locations: []string{"pom.xml"}}
-	tests := []struct {
-		name string
-		pkgs []*extractor.Package
-		want []string
-	}{
-		{
-			name: "a maven dependency the project declares itself",
-			pkgs: []*extractor.Package{maven},
-			want: []string{"maven"},
-		},
-		{
-			name: "every unparsed ecosystem in the scan, once each",
-			pkgs: []*extractor.Package{
-				maven,
-				{Name: "rails", Version: "7.1.3", PURLType: "gem"},
-				{Name: "monolog/monolog", Version: "3.5.0", PURLType: "composer"},
-				maven,
-			},
-			want: []string{"maven", "packagist", "rubygems"},
-		},
-		{
-			name: "an ecosystem whose manifests are parsed",
-			pkgs: []*extractor.Package{{Name: "github.com/spf13/cobra", Version: "v1.8.0", PURLType: "golang"}},
-			want: nil,
-		},
-		{
-			name: "a container image's os packages",
-			pkgs: []*extractor.Package{{Name: "openssl", Version: "3.0.11-r0", PURLType: "apk"}},
-			want: nil,
-		},
-		{
-			name: "a tool that is direct by construction",
-			pkgs: []*extractor.Package{{Name: "node", Version: "20.11.0", PURLType: purlx.TypeMise}},
-			want: nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logged := captureWarnings(t)
-			pkgs := ExtractorPackagesToProto(tt.pkgs, map[string]bool{"github.com/spf13/cobra": true})
-			if len(pkgs) != len(tt.pkgs) {
-				t.Fatalf("converted %d packages, want %d", len(pkgs), len(tt.pkgs))
-			}
-			for _, eco := range tt.want {
-				if !strings.Contains(logged.String(), eco) {
-					t.Errorf("no warning named %q for a scan Deputy cannot classify; logged %q", eco, logged.String())
-				}
-			}
-			if tt.want == nil && logged.Len() > 0 {
-				t.Errorf("warned about directness for a scan that needs no warning: %q", logged.String())
-			}
-		})
-	}
-}
-
-// captureWarnings redirects the default logger to a buffer for the duration of
-// the test, so an assertion can read what a caller of the conversion would see.
-func captureWarnings(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-	return &buf
 }

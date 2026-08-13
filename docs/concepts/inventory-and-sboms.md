@@ -37,9 +37,12 @@ down in the file that declares it.
 Every other ecosystem Deputy inventories (Maven, RubyGems, NuGet, Hex, Pub,
 CocoaPods, Packagist, Hackage, CRAN, ConanCenter) has no manifest parser yet, and
 `direct` is a boolean, so its packages are reported as transitive whether they are
-or not. Deputy logs a warning naming those ecosystems when a scan includes them, so
-treat `--only-direct` and direct-only policies as covering the four ecosystems above
-until the warning stops naming yours.
+or not, with nothing in the output distinguishing the two. Treat `--only-direct`,
+`direct` in JSON and SBOM output, and direct-only policies as covering the
+ecosystems listed above and no others.
+[Issue #246](https://github.com/temporalio/deputy/issues/246) tracks both halves:
+reading the remaining manifests, and a contract that can say "not determined"
+instead of reporting `false`.
 
 ## PURLs
 

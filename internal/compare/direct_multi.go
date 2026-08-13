@@ -43,14 +43,16 @@ const goDirectDepManifest = "go.mod"
 // the file patterns the ecosystem registry declares, so an ecosystem joins the
 // answer when its parser is written and not when someone remembers to say so.
 //
-// Callers report directness as a bool, where an ecosystem nobody parses looks
-// exactly like a project that declared nothing: [proto.ExtractorPackageIsDirect]
-// returns false for a key no collector ever wrote, and a direct-only rule reads
-// that as "transitive" rather than "not determined here". Anything that presents
-// directness to a user should say which of the two it means, and this is what it
-// asks. Ecosystems that are direct by construction (base images, workflow uses,
-// mise and asdf tools) are classified from the PURL type instead and are
-// deliberately absent.
+// It answers the question the directness contract cannot: an ecosystem nobody
+// parses looks exactly like a project that declared nothing, because
+// [proto.ExtractorPackageIsDirect] returns false for a key no collector ever
+// wrote and is_direct is a bool. Ecosystems that are direct by construction (base
+// images, workflow uses, mise and asdf tools) are classified from the PURL type
+// instead and are deliberately absent.
+//
+// Nothing outside this package's tests calls it yet. It is the input the reporting
+// side of issue #246 needs, which is where an undetermined ecosystem becomes
+// something a caller can render rather than a value it has to guess at.
 func EcosystemsWithDirectDependencyCollection() []ecosystem.Ecosystem {
 	collected := make([]ecosystem.Ecosystem, 0, len(manifestDirectDepParsers)+1)
 	for _, reg := range ecosystem.Default().All() {

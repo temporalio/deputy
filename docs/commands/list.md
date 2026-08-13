@@ -41,10 +41,10 @@ deputy ls [target] [flags]
 | `--platform` | | | Platform for container images (`os/arch[/variant]`) |
 
 `--only-direct` is answered from the manifests Deputy parses for directness (Go, npm,
-Cargo, PyPI, plus the ecosystems that are direct by construction). A scan that
-includes an ecosystem with no manifest parser logs a warning naming it, and every one
-of its packages is listed as indirect. See
-[Direct and transitive dependencies](../concepts/inventory-and-sboms.md#direct-and-transitive-dependencies).
+Cargo, PyPI, plus the ecosystems that are direct by construction). For an ecosystem
+with no manifest parser, such as Maven or RubyGems, every package is listed as
+`indirect` whether it is or not, and the DIRECT column cannot yet say the difference.
+See [Direct and transitive dependencies](../concepts/inventory-and-sboms.md#direct-and-transitive-dependencies).
 
 ## Examples
 
