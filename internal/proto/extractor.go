@@ -278,7 +278,9 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 			}
 		}
 	case "npm":
-		recordDirectKey(direct, purlx.NPMPackageName(parsed.Namespace, parsed.Name), isDirect)
+		npmName := purlx.NPMPackageName(parsed.Namespace, parsed.Name)
+		recordDirectKey(direct, npmName, isDirect)
+		recordNpmVersionDirectness(direct, npmName, pkg.Version, isDirect)
 	case "cargo":
 		recordDirectKey(direct, ecosystem.Cargo.NameEquivalenceKey(parsed.Name), isDirect)
 	case "pypi":
@@ -286,6 +288,33 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 	default:
 		recordDirectKey(direct, packageName, isDirect)
 	}
+}
+
+// recordNpmVersionDirectness records the version keys the npm lookup consults,
+// so a directness decision made once survives being encoded as protos and
+// decoded again.
+//
+// The classification is version-sensitive for npm (see [compare.LookupDirect]),
+// and the proto carries each package's answer on the package itself. Recording
+// only the name collapsed the two copies a lockfile can hold of one declared
+// package, because [recordDirectKey] lets a direct win, so the transitive copy
+// came back direct on every surface that decodes a ScanResponse while the
+// in-process path had it right. A classification that depends on which surface
+// the caller arrived through cannot be reasoned about, so this is the half that
+// makes the two agree.
+//
+// Every npm package in the response gets its own version key, which is what
+// makes the marker safe to write here: the lookup only ever asks about packages
+// from this same set, so there is no name whose marker is set without its
+// versions being recorded. A package with no version is left with the name-only
+// answer, since a marker with nothing behind it would read as "resolved, and not
+// this one" for every copy of the name.
+func recordNpmVersionDirectness(direct map[string]bool, name, version string, isDirect bool) {
+	if strings.TrimSpace(name) == "" || strings.TrimSpace(version) == "" {
+		return
+	}
+	direct[compare.DirectVersionMarker(name)] = true
+	recordDirectKey(direct, compare.DirectVersionKey(name, version), isDirect)
 }
 
 func recordDirectKey(direct map[string]bool, key string, isDirect bool) {

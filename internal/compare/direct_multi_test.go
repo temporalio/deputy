@@ -1188,6 +1188,7 @@ func TestLookupDirectPrefersResolvedVersion(t *testing.T) {
 		{name: "a nested copy of a declared name is not", pkgName: "lodash", version: "3.10.1", want: false},
 		{name: "a name with no resolution falls back to the name", pkgName: "tokio", version: "1.26.0", want: true},
 		{name: "a name nothing declares is not direct", pkgName: "left-pad", version: "1.3.0", want: false},
+		{name: "a versionless copy of a declared name keeps the name answer", pkgName: "lodash", version: "", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1195,5 +1196,28 @@ func TestLookupDirectPrefersResolvedVersion(t *testing.T) {
 				t.Errorf("LookupDirect(%q, %q) = %v, want %v", tt.pkgName, tt.version, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestLookupDirectDoesNotReadTheMarkerAsAnAnswer pins the one collision in the
+// key scheme: DirectVersionMarker(name) and DirectVersionKey(name, "") are the
+// same string, so a versionless package must be answered by name. Reading the
+// versioned answer for one would find the marker, which is always true, and
+// report every copy of a resolved name direct however it was classified.
+//
+// The fixture is what a decoded ScanResponse produces when every copy of a name
+// is transitive: the name answers false while the marker still says the name's
+// versions were resolved.
+func TestLookupDirectDoesNotReadTheMarkerAsAnAnswer(t *testing.T) {
+	transitiveOnly := map[string]bool{
+		"lodash":        false,
+		"lodash@":       true,
+		"lodash@3.10.1": false,
+	}
+	if got := LookupDirect(transitiveOnly, "lodash", ""); got {
+		t.Errorf("LookupDirect(lodash, \"\") = %v, want false: the marker was read as the answer", got)
+	}
+	if got := LookupDirect(transitiveOnly, "lodash", "3.10.1"); got {
+		t.Errorf("LookupDirect(lodash, 3.10.1) = %v, want false", got)
 	}
 }
