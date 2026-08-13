@@ -20,6 +20,12 @@ type Bare interface{ Ba() }
 // depending on the abstraction.
 type SelfAccepting interface{ Merge(SelfAccepting) }
 
+// Shared has the name of an encoding-tagged type in another package and no tags
+// of its own, so nothing reflective can reach it and it carries no doubt.
+type Shared struct {
+	Name string
+}
+
 type holder struct {
 	field Held
 }

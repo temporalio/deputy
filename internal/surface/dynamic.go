@@ -43,9 +43,15 @@ type dynamic struct {
 	// declare a method by that name.
 	byMethod map[string][]contract
 
-	// taggedTypes holds the named types with at least one encoding-tagged
-	// field. Such a type is normally built by a decoder rather than by a caller
-	// naming it, so a decoder can reach it without any reference.
+	// taggedTypes holds the package-qualified names ("pkg/path.Type") of the
+	// package-level types with at least one encoding-tagged field. Such a type is
+	// normally built by a decoder rather than by a caller naming it, so a decoder
+	// can reach it without any reference.
+	//
+	// The key carries the package because a bare name is not an identity. A
+	// common name such as Run or Stats would otherwise lend this doubt to every
+	// object called that, in any package and of any kind, which is evidence the
+	// audit does not have.
 	taggedTypes map[string]bool
 
 	// blankImported holds canonical paths imported for side effects only. Such
@@ -301,14 +307,23 @@ func isIdentRune(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
-// addTaggedTypes records the named type declared by spec when its struct body
-// carries an encoding tag. The type, not the field, is what the doubt is about:
-// a decoder constructs the whole value, and struct fields are outside the
-// audited surface anyway. Keying on the field name instead would attach a doubt
-// to any unrelated symbol that happened to share a field's name.
+// addTaggedTypes records the package-level named type declared by spec when its
+// struct body carries an encoding tag. The type, not the field, is what the
+// doubt is about: a decoder constructs the whole value, and struct fields are
+// outside the audited surface anyway. Keying on the field name instead would
+// attach a doubt to any unrelated symbol that happened to share a field's name.
+//
+// The record is package-qualified, and a type declared inside a function body is
+// skipped. Such a type is nobody's surface and can never be the subject of a
+// finding, so recording it could only lend its doubt to a package-level name it
+// happens to collide with.
 func (d *dynamic) addTaggedTypes(v *variant, spec *ast.TypeSpec) {
 	st, ok := spec.Type.(*ast.StructType)
 	if !ok {
+		return
+	}
+	obj := v.pkg.TypesInfo.Defs[spec.Name]
+	if obj == nil || obj.Pkg() == nil || obj.Parent() != v.pkg.Types.Scope() {
 		return
 	}
 	for _, field := range st.Fields.List {
@@ -320,9 +335,7 @@ func (d *dynamic) addTaggedTypes(v *variant, spec *ast.TypeSpec) {
 			continue
 		}
 		if hasEncodingTag(tag) {
-			if obj := v.pkg.TypesInfo.Defs[spec.Name]; obj != nil {
-				d.taggedTypes[obj.Name()] = true
-			}
+			d.taggedTypes[obj.Pkg().Path()+"."+obj.Name()] = true
 			return
 		}
 	}
@@ -391,13 +404,25 @@ func (d *dynamic) symbolDoubts(obj types.Object, kind SymbolKind, pkgPath string
 	if d.blankImported[pkgPath] {
 		doubts = append(doubts, "declaring package is imported for side effects only, so its exports are wired up by registration")
 	}
-	if tn, ok := obj.(*types.TypeName); ok && d.protoLike(tn) {
-		doubts = append(doubts, "type is a protobuf message, reachable through the proto registry")
-	}
-	if d.taggedTypes[obj.Name()] {
-		doubts = append(doubts, "type has encoding-tagged fields, so a codec may construct it reflectively")
+	if tn, ok := obj.(*types.TypeName); ok {
+		if d.protoLike(tn) {
+			doubts = append(doubts, "type is a protobuf message, reachable through the proto registry")
+		}
+		if d.taggedType(tn) {
+			doubts = append(doubts, "type has encoding-tagged fields, so a codec may construct it reflectively")
+		}
 	}
 	return doubts
+}
+
+// taggedType reports whether tn is a type recorded as carrying encoding tags.
+// The lookup is package-qualified for the same reason the record is: the doubt
+// describes one type, not every object that shares its name.
+func (d *dynamic) taggedType(tn *types.TypeName) bool {
+	if tn.Pkg() == nil {
+		return false
+	}
+	return d.taggedTypes[tn.Pkg().Path()+"."+tn.Name()]
 }
 
 // protoLike reports whether a type implements protoreflect's message contract,

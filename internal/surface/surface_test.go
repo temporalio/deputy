@@ -124,15 +124,17 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 
 	// Every exported declaration under internal/, and nothing from the excluded
 	// trees: 8 funcs (Used, Local, NamedInString, Orphaned, ForForeignTests,
-	// ForOwnBlackBoxTest, Run, Make), 11 types (Never, Stringish, Decoy,
-	// Scannable, Tagged plus 6 interfaces), and 10 methods (Never.Method,
-	// Stringish.String, Decoy.Read, Scannable.Scan plus one per interface). Vars
-	// and consts are zero, which also pins that struct fields such as Tagged.Name
-	// are not counted as symbols.
+	// ForOwnBlackBoxTest, Run, Make), 14 types (Never, Stringish, Decoy,
+	// Scannable, Tagged, testonly.Shared, testonly.Holder, ifaces.Shared plus 6
+	// interfaces), and 11 methods (Never.Method, Stringish.String, Decoy.Read,
+	// Scannable.Scan, Holder.Shared plus one per interface). Vars and consts are
+	// zero, which also pins that struct fields such as Tagged.Name are not counted
+	// as symbols, and that the type declared inside used.localTagged is not one
+	// either.
 	want := map[SymbolKind]int{
 		KindFunc:   8,
-		KindType:   11,
-		KindMethod: 10,
+		KindType:   14,
+		KindMethod: 11,
 		KindVar:    0,
 		KindConst:  0,
 	}
@@ -266,6 +268,61 @@ func TestDispatchDoubtRequiresImplementingTheInterface(t *testing.T) {
 			}
 			if !slices.ContainsFunc(got.Doubts, func(d string) bool { return strings.Contains(d, tt.wantDoubt) }) {
 				t.Errorf("%s doubts = %v, want one mentioning %q", tt.symbol, got.Doubts, tt.wantDoubt)
+			}
+		})
+	}
+}
+
+// TestEncodingDoubtBelongsToOneType covers the other half of the encoding
+// signal: which object the doubt is about. Only the type whose fields carry the
+// tag can be built by a decoder. Matching the doubt on a bare name spreads it to
+// every object of that name in any package and of any kind, which fabricates
+// dynamic-reachability evidence and keeps the findings it lands on from ever
+// being read as certain.
+func TestEncodingDoubtBelongsToOneType(t *testing.T) {
+	report := analyzeFixture(t)
+
+	const doubt = "encoding-tagged"
+	tests := []struct {
+		name   string
+		pkg    string
+		symbol string
+		want   bool
+	}{
+		{
+			name:   "the tagged type earns it",
+			pkg:    "fixture/internal/testonly",
+			symbol: "Shared",
+			want:   true,
+		},
+		{
+			name:   "a same-named type in another package does not",
+			pkg:    "fixture/internal/ifaces",
+			symbol: "Shared",
+			want:   false,
+		},
+		{
+			name:   "a method of that name in that same package does not",
+			pkg:    "fixture/internal/testonly",
+			symbol: "Holder.Shared",
+			want:   false,
+		},
+		{
+			name:   "a tagged type declared inside a function lends nothing to the name it shadows",
+			pkg:    "fixture/internal/used",
+			symbol: "Never",
+			want:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := findSymbol(report, tt.pkg, tt.symbol)
+			if !ok {
+				t.Fatalf("%s.%s was not reported", tt.pkg, tt.symbol)
+			}
+			has := slices.ContainsFunc(got.Doubts, func(d string) bool { return strings.Contains(d, doubt) })
+			if has != tt.want {
+				t.Errorf("%s.%s doubts = %v, want the %q reason present = %v", tt.pkg, tt.symbol, got.Doubts, doubt, tt.want)
 			}
 		})
 	}
