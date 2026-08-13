@@ -1056,3 +1056,144 @@ func TestDirectDependencyCollectionIsDerivedFromTheParsers(t *testing.T) {
 		}
 	}
 }
+
+// npmDuplicateVersionLock is the shape npm writes when the project declares one
+// version of a package and a dependency of the project pins an incompatible
+// one: the project's copy takes the top-level slot and the other is nested.
+// Duplicate versions of one name are ordinary in npm, and the lockfile is the
+// only file that says which version the declaration resolved to.
+const npmDuplicateVersionLock = `{
+  "name": "app",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "app", "dependencies": {"lodash": "^4.17.21", "legacy-thing": "^1.0.0"}, "devDependencies": {"jest": "^29.0.0"}},
+    "node_modules/lodash": {"version": "4.17.21"},
+    "node_modules/jest": {"version": "29.7.0"},
+    "node_modules/legacy-thing": {"version": "1.0.0", "dependencies": {"lodash": "3.10.1"}},
+    "node_modules/legacy-thing/node_modules/lodash": {"version": "3.10.1"}
+  }
+}`
+
+// TestGetNpmLockDirectDeps pins what the lockfile adds over the manifest: the
+// resolved version of every name the project declares, plus the marker that says
+// a name's versions were resolved at all. Both directions matter, so the nested
+// copy's absence from the map is asserted as explicitly as the declared copy's
+// presence.
+func TestGetNpmLockDirectDeps(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  map[string]bool
+	}{
+		{
+			name:  "resolved declarations and the marker for each",
+			input: npmDuplicateVersionLock,
+			want: map[string]bool{
+				"lodash@":            true,
+				"lodash@4.17.21":     true,
+				"jest@":              true,
+				"jest@29.7.0":        true,
+				"legacy-thing@":      true,
+				"legacy-thing@1.0.0": true,
+			},
+		},
+		{
+			name: "an alias resolves under the name the lockfile reports",
+			input: `{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"dependencies": {"my-lodash": "npm:lodash@^4.17.21"}},
+    "node_modules/my-lodash": {"name": "lodash", "version": "4.17.21"}
+  }
+}`,
+			want: map[string]bool{"lodash@": true, "lodash@4.17.21": true},
+		},
+		{
+			name: "a scoped package keeps its scope",
+			input: `{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"devDependencies": {"@types/node": "^20.0.0"}},
+    "node_modules/@types/node": {"version": "20.11.5"}
+  }
+}`,
+			want: map[string]bool{"@types/node@": true, "@types/node@20.11.5": true},
+		},
+		{
+			name: "a declaration with no resolvable version gets no marker",
+			input: `{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"dependencies": {"local-thing": "file:../local-thing", "lodash": "^4.0.0"}},
+    "node_modules/local-thing": {"resolved": "../local-thing", "link": true},
+    "node_modules/lodash": {"version": "4.17.21"}
+  }
+}`,
+			want: map[string]bool{"lodash@": true, "lodash@4.17.21": true},
+		},
+		{
+			name: "a v1 lockfile cannot distinguish top-level from hoisted",
+			input: `{
+  "lockfileVersion": 1,
+  "dependencies": {"lodash": {"version": "4.17.21"}}
+}`,
+			want: map[string]bool{},
+		},
+		{
+			name:  "a lockfile that does not parse yields nothing",
+			input: `{not json`,
+			want:  map[string]bool{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getNpmLockDirectDeps([]byte(tt.input))
+			if len(got) != len(tt.want) {
+				t.Errorf("got %d keys, want %d\n got:  %v\n want: %v", len(got), len(tt.want), got, tt.want)
+			}
+			for k, v := range tt.want {
+				if got[k] != v {
+					t.Errorf("key %q = %v, want %v (got map %v)", k, got[k], v, got)
+				}
+			}
+			// The nested copy must never earn a key of its own.
+			if got["lodash@3.10.1"] {
+				t.Errorf("nested transitive copy was recorded as a resolved declaration: %v", got)
+			}
+		})
+	}
+}
+
+// TestLookupDirectPrefersResolvedVersion pins the rule both sides of the
+// directness lookup share: once a name's versions are resolved, only those
+// versions are direct, and a name with no resolution keeps the name-only answer
+// so a project without a committed lockfile classifies exactly as before.
+func TestLookupDirectPrefersResolvedVersion(t *testing.T) {
+	resolved := map[string]bool{
+		"lodash":         true,
+		"lodash@":        true,
+		"lodash@4.17.21": true,
+		"tokio":          true,
+	}
+
+	tests := []struct {
+		name    string
+		pkgName string
+		version string
+		want    bool
+	}{
+		{name: "the resolved version is direct", pkgName: "lodash", version: "4.17.21", want: true},
+		{name: "a nested copy of a declared name is not", pkgName: "lodash", version: "3.10.1", want: false},
+		{name: "a name with no resolution falls back to the name", pkgName: "tokio", version: "1.26.0", want: true},
+		{name: "a name nothing declares is not direct", pkgName: "left-pad", version: "1.3.0", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := LookupDirect(resolved, tt.pkgName, tt.version); got != tt.want {
+				t.Errorf("LookupDirect(%q, %q) = %v, want %v", tt.pkgName, tt.version, got, tt.want)
+			}
+		})
+	}
+}

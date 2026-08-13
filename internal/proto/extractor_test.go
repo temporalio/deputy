@@ -116,6 +116,81 @@ func TestDirectKeysSurviveTheManifestRoundTrip(t *testing.T) {
 	}
 }
 
+// TestNpmDuplicateVersionsClassifySeparately pins the case a name-only lookup
+// gets wrong. npm nests a version that conflicts with the root's, so one
+// lockfile carries two copies of a declared package; the extractor reports both
+// under one name and discards the install path that distinguished them, so
+// directness has to come from the version the declaration resolved to.
+//
+// Both directions are asserted, because the two failure modes are opposite and a
+// fix for one is a plausible cause of the other: the declared copy must stay
+// direct, and the nested copy must not be direct even though a direct package of
+// the same name exists. The unlocked case is asserted alongside them, since a
+// project with no committed lockfile has no resolution to prefer and must keep
+// classifying by name.
+func TestNpmDuplicateVersionsClassifySeparately(t *testing.T) {
+	const manifest = `{"name":"app","dependencies":{"lodash":"^4.17.21","legacy-thing":"^1.0.0"}}`
+	const lockfile = `{
+  "name": "app",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "app", "dependencies": {"lodash": "^4.17.21", "legacy-thing": "^1.0.0"}},
+    "node_modules/lodash": {"version": "4.17.21"},
+    "node_modules/legacy-thing": {"version": "1.0.0", "dependencies": {"lodash": "3.10.1"}},
+    "node_modules/legacy-thing/node_modules/lodash": {"version": "3.10.1"}
+  }
+}`
+
+	tests := []struct {
+		name  string
+		files map[string]string
+		pkg   *extractor.Package
+		want  bool
+	}{
+		{
+			name:  "the version the declaration resolved to is direct",
+			files: map[string]string{"package.json": manifest, "package-lock.json": lockfile},
+			pkg:   &extractor.Package{Name: "lodash", Version: "4.17.21", PURLType: "npm"},
+			want:  true,
+		},
+		{
+			name:  "a nested copy of the same name is not direct",
+			files: map[string]string{"package.json": manifest, "package-lock.json": lockfile},
+			pkg:   &extractor.Package{Name: "lodash", Version: "3.10.1", PURLType: "npm"},
+			want:  false,
+		},
+		{
+			name:  "the dependency that pulled the nested copy is still direct",
+			files: map[string]string{"package.json": manifest, "package-lock.json": lockfile},
+			pkg:   &extractor.Package{Name: "legacy-thing", Version: "1.0.0", PURLType: "npm"},
+			want:  true,
+		},
+		{
+			name:  "without a lockfile every copy of a declared name stays direct",
+			files: map[string]string{"package.json": manifest},
+			pkg:   &extractor.Package{Name: "lodash", Version: "3.10.1", PURLType: "npm"},
+			want:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ws := workspace.NewMemory()
+			t.Cleanup(func() { _ = ws.Close() })
+			for name, contents := range tt.files {
+				if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+					t.Fatalf("write %s: %v", name, err)
+				}
+			}
+			direct := compare.CollectDirectDependenciesFromWorkspace(ws)
+			if got := ExtractorPackageIsDirect(tt.pkg, direct); got != tt.want {
+				t.Errorf("ExtractorPackageIsDirect(%s@%s) = %v, want %v (collected %v)",
+					tt.pkg.Name, tt.pkg.Version, got, tt.want, direct)
+			}
+		})
+	}
+}
+
 func TestExtractorPackageToProto_DirectDetection(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -1,6 +1,7 @@
 package compare
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -19,16 +20,68 @@ import (
 )
 
 // manifestDirectDepParsers maps non-Go manifest basenames to the parser that
-// extracts direct dependency names from that manifest's contents. Both the
+// extracts direct dependency keys from that file's contents. Both the
 // workspace walk and the commit-tree walk dispatch through this table so the
 // two collection paths cannot drift in ecosystem coverage. go.mod is handled
 // separately by the CollectGoDirectModules* functions because of its module
 // root and stdlib pseudo-dependency handling.
+//
+// package-lock.json is a lockfile rather than a manifest, and it is here because
+// a declaration and its resolution live in different files: package.json names
+// the range, and only the lockfile says which version it resolved to. What it
+// contributes is keyed by [DirectVersionKey] and [DirectVersionMarker] rather
+// than by name, so it narrows the answer for the names it resolves without
+// changing it for anything else.
 var manifestDirectDepParsers = map[string]func([]byte) map[string]bool{
-	"package.json":     getNpmDirectDeps,
-	"Cargo.toml":       getCargoDirectDeps,
-	"pyproject.toml":   getPyprojectDirectDeps,
-	"requirements.txt": getRequirementsDirectDeps,
+	"package.json":      getNpmDirectDeps,
+	"package-lock.json": getNpmLockDirectDeps,
+	"Cargo.toml":        getCargoDirectDeps,
+	"pyproject.toml":    getPyprojectDirectDeps,
+	"requirements.txt":  getRequirementsDirectDeps,
+}
+
+// DirectVersionKey is the key under which a declared dependency's resolved
+// version is recorded, for the ecosystems whose lockfile says which version a
+// declaration resolved to. It shares the direct set with the name-only keys
+// rather than living in a second map, so every existing reader of the set is
+// unaffected: the keys it adds are ones no name-only lookup constructs.
+func DirectVersionKey(name, version string) string {
+	return name + "@" + version
+}
+
+// DirectVersionMarker is the key that records that a name's versions were
+// resolved at all. It is what lets one bool map answer three states: a name with
+// resolved versions (marker present, only those versions direct), a name
+// declared but unresolved (marker absent, the name-only answer stands), and a
+// name nothing declares.
+//
+// The marker is why the resolution can be additive. Recording the resolved
+// versions alone could not narrow anything, since the name-only key is still
+// there and [mergeDirectDependencies] lets a true win; writing false against the
+// name instead would be swallowed by that same merge, and would also change the
+// answer for every reader that looks a bare name up.
+func DirectVersionMarker(name string) string {
+	return name + "@"
+}
+
+// LookupDirect reports whether a scanned package is a direct dependency, given
+// the name it goes by in its own ecosystem and the version it was found at.
+//
+// A name whose versions a lockfile resolved is direct only at those versions, so
+// a second copy of a declared package at a version nothing declared reads as
+// transitive, which is what it is. A name with no resolution keeps the name-only
+// answer, so a project with no committed lockfile, or in an ecosystem whose
+// lockfile Deputy does not read, classifies exactly as it did before.
+//
+// It is the one definition of the rule. [proto.ExtractorPackageIsDirect] calls
+// it rather than reimplementing the key construction, for the same reason the
+// name keys are folded on both sides by one function: two spellings of one rule
+// is how the manifest side and the lookup side come to disagree.
+func LookupDirect(direct map[string]bool, name, version string) bool {
+	if direct[DirectVersionMarker(name)] {
+		return direct[DirectVersionKey(name, version)]
+	}
+	return direct[name]
 }
 
 // goDirectDepManifest is the manifest [CollectGoDirectModulesFromWorkspace] and
@@ -274,11 +327,16 @@ func isVendoredManifestPath(p string) bool {
 // proto.ExtractorPackageIsDirect, which keys the scanned package the same way,
 // so both sides build one key.
 //
-// The manifests parsed are exactly [manifestDirectDepParsers] plus go.mod:
+// The files parsed are exactly [manifestDirectDepParsers] plus go.mod:
 //   - Go (go.mod)
-//   - npm (package.json)
+//   - npm (package.json, and package-lock.json for the resolved versions)
 //   - Cargo (Cargo.toml)
 //   - PyPI (pyproject.toml, requirements.txt)
+//
+// Only npm resolves a declaration to a version. For every other ecosystem a
+// declared name marks each copy of that name direct, which over-claims when a
+// lockfile carries two versions of one declared package. Cargo is the case that
+// can: see [LookupDirect] and issue #279.
 //
 // setup.py is not among them. It was listed here and never parsed, so a
 // distribution declared only in install_requires was collected by nothing and
@@ -397,6 +455,68 @@ func getNpmDirectDeps(data []byte) map[string]bool {
 	for _, table := range []map[string]string{pkg.Dependencies, pkg.DevDependencies, pkg.OptionalDependencies} {
 		for name, spec := range table {
 			recordNpmDependency(deps, name, spec)
+		}
+	}
+	return deps
+}
+
+// npmLockfile is the slice of package-lock.json that says which version each of
+// the project's declarations resolved to. Only the v2/v3 "packages" object can
+// answer that: its "" entry holds the root's own dependency tables, and every
+// other key is an install path, so the entry at "node_modules/<name>" is the copy
+// npm gave the root. A v1 lockfile has a flat "dependencies" tree whose top level
+// mixes the root's dependencies with hoisted transitive ones, which cannot
+// distinguish the two, so it contributes nothing and the name-only answer stands.
+type npmLockfile struct {
+	Packages map[string]struct {
+		Name                 string            `json:"name"`
+		Version              string            `json:"version"`
+		Dependencies         map[string]string `json:"dependencies"`
+		DevDependencies      map[string]string `json:"devDependencies"`
+		OptionalDependencies map[string]string `json:"optionalDependencies"`
+	} `json:"packages"`
+}
+
+// getNpmLockDirectDeps records the resolved version of every dependency the
+// project declares, keyed by [DirectVersionKey], along with the
+// [DirectVersionMarker] for each name it resolved.
+//
+// This is what stops a lockfile's second copy of a declared package from reading
+// as direct. npm nests a version that conflicts with the root's, so a project
+// that declares lodash ^4.17.21 and depends on something pinning lodash 3.10.1
+// gets two lodash packages from the extractor, which reports both under one name
+// and discards the install path that told them apart. Without the resolution both
+// were direct, so a direct-only view showed a transitive copy.
+//
+// A declaration whose version the lockfile does not give (a "file:" or "link"
+// entry, or a name with no top-level install path) is deliberately left without a
+// marker, so it falls back to the name-only answer rather than becoming
+// undeclared. Under-claiming a dependency the project really named is the one
+// direction this must not introduce.
+func getNpmLockDirectDeps(data []byte) map[string]bool {
+	deps := make(map[string]bool)
+
+	var lock npmLockfile
+	if err := json.Unmarshal(data, &lock); err != nil {
+		return deps
+	}
+	root, ok := lock.Packages[""]
+	if !ok {
+		return deps
+	}
+
+	for _, table := range []map[string]string{root.Dependencies, root.DevDependencies, root.OptionalDependencies} {
+		for declared := range table {
+			installed, ok := lock.Packages["node_modules/"+declared]
+			if !ok || installed.Version == "" {
+				continue
+			}
+			// An aliased entry is installed under the alias and records the
+			// package it actually is, which is the name every npm extractor
+			// reports and therefore the name the lookup will ask about.
+			name := cmp.Or(installed.Name, declared)
+			deps[DirectVersionMarker(name)] = true
+			deps[DirectVersionKey(name, installed.Version)] = true
 		}
 	}
 	return deps
