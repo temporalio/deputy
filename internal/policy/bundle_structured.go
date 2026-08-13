@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	yaml "gopkg.in/yaml.v3"
@@ -458,7 +459,7 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 	if len(ecosystems) > 0 {
 		quoted := make([]string, len(ecosystems))
 		for i, eco := range ecosystems {
-			quoted[i] = fmt.Sprintf("\"%s\"", eco)
+			quoted[i] = celStringLiteral(eco)
 		}
 		guard := fmt.Sprintf("(request.?ecosystem.orValue(\"\") in [%s]) || (pkg.ecosystem in [%s])", strings.Join(quoted, ","), strings.Join(quoted, ","))
 		when = fmt.Sprintf("((%s) && (%s))", guard, when)
@@ -491,6 +492,25 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 		return "", fmt.Errorf("marshal action: %w", err)
 	}
 	return fmt.Sprintf("((%s) ? [%s] : [])", when, string(actionJSON)), nil
+}
+
+// celStringLiteral renders an authored value as a CEL string literal, quoted and
+// escaped, so a value can only ever be data in the generated expression. It is
+// used for the ecosystem guard, which is the one place a policy's own text is
+// interpolated into CEL rather than marshaled into it.
+//
+// Interpolating the value bare let it close the literal and keep going: an
+// ecosystems entry of `npm"] || true || ["x"] == ["x` generated a guard that
+// matched every ecosystem, so a bundle that reads as scoped to npm denied a PyPI
+// package, and it compiled and linted clean. That is the same defect as an aliased
+// policy, the text a reviewer reads not being the policy that runs, reached through
+// a field instead of a YAML construct.
+//
+// Go's quoting is CEL's: both accept \\, \", \n, \r, \t, \a, \b, \f, \v, \xHH,
+// \uXXXX and \UXXXXXXXX, which is every escape strconv.Quote emits, so the literal
+// it produces parses as the value it was given.
+func celStringLiteral(value string) string {
+	return strconv.Quote(value)
 }
 
 // escapeComment escapes characters in a string to make it safe for inclusion

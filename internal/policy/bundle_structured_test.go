@@ -2,6 +2,7 @@ package policy
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -229,5 +230,84 @@ func TestStructuredPolicyNormalizesCommandAliases(t *testing.T) {
 	}
 	if strings.Contains(src, "exec") {
 		t.Fatalf("compiled source retained legacy exec alias: %s", src)
+	}
+}
+
+// TestGeneratedEcosystemGuardCannotBeRewritten pins that a policy's ecosystems
+// reach the generated guard as string literals and nothing else. The guard is CEL
+// source built by interpolating each value, so a value carrying a quote used to
+// close the list and continue the expression: the bundle below reads as scoped to
+// npm, and before this it compiled, linted clean, and denied a PyPI package. The
+// text a reviewer reads has to be the policy that runs, which is the same reason
+// the format refuses aliases.
+//
+// The plain cases are here too, so escaping cannot pass by scoping nothing.
+func TestGeneratedEcosystemGuardCannotBeRewritten(t *testing.T) {
+	cases := []struct {
+		name       string
+		ecosystems string
+		ecosystem  string
+		wantDeny   bool
+	}{
+		{
+			name:       "a value crafted to close the list and always match",
+			ecosystems: `['npm"] || true || ["x"] == ["x']`,
+			ecosystem:  "PyPI",
+		},
+		{
+			name:       "a value carrying a bare quote",
+			ecosystems: `['npm"']`,
+			ecosystem:  "npm",
+		},
+		{
+			name:       "a value carrying a backslash",
+			ecosystems: `['npm\']`,
+			ecosystem:  "npm",
+		},
+		{
+			name:       "the declared ecosystem matches",
+			ecosystems: `['npm']`,
+			ecosystem:  "npm",
+			wantDeny:   true,
+		},
+		{
+			name:       "another ecosystem does not match",
+			ecosystems: `['npm']`,
+			ecosystem:  "PyPI",
+		},
+		{
+			name:       "one of several declared ecosystems matches",
+			ecosystems: `['npm', 'PyPI']`,
+			ecosystem:  "PyPI",
+			wantDeny:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := "policies:\n  - name: scoped\n    ecosystems: " + tc.ecosystems +
+				"\n    rules:\n      - when: \"pkg.name == 'left-pad'\"\n        action: deny\n        reason: r\n"
+			sources, err := ParseStructuredSources([]byte(bundle), "b.yaml")
+			if err != nil {
+				t.Fatalf("ParseStructuredSources: %v", err)
+			}
+			eng, err := NewEngine(sources)
+			if err != nil {
+				t.Fatalf("NewEngine: %v", err)
+			}
+			// request is supplied because the generated guard reads it before
+			// pkg, and an absent one errors before the ecosystem is compared.
+			payload := map[string]any{
+				"pkg":     map[string]any{"name": "left-pad", "ecosystem": tc.ecosystem},
+				"request": map[string]any{"ecosystem": "unrelated"},
+			}
+			actions, err := eng.EvaluateAllMap(t.Context(), payload, "scan", "")
+			if err != nil {
+				t.Fatalf("EvaluateAllMap: %v", err)
+			}
+			denied := slices.ContainsFunc(actions, func(a Action) bool { return ActionTypeIs(a.Type, ActionDeny) })
+			if denied != tc.wantDeny {
+				t.Fatalf("denied a %s package = %v, want %v (actions %+v)", tc.ecosystem, denied, tc.wantDeny, actions)
+			}
+		})
 	}
 }
