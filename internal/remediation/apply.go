@@ -682,12 +682,20 @@ func pruneStaleMiseLock(root *os.Root, configRelPath, tool string, currentVersio
 	return replaceFileAtomically(root, lockRel, pruned, info.Mode().Perm())
 }
 
-// declaresOnlyNewVersion reports whether the edited config declares exactly one
-// version for tool and that version is the one the fix wrote. It is the
-// question "does anything this config asks for still need a lock entry other
-// than the new version's", asked of the file as it now stands rather than of
-// the plan, because the plan only names the versions a finding reported and a
-// lockfile may record versions no finding ever mentioned.
+// declaresOnlyNewVersion reports whether every version the edited config still
+// declares for tool is the one the fix wrote. It is the question "does anything
+// this config asks for still need a lock entry other than the new version's",
+// asked of the file as it now stands rather than of the plan, because the plan
+// only names the versions a finding reported and a lockfile may record versions
+// no finding ever mentioned.
+//
+// Duplicates answer yes, which is why the question is about content rather than
+// arity. An update that replaces several vulnerable versions with one target
+// leaves `go = ["1.24.3", "1.24.3"]`, a declaration that needs exactly one lock
+// entry however many times it spells it; reading two elements as "still
+// multi-version" left a historical entry standing as the only one, and lock
+// resolution lends a sole entry to a declaration that matched nothing, so the
+// next scan reported the fixed tool at a version older than the one flagged.
 //
 // It parses the config the way mise does, so every declaration form is
 // recognized, and answers false on any read or parse failure: an unclear
@@ -705,7 +713,14 @@ func declaresOnlyNewVersion(root *os.Root, configRelPath, tool, newVersion strin
 		if spec.Key != tool {
 			continue
 		}
-		return len(spec.Versions) == 1 && mise.SameVersion(tool, spec.Versions[0], newVersion)
+		// Every declared version, not one of them: a declaration counts as
+		// exclusive when nothing it asks for is any other version. Counting
+		// declarations instead missed the array whose elements converge, since
+		// an update that replaces two vulnerable versions with one target
+		// leaves that target declared twice.
+		return len(spec.Versions) > 0 && !slices.ContainsFunc(spec.Versions, func(v string) bool {
+			return !mise.SameVersion(tool, v, newVersion)
+		})
 	}
 	return false
 }

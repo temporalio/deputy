@@ -2844,6 +2844,21 @@ func TestApplyMiseUpdatePrunesObsoleteLockEntries(t *testing.T) {
 			wantResolved: obsolete,
 		},
 		{
+			// Several vulnerable versions replaced by one target leave that
+			// target declared twice, which is still a declaration that needs a
+			// single lock entry. Reading it as "still multi-version" left the
+			// historical entry standing as the only one, and lock resolution
+			// lends a sole entry to a declaration that matched nothing, so the
+			// scan read the fixed tool at a version older than the flagged one.
+			name: "converging array elements are one declared version",
+			files: map[string]string{
+				"mise.toml": "[tools]\ngo = [\"" + flagged + "\", \"1.22.11\"]\n",
+				"mise.lock": lock + "\n" + entry("1.22.11", "sha256:second"),
+			},
+			cmd:      "deputy:mise:update mise.toml go 1.24.3 " + flagged + " 1.22.11",
+			wantGone: []string{"sha256:flagged", "sha256:second", "sha256:obsolete"},
+		},
+		{
 			// Ownership still comes first: a second config declaring the same
 			// key means neither entry is this fix's to remove, and the wider
 			// rule must not talk its way past that.
