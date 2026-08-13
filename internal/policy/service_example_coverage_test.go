@@ -462,6 +462,47 @@ func TestShippedOIDCFederationTrustsWhatItsGatesAccept(t *testing.T) {
 			wantDenied: true,
 		},
 		{
+			// An issuer is an identity, so a substring test hands it to whoever
+			// registers a matching hostname. Both the unified rule and
+			// gitlab-namespace-restriction tested contains("gitlab"), so this
+			// token satisfied one and was skipped by the other.
+			name: "attacker-controlled issuer whose host contains a trusted name",
+			jwt: &policyv1.JWTClaims{
+				Sub: "project_path:acme/scanner:ref_type:branch:ref:main",
+				Iss: "https://gitlab.attacker.example",
+				CustomClaims: map[string]string{
+					"namespace_path": "acme", "project_path": "acme/scanner",
+				},
+			},
+			wantDenied: true,
+		},
+		{
+			// Same shape for Azure, where the host was matched as a substring
+			// and so also matched a domain merely ending in it.
+			name: "issuer whose host merely ends with the Azure host",
+			jwt: &policyv1.JWTClaims{
+				Sub: "azure-user-object-id",
+				Iss: "https://login.microsoftonline.com.attacker.example/tid/v2.0",
+				CustomClaims: map[string]string{
+					"tid": "12345678-1234-1234-1234-123456789abc", "idtyp": "app",
+				},
+			},
+			wantDenied: true,
+		},
+		{
+			// The real GitLab issuer must still be trusted, since an exact test
+			// that is too strict silently locks out the provider it names.
+			name: "the real GitLab issuer in a trusted namespace",
+			jwt: &policyv1.JWTClaims{
+				Sub: "project_path:acme/scanner:ref_type:branch:ref:main",
+				Iss: "https://gitlab.com",
+				CustomClaims: map[string]string{
+					"namespace_path": "acme", "project_path": "acme/scanner",
+				},
+			},
+			wantDenied: false,
+		},
+		{
 			// A service account email is a claim, not a proof of issuer. Every
 			// gcp- rule is guarded on the Google issuer, so a trusted-looking
 			// email from elsewhere must not satisfy the unified rule either.

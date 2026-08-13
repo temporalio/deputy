@@ -142,7 +142,7 @@ policies:
     rules:
       - action: deny
         when: |
-          jwt.?iss.orValue("").contains("gitlab") &&
+          jwt.?iss.orValue("") == "https://gitlab.com" &&
           !jwt.?namespace_path.orValue("").matches("^(acme|acme-security|acme-platform)(/.*)?$")
         reason: "Only projects from trusted GitLab namespaces allowed"
 
@@ -153,7 +153,7 @@ policies:
     rules:
       - action: deny
         when: |
-          jwt.?iss.orValue("").contains("gitlab") &&
+          jwt.?iss.orValue("") == "https://gitlab.com" &&
           jwt.?environment.orValue("") != "" &&
           !(jwt.?environment.orValue("") in ["production", "staging"])
         reason: "Secrets scanning requires protected environment"
@@ -262,7 +262,7 @@ policies:
     rules:
       - action: deny
         when: |
-          jwt.?iss.orValue("").contains("login.microsoftonline.com") &&
+          jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
           !(jwt.?tid.orValue("") in [
             "12345678-1234-1234-1234-123456789abc",
             "87654321-4321-4321-4321-cba987654321"
@@ -276,7 +276,7 @@ policies:
     rules:
       - action: deny
         when: |
-          jwt.?iss.orValue("").contains("login.microsoftonline.com") &&
+          jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
           jwt.?idtyp.orValue("") == "app" &&
           !(jwt.?oid.orValue("") in [
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -365,7 +365,7 @@ policies:
             jwt.?sub.orValue("").startsWith("sa:") ||
             jwt.?sub.orValue("").startsWith("repo:") ||
             // GitLab CI job.
-            (jwt.?iss.orValue("").contains("gitlab") &&
+            (jwt.?iss.orValue("") == "https://gitlab.com" &&
              jwt.?sub.orValue("").startsWith("project_path:")) ||
             // AWS role assumed through web identity.
             jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::")) ||
@@ -373,7 +373,7 @@ policies:
             (jwt.?iss.orValue("") == "https://accounts.google.com" &&
              jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com")) ||
             // Azure application identity rather than a user.
-            (jwt.?iss.orValue("").contains("login.microsoftonline.com") &&
+            (jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
              jwt.?idtyp.orValue("") == "app")
           ) &&
           !jwt.?amr.orValue([]).exists(a, a in ["mfa", "otp", "hwk", "swk"])
@@ -381,7 +381,16 @@ policies:
         remediation: "Re-authenticate with MFA enabled"
 
   - name: human-group-restriction
-    description: Require security group membership for sensitive operations
+    description: |
+      Require security group membership for sensitive operations.
+
+      The machine exemption is the same one human-require-mfa applies, and for
+      the same reason: an email claim does not mean a person. A Google service
+      account presents deputy-scanner@acme-prod.iam.gserviceaccount.com, so
+      keying on the presence of an email denied every service account here.
+
+      This is the fourth copy of provider recognition in this file, because a
+      policy cannot share a definition with another policy.
     entrypoints:
       - service_secrets_request
     rules:
@@ -389,6 +398,18 @@ policies:
         when: |
           !jwt.anonymous &&
           jwt.?email.orValue("") != "" &&
+          !(
+            jwt.?sub.orValue("").startsWith("system:") ||
+            jwt.?sub.orValue("").startsWith("sa:") ||
+            jwt.?sub.orValue("").startsWith("repo:") ||
+            (jwt.?iss.orValue("") == "https://gitlab.com" &&
+             jwt.?sub.orValue("").startsWith("project_path:")) ||
+            jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::")) ||
+            (jwt.?iss.orValue("") == "https://accounts.google.com" &&
+             jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com")) ||
+            (jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
+             jwt.?idtyp.orValue("") == "app")
+          ) &&
           !jwt.?groups.orValue([]).exists(g, g in ["security-team", "sre-oncall", "platform-admins"])
         reason: "Security group membership required"
         remediation: "Request access in #security-access channel"
@@ -437,7 +458,7 @@ policies:
             // github-actions-organization-allowlist's decision, not this rule's.
             jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" ||
             // A GitLab CI job; gitlab-namespace-restriction picks the namespaces.
-            jwt.?iss.orValue("").contains("gitlab") ||
+            jwt.?iss.orValue("") == "https://gitlab.com" ||
             // A Google service account; the two gcp- rules pick the accounts and
             // projects. The issuer is part of the shape, because the email claim
             // alone is a name any issuer can mint.
@@ -446,7 +467,7 @@ policies:
             // An assumed AWS role; aws-account-restriction picks the accounts.
             jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::")) ||
             // An Azure AD identity; azure-tenant-restriction picks the tenants.
-            jwt.?iss.orValue("").contains("login.microsoftonline.com") ||
+            jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") ||
             // A Kubernetes workload; kubernetes-namespace-restriction picks the
             // namespaces.
             jwt.?sub.orValue("").startsWith("system:serviceaccount:") ||
