@@ -124,17 +124,18 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 
 	// Every exported declaration under internal/, and nothing from the excluded
 	// trees: 8 funcs (Used, Local, NamedInString, Orphaned, ForForeignTests,
-	// ForOwnBlackBoxTest, Run, Make), 14 types (Never, Stringish, Decoy,
-	// Scannable, Tagged, testonly.Shared, testonly.Holder, ifaces.Shared plus 6
-	// interfaces), and 11 methods (Never.Method, Stringish.String, Decoy.Read,
-	// Scannable.Scan, Holder.Shared plus one per interface). Vars and consts are
-	// zero, which also pins that struct fields such as Tagged.Name are not counted
-	// as symbols, and that the type declared inside used.localTagged is not one
+	// ForOwnBlackBoxTest, Run, Make), 15 types (Never, Stringish, Decoy,
+	// Scannable, Tagged, Handled, testonly.Shared, testonly.Holder,
+	// ifaces.Shared plus 6 interfaces), and 15 methods (Never.Method,
+	// Stringish.String, Decoy.Read, Scannable.Scan, Holder.Shared, the four
+	// Handled methods, plus one per interface). Vars and consts are zero, which
+	// also pins that struct fields such as Tagged.Name are not counted as
+	// symbols, and that the type declared inside used.localTagged is not one
 	// either.
 	want := map[SymbolKind]int{
 		KindFunc:   8,
-		KindType:   14,
-		KindMethod: 11,
+		KindType:   15,
+		KindMethod: 15,
 		KindVar:    0,
 		KindConst:  0,
 	}
@@ -251,6 +252,12 @@ func TestDispatchDoubtRequiresImplementingTheInterface(t *testing.T) {
 			name:       "a standard-library contract no file names still earns the doubt",
 			symbol:     "Scannable.Scan",
 			wantDoubt:  "database/sql.Scanner",
+			wantDoubts: true,
+		},
+		{
+			name:       "a contract the supplemental list omits is derived from the type graph",
+			symbol:     "Handled.Handle",
+			wantDoubt:  "log/slog.Handler",
 			wantDoubts: true,
 		},
 	}

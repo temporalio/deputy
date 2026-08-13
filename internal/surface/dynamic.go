@@ -77,20 +77,23 @@ type contract struct {
 	iface *types.Interface
 }
 
-// dispatchContracts names the standard-library and protobuf interfaces whose
-// methods are called from code this module does not contain, so no reference to
-// them will ever appear in the load graph. Interfaces the module declares itself
-// are collected from the program and need no list.
+// dispatchContracts is a floor under the derived contracts, not the source of
+// them. [dynamic.addReferencedContracts] finds a foreign interface the moment
+// any type in the module mentions it, which covers the ordinary case: a method
+// returning [log/slog.Handler], a struct field holding an [io.Writer], a call to
+// a function that takes one. This list names the classic contracts a type here
+// can satisfy by signature alone while no type in the module mentions the
+// interface at all, which is how [database/sql.Scanner] gets called by a driver
+// reached through a dependency.
 //
-// This list cannot be derived: nothing in the type graph distinguishes an
-// interface whose implementations are dispatched by a foreign package from any
-// other interface. It only has to name contracts satisfied by accident of
-// method signature, which is why membership is verified with [types.Implements]
-// rather than by method name.
+// A hand-maintained list must stay a floor rather than the mechanism, because a
+// missing entry does not merely weaken the audit, it inverts it: the methods
+// that contract reaches are then reported as certainly unused, and the tool
+// recommends unexporting live code. Widen the derivation before adding a name
+// here.
 //
-// Because it cannot be derived it has to be checked. Every name must resolve to
-// an interface in the package it is filed under, which
-// [dynamic.addForeignContracts] enforces at run time and
+// Every name must resolve to an interface in the package it is filed under,
+// which [dynamic.addForeignContracts] enforces at run time and
 // TestDispatchContractsResolveToInterfaces enforces for the whole list.
 var dispatchContracts = map[string][]string{
 	"fmt":                 {"Stringer", "GoStringer", "Formatter"},
@@ -167,6 +170,7 @@ func newDynamic(p *program, roots []*packages.Package) (*dynamic, error) {
 	for _, v := range p.variants() {
 		d.addDeclaredInterfaces(v.pkg)
 	}
+	d.addReferencedContracts(p)
 	if err := d.addForeignContracts(roots, dispatchContracts); err != nil {
 		return nil, err
 	}
@@ -200,6 +204,66 @@ func (d *dynamic) addDeclaredInterfaces(pkg *packages.Package) {
 		}
 		if iface, ok := tn.Type().Underlying().(*types.Interface); ok {
 			d.addContract(pkg.PkgPath+"."+name, iface)
+		}
+	}
+}
+
+// addReferencedContracts derives the dispatch contracts of foreign packages from
+// the module's own type graph: every named interface mentioned by the type of
+// anything the module declares or references.
+//
+// This is what keeps the audit from depending on a hand-maintained list of
+// interfaces. A [log/slog.Handler] implementation is the case that motivated it:
+// its Handle, WithAttrs and WithGroup are called by slog, so nothing in the
+// module references them, and without the contract the audit reported four live
+// methods as certainly unexportable. Nothing about slog made it special. Any
+// interface a foreign package dispatches through would have gone the same way
+// until someone noticed a wrong recommendation.
+//
+// Mentioning the interface is the signal because that is what puts a value of an
+// implementing type somewhere a foreign package can dispatch on it. Declaring a
+// method that returns slog.Handler, holding one in a field, or calling
+// slog.New all mention it, and any of the three is enough for the handler to
+// leave this module as an interface value.
+//
+// [types.Info.Defs] carries the module's own declarations, so a signature or
+// field type reaches this even when nothing calls it; [types.Info.Uses] carries
+// everything the module names, so a foreign function's parameters and a foreign
+// struct's fields arrive through the objects the module refers to. Objects and
+// types are both deduplicated, because a package's popular function appears in
+// Uses once per call site.
+//
+// The doubt is still earned by [types.Implements] in [dynamic.dispatchedThrough]
+// rather than by method name, so widening the contract set cannot make a method
+// carry a doubt it does not satisfy.
+func (d *dynamic) addReferencedContracts(p *program) {
+	seenObj := map[types.Object]bool{}
+	seenType := map[types.Type]bool{}
+	consider := func(obj types.Object) {
+		if obj == nil || seenObj[obj] {
+			return
+		}
+		seenObj[obj] = true
+		t := obj.Type()
+		if t == nil || seenType[t] {
+			return
+		}
+		seenType[t] = true
+		for _, tn := range namedTypes(t) {
+			if tn.Pkg() == nil {
+				continue
+			}
+			if iface, ok := tn.Type().Underlying().(*types.Interface); ok {
+				d.addContract(tn.Pkg().Path()+"."+tn.Name(), iface)
+			}
+		}
+	}
+	for _, v := range p.variants() {
+		for _, obj := range v.pkg.TypesInfo.Defs {
+			consider(obj)
+		}
+		for _, obj := range v.pkg.TypesInfo.Uses {
+			consider(obj)
 		}
 	}
 }
