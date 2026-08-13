@@ -145,12 +145,32 @@ func TestProtoToMapConvertsByDeclaredType(t *testing.T) {
 			want: int64(2),
 		},
 		{
-			name: "map with message values is walked",
+			name: "second map with string values keeps its values",
 			msg: &triagev1.PackageSummary{
 				DatabaseSpecific: map[string]string{"review_status": "1.20"},
 			},
 			path: []any{"database_specific", "review_status"},
 			want: "1.20",
+		},
+		{
+			name: "string in a map with message values stays a string",
+			msg: &vulnerabilityv1.GetAdvisoriesResponse{
+				Advisories: map[string]*vulnerabilityv1.Advisory{
+					"GHSA-1234": {Id: "GHSA-1234", Summary: "1.20", Severity: &vulnerabilityv1.Severity{Score: 9}},
+				},
+			},
+			path: []any{"advisories", "GHSA-1234", "summary"},
+			want: "1.20",
+		},
+		{
+			name: "double in a map with message values holds a number",
+			msg: &vulnerabilityv1.GetAdvisoriesResponse{
+				Advisories: map[string]*vulnerabilityv1.Advisory{
+					"GHSA-1234": {Id: "GHSA-1234", Summary: "1.20", Severity: &vulnerabilityv1.Severity{Score: 9}},
+				},
+			},
+			path: []any{"advisories", "GHSA-1234", "severity", "score"},
+			want: float64(9),
 		},
 		{
 			name: "string in a nested message stays a string",

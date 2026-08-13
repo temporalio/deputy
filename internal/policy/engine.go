@@ -445,6 +445,10 @@ func convertMessageFields(doc map[string]any, md protoreflect.MessageDescriptor)
 	for key, val := range doc {
 		fd := fields.ByTextName(key)
 		if fd == nil {
+			// ProtoToMap marshals with UseProtoNames, so the text name resolves
+			// every field today. The lowerCamelCase lookup is here so that a
+			// caller who drops that option gets typed values rather than a
+			// document the walk silently declines to convert.
 			fd = fields.ByJSONName(key)
 		}
 		if fd == nil {
