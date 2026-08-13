@@ -27,6 +27,21 @@ import (
 	"slices"
 	"sync"
 
+	// Both PURL packages appear here on purpose, and which one a registration's
+	// PURLType comes from is the statement that the type is registered upstream
+	// or is not.
+	//
+	// packageurl-go carries the types the package-url spec has adopted, and it
+	// validates against that set. purlx carries the ones it has not: mise, asdf,
+	// and GitHub Actions are emerging types that neither packageurl-go nor
+	// OSV-SCALIBR's allowlist recognizes yet, so Deputy defines them and parses
+	// them loosely (see [purlx] for the upstream issue).
+	//
+	// Re-exporting the upstream types through purlx would collapse the imports
+	// at the cost of that distinction: every PURLType below would read the same
+	// whether the spec blesses it or Deputy invented it, and purlx would own a
+	// hand-maintained mirror of an upstream list, which is the drift this
+	// package exists to avoid elsewhere. The two imports are the cheaper signal.
 	packageurl "github.com/package-url/packageurl-go"
 
 	"github.com/temporalio/deputy/internal/purlx"
