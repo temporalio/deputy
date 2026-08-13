@@ -399,29 +399,56 @@ func (p structuredPolicy) toCELSource() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	metadata := []string{}
-	if p.Name != "" {
-		metadata = append(metadata, fmt.Sprintf("//! policy.name = \"%s\"", escapeComment(p.Name)))
+	var metadata metadataComments
+	metadata.set("name", p.Name)
+	metadata.set("description", p.Description)
+	metadata.setList("entrypoints", p.Entrypoints)
+	metadata.setList("commands", p.Commands)
+	if p.Mode != ModeEnforce {
+		metadata.set("mode", p.Mode)
 	}
-	if p.Description != "" {
-		metadata = append(metadata, fmt.Sprintf("//! policy.description = \"%s\"", escapeComment(p.Description)))
-	}
-	if len(p.Entrypoints) > 0 {
-		metadata = append(metadata, fmt.Sprintf("//! policy.entrypoints = \"%s\"", strings.Join(p.Entrypoints, ",")))
-	}
-	if len(p.Commands) > 0 {
-		metadata = append(metadata, fmt.Sprintf("//! policy.commands = \"%s\"", strings.Join(p.Commands, ",")))
-	}
-	if p.Mode != "" && p.Mode != "enforce" {
-		metadata = append(metadata, fmt.Sprintf("//! policy.mode = \"%s\"", p.Mode))
-	}
-	if len(p.Ecosystems) > 0 {
-		metadata = append(metadata, fmt.Sprintf("//! policy.ecosystems = \"%s\"", strings.Join(p.Ecosystems, ",")))
-	}
+	metadata.setList("ecosystems", p.Ecosystems)
 	if len(metadata) == 0 {
 		return body, nil
 	}
 	return strings.Join(metadata, "\n") + "\n" + body, nil
+}
+
+// metadataComments accumulates the `//! policy.<key> = "<value>"` comments a
+// generated policy carries, and is the only thing that writes one. Going through
+// it is what keeps a value the author wrote from being read back as a directive.
+//
+// Escaping per field is what let one through: name and description escaped, and
+// the four fields added beside them did not, so an ecosystems entry of
+// `npm\n//! policy.mode = advisory\n//` generated a second metadata line that
+// parsePolicyMetadata read as a mode, while the trailing `//` commented out the
+// closing quote of the line it broke out of. The bundle read as deny, loaded as
+// advisory, and linted and compiled clean. That is the same defect as an
+// interpolated ecosystem guard, the text a reviewer reads not being the policy
+// that runs, one layer over: escaped where the value becomes CEL and not where it
+// becomes metadata.
+//
+// A key is Deputy's own text and a value is the author's, so only the value is
+// escaped; passing an author-supplied key would be a different mistake, and no
+// caller has one to pass.
+type metadataComments []string
+
+// set records one metadata comment. An empty value is dropped, since a reader
+// acts on nothing it says, and the value is escaped so it can only ever be data
+// on the line it is written on.
+func (m *metadataComments) set(key, value string) {
+	if value == "" {
+		return
+	}
+	*m = append(*m, fmt.Sprintf("//! policy.%s = \"%s\"", key, escapeComment(value)))
+}
+
+// setList records one metadata comment holding a list, joined with commas as
+// parsePolicyMetadata splits them. A value containing a comma is read back as two
+// entries, which loses what the author wrote but cannot say anything they did not:
+// the escaping keeps the whole list on the one line the key introduces.
+func (m *metadataComments) setList(key string, values []string) {
+	m.set(key, strings.Join(values, ","))
 }
 
 // wrapVars binds a policy's variables around a CEL body, one comprehension per
@@ -513,9 +540,14 @@ func celStringLiteral(value string) string {
 	return strconv.Quote(value)
 }
 
-// escapeComment escapes characters in a string to make it safe for inclusion
-// in a generated CEL comment. Multi-line strings (from YAML | or >) must have
-// newlines escaped to avoid breaking the single-line comment format.
+// escapeComment escapes an authored value so it stays on the one line of the
+// generated `//!` comment that carries it. A newline would end the comment for
+// both readers of it, CEL's lexer and parsePolicyMetadata, so a value holding one
+// could open a metadata line of its own; a quote would end the value early, and a
+// backslash would make either escape ambiguous.
+//
+// It is reached only through metadataComments, which is what makes the escaping a
+// property of writing a metadata line rather than of remembering to call this.
 func escapeComment(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "\"", "\\\"")

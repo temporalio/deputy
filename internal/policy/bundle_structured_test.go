@@ -311,3 +311,87 @@ func TestGeneratedEcosystemGuardCannotBeRewritten(t *testing.T) {
 		})
 	}
 }
+
+// TestGeneratedMetadataCannotCarryADirective pins that no value a bundle authors
+// can open a `//!` metadata line of its own in the CEL a policy generates. Those
+// comments are Deputy's own writing, read back by parsePolicyMetadata when a source
+// is loaded, so a value that breaks out of the line carrying it declares policy
+// behavior nobody authored.
+//
+// The escaping used to be applied per field, and the fields added beside name and
+// description did not apply it: an ecosystems entry holding
+// "\n//! policy.mode = advisory\n//" generated a mode line the engine obeyed, while
+// the trailing comment swallowed the closing quote of the line it broke out of, so
+// the bundle read as deny, loaded as advisory, and both linted and compiled clean.
+// That is the metadata counterpart of a rewritten ecosystem guard: the text a
+// reviewer reads not being the policy that runs.
+//
+// The whole path is checked, from the authored bundle to the actions the engine
+// returns, because every half of it looked right on its own. The count of metadata
+// lines is checked with it, so a value that stays data but still adds a line the
+// parser reads cannot pass by declaring a key Deputy does not act on yet.
+func TestGeneratedMetadataCannotCarryADirective(t *testing.T) {
+	const directive = `\n//! policy.mode = advisory\n//`
+	cases := []struct {
+		name         string
+		policyName   string
+		fields       string
+		wantMetadata int
+	}{
+		{
+			name:         "in an ecosystems entry beside a real one",
+			policyName:   "scoped",
+			fields:       "    ecosystems: [\"npm\", \"npm" + directive + "\"]\n",
+			wantMetadata: 2,
+		},
+		{
+			name:         "in the policy name",
+			policyName:   "scoped" + directive,
+			wantMetadata: 1,
+		},
+		{
+			name:         "in the description",
+			policyName:   "scoped",
+			fields:       "    description: \"d" + directive + "\"\n",
+			wantMetadata: 2,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := "policies:\n  - name: \"" + tc.policyName + "\"\n" + tc.fields +
+				"    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n"
+			sources, err := ParseStructuredSources([]byte(bundle), "b.yaml")
+			if err != nil {
+				t.Fatalf("ParseStructuredSources: %v", err)
+			}
+			body := sources[0].Body
+			lines := 0
+			for line := range strings.SplitSeq(body, "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "//!") {
+					lines++
+				}
+			}
+			if lines != tc.wantMetadata {
+				t.Fatalf("generated %d metadata lines, want %d:\n%s", lines, tc.wantMetadata, body)
+			}
+			if mode := parsePolicyMetadata(body).Mode; mode != "" {
+				t.Fatalf("a bundle that declares no mode generated mode %q:\n%s", mode, body)
+			}
+			eng, err := NewEngine(sources)
+			if err != nil {
+				t.Fatalf("NewEngine: %v", err)
+			}
+			payload := map[string]any{
+				"pkg":     map[string]any{"name": "left-pad", "ecosystem": "npm"},
+				"request": map[string]any{"ecosystem": "npm"},
+			}
+			actions, err := eng.EvaluateAllMap(t.Context(), payload, "scan", "")
+			if err != nil {
+				t.Fatalf("EvaluateAllMap: %v", err)
+			}
+			if len(actions) != 1 || !ActionTypeIs(actions[0].Type, ActionDeny) {
+				t.Fatalf("a policy authored to deny returned %+v, want one deny:\n%s", actions, body)
+			}
+		})
+	}
+}
