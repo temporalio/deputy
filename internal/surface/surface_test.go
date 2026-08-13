@@ -588,6 +588,61 @@ func TestOversizedAssetIsReportedNotSilentlyDropped(t *testing.T) {
 	}
 }
 
+// TestUnwalkableDirectoryIsReportedNotSilentlySkipped covers the largest way the
+// asset scan can miss evidence. A directory it cannot enter costs every file
+// underneath it, not one, and WalkDir reports that as an error the callback is
+// free to swallow. Swallowing it leaves the report asserting a coverage it does
+// not have, which is the same defect as the size limit and worth more.
+func TestUnwalkableDirectoryIsReportedNotSilentlySkipped(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "unreadable")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "hidden.cel"), []byte("NamedOnlyInAnUnreadableTree"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "visible.cel"), []byte("NamedInAReadableTree"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.Chmod(sub, 0o000); err != nil {
+		t.Skipf("cannot make a directory unreadable here: %v", err)
+	}
+	// Restore before t.TempDir's own cleanup, which is registered earlier and so
+	// runs after this one.
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
+	if _, err := os.ReadDir(sub); err == nil {
+		t.Skip("directory permissions are not enforced for this user, so the walk cannot fail")
+	}
+
+	d := &dynamic{tokens: map[string]string{}}
+	if err := d.addAssets(t.Context(), dir); err != nil {
+		t.Fatalf("addAssets error = %v, want nil: one unreadable tree must not end the scan", err)
+	}
+
+	if _, ok := d.tokens["NamedOnlyInAnUnreadableTree"]; ok {
+		t.Fatal("the unreadable tree was somehow read, so this test proves nothing")
+	}
+	var found *Unexamined
+	for i, gap := range d.unexamined {
+		if gap.Path == "unreadable" {
+			found = &d.unexamined[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("unexamined = %v, want an entry for the unreadable directory", d.unexamined)
+	}
+	if !strings.Contains(found.Reason, "nothing under it was scanned") {
+		t.Errorf("reason = %q, want it to say the whole subtree went unread", found.Reason)
+	}
+
+	// The rest of the tree still has to be scanned, or one bad directory would
+	// quietly cost the entire run's evidence.
+	if _, ok := d.tokens["NamedInAReadableTree"]; !ok {
+		t.Errorf("tokens = %v, want the readable sibling still scanned", d.tokens)
+	}
+}
+
 // TestAssetScanHonorsCancellation pins the one phase that can run long after
 // the package load has finished. A signal-backed context has to be able to stop
 // the asset walk, or an audit interrupted on a large repository keeps reading
