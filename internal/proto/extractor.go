@@ -1,6 +1,8 @@
 package proto
 
 import (
+	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/google/osv-scalibr/extractor"
@@ -159,6 +161,12 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 // The direct map indicates which packages are direct dependencies. For Go packages,
 // the map keys are module roots (e.g., "github.com/google/osv-scalibr"). For other
 // ecosystems, keys are PURL strings.
+//
+// Every package of an ecosystem no collector reads is reported indirect, because
+// is_direct is a bool and the collectors cannot spell "not determined". That is
+// wrong often enough to say out loud, so the conversion logs the ecosystems it
+// could not classify instead of leaving a Maven project's SBOM claiming every
+// component of it is transitive. See [undeterminedDirectEcosystems].
 func ExtractorPackagesToProto(pkgs []*extractor.Package, direct map[string]bool) []*dependencyv1.Package {
 	if len(pkgs) == 0 {
 		return nil
@@ -167,7 +175,44 @@ func ExtractorPackagesToProto(pkgs []*extractor.Package, direct map[string]bool)
 	for i, pkg := range pkgs {
 		out[i] = ExtractorPackageToProto(pkg, direct)
 	}
+	if undetermined := undeterminedDirectEcosystems(pkgs); len(undetermined) > 0 {
+		slog.Warn("directness not determined for some ecosystems; their packages are reported indirect",
+			"ecosystems", undetermined)
+	}
 	return out
+}
+
+// undeterminedDirectEcosystems returns the ecosystems present in pkgs whose
+// direct dependencies Deputy does not collect, sorted by canonical token. An
+// ecosystem qualifies when nothing can answer the question for it: no
+// direct-dependency collector reads its manifests
+// ([compare.EcosystemsWithDirectDependencyCollection]) and its packages are not
+// direct by construction, which [ExtractorPackageIsDirect] decides from the PURL
+// type alone and so answers with no map at all.
+//
+// A package whose PURL type resolves to no registered ecosystem is left out. OS
+// packages in a container image (deb, apk, rpm) are the reason: an image has no
+// manifest declaring anything, so "direct" is not a question about them and
+// reporting it undetermined would warn on every container scan.
+func undeterminedDirectEcosystems(pkgs []*extractor.Package) []string {
+	collected := compare.EcosystemsWithDirectDependencyCollection()
+	var undetermined []string
+	for _, pkg := range pkgs {
+		purl := pkg.PURL()
+		if purl == nil {
+			continue
+		}
+		eco, known := ecosystem.FromPURLType(purl.Type)
+		if !known || slices.Contains(collected, eco) {
+			continue
+		}
+		if ExtractorPackageIsDirect(pkg, nil) {
+			continue
+		}
+		undetermined = append(undetermined, string(eco))
+	}
+	slices.Sort(undetermined)
+	return slices.Compact(undetermined)
 }
 
 // ExtractorPackagesFromProto converts proto Packages back to a simplified representation.

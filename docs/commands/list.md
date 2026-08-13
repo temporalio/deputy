@@ -40,6 +40,12 @@ deputy ls [target] [flags]
 | `--source` | | | Target source type: `remote`, `docker-daemon`, `tarball`, `oci-archive`, `oci-layout` |
 | `--platform` | | | Platform for container images (`os/arch[/variant]`) |
 
+`--only-direct` is answered from the manifests Deputy parses for directness (Go, npm,
+Cargo, PyPI, plus the ecosystems that are direct by construction). A scan that
+includes an ecosystem with no manifest parser logs a warning naming it, and every one
+of its packages is listed as indirect. See
+[Direct and transitive dependencies](../concepts/inventory-and-sboms.md#direct-and-transitive-dependencies).
+
 ## Examples
 
 ### Basic Usage

@@ -2,8 +2,10 @@ package compare
 
 import (
 	"path"
+	"slices"
 	"testing"
 
+	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
@@ -919,5 +921,40 @@ my-serde = { workspace = true }
 				}
 			}
 		})
+	}
+}
+
+// TestDirectDependencyCollectionIsDerivedFromTheParsers pins both halves of the
+// coverage answer to the parser table instead of to a list of ecosystem names
+// kept beside it. An ecosystem is reported collected exactly when a parser reads
+// one of the files the registry declares for it, so writing a parser is what
+// widens the answer, and registering an ecosystem nobody parses cannot quietly
+// leave a caller thinking its packages were classified.
+func TestDirectDependencyCollectionIsDerivedFromTheParsers(t *testing.T) {
+	collected := EcosystemsWithDirectDependencyCollection()
+
+	for _, reg := range ecosystem.Default().All() {
+		parsed := false
+		for _, pattern := range slices.Concat(reg.Manifests, reg.Lockfiles) {
+			if _, ok := manifestDirectDepParsers[pattern]; ok || pattern == goDirectDepManifest {
+				parsed = true
+				break
+			}
+		}
+		reported := slices.Contains(collected, reg.Ecosystem)
+		switch {
+		case parsed && !reported:
+			t.Errorf("%s has a direct dependency parser but is missing from the collection set %v", reg.Ecosystem, collected)
+		case !parsed && reported:
+			t.Errorf("%s is reported collected but no parser reads %v or %v", reg.Ecosystem, reg.Manifests, reg.Lockfiles)
+		}
+	}
+
+	// Ecosystems Deputy inventories and cannot classify: the answer callers need
+	// in order to tell "transitive" from "not determined here".
+	for _, eco := range []ecosystem.Ecosystem{ecosystem.Maven, ecosystem.RubyGems, ecosystem.NuGet, ecosystem.Packagist, ecosystem.CocoaPods, ecosystem.Hex, ecosystem.Pub} {
+		if slices.Contains(collected, eco) {
+			t.Errorf("%s is reported collected, but nothing here parses its manifests", eco)
+		}
 	}
 }
