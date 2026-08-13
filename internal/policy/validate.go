@@ -2,6 +2,7 @@ package policy
 
 import (
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -662,8 +663,37 @@ func validateRules(item *yaml.Node, policyName string, declaredVars []string, ch
 			}
 		}
 		issues = append(issues, validateRuleAction(rule, idx)...)
+		issues = append(issues, validateRuleDetails(rule, idx)...)
 	}
 	return issues
+}
+
+// validateRuleDetails reports a rule's details that Deputy cannot put into the
+// action the policy generates. The details are marshaled to JSON when a rule is
+// expanded, and YAML writes values JSON has no spelling for, a NaN or an infinity
+// among them, so a rule carrying one cannot be expanded at all.
+//
+// It asks encoding/json rather than judging the value itself, so it recognizes
+// exactly what the expansion recognizes. Locating it here is what reports it on
+// the line it is written on and beside the rule's other defects: the expansion
+// refuses a field of the rule in a fixed order and stops, so an action typo above
+// the details used to withhold this until the typo was fixed and lint rerun.
+func validateRuleDetails(rule *yaml.Node, idx int) []Issue {
+	node := MappingValue(rule, "details")
+	if node == nil {
+		return nil
+	}
+	var details map[string]any
+	// A details value the decoder cannot read at all is the decoder's to report,
+	// on the line it names; this asks only about the values it can read.
+	if err := node.Decode(&details); err != nil {
+		return nil
+	}
+	if _, err := json.Marshal(details); err != nil {
+		message := fmt.Sprintf("'details' holds a value that cannot be represented: %v", err)
+		return []Issue{ruleIssue(idx, issueAt(node, IssueError, "details-not-representable", message))}
+	}
+	return nil
 }
 
 // validateRuleAction checks a rule's action against the allow/deny/warn

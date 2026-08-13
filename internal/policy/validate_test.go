@@ -189,6 +189,21 @@ policies:
 			wantText:  []string{`invalid mode "enfroce"`, `invalid action "dney"`, "cannot unmarshal"},
 		},
 		{
+			name: "a details value that cannot be represented",
+			bundle: `
+policies:
+  - name: nan-details
+    rules:
+      - when: "true"
+        action: deny
+        reason: "x"
+        details:
+          score: .nan
+`,
+			wantCodes: []string{"details-not-representable"},
+			wantText:  []string{"9:11: error: policy \"nan-details\" rule[0]: 'details' holds a value that cannot be represented"},
+		},
+		{
 			name: "duplicate var names",
 			bundle: `
 policies:
@@ -2007,6 +2022,25 @@ policies:
         reason: "r"
 `,
 			wantCodes: []string{"empty-var-name", "invalid-action"},
+		},
+		{
+			// The details of a rule are marshaled into the action the policy
+			// generates, so a value JSON has no spelling for stops the whole
+			// expansion. It is a defect of that field alone, and the expansion
+			// refuses the action above it first, so the walk has to locate it or
+			// the author fixes the action to be told about the details.
+			name: "a details value that cannot be represented beside a bad action",
+			bundle: `
+policies:
+  - name: nan-details-and-action
+    rules:
+      - when: "true"
+        action: dney
+        reason: "r"
+        details:
+          score: .nan
+`,
+			wantCodes: []string{"invalid-action", "details-not-representable"},
 		},
 		{
 			// A name the policy cannot bind is a defect of that one var, so the
