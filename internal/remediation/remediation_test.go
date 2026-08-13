@@ -1,14 +1,18 @@
 package remediation
 
 import (
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
@@ -722,6 +726,76 @@ func TestDeputyCommandsRoundTripOrAreNotExecutable(t *testing.T) {
 					t.Errorf("command %q parses to %q, want %q in the file position", res.command, args, manifest)
 				}
 			})
+		}
+	}
+}
+
+// TestCommandsFromConsolidatedCarriesEveryMergedVersion pins the fix for a
+// declaration whose versions are all covered by one advisory. Consolidation
+// merges those findings by alias into a single record, and a command built from
+// that record's single Version rewrites one element of
+// `go = ["1.22.12", "1.23.8"]`, reports success, and leaves the other vulnerable
+// version declared. The generated command has to name every merged version, so
+// the apply targets each vulnerable element.
+//
+// The findings start as findings rather than as consolidated records because the
+// loss happened during consolidation: a test that hands the plan two records
+// already carries the versions the bug drops.
+func TestCommandsFromConsolidatedCarriesEveryMergedVersion(t *testing.T) {
+	finding := func(version string) vulnerability.Finding {
+		return vulnerability.Finding{
+			AdvisoryID: "GO-2025-1234",
+			Dependency: dependency.ID{Name: "stdlib", Ecosystem: "Go"},
+			Version:    version,
+			Affected:   true,
+			Direct:     true,
+			ManifestRefs: []dependencyv1.ManifestRef{
+				dependency.NewManifestRef("mise.toml", "mise", nil, "go"),
+			},
+		}
+	}
+	cons := vulnerability.Consolidate(
+		[]vulnerability.Finding{finding("1.22.12"), finding("1.23.8")},
+		map[string]*vulnerabilityv1.Advisory{
+			"GO-2025-1234": {Id: "GO-2025-1234", Aliases: []string{"CVE-2025-1111"}, FixedVersions: []string{"1.24.3"}},
+		},
+	)
+	if len(cons) != 1 {
+		t.Fatalf("expected the two findings to merge into one record, got %d", len(cons))
+	}
+
+	commands, _ := CommandsFromConsolidated(cons)
+	const want = "deputy:mise:update mise.toml go 1.24.3 1.22.12 1.23.8"
+	if !slices.ContainsFunc(commands, func(c Command) bool { return c.Command == want }) {
+		t.Fatalf("expected %q; commands=%+v", want, commands)
+	}
+
+	// The command is only right if applying it leaves nothing vulnerable
+	// declared, which is the harm the missing version caused.
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "mise.toml")
+	if err := os.WriteFile(configPath, []byte("[tools]\ngo = [\"1.22.12\", \"1.23.8\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyDeputyCommand(dir, want); err != nil {
+		t.Fatalf("ApplyDeputyCommand: %v", err)
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := mise.Parse("mise.toml", after)
+	if err != nil {
+		t.Fatalf("parsing the rewritten config: %v", err)
+	}
+	for _, spec := range cfg.Tools {
+		if spec.Key != "go" {
+			continue
+		}
+		for _, version := range spec.Versions {
+			if version != "1.24.3" {
+				t.Errorf("go still declares %q after the fix:\n%s", version, after)
+			}
 		}
 	}
 }

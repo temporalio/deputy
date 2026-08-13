@@ -140,9 +140,7 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 			// the Go version (go.mod vs mise.toml vs .tool-versions) distinctly.
 			stdlibRefs = mergeManifestRefs(stdlibRefs, v.ManifestRefs)
 			stdlibVulnIDs = append(stdlibVulnIDs, v.PrimaryID)
-			if cur := strings.TrimSpace(v.Version); cur != "" && !slices.Contains(stdlibCurrents, cur) {
-				stdlibCurrents = append(stdlibCurrents, cur)
-			}
+			stdlibCurrents = mergeStrings(stdlibCurrents, currentVersionsOf(v))
 			continue
 		}
 
@@ -151,7 +149,7 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 			pkgBest[v.Package] = &packageUpgrade{
 				Name:         v.Package,
 				Current:      v.Version,
-				Currents:     currentVersionsOf(v.Version),
+				Currents:     currentVersionsOf(v),
 				Recommended:  best,
 				IsDirect:     v.IsDirect,
 				Ecosystem:    v.Ecosystem,
@@ -176,7 +174,7 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 			// Merge references
 			existing.References = mergeManifestRefs(existing.References, v.ManifestRefs)
 			existing.Locations = mergeStrings(existing.Locations, v.Locations)
-			existing.Currents = mergeStrings(existing.Currents, currentVersionsOf(v.Version))
+			existing.Currents = mergeStrings(existing.Currents, currentVersionsOf(v))
 			if existing.PURL == "" {
 				existing.PURL = v.PURL
 			}
@@ -280,13 +278,30 @@ func mergeManifestRefs(a, b []dependencyv1.ManifestRef) []dependencyv1.ManifestR
 }
 
 // mergeStrings combines two slices of strings, deduplicating.
-// currentVersionsOf wraps one finding's installed version as a Currents
-// slice, dropping blanks so merges never accumulate empty entries.
-func currentVersionsOf(version string) []string {
-	if v := strings.TrimSpace(version); v != "" {
-		return []string{v}
+// currentVersionsOf returns every installed version a consolidated finding
+// reported for its package, which is what a fix that edits a manifest in place
+// has to target. Blanks are dropped so merges never accumulate empty entries.
+//
+// [vulnerability.Consolidated.Version] is one of them, not all of them: findings
+// merge by advisory alias, so one advisory affecting two declared versions of a
+// tool arrives as a single record. Reading only that field wrote a command naming
+// one version, and applying it rewrote that declaration, reported success, and
+// left the other vulnerable version declared.
+func currentVersionsOf(v vulnerability.Consolidated) []string {
+	versions := v.Versions
+	if len(versions) == 0 {
+		versions = []string{v.Version}
 	}
-	return nil
+	out := make([]string, 0, len(versions))
+	for _, version := range versions {
+		if trimmed := strings.TrimSpace(version); trimmed != "" && !slices.Contains(out, trimmed) {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func mergeStrings(a, b []string) []string {
