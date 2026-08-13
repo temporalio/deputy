@@ -62,9 +62,12 @@ func TestDirectKeysSurviveTheManifestRoundTrip(t *testing.T) {
 			want:     false,
 		},
 		{
+			// A dotted distribution has to be quoted, since TOML reads a bare
+			// dotted key as a nested table and Poetry would not read the
+			// unquoted form as a constraint either.
 			name:     "pypi poetry dotted distribution",
 			manifest: "pyproject.toml",
-			contents: "[tool.poetry.dependencies]\npython = \"^3.9\"\nzope.interface = \"^5.4\"\n",
+			contents: "[tool.poetry.dependencies]\npython = \"^3.9\"\n\"zope.interface\" = \"^5.4\"\n",
 			pkg:      &extractor.Package{Name: "zope.interface", Version: "5.4.0", PURLType: "pypi"},
 			want:     true,
 		},

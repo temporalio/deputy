@@ -949,10 +949,13 @@ func TestCollectDirectDependenciesFromCommit(t *testing.T) {
 		t.Fatalf("init repo: %v", err)
 	}
 	files := map[string]string{
-		"go.mod":           "module example.com/app\n\nrequire github.com/commit/dependency v1.2.3\n",
-		"package.json":     `{"dependencies":{"lodash":"^4.17.21"},"devDependencies":{"jest":"^29.0.0"}}`,
-		"Cargo.toml":       "[package]\nname = \"app\"\n\n[dependencies]\ntokio = \"1.26\"\n",
-		"pyproject.toml":   "[project]\ndependencies = [\"requests>=2.31\"]\n",
+		"go.mod":       "module example.com/app\n\nrequire github.com/commit/dependency v1.2.3\n",
+		"package.json": `{"dependencies":{"lodash":"^4.17.21"},"devDependencies":{"jest":"^29.0.0"}}`,
+		"Cargo.toml":   "[package]\nname = \"app\"\n\n[dependencies]\ntokio = \"1.26\"\n",
+		"pyproject.toml": "[project]\ndependencies = [\"requests>=2.31\"]\n\n" +
+			"[project.optional-dependencies]\ntest = [\"pytest>=8.0\"]\n\n" +
+			"[dependency-groups]\nlint = [\"ruff\"]\n\n" +
+			"[tool.poetry.group.docs.dependencies]\nsphinx = \"^7.0\"\n",
 		"requirements.txt": "flask==2.3.0\n",
 		// Vendored manifests describe third-party packages, not ours.
 		"node_modules/left-pad/package.json": `{"dependencies":{"npm-vendored":"1.0.0"}}`,
@@ -997,6 +1000,10 @@ func TestCollectDirectDependenciesFromCommit(t *testing.T) {
 		{name: "npm dev dependency", key: "jest", want: true},
 		{name: "cargo dependency", key: "tokio", want: true},
 		{name: "pypi pyproject dependency", key: "requests", want: true},
+		{name: "pypi pyproject extra", key: "pytest", want: true},
+		{name: "pypi pep 735 dependency group", key: "ruff", want: true},
+		{name: "pypi poetry named group", key: "sphinx", want: true},
+		{name: "pypi distribution nothing declares", key: "urllib3", want: false},
 		{name: "pypi requirements dependency", key: "flask", want: true},
 		{name: "node_modules manifest excluded", key: "npm-vendored", want: false},
 		{name: "vendored cargo manifest excluded", key: "cargo-vendored", want: false},
