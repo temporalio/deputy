@@ -2,7 +2,6 @@ package surface
 
 import (
 	"bufio"
-	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -92,13 +91,18 @@ func (p *program) unreachablePackages() []PackageFinding {
 // scope filed those packages under documentation, which dropped them from the
 // report and, because the baseline is generated from the report, from the ratchet
 // as well. A check cannot be allowed to shrink its own ratchet.
+//
+// An import is a declaration for this purpose, and that is not a technicality.
+// Go rejects an unused import, so a package with imports and nothing else has
+// only blank ones, which makes it an aggregator whose entire job is to run other
+// packages' initializers when something imports it. Nobody importing the
+// aggregator means none of those registrations happen, which is the same failure
+// as the init-only package above and the reason a real doc.go can be recognized
+// by having no declarations whatsoever.
 func declaresNothing(pkg *packages.Package) bool {
 	for _, file := range pkg.Syntax {
-		for _, decl := range file.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.IMPORT {
-				return false
-			}
+		if len(file.Decls) > 0 {
+			return false
 		}
 	}
 	return true
