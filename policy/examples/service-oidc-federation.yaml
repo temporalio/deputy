@@ -138,6 +138,7 @@ policies:
       - service_sbom_request
       - service_diff_request
       - service_graph_request
+      - service_secrets_request
     rules:
       - action: deny
         when: |
@@ -197,6 +198,8 @@ policies:
       - service_list_request
       - service_diff_request
       - service_graph_request
+      - service_sbom_request
+      - service_secrets_request
     rules:
       - action: deny
         when: |
@@ -221,6 +224,8 @@ policies:
       - service_list_request
       - service_diff_request
       - service_graph_request
+      - service_sbom_request
+      - service_secrets_request
     rules:
       - action: deny
         when: |
@@ -253,6 +258,7 @@ policies:
       - service_sbom_request
       - service_diff_request
       - service_graph_request
+      - service_secrets_request
     rules:
       - action: deny
         when: |
@@ -298,6 +304,7 @@ policies:
       - service_sbom_request
       - service_diff_request
       - service_graph_request
+      - service_secrets_request
     rules:
       - action: deny
         when: |
@@ -360,52 +367,53 @@ policies:
 
   - name: unified-identity-authorization
     description: |
-      Unified policy supporting both human and machine identities.
-      Determines identity type from token claims and applies appropriate rules.
+      Deny any authenticated identity that is not one of the shapes this
+      deployment trusts, for both human and machine callers.
+
+      This is one deny whose condition negates every trusted shape, rather than
+      a list of allow rules followed by a catch-all deny, because that shape
+      cannot express what it looks like it expresses. Rules do not short circuit
+      and a deny is final regardless of any allow, so a catch-all "deny unless
+      anonymous" fires for the trusted identities too and the policy denies
+      everyone. Writing the trusted set once and negating it keeps the two in
+      agreement, at the cost of one long expression. Whether an allow should be
+      able to lift a deny is a separate question.
     entrypoints:
       - service_scan_request
       - service_list_request
       - service_sbom_request
       - service_diff_request
       - service_graph_request
+      - service_secrets_request
     rules:
-      # GitHub Actions: allow from trusted repos
-      - action: allow
-        when: |
-          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
-          jwt.?repository_owner.orValue("") in ["acme-corp", "acme-infra"]
-        reason: "Trusted GitHub Actions workflow"
-
-      # GitLab CI: allow from trusted namespaces
-      - action: allow
-        when: |
-          jwt.?iss.orValue("").contains("gitlab") &&
-          jwt.?namespace_path.orValue("").startsWith("acme")
-        reason: "Trusted GitLab CI pipeline"
-
-      # GCP Service Account: allow from trusted projects
-      - action: allow
-        when: |
-          jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com") &&
-          jwt.?email.orValue("").matches("@acme-(prod|staging|ci)\\.iam")
-        reason: "Trusted GCP service account"
-
-      # Kubernetes: allow from security namespace
-      - action: allow
-        when: |
-          jwt.?sub.orValue("").startsWith("system:serviceaccount:security:")
-        reason: "Trusted Kubernetes security workload"
-
-      # Humans: allow with appropriate group membership
-      - action: allow
-        when: |
-          jwt.?email.orValue("") != "" &&
-          jwt.?groups.orValue([]).exists(g, g in ["developers", "security-team", "platform"])
-        reason: "Authorized human user"
-
-      # Deny everything else that's not anonymous (anonymous handled by auth)
       - action: deny
-        when: "!jwt.anonymous"
+        when: |
+          !jwt.anonymous &&
+          !(
+            // GitHub Actions from a trusted organization.
+            (jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+             jwt.?repository_owner.orValue("") in ["acme-corp", "acme-infra"]) ||
+            // GitLab CI from a trusted namespace.
+            (jwt.?iss.orValue("").contains("gitlab") &&
+             jwt.?namespace_path.orValue("").startsWith("acme")) ||
+            // GCP service account from a trusted project.
+            (jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com") &&
+             jwt.?email.orValue("").matches("@acme-(prod|staging|ci)\\.iam")) ||
+            // AWS role assumed from an approved account.
+            jwt.?amr.orValue([]).exists(a,
+              a.matches("^arn:aws:sts::(123456789012|234567890123):assumed-role/")) ||
+            // Azure AD identity from an approved tenant.
+            (jwt.?iss.orValue("").contains("login.microsoftonline.com") &&
+             jwt.?tid.orValue("") in [
+               "12345678-1234-1234-1234-123456789abc",
+               "87654321-4321-4321-4321-cba987654321"
+             ]) ||
+            // Kubernetes workload in the security namespace.
+            jwt.?sub.orValue("").startsWith("system:serviceaccount:security:") ||
+            // Human with an authorized group membership.
+            (jwt.?email.orValue("") != "" &&
+             jwt.?groups.orValue([]).exists(g, g in ["developers", "security-team", "platform"]))
+          )
         reason: "Identity not authorized"
         remediation: "Contact security team for access"
 

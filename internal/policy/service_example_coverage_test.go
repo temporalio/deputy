@@ -146,14 +146,159 @@ func TestShippedTenantIsolationCoversEveryServiceEntrypoint(t *testing.T) {
 	}
 }
 
-// TestShippedOIDCFederationCoversEveryServiceEntrypoint tests the same class of
-// gap in the federation example, whose identity rules state that only listed
-// organizations, namespaces, projects, accounts, and tenants may call at all.
+// oidcIdentity is a caller shape the federation example has an opinion about.
+// Each provider needs both directions tested: the untrusted identity must be
+// denied at every service entrypoint, and the trusted one must be admitted.
+// Testing only the deny direction is how the example came to deny everyone.
+type oidcIdentity struct {
+	provider string
+	// trusted and untrusted differ only in the claim the gate examines.
+	trusted   *policyv1.JWTClaims
+	untrusted *policyv1.JWTClaims
+	// admitOnly restricts the admit direction to these entrypoints. A provider
+	// lists one when another rule in the file denies it for an unrelated
+	// reason, which is a finding about that rule rather than about coverage.
+	admitOnly []Entrypoint
+	// why explains a non-empty admitOnly.
+	why string
+	// blocked names the defect that stops this provider being evaluated at all,
+	// in either direction. Set it rather than dropping the provider, so the
+	// coverage arrives on its own when the defect is fixed.
+	blocked string
+}
+
+// oidcIdentities enumerates the providers the federation example gates on.
+func oidcIdentities() []oidcIdentity {
+	// Every service entrypoint except secrets, for the providers whose machine
+	// identities human-require-mfa does not recognize as machines.
+	exceptSecrets := []Entrypoint{
+		EntrypointServiceScanRequest, EntrypointServiceListRequest,
+		EntrypointServiceSBOMRequest, EntrypointServiceDiffRequest,
+		EntrypointServiceGraphRequest,
+	}
+	const mfaGap = "human-require-mfa identifies machine identities by sub prefix (system:, sa:, repo:), so this provider's machine identity is treated as a human without MFA"
+
+	return []oidcIdentity{
+		{
+			provider: "github-actions",
+			trusted: &policyv1.JWTClaims{
+				Sub: "repo:acme-corp/security-scanner:ref:refs/heads/main",
+				Iss: "https://token.actions.githubusercontent.com",
+				CustomClaims: map[string]string{
+					"repository": "acme-corp/security-scanner", "repository_owner": "acme-corp",
+					"ref": "refs/heads/main", "event_name": "push",
+					"job_workflow_ref": "acme-corp/workflows/.github/workflows/security-scan.yml@refs/heads/main",
+				},
+			},
+			untrusted: &policyv1.JWTClaims{
+				Sub: "repo:untrusted-org/repo:ref:refs/heads/main",
+				Iss: "https://token.actions.githubusercontent.com",
+				CustomClaims: map[string]string{
+					"repository": "untrusted-org/repo", "repository_owner": "untrusted-org",
+					"ref": "refs/heads/main", "event_name": "push",
+				},
+			},
+		},
+		{
+			provider: "gitlab-ci",
+			trusted: &policyv1.JWTClaims{
+				Sub:          "project_path:acme/scanner:ref_type:branch:ref:main",
+				Iss:          "https://gitlab.com",
+				CustomClaims: map[string]string{"namespace_path": "acme", "project_path": "acme/scanner"},
+			},
+			untrusted: &policyv1.JWTClaims{
+				Sub:          "project_path:untrusted/repo:ref_type:branch:ref:main",
+				Iss:          "https://gitlab.com",
+				CustomClaims: map[string]string{"namespace_path": "untrusted", "project_path": "untrusted/repo"},
+			},
+			admitOnly: exceptSecrets,
+			why:       mfaGap,
+		},
+		{
+			provider: "gcp-service-account",
+			trusted: &policyv1.JWTClaims{
+				Sub:          "104567890123456789012",
+				Iss:          "https://accounts.google.com",
+				CustomClaims: map[string]string{"email": "deputy-scanner@acme-prod.iam.gserviceaccount.com"},
+			},
+			untrusted: &policyv1.JWTClaims{
+				Sub:          "104567890123456789099",
+				Iss:          "https://accounts.google.com",
+				CustomClaims: map[string]string{"email": "attacker@untrusted-project.iam.gserviceaccount.com"},
+			},
+			admitOnly: exceptSecrets,
+			why:       mfaGap,
+			// A Google service account subject is a 21-digit account id, and
+			// the payload conversion turns any numeric-looking string into a
+			// number, so kubernetes-namespace-restriction calls .startsWith on
+			// a float64 and the whole evaluation errors. The interceptor turns
+			// that into CodeInternal, so this identity cannot be allowed or
+			// denied, only failed.
+			blocked: "#248: numeric-looking strings are coerced to numbers, so jwt.sub is a float64 for this provider",
+		},
+		{
+			provider: "aws-sts",
+			trusted: &policyv1.JWTClaims{
+				Sub:          "arn:aws:sts::123456789012:assumed-role/deputy-scanner",
+				CustomClaims: map[string]string{"amr": "[arn:aws:sts::123456789012:assumed-role/deputy-scanner]"},
+			},
+			untrusted: &policyv1.JWTClaims{
+				Sub:          "arn:aws:sts::999999999999:assumed-role/attacker",
+				CustomClaims: map[string]string{"amr": "[arn:aws:sts::999999999999:assumed-role/attacker]"},
+			},
+			admitOnly: exceptSecrets,
+			why:       mfaGap,
+		},
+		{
+			provider: "azure-ad",
+			trusted: &policyv1.JWTClaims{
+				Sub: "azure-user-object-id",
+				Iss: "https://login.microsoftonline.com/12345678-1234-1234-1234-123456789abc/v2.0",
+				CustomClaims: map[string]string{
+					"tid": "12345678-1234-1234-1234-123456789abc",
+					"oid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "idtyp": "app",
+				},
+			},
+			untrusted: &policyv1.JWTClaims{
+				Sub: "azure-user-object-id",
+				Iss: "https://login.microsoftonline.com/99999999-9999-9999-9999-999999999999/v2.0",
+				CustomClaims: map[string]string{
+					"tid": "99999999-9999-9999-9999-999999999999",
+					"oid": "ffffffff-ffff-ffff-ffff-ffffffffffff", "idtyp": "app",
+				},
+			},
+			admitOnly: exceptSecrets,
+			why:       mfaGap,
+		},
+		{
+			provider: "kubernetes",
+			trusted: &policyv1.JWTClaims{
+				Sub:          "system:serviceaccount:security:deputy-scanner",
+				CustomClaims: map[string]string{"kubernetes.io/serviceaccount/namespace": "security"},
+			},
+			untrusted: &policyv1.JWTClaims{
+				Sub:          "system:serviceaccount:untrusted:attacker",
+				CustomClaims: map[string]string{"kubernetes.io/serviceaccount/namespace": "untrusted"},
+			},
+		},
+	}
+}
+
+// TestShippedOIDCFederationGatesEveryServiceEntrypoint tests both directions of
+// every identity gate in the federation example, at every service entrypoint.
 //
-// A rule of that kind that omits an entrypoint is not a narrower rule, it is an
-// unauthenticated hole: the untrusted identity is denied for scanning and
-// admitted for the entrypoints the rule forgot.
-func TestShippedOIDCFederationCoversEveryServiceEntrypoint(t *testing.T) {
+// The deny direction catches the coverage gap: a rule stating that only listed
+// organizations, namespaces, projects, accounts, or tenants may call at all is
+// not narrower when it omits an entrypoint, it is open there.
+//
+// The admit direction catches the opposite failure, and it is the one that went
+// unnoticed. unified-identity-authorization was written as five allow rules
+// followed by "deny unless anonymous". Rules do not short circuit and a deny is
+// final whatever any allow says, so that catch-all fired for the trusted
+// identities too and the file denied every authenticated caller. A test that
+// only checks that strangers are refused passes against a policy that refuses
+// everyone.
+func TestShippedOIDCFederationGatesEveryServiceEntrypoint(t *testing.T) {
 	sources, err := LoadSources([]string{findExample(t, "service-oidc-federation.yaml")})
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
@@ -163,39 +308,50 @@ func TestShippedOIDCFederationCoversEveryServiceEntrypoint(t *testing.T) {
 		t.Fatalf("NewEngine: %v", err)
 	}
 
-	for _, ep := range EntrypointsService {
-		build, ok := serviceRequestInput[ep]
-		if !ok {
+	denied := func(t *testing.T, ep Entrypoint, jwt *policyv1.JWTClaims) (bool, string) {
+		t.Helper()
+		build := serviceRequestInput[ep]
+		input := build(jwt, "/deputy.test.v1.TestService/Probe", "github.com/acme-corp/repo")
+		actions, err := engine.EvaluateAll(t.Context(), input, "server", string(ep))
+		if err != nil {
+			t.Fatalf("EvaluateAll: %v", err)
+		}
+		for _, action := range actions {
+			if ActionTypeIs(action.Type, ActionDeny) {
+				return true, action.Source + ": " + action.Reason
+			}
+		}
+		return false, ""
+	}
+
+	for _, id := range oidcIdentities() {
+		if id.blocked != "" {
+			t.Run(id.provider, func(t *testing.T) {
+				t.Skipf("cannot evaluate this provider: %s", id.blocked)
+			})
 			continue
 		}
-		t.Run(string(ep), func(t *testing.T) {
-			// A GitHub Actions token from an organization the file does not
-			// trust. Every other claim is well formed, so only the
-			// organization allowlist can be what denies it.
-			jwt := &policyv1.JWTClaims{
-				Sub: "repo:untrusted-org/repo:ref:refs/heads/main",
-				Iss: "https://token.actions.githubusercontent.com",
-				CustomClaims: map[string]string{
-					"repository":       "untrusted-org/repo",
-					"repository_owner": "untrusted-org",
-					"ref":              "refs/heads/main",
-					"event_name":       "push",
-				},
+		for _, ep := range EntrypointsService {
+			if _, ok := serviceRequestInput[ep]; !ok {
+				continue
 			}
-			input := build(jwt, "/deputy.test.v1.TestService/Probe", "github.com/untrusted-org/repo")
-
-			actions, err := engine.EvaluateAll(t.Context(), input, "server", string(ep))
-			if err != nil {
-				t.Fatalf("EvaluateAll: %v", err)
-			}
-
-			for _, action := range actions {
-				if ActionTypeIs(action.Type, ActionDeny) {
-					return
+			t.Run(id.provider+"/"+string(ep)+"/refuses-untrusted", func(t *testing.T) {
+				if got, _ := denied(t, ep, id.untrusted); !got {
+					t.Errorf("untrusted %s identity was not denied at %s: the gate for this provider does not reach this entrypoint", id.provider, ep)
 				}
+			})
+			if len(id.admitOnly) > 0 && !slices.Contains(id.admitOnly, ep) {
+				continue
 			}
-			t.Errorf("token from an untrusted organization was not denied at %s: the organization allowlist does not reach this entrypoint", ep)
-		})
+			t.Run(id.provider+"/"+string(ep)+"/admits-trusted", func(t *testing.T) {
+				if got, by := denied(t, ep, id.trusted); got {
+					t.Errorf("trusted %s identity was denied at %s by %s: a gate that refuses the callers it names is not an allowlist", id.provider, ep, by)
+				}
+			})
+		}
+		if id.why != "" {
+			t.Logf("%s: admit direction not asserted at service_secrets_request, because %s", id.provider, id.why)
+		}
 	}
 }
 
