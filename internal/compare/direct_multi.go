@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"maps"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -28,6 +29,41 @@ var manifestDirectDepParsers = map[string]func([]byte) map[string]bool{
 	"Cargo.toml":       getCargoDirectDeps,
 	"pyproject.toml":   getPyprojectDirectDeps,
 	"requirements.txt": getRequirementsDirectDeps,
+}
+
+// goDirectDepManifest is the manifest [CollectGoDirectModulesFromWorkspace] and
+// [CollectGoDirectModulesFromCommit] read. It is named here rather than in
+// [manifestDirectDepParsers] because those two collectors need the module root
+// and the stdlib pseudo-dependency, which a content-only parser cannot see.
+const goDirectDepManifest = "go.mod"
+
+// EcosystemsWithDirectDependencyCollection returns the ecosystems whose direct
+// dependencies these collectors actually read, sorted by canonical token. It is
+// derived by matching the manifests the parsers above are registered for against
+// the file patterns the ecosystem registry declares, so an ecosystem joins the
+// answer when its parser is written and not when someone remembers to say so.
+//
+// Callers report directness as a bool, where an ecosystem nobody parses looks
+// exactly like a project that declared nothing: [proto.ExtractorPackageIsDirect]
+// returns false for a key no collector ever wrote, and a direct-only rule reads
+// that as "transitive" rather than "not determined here". Anything that presents
+// directness to a user should say which of the two it means, and this is what it
+// asks. Ecosystems that are direct by construction (base images, workflow uses,
+// mise and asdf tools) are classified from the PURL type instead and are
+// deliberately absent.
+func EcosystemsWithDirectDependencyCollection() []ecosystem.Ecosystem {
+	collected := make([]ecosystem.Ecosystem, 0, len(manifestDirectDepParsers)+1)
+	for _, reg := range ecosystem.Default().All() {
+		for _, pattern := range slices.Concat(reg.Manifests, reg.Lockfiles) {
+			_, parsed := manifestDirectDepParsers[pattern]
+			if parsed || pattern == goDirectDepManifest {
+				collected = append(collected, reg.Ecosystem)
+				break
+			}
+		}
+	}
+	slices.Sort(collected)
+	return slices.Compact(collected)
 }
 
 // manifestWorkspaceAliasParsers maps manifest basenames to the parser that
