@@ -1,6 +1,9 @@
 package policy
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Mode selects how a policy's decisions are applied.
 type Mode string
@@ -59,6 +62,47 @@ type Metadata struct {
 	Commands    []string     `json:"commands,omitempty"`    // Commands limits the policy to specific CLI commands, in canonical form.
 	Ecosystems  []string     `json:"ecosystems,omitempty"`  // Ecosystems records the ecosystems the policy was written for.
 	Mode        Mode         `json:"mode,omitempty"`        // Mode selects how decisions are applied; empty means ModeEnforce.
+}
+
+// validate reports whether everything the policy declares about itself is
+// something Deputy can apply.
+//
+// Every route into the engine shares this check, because only one of them passes
+// through the authoring loader: a compiled bundle is JSON, so unmarshalling it
+// fills a Metadata with whatever the file says. Left unchecked, both mistakes an
+// operator can make in that file fail open. A command the engine does not
+// recognize is dropped from the filter set it builds, so a policy that asked for
+// one command runs for every command; and a mode that is not exactly advisory is
+// enforced, so denials the author wanted merely observed block instead.
+//
+// A declaration that names nothing is rejected for the same reason rather than
+// skipped: the engine filters only on a non-empty set, so an all-blank list of
+// commands or entrypoints would widen the policy to everywhere.
+func (m Metadata) validate() error {
+	for _, ep := range m.Entrypoints {
+		if !IsAllowedEntrypoint(trimmedEntrypoint(ep)) {
+			return fmt.Errorf("invalid entrypoint %q (not in allowed set)", ep)
+		}
+	}
+	for _, cmd := range m.Commands {
+		if !IsAllowedCommand(cmd) {
+			return fmt.Errorf("invalid command %q (not in allowed set)", cmd)
+		}
+	}
+	if !m.Mode.IsValid() {
+		return fmt.Errorf("invalid mode %q (expected %s)", m.Mode, modeVocabulary())
+	}
+	return nil
+}
+
+// modeVocabulary renders the canonical modes for an error message, derived from
+// [Modes] so no message can name a vocabulary that has moved on.
+func modeVocabulary() string {
+	names := make([]string, 0, len(Modes()))
+	for _, mode := range Modes() {
+		names = append(names, mode.String())
+	}
+	return strings.Join(names, "|")
 }
 
 // EntrypointNames returns the declared entrypoints as plain strings, for

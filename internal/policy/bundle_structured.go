@@ -246,7 +246,7 @@ func (p structuredPolicy) metadata() (Metadata, error) {
 	if p.Mode != "" {
 		mode := normalizeMode(Mode(p.Mode))
 		if mode == "" || !mode.IsValid() {
-			return Metadata{}, fmt.Errorf("invalid mode %q (expected advisory|enforce)", p.Mode)
+			return Metadata{}, fmt.Errorf("invalid mode %q (expected %s)", p.Mode, modeVocabulary())
 		}
 		meta.Mode = mode
 	}

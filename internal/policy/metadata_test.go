@@ -2,6 +2,7 @@ package policy
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,12 +152,12 @@ func TestStructuredMetadataRejectsUnknownVocabulary(t *testing.T) {
 		{
 			name:    "unknown mode",
 			policy:  structuredPolicy{Mode: "audit"},
-			wantErr: `invalid mode "audit" (expected advisory|enforce)`,
+			wantErr: `invalid mode "audit" (expected enforce|advisory)`,
 		},
 		{
 			name:    "blank mode",
 			policy:  structuredPolicy{Mode: "   "},
-			wantErr: `invalid mode "   " (expected advisory|enforce)`,
+			wantErr: `invalid mode "   " (expected enforce|advisory)`,
 		},
 	}
 	for _, test := range tests {
@@ -359,6 +360,67 @@ func TestLoadSourcesRejectsBundleWithCommentMetadata(t *testing.T) {
 			}
 			if err != nil {
 				t.Errorf("LoadSources() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestBundleScopingIsValidatedAtTheEngine covers the one route into the engine
+// that never passes the authoring loader: a compiled bundle is JSON, so its
+// typed metadata is whatever the file says, including values no author could
+// have written through `deputy policy bundle`.
+//
+// Both misspellings below fail open if they are trusted. The engine only filters
+// on commands it recognizes, so "scna" leaves the policy running for every
+// command; and "advisroy" is not advisory, so the deny this policy was meant to
+// only warn about is enforced. The load has to fail instead.
+func TestBundleScopingIsValidatedAtTheEngine(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		entry   string
+		wantErr string
+	}{
+		{
+			name:    "misspelled command",
+			entry:   `"commands": ["scna"],`,
+			wantErr: `invalid command "scna"`,
+		},
+		{
+			name:    "misspelled mode",
+			entry:   `"mode": "advisroy",`,
+			wantErr: `invalid mode "advisroy"`,
+		},
+		{
+			name:  "canonical scoping loads",
+			entry: `"commands": ["scan"], "mode": "advisory",`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			data := fmt.Sprintf(`{
+  "schemaVersion": %q,
+  "policies": [
+    {"name": "hand-written", %s "source": "[{\"action\": \"deny\", \"reason\": \"nope\"}]"}
+  ]
+}`, bundleSchemaVersion, test.entry)
+			path := filepath.Join(t.TempDir(), "bundle.json")
+			if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+				t.Fatalf("write bundle: %v", err)
+			}
+			_, err := NewEngineFromPaths([]string{path})
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("NewEngineFromPaths() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("NewEngineFromPaths() error = nil, want one containing %q", test.wantErr)
+			}
+			if !strings.Contains(err.Error(), test.wantErr) {
+				t.Errorf("NewEngineFromPaths() error = %v, want it to contain %q", err, test.wantErr)
 			}
 		})
 	}

@@ -482,6 +482,77 @@ func TestNewEngine_InvalidEntrypointRejected(t *testing.T) {
 	}
 }
 
+// TestNewEngine_UnusableMetadataRejected verifies that the engine refuses
+// metadata it cannot apply, whichever way the metadata arrived.
+//
+// The authoring loader validates what a policy declares, but a compiled bundle
+// is JSON: unmarshalling it fills [Metadata] directly and skips that loader
+// entirely. Both dangerous values fail open if they are copied in unchecked. A
+// command the engine cannot recognize is dropped from the filter set, so a
+// policy that asked for one command runs for every command; a misspelled
+// advisory mode is not advisory, so the denials the author wanted observed are
+// enforced instead.
+func TestNewEngine_UnusableMetadataRejected(t *testing.T) {
+	tests := []struct {
+		name       string
+		meta       Metadata
+		errContain string
+	}{
+		{
+			name:       "unknown command is rejected",
+			meta:       Metadata{Commands: []string{"teleport"}},
+			errContain: `invalid command "teleport"`,
+		},
+		{
+			name:       "a command that names nothing is rejected",
+			meta:       Metadata{Commands: []string{"  "}},
+			errContain: `invalid command "  "`,
+		},
+		{
+			name:       "an entrypoint that names nothing is rejected",
+			meta:       Metadata{Entrypoints: []Entrypoint{"  "}},
+			errContain: `invalid entrypoint "  "`,
+		},
+		{
+			name:       "misspelled advisory mode is rejected",
+			meta:       Metadata{Mode: "advisroy"},
+			errContain: `invalid mode "advisroy"`,
+		},
+		{
+			name: "canonical commands, aliases, and padded mode are accepted",
+			meta: Metadata{
+				Commands: []string{"scan", " EXEC "},
+				Mode:     " Advisory ",
+			},
+		},
+		{
+			name: "no metadata at all is accepted",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sources := []Source{{Name: "test-policy", Body: `[{"action": "allow"}]`, Metadata: tc.meta}}
+			_, err := NewEngine(sources)
+			if tc.errContain == "" {
+				if err != nil {
+					t.Fatalf("NewEngine() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("NewEngine() error = nil, want one containing %q", tc.errContain)
+			}
+			if !strings.Contains(err.Error(), tc.errContain) {
+				t.Errorf("NewEngine() error = %v, want it to contain %q", err, tc.errContain)
+			}
+			if !strings.Contains(err.Error(), "test-policy") {
+				t.Errorf("NewEngine() error = %v, want it to name the policy", err)
+			}
+		})
+	}
+}
+
 // TestEvaluateAll_InvalidEntrypointRejected verifies that invalid entrypoints
 // are rejected at evaluation time.
 func TestEvaluateAll_InvalidEntrypointRejected(t *testing.T) {

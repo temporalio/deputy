@@ -56,9 +56,11 @@ func NewEngine(sources []Source) (*Engine, error) {
 			return nil, err
 		}
 
-		// Validate entrypoints at load time - reject unknown entrypoints
-		if err := validateEntrypoints(src.Metadata.Entrypoints, src.Name); err != nil {
-			return nil, err
+		// Validate the declared scoping at load time, whichever way it arrived:
+		// the engine cannot apply metadata it does not recognize, and quietly
+		// dropping it would run the policy outside the scope it declared.
+		if err := src.Metadata.validate(); err != nil {
+			return nil, fmt.Errorf("%s: %w", src.Name, err)
 		}
 
 		compiled = append(compiled, compiledPolicy{
@@ -70,22 +72,6 @@ func NewEngine(sources []Source) (*Engine, error) {
 		})
 	}
 	return &Engine{compiled: compiled}, nil
-}
-
-// validateEntrypoints checks that all entrypoints are known canonical values.
-// This prevents typos and injection of arbitrary entrypoint names. Empty
-// entries are ignored, matching the set the engine builds for filtering.
-func validateEntrypoints(entrypoints []Entrypoint, policyName string) error {
-	for _, ep := range entrypoints {
-		trimmed := trimmedEntrypoint(ep)
-		if trimmed == "" {
-			continue
-		}
-		if !IsAllowedEntrypoint(trimmed) {
-			return fmt.Errorf("%s: invalid entrypoint %q (not in allowed set)", policyName, trimmed)
-		}
-	}
-	return nil
 }
 
 // trimmedEntrypoint returns the entrypoint's name without surrounding
