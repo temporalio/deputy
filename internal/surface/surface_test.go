@@ -157,18 +157,19 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	// Every exported declaration under internal/, and nothing from the excluded
 	// trees: 14 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
 	// Orphaned, ForForeignTests, ForOwnBlackBoxTest, Run, Make, RunAnon,
-	// RunStringish, RunConstrained, Awkward), 18 types (Never, Stringish, Decoy,
-	// Scannable, Tagged, Handled, AnonReached, ConstraintReached, testonly.Shared,
-	// testonly.Decoyed, testonly.Holder, ifaces.Shared plus 6 interfaces), and 17
-	// methods (Never.Method, Stringish.String, Decoy.Read, Scannable.Scan, Holder.Shared,
-	// AnonReached.Anon, ConstraintReached.Constrained, the four Handled methods,
-	// plus one per interface). Vars and consts are zero, which also pins that
+	// RunStringish, RunConstrained, Awkward), 19 types (Never, Stringish, Decoy,
+	// Scannable, Tagged, Handled, AnonReached, ConstraintReached, NotAProto,
+	// testonly.Shared, testonly.Decoyed, testonly.Holder, ifaces.Shared plus 6
+	// interfaces), and 18 methods (Never.Method, Stringish.String, Decoy.Read,
+	// Scannable.Scan, Holder.Shared, AnonReached.Anon,
+	// ConstraintReached.Constrained, NotAProto.ProtoReflect, the four Handled
+	// methods, plus one per interface). Vars and consts are zero, which also pins that
 	// struct fields such as Tagged.Name are not counted as symbols, and that the
 	// type declared inside used.localTagged is not one either.
 	want := map[SymbolKind]int{
 		KindFunc:   14,
-		KindType:   18,
-		KindMethod: 17,
+		KindType:   19,
+		KindMethod: 18,
 		KindVar:    0,
 		KindConst:  0,
 	}
@@ -312,6 +313,14 @@ func TestDispatchDoubtRequiresImplementingTheInterface(t *testing.T) {
 			symbol:     "ConstraintReached.Constrained",
 			wantDoubt:  "interface{Constrained()}",
 			wantDoubts: true,
+		},
+		{
+			// ProtoReflect() string is not protobuf's contract, and calling the type
+			// a registered message would be evidence the audit does not have.
+			name:       "protobuf's method name without its signature is not a message",
+			symbol:     "NotAProto",
+			wantAbsent: "protobuf message",
+			wantDoubts: false,
 		},
 	}
 	for _, tt := range tests {

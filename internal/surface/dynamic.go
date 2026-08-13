@@ -112,8 +112,17 @@ var dispatchContracts = map[string][]string{
 	"net/http":            {"Handler", "RoundTripper", "ResponseWriter", "Flusher"},
 	"database/sql":        {"Scanner"},
 	"database/sql/driver": {"Valuer"},
-	"google.golang.org/protobuf/reflect/protoreflect": {"ProtoMessage", "Message"},
+	protoreflectPath:      {"ProtoMessage", "Message"},
 }
+
+// protoreflectPath is the package declaring the interface that makes a type
+// reachable through the protobuf registry. It is written once and used both to
+// register the contract above and to look it up in [dynamic.protoLike], so the
+// doubt cannot search for a contract the table never adds.
+const protoreflectPath = "google.golang.org/protobuf/reflect/protoreflect"
+
+// protoMessageContract is the registered name of protobuf's message contract.
+const protoMessageContract = protoreflectPath + ".ProtoMessage"
 
 // encodingTags are the struct tag keys that mean a field is read or written by
 // a reflective codec in this module.
@@ -607,12 +616,24 @@ func (d *dynamic) taggedType(tn *types.TypeName) bool {
 // protoLike reports whether a type implements protoreflect's message contract,
 // which makes it reachable through the protobuf registry regardless of what
 // references it.
+//
+// Membership is decided by [types.Implements] against the registered contract,
+// not by finding a method called ProtoReflect. A type declaring ProtoReflect()
+// string satisfies nothing and is not in any registry, and labelling it a
+// protobuf message invents the evidence, which is the same mistake this file
+// refuses to make for [fmt.Stringer] and every other contract.
+//
+// A module that does not depend on protobuf has no such contract registered and
+// gets false, which is the right answer: with no protobuf in the graph there is
+// no registry to be reachable through.
 func (d *dynamic) protoLike(tn *types.TypeName) bool {
-	ptr := types.NewPointer(tn.Type())
-	for _, t := range []types.Type{tn.Type(), ptr} {
-		ms := types.NewMethodSet(t)
-		for i := range ms.Len() {
-			if ms.At(i).Obj().Name() == "ProtoReflect" {
+	forms := []types.Type{tn.Type(), types.NewPointer(tn.Type())}
+	for _, c := range d.byMethod["ProtoReflect"] {
+		if c.name != protoMessageContract {
+			continue
+		}
+		for _, form := range forms {
+			if types.Implements(form, c.iface) {
 				return true
 			}
 		}
