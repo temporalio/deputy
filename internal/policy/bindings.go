@@ -123,9 +123,14 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 
 	// Diff entrypoints (git repository)
 	EntrypointDiffReport: {
-		Entrypoint:  EntrypointDiffReport,
-		Required:    append([]string{"changes", "vulnerabilities"}, envVars...),
-		Optional:    targetVars,
+		Entrypoint: EntrypointDiffReport,
+		Required:   append([]string{"changes", "vulnerabilities"}, envVars...),
+		// A diff names refs within one repository, so it binds those rather
+		// than a target. The list has to match what the payload actually
+		// carries: the CEL environment declares every variable globally, so
+		// reading one the payload omits is an evaluation error rather than an
+		// absent value, and advertising it here invites exactly that.
+		Optional:    []string{"repo", "base_ref", "target_ref"},
 		Description: "Triggers after a dependency diff completes",
 	},
 	EntrypointDiffDependencyChange: {
@@ -137,7 +142,7 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 	EntrypointDiffVulnerability: {
 		Entrypoint:  EntrypointDiffVulnerability,
 		Required:    append(singleVulnerabilityVars, envVars...),
-		Optional:    targetVars,
+		Optional:    []string{"repo", "base_ref", "target_ref"},
 		Description: "Triggers for each vulnerability found in a diff",
 	},
 

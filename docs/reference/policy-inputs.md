@@ -170,7 +170,9 @@ Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
 | `changes` | `list(object)` | yes | Dependency changes |
 | `vulnerabilities` | `list(vulnerabilityv1.Finding)` | yes | Vulnerability findings |
 | `env` | `policyv1.Environment` | yes | Execution environment context |
-| `target` | `targetv1.Target` | no | Target or provenance metadata |
+| `repo` | `string` | no | Repository path |
+| `base_ref` | `string` | no | Diff base reference |
+| `target_ref` | `string` | no | Diff target reference |
 
 #### `diff_dependency_change`
 
@@ -199,7 +201,9 @@ Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
 | `vulnerability` | `vulnerabilityv1.Finding` | yes | Current vulnerability finding |
 | `pkg` | `dependencyv1.Package` | yes | Package associated with the current policy item |
 | `env` | `policyv1.Environment` | yes | Execution environment context |
-| `target` | `targetv1.Target` | no | Target or provenance metadata |
+| `repo` | `string` | no | Repository path |
+| `base_ref` | `string` | no | Diff base reference |
+| `target_ref` | `string` | no | Diff target reference |
 
 ### Category: `dockerfile`
 
