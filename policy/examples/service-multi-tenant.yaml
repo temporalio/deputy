@@ -125,12 +125,16 @@ policies:
         reason: "Cross-tenant diff denied - both sides must belong to your tenant"
         remediation: "You can only diff resources within your tenant namespace"
 
-  # A target carrying a URL fragment or query cannot be authorized by matching
-  # the string, because the fetch does not use the whole string. Git drops the
-  # fragment, so "https://github.com/other/repo.git#/acme/x" reads as belonging
-  # to acme and clones other/repo.git. Refusing those targets is what makes the
-  # matching rules above sound, rather than another position for the tenant name
-  # to hide in.
+  # A target that does not name the resource it fetches cannot be authorized by
+  # matching its string. Three shapes do that. Git drops a URL fragment, so
+  # "https://github.com/other/repo.git#/acme/x" reads as belonging to acme and
+  # clones other/repo.git. A query does the same. And a dot segment is resolved
+  # by whatever normalizes the path, so "https://github.com/acme/../other/repo"
+  # matches "/acme/" and can fetch "/other/repo".
+  #
+  # Refusing these is what makes the matching rules above sound. The alternative
+  # is enumerating the positions a tenant name can hide in, which is what the
+  # four earlier revisions of those rules each tried.
   - name: reject-unauthorizable-targets
     description: |
       Deputy also rejects fragments during remote target validation. This rule
@@ -147,9 +151,10 @@ policies:
       - action: deny
         when: |
           request.?target.orValue("").contains("#") ||
-          request.?target.orValue("").contains("?")
-        reason: "Target must not carry a URL fragment or query"
-        remediation: "Name the resource directly, without a #fragment or ?query suffix"
+          request.?target.orValue("").contains("?") ||
+          request.?target.orValue("").contains("..")
+        reason: "Target must not carry a URL fragment, query, or dot segment"
+        remediation: "Name the resource directly, without a #fragment, ?query, or .. path segment"
 
   # Same rule for the two sides of a diff, which request.target does not report.
   - name: reject-unauthorizable-diff-targets
@@ -159,10 +164,12 @@ policies:
       - action: deny
         when: |
           [diff_base, diff_target].exists(t,
-            t.display_path.contains("#") || t.display_path.contains("?")
+            t.display_path.contains("#") ||
+            t.display_path.contains("?") ||
+            t.display_path.contains("..")
           )
-        reason: "Neither side of a diff may carry a URL fragment or query"
-        remediation: "Name both resources directly, without a #fragment or ?query suffix"
+        reason: "Neither side of a diff may carry a URL fragment, query, or dot segment"
+        remediation: "Name both resources directly, without a #fragment, ?query, or .. path segment"
 
   # Require authentication for all operations
   - name: require-authentication

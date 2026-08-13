@@ -255,6 +255,10 @@ func generateVariableValue(ep Entrypoint, varName string, level ExampleLevel, re
 		return generateLayerDiff(level), "layer difference"
 	case "repo":
 		return "github.com/example/app", "repository path"
+	case "base_ref":
+		return "main", "the git ref the diff starts from"
+	case "target_ref":
+		return "feature/upgrade-deps", "the git ref being compared"
 	default:
 		return nil, ""
 	}

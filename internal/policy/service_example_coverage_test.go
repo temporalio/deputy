@@ -380,6 +380,8 @@ func TestShippedTenantIsolationRejectsUnauthorizableTargets(t *testing.T) {
 	}{
 		{"fragment naming the tenant", "https://github.com/other/repo.git#/acme/x"},
 		{"query naming the tenant", "https://github.com/other/repo.git?path=/acme/x"},
+		{"dot segment leaving the tenant", "https://github.com/acme/../other/repo"},
+		{"dot segments deeper in the path", "https://github.com/acme/group/../../other/repo"},
 	}
 
 	for _, ep := range EntrypointsService {
