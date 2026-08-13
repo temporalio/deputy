@@ -402,7 +402,8 @@ policies:
             (jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
              jwt.?idtyp.orValue("") == "app")
           ) &&
-          !jwt.?amr.orValue([]).exists(a, a in ["mfa", "otp", "hwk", "swk"])
+          !(jwt.?iss.orValue("") == "https://acme.okta.com" &&
+            jwt.?amr.orValue([]).exists(a, a in ["mfa", "otp", "hwk", "swk"]))
         reason: "Multi-factor authentication required for secrets scanning"
         remediation: "Re-authenticate with MFA enabled"
 
@@ -440,7 +441,8 @@ policies:
             (jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
              jwt.?idtyp.orValue("") == "app")
           ) &&
-          !jwt.?groups.orValue([]).exists(g, g in ["security-team", "sre-oncall", "platform-admins"])
+          !(jwt.?iss.orValue("") == "https://acme.okta.com" &&
+            jwt.?groups.orValue([]).exists(g, g in ["security-team", "sre-oncall", "platform-admins"]))
         reason: "Security group membership required"
         remediation: "Request access in #security-access channel"
 
@@ -504,10 +506,12 @@ policies:
             // carry custom claims could otherwise mint this subject.
             (jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
              jwt.?sub.orValue("").startsWith("system:serviceaccount:")) ||
-            // A human with an authorized group membership. This one carries its
-            // own allowlist because no other rule in this file gates humans on
-            // group membership outside secrets scanning.
-            (jwt.?email.orValue("") != "" &&
+            // A human from the corporate identity provider, with an authorized
+            // group membership. The issuer is as load-bearing here as in every
+            // machine branch: a group claim only means something when it comes
+            // from the directory that assigns groups.
+            (jwt.?iss.orValue("") == "https://acme.okta.com" &&
+             jwt.?email.orValue("") != "" &&
              jwt.?groups.orValue([]).exists(g, g in ["developers", "security-team", "platform"]))
           )
         reason: "Identity not authorized"

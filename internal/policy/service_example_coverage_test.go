@@ -505,6 +505,34 @@ func TestShippedOIDCFederationTrustsWhatItsGatesAccept(t *testing.T) {
 			wantDenied: true,
 		},
 		{
+			// A group claim only means something from the directory that assigns
+			// groups. Found by auditing every trust claim for an issuer rather
+			// than by a review round, after three rounds of the same defect.
+			name: "authorized group asserted by an untrusted issuer",
+			jwt: &policyv1.JWTClaims{
+				Sub: "alice@acme-corp.com",
+				Iss: "https://idp.attacker.example",
+				CustomClaims: map[string]string{
+					"email": "alice@acme-corp.com", "groups": "[developers security-team]",
+				},
+			},
+			wantDenied: true,
+		},
+		{
+			// And a factor asserted by an issuer nobody trusts is not a factor,
+			// so it must not satisfy the MFA requirement at secrets.
+			name: "MFA factor asserted by an untrusted issuer",
+			jwt: &policyv1.JWTClaims{
+				Sub: "alice@acme-corp.com",
+				Iss: "https://idp.attacker.example",
+				CustomClaims: map[string]string{
+					"email": "alice@acme-corp.com", "groups": "[security-team]",
+					"amr": "[pwd hwk]",
+				},
+			},
+			wantDenied: true,
+		},
+		{
 			// An amr entry is a claim like any other. AWS does not mint the token
 			// carrying the ARN, so without an issuer test any accepted issuer
 			// could assert an approved account number and be treated as a
