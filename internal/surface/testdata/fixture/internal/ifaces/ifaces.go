@@ -42,6 +42,12 @@ func Make() Returned { return nil }
 // signature out of the type graph either way.
 func RunAnon(v interface{ Anon() }) { v.Anon() }
 
+// RunConstrained reaches its argument's method through a type constraint rather
+// than through a parameter of interface type. Nothing names the concrete method,
+// and the constraint is where the contract lives, so a walk that visits only
+// parameter and result types finds no reason to doubt a finding about it.
+func RunConstrained[T interface{ Constrained() }](v T) { v.Constrained() }
+
 // RunStringish accepts an anonymous interface identical to [fmt.Stringer]. A
 // doubt must not name both spellings: identical interfaces cannot differ in who
 // implements them, so the anonymous one would lengthen every Stringer doubt in

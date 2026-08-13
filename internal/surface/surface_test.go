@@ -155,19 +155,20 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	report := analyzeFixture(t)
 
 	// Every exported declaration under internal/, and nothing from the excluded
-	// trees: 13 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
+	// trees: 14 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
 	// Orphaned, ForForeignTests, ForOwnBlackBoxTest, Run, Make, RunAnon,
-	// RunStringish, Awkward), 16 types (Never, Stringish, Decoy, Scannable, Tagged,
-	// Handled, AnonReached, testonly.Shared, testonly.Holder, ifaces.Shared plus 6
-	// interfaces), and 16 methods (Never.Method, Stringish.String, Decoy.Read,
-	// Scannable.Scan, Holder.Shared, AnonReached.Anon, the four Handled methods,
+	// RunStringish, RunConstrained, Awkward), 17 types (Never, Stringish, Decoy,
+	// Scannable, Tagged, Handled, AnonReached, ConstraintReached, testonly.Shared,
+	// testonly.Holder, ifaces.Shared plus 6 interfaces), and 17 methods
+	// (Never.Method, Stringish.String, Decoy.Read, Scannable.Scan, Holder.Shared,
+	// AnonReached.Anon, ConstraintReached.Constrained, the four Handled methods,
 	// plus one per interface). Vars and consts are zero, which also pins that
 	// struct fields such as Tagged.Name are not counted as symbols, and that the
 	// type declared inside used.localTagged is not one either.
 	want := map[SymbolKind]int{
-		KindFunc:   13,
-		KindType:   16,
-		KindMethod: 16,
+		KindFunc:   14,
+		KindType:   17,
+		KindMethod: 17,
 		KindVar:    0,
 		KindConst:  0,
 	}
@@ -302,6 +303,14 @@ func TestDispatchDoubtRequiresImplementingTheInterface(t *testing.T) {
 			name:       "an anonymous interface in a signature is a contract too",
 			symbol:     "AnonReached.Anon",
 			wantDoubt:  "interface{Anon()}",
+			wantDoubts: true,
+		},
+		{
+			// A constraint is not a parameter type, so a walk over parameters and
+			// results alone never sees it.
+			name:       "a generic type constraint is a contract too",
+			symbol:     "ConstraintReached.Constrained",
+			wantDoubt:  "interface{Constrained()}",
 			wantDoubts: true,
 		},
 	}
