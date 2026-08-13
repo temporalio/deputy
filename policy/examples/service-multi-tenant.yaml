@@ -77,11 +77,16 @@ policies:
       Verify, ListDetectors, RegisterDetector, and SBOMService Diff), and
       without it they would be denied unconditionally. Those procedures are
       governed by require-tenant-claim and secrets-requires-security-team.
+
+      Graph requests belong here too. BuildGraph, WhyDependency, and QueryGraph
+      each name a resource and report its dependency structure, so omitting
+      them lets a tenant map another tenant's repository.
     entrypoints:
       - service_scan_request
       - service_list_request
       - service_sbom_request
       - service_secrets_request
+      - service_graph_request
     rules:
       - action: deny
         when: |

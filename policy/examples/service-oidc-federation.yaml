@@ -16,6 +16,14 @@
 #   - Kubernetes: https://kubernetes.default.svc.cluster.local
 #
 # JWT claims vary by provider. See examples below for provider-specific patterns.
+#
+# Two kinds of rule appear below, and the difference decides which entrypoints
+# each one declares. A rule that decides whether a caller is trusted at all
+# covers every service entrypoint, because an identity that may not scan may not
+# diff or build a dependency graph either. A rule scoped to one operation, such
+# as restricting secrets scanning to approved repositories, names only that
+# operation's entrypoint. Adding a service entrypoint means revisiting the first
+# kind; internal/policy enforces that with a test over EntrypointsService.
 
 policies:
   # =============================================================================
@@ -43,6 +51,8 @@ policies:
       - service_list_request
       - service_sbom_request
       - service_secrets_request
+      - service_diff_request
+      - service_graph_request
     rules:
       - action: deny
         when: |
@@ -126,6 +136,8 @@ policies:
       - service_scan_request
       - service_list_request
       - service_sbom_request
+      - service_diff_request
+      - service_graph_request
     rules:
       - action: deny
         when: |
@@ -164,6 +176,8 @@ policies:
       - service_list_request
       - service_sbom_request
       - service_secrets_request
+      - service_diff_request
+      - service_graph_request
     rules:
       - action: deny
         when: |
@@ -181,6 +195,8 @@ policies:
     entrypoints:
       - service_scan_request
       - service_list_request
+      - service_diff_request
+      - service_graph_request
     rules:
       - action: deny
         when: |
@@ -203,6 +219,8 @@ policies:
     entrypoints:
       - service_scan_request
       - service_list_request
+      - service_diff_request
+      - service_graph_request
     rules:
       - action: deny
         when: |
@@ -233,6 +251,8 @@ policies:
       - service_scan_request
       - service_list_request
       - service_sbom_request
+      - service_diff_request
+      - service_graph_request
     rules:
       - action: deny
         when: |
@@ -276,6 +296,8 @@ policies:
       - service_scan_request
       - service_list_request
       - service_sbom_request
+      - service_diff_request
+      - service_graph_request
     rules:
       - action: deny
         when: |
@@ -344,6 +366,8 @@ policies:
       - service_scan_request
       - service_list_request
       - service_sbom_request
+      - service_diff_request
+      - service_graph_request
     rules:
       # GitHub Actions: allow from trusted repos
       - action: allow
