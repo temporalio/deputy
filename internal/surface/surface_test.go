@@ -59,6 +59,7 @@ func TestAuditedPackagesExcludeGeneratedAndPublicTrees(t *testing.T) {
 	report := analyzeFixture(t)
 
 	want := []string{
+		"fixture/internal/aggregator",
 		"fixture/internal/awkward_test",
 		"fixture/internal/blackbox",
 		"fixture/internal/doconly",
@@ -78,20 +79,23 @@ func TestAuditedPackagesExcludeGeneratedAndPublicTrees(t *testing.T) {
 // cases that make it worth having: a package reached only by its own in-package
 // test counts as unreachable, so does one reached only by its own black-box test
 // package, a package that declares nothing at all does not count, a package whose
-// only declaration is func init() does count even though its package scope is
-// just as empty, and a package whose own import path ends in "_test" is one of
-// these packages rather than somebody's external test package.
+// only declaration is func init() or a blank import does count even though its
+// package scope is just as empty, and a package whose own import path ends in
+// "_test" is one of these packages rather than somebody's external test package.
 //
-// The want list is the assertion for both of the awkward ones. internal/doconly
-// must stay out of it and internal/initonly must stay in, which is the whole
-// difference between "declares nothing" and "declares nothing the type checker
-// files in package scope". The TestFiles assertion is where the "_test" path
+// The want list is the assertion for the awkward ones. internal/doconly must stay
+// out of it while internal/initonly and internal/aggregator stay in, which is the
+// whole difference between "declares nothing" and "declares nothing the type
+// checker files in package scope". The aggregator is the sharper case: its blank
+// import is its entire purpose, so nothing importing it means the registrations it
+// exists to trigger never run. The TestFiles assertion is where the "_test" path
 // case bites: misreading the path moves those test files onto a package that does
 // not exist, and the real package's count drops to zero.
 func TestUnreachablePackagesFindTestOnlyReachability(t *testing.T) {
 	report := analyzeFixture(t)
 
 	want := []string{
+		filepath.Join("internal", "aggregator"),
 		filepath.Join("internal", "awkward_test"),
 		filepath.Join("internal", "blackbox"),
 		filepath.Join("internal", "initonly"),
