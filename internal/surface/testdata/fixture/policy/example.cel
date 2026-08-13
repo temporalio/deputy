@@ -1,0 +1,4 @@
+// An executable asset: a CEL policy the fixture stands in for. A name here is
+// read and acted on at run time, which is the strongest evidence this audit has
+// that a symbol is reached without any package referencing it.
+NamedInAssetAndLiteral == "ok"

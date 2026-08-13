@@ -34,6 +34,16 @@ func NamedInString() string { return "named" }
 
 func selfReference() string { return "NamedInString" }
 
+// NamedInAssetAndLiteral is named in the Go string literal below and also in the
+// fixture's CEL policy. Go literals are tokenized before assets, so reporting
+// whichever source arrived first would name the literal and hide the policy that
+// actually looks the symbol up.
+func NamedInAssetAndLiteral() string { return "both" }
+
+func selfReferenceBoth() string { return "NamedInAssetAndLiteral" }
+
+var _ = selfReferenceBoth
+
 // localTagged declares an encoding-tagged type inside a function body, where it
 // is nobody's surface and no finding can be about it. It deliberately shadows the
 // name of the package-level Never, which must stay free of the encoding doubt.
