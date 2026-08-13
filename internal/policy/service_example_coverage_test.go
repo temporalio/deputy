@@ -155,16 +155,6 @@ type oidcIdentity struct {
 	// trusted and untrusted differ only in the claim the gate examines.
 	trusted   *policyv1.JWTClaims
 	untrusted *policyv1.JWTClaims
-	// admitOnly restricts the admit direction to these entrypoints. A provider
-	// lists one when another rule in the file denies it for an unrelated
-	// reason, which is a finding about that rule rather than about coverage.
-	admitOnly []Entrypoint
-	// why explains a non-empty admitOnly.
-	why string
-	// blocked names the defect that stops this provider being evaluated at all,
-	// in either direction. Set it rather than dropping the provider, so the
-	// coverage arrives on its own when the defect is fixed.
-	blocked string
 }
 
 // oidcIdentities enumerates the providers the federation example gates on.
@@ -215,13 +205,12 @@ func oidcIdentities() []oidcIdentity {
 				Iss:          "https://accounts.google.com",
 				CustomClaims: map[string]string{"email": "attacker@untrusted-project.iam.gserviceaccount.com"},
 			},
-			// A Google service account subject is a 21-digit account id, and
-			// the payload conversion turns any numeric-looking string into a
-			// number, so kubernetes-namespace-restriction calls .startsWith on
-			// a float64 and the whole evaluation errors. The interceptor turns
-			// that into CodeInternal, so this identity cannot be allowed or
-			// denied, only failed.
-			blocked: "#248: numeric-looking strings are coerced to numbers, so jwt.sub is a float64 for this provider",
+			// A Google service account subject is a 21-digit account id, which
+			// the payload conversion used to rewrite into a float64, so
+			// kubernetes-namespace-restriction called .startsWith on a number
+			// and the whole evaluation errored. The payload now keeps a
+			// declared string as a string, so this identity is decidable in
+			// both directions at every entrypoint.
 		},
 		{
 			provider: "aws-sts",
@@ -308,12 +297,6 @@ func TestShippedOIDCFederationGatesEveryServiceEntrypoint(t *testing.T) {
 	}
 
 	for _, id := range oidcIdentities() {
-		if id.blocked != "" {
-			t.Run(id.provider, func(t *testing.T) {
-				t.Skipf("cannot evaluate this provider: %s", id.blocked)
-			})
-			continue
-		}
 		for _, ep := range EntrypointsService {
 			if _, ok := serviceRequestInput[ep]; !ok {
 				continue
@@ -323,17 +306,11 @@ func TestShippedOIDCFederationGatesEveryServiceEntrypoint(t *testing.T) {
 					t.Errorf("untrusted %s identity was not denied at %s: the gate for this provider does not reach this entrypoint", id.provider, ep)
 				}
 			})
-			if len(id.admitOnly) > 0 && !slices.Contains(id.admitOnly, ep) {
-				continue
-			}
 			t.Run(id.provider+"/"+string(ep)+"/admits-trusted", func(t *testing.T) {
 				if got, by := denied(t, ep, id.trusted); got {
 					t.Errorf("trusted %s identity was denied at %s by %s: a gate that refuses the callers it names is not an allowlist", id.provider, ep, by)
 				}
 			})
-		}
-		if id.why != "" {
-			t.Logf("%s: admit direction not asserted at service_secrets_request, because %s", id.provider, id.why)
 		}
 	}
 }
