@@ -61,11 +61,11 @@ func (r *Report) Text(w io.Writer) error {
 	fmt.Fprintf(b, "\n4. dynamic reachability: %d of %d symbol findings and %d of %d interface findings carry a doubt\n",
 		len(r.Symbols)-certainSymbols, len(r.Symbols), doubted(r.Interfaces), len(r.Interfaces))
 
-	if len(r.Constrained) > 0 {
-		fmt.Fprintf(b, "\ncaveat: %d file(s) excluded by this platform's build constraints were not\n", len(r.Constrained))
-		fmt.Fprintf(b, "type-checked, so references they make are invisible to every check above:\n")
-		for _, name := range r.Constrained {
-			fmt.Fprintf(b, "   %s\n", name)
+	if len(r.Unexamined) > 0 {
+		fmt.Fprintf(b, "\ncaveat: %d path(s) were not examined, so evidence in them could not\n", len(r.Unexamined))
+		fmt.Fprintf(b, "contradict any finding above:\n")
+		for _, gap := range r.Unexamined {
+			fmt.Fprintf(b, "   %s: %s\n", gap.Path, gap.Reason)
 		}
 	}
 

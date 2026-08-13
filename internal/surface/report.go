@@ -34,12 +34,25 @@ type Report struct {
 	// InterfaceTotal counts the exported interfaces examined.
 	InterfaceTotal int
 
-	// Constrained lists the Go files this platform's build constraints excluded
-	// from the load, relative to the module root. Nothing in them is
-	// type-checked, so a reference made only from one of them is invisible to
-	// every check and any finding could in principle be wrong because of it.
-	// Auditing on another platform, or with the relevant tags, closes the gap.
-	Constrained []string
+	// Unexamined lists the parts of the repository this run did not read, with
+	// the reason for each. Every finding above is conditional on it: evidence
+	// this run never looked at cannot contradict a finding, so a report that
+	// omitted this would claim a completeness it does not have.
+	//
+	// A bounded scan is fine. A bounded scan that reports its results as though
+	// they were exhaustive is how the audit ends up recommending that live code
+	// be unexported, and the reader has no way to see it happened.
+	Unexamined []Unexamined
+}
+
+// Unexamined is one piece of the repository a run skipped, and why.
+type Unexamined struct {
+	// Path is the file or directory, relative to the module root.
+	Path string
+
+	// Reason says what stopped the run from reading it, in terms the reader can
+	// act on: which limit applied, or which condition excluded it.
+	Reason string
 }
 
 // Reach describes how far a declaration's references travel. It is the axis

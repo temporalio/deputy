@@ -1,6 +1,7 @@
 package surface
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"go/types"
@@ -527,6 +528,63 @@ func TestForeignContractLookupIsLoud(t *testing.T) {
 	quiet := &dynamic{byMethod: map[string][]contract{}}
 	if err := quiet.addForeignContracts(loaded, map[string][]string{"database/sql": {"Absent"}}); err != nil {
 		t.Errorf("addForeignContracts for a package the graph lacks = %v, want nil", err)
+	}
+}
+
+// TestOversizedAssetIsReportedNotSilentlyDropped pins the audit's account of its
+// own coverage. The asset scan is bounded, which is fine; dropping a file without
+// saying so is not, because that file is exactly where the only mention of a
+// reflectively consumed symbol could be, and the report would then present a live
+// symbol as safe to unexport with the evidence knowingly unread.
+//
+// The whole chain is exercised rather than addAssets alone. The recording is
+// worthless if it does not reach the report, and losing the one line that carries
+// it there would leave every unit-level assertion passing.
+func TestOversizedAssetIsReportedNotSilentlyDropped(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite := func(name string, data []byte) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	mustWrite("go.mod", []byte("module gap\n\ngo 1.26\n"))
+	mustWrite(filepath.Join("internal", "thing", "thing.go"), []byte("package thing\n\n// Thing is here to give the module a surface.\nfunc Thing() {}\n"))
+	mustWrite("small.cel", []byte("NamedInASmallAsset"))
+	// One byte past the cap, and the name is at the front so a partial read would
+	// still have found it. Only the limit can explain its absence.
+	oversized := bytes.Repeat([]byte("x"), maxAssetBytes+1)
+	copy(oversized, []byte("NamedInAnOversizedAsset "))
+	mustWrite("big.json", oversized)
+
+	report, err := Analyze(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("Analyze error: %v", err)
+	}
+
+	var found *Unexamined
+	for i, gap := range report.Unexamined {
+		if gap.Path == "big.json" {
+			found = &report.Unexamined[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("Unexamined = %v, want an entry for big.json: the run skipped it and said nothing", report.Unexamined)
+	}
+	if !strings.Contains(found.Reason, "asset limit") {
+		t.Errorf("Unexamined reason = %q, want it to name the limit that applied", found.Reason)
+	}
+
+	// The other half: the limit must not be an excuse to skip ordinary assets, or
+	// every finding would carry a caveat and the channel would mean nothing.
+	for _, gap := range report.Unexamined {
+		if gap.Path == "small.cel" {
+			t.Errorf("small.cel was reported unexamined (%s), but it is well under the limit", gap.Reason)
+		}
 	}
 }
 
