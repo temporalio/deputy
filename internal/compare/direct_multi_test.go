@@ -361,14 +361,32 @@ dependencies = ["requests[security]>=2.0", "boto3[crt]"]
 			},
 		},
 		{
+			// A distribution whose name contains a dot has to be quoted, because
+			// TOML reads a bare dotted key as a nested table. Both entries here
+			// are the spelling Poetry accepts.
 			name: "Poetry dotted distribution",
 			input: `[tool.poetry.dependencies]
-zope.interface = "^5.4"
+"zope.interface" = "^5.4"
 "backports.zoneinfo" = "^0.2"
 `,
 			expected: map[string]bool{
 				"zope-interface":     true,
 				"backports-zoneinfo": true,
+			},
+		},
+		{
+			// The unquoted form is a different declaration, not the same one
+			// spelled loosely: TOML makes it the table zope = {interface = "^5.4"},
+			// which is not a constraint Poetry can read, so the file is broken and
+			// the name it appears to declare is not one this manifest names. Pinned
+			// because the line scanner this replaced reported "zope-interface" here,
+			// which no TOML reader agrees with.
+			name: "Poetry unquoted dotted key is a nested table",
+			input: `[tool.poetry.dependencies]
+zope.interface = "^5.4"
+`,
+			expected: map[string]bool{
+				"zope": true,
 			},
 		},
 		{
@@ -417,6 +435,86 @@ dependencies = [
 				"flask":      true,
 				"requests":   true,
 				"sqlalchemy": true,
+			},
+		},
+		{
+			name: "PEP 621 optional-dependencies extras are declarations",
+			input: `[project]
+name = "my-app"
+dependencies = ["flask>=2.0"]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "coverage"]
+docs = ["sphinx>=7.0"]
+`,
+			expected: map[string]bool{
+				"flask":    true,
+				"pytest":   true,
+				"coverage": true,
+				"sphinx":   true,
+			},
+		},
+		{
+			name: "Poetry group dependencies are declarations",
+			input: `[tool.poetry.dependencies]
+python = "^3.9"
+django = "^4.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+ruff = "^0.5"
+
+[tool.poetry.group.docs.dependencies]
+sphinx = "^7.0"
+`,
+			expected: map[string]bool{
+				"django": true,
+				"pytest": true,
+				"ruff":   true,
+				"sphinx": true,
+			},
+		},
+		{
+			name: "Poetry legacy dev-dependencies are declarations",
+			input: `[tool.poetry.dependencies]
+python = "^3.9"
+django = "^4.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^8.0"
+`,
+			expected: map[string]bool{
+				"django": true,
+				"pytest": true,
+			},
+		},
+		{
+			name: "PEP 735 dependency-groups are declarations",
+			input: `[project]
+dependencies = ["flask>=2.0"]
+
+[dependency-groups]
+test = ["pytest>=8.0", "coverage"]
+lint = ["ruff", {include-group = "test"}]
+`,
+			expected: map[string]bool{
+				"flask":    true,
+				"pytest":   true,
+				"coverage": true,
+				"ruff":     true,
+			},
+		},
+		{
+			name: "an extra declared only under an extras table still counts",
+			input: `[project]
+name = "my-app"
+
+[project.optional-dependencies]
+aws = ["boto3[crt]>=1.34", "Flask-SQLAlchemy"]
+`,
+			expected: map[string]bool{
+				"boto3":            true,
+				"flask-sqlalchemy": true,
 			},
 		},
 	}

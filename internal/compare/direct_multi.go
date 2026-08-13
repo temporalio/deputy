@@ -595,79 +595,118 @@ func recordCargoDependency(deps map[string]bool, name string, entry any) {
 	}
 }
 
-// getPyprojectDirectDeps extracts direct dependencies from pyproject.toml.
-// Supports both PEP 621 [project.dependencies] and Poetry [tool.poetry.dependencies].
+// pyprojectManifest is the slice of pyproject.toml that bears on direct
+// dependencies. It exists so that the question "which tables constitute a
+// declaration" is answered once, in a shape the TOML decoder enforces, rather
+// than by a scanner that has to recognize each section header it cares about and
+// therefore silently omits the ones nobody thought of.
+//
+// Every table here is a place the project names a distribution for itself, so
+// every one of them is direct:
+//
+//   - [project] dependencies, the PEP 621 runtime requirements.
+//   - [project.optional-dependencies], the PEP 621 extras. An extra is declared
+//     by this project and resolves to a package the lock extractors report; what
+//     "optional" governs is whether an installer selects the extra, not who
+//     declared it. This is the same reasoning that puts npm's
+//     optionalDependencies in [getNpmDirectDeps].
+//   - [dependency-groups], the PEP 735 groups that development requirements
+//     moved to. An entry is either a requirement string or an {include-group}
+//     table naming another group in this same file, and the included group's own
+//     entries are read from that table, so the reference itself declares nothing.
+//   - [tool.poetry.dependencies] and [tool.poetry.group.*.dependencies], the
+//     Poetry equivalents, plus [tool.poetry.dev-dependencies], which is where
+//     Poetry kept development requirements before 1.2 and which real manifests
+//     still carry.
+//
+// PEP 621 entries are PEP 508 requirement strings and Poetry entries are table
+// keys, which is why the two decode differently and meet at
+// [recordPyPIDirectDep]. A Poetry value is decoded as any because a constraint
+// is a string, a table, or a list of tables, and only the key is needed.
+type pyprojectManifest struct {
+	Project struct {
+		Dependencies         []string            `toml:"dependencies"`
+		OptionalDependencies map[string][]string `toml:"optional-dependencies"`
+	} `toml:"project"`
+	DependencyGroups map[string][]any `toml:"dependency-groups"`
+	Tool             struct {
+		Poetry struct {
+			Dependencies    map[string]any `toml:"dependencies"`
+			DevDependencies map[string]any `toml:"dev-dependencies"`
+			Group           map[string]struct {
+				Dependencies map[string]any `toml:"dependencies"`
+			} `toml:"group"`
+		} `toml:"poetry"`
+	} `toml:"tool"`
+}
+
+// poetryTables returns every Poetry dependency table the manifest declares: the
+// main one, the legacy dev table, and one per named group.
+func (m pyprojectManifest) poetryTables() []map[string]any {
+	poetry := m.Tool.Poetry
+	tables := make([]map[string]any, 0, 2+len(poetry.Group))
+	tables = append(tables, poetry.Dependencies, poetry.DevDependencies)
+	for _, group := range poetry.Group {
+		tables = append(tables, group.Dependencies)
+	}
+	return tables
+}
+
+// requirementLists returns every list of PEP 508 requirement strings the
+// manifest declares: the PEP 621 runtime list, one per extra, and one per PEP
+// 735 dependency group. Group entries that are {include-group} tables rather
+// than strings are dropped, since the group they name is read from its own table.
+func (m pyprojectManifest) requirementLists() [][]string {
+	lists := make([][]string, 0, 1+len(m.Project.OptionalDependencies)+len(m.DependencyGroups))
+	lists = append(lists, m.Project.Dependencies)
+	for _, extra := range m.Project.OptionalDependencies {
+		lists = append(lists, extra)
+	}
+	for _, group := range m.DependencyGroups {
+		requirements := make([]string, 0, len(group))
+		for _, entry := range group {
+			if requirement, isString := entry.(string); isString {
+				requirements = append(requirements, requirement)
+			}
+		}
+		lists = append(lists, requirements)
+	}
+	return lists
+}
+
+// getPyprojectDirectDeps extracts direct dependencies from pyproject.toml,
+// covering every table [pyprojectManifest] declares: PEP 621 dependencies and
+// extras, PEP 735 dependency groups, and Poetry's main, legacy dev, and named
+// group tables.
+//
+// A manifest that does not parse as TOML yields nothing, matching
+// [getCargoDirectDeps]: no installer would read it either. The line scanner this
+// replaced would still scrape a malformed file, which sounds forgiving and is
+// not, because the same leniency is what made it answer for [project] and
+// [tool.poetry.dependencies] alone and report every other declaration as
+// transitive.
 func getPyprojectDirectDeps(data []byte) map[string]bool {
 	deps := make(map[string]bool)
 
-	lines := strings.Split(string(data), "\n")
-	inProjectSection := false
-	inPoetryDeps := false
-	inDepsArray := false // Inside a multi-line dependencies = [ ... ] array
+	var manifest pyprojectManifest
+	if err := toml.Unmarshal(data, &manifest); err != nil {
+		return deps
+	}
 
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		// Track which section we're in
-		if strings.HasPrefix(trimmed, "[") {
-			// Exiting any array we were in
-			inDepsArray = false
-
-			inProjectSection = trimmed == "[project]"
-			inPoetryDeps = trimmed == "[tool.poetry.dependencies]"
-			continue
+	for _, requirements := range manifest.requirementLists() {
+		for _, requirement := range requirements {
+			parsePyPIDep(requirement, deps)
 		}
+	}
 
-		// Handle PEP 621 dependencies array start
-		if inProjectSection && strings.HasPrefix(trimmed, "dependencies") && strings.Contains(trimmed, "=") {
-			if idx := strings.Index(trimmed, "["); idx != -1 {
-				// Check if it's a single-line array that also closes
-				if strings.Contains(trimmed[idx:], "]") {
-					parseInlineDepsArray(trimmed[idx:], deps)
-				} else {
-					// Multi-line array starting
-					inDepsArray = true
-					// Parse any deps on the opening line after [
-					parseInlineDepsArray(trimmed[idx:]+"]", deps)
-				}
+	for _, table := range manifest.poetryTables() {
+		for name := range table {
+			// python is the interpreter Poetry resolves against, not a
+			// distribution any lockfile carries.
+			if name == "python" {
+				continue
 			}
-			continue
-		}
-
-		// Handle multi-line PEP 621 dependencies array
-		if inDepsArray {
-			if strings.Contains(trimmed, "]") {
-				// Array closing - parse any remaining deps on this line
-				if idx := strings.Index(trimmed, "]"); idx > 0 {
-					parseInlineDepsArray("["+trimmed[:idx]+"]", deps)
-				}
-				inDepsArray = false
-			} else if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-				// Parse individual dependency line: "celery>=5.3.0",
-				entry := strings.Trim(trimmed, ",\"'")
-				if entry != "" {
-					parsePyPIDep(entry, deps)
-				}
-			}
-			continue
-		}
-
-		// Handle optional-dependencies section (key = [...] format)
-		if strings.HasPrefix(trimmed, "[project.optional-dependencies") ||
-			(inProjectSection && strings.Contains(line, "optional-dependencies")) {
-			// Skip section header
-			continue
-		}
-
-		// Handle Poetry-style dependencies
-		if inPoetryDeps && !strings.HasPrefix(trimmed, "#") && trimmed != "" {
-			parts := strings.SplitN(trimmed, "=", 2)
-			if len(parts) == 2 {
-				pkgName := strings.Trim(strings.TrimSpace(parts[0]), `"'`)
-				if pkgName != "" && pkgName != "python" {
-					recordPyPIDirectDep(deps, pkgName)
-				}
-			}
+			recordPyPIDirectDep(deps, name)
 		}
 	}
 
@@ -707,24 +746,6 @@ func recordPyPIDirectDep(deps map[string]bool, name string) {
 // parsePyPIDep extracts and normalizes a single PyPI dependency string.
 func parsePyPIDep(entry string, deps map[string]bool) {
 	recordPyPIDirectDep(deps, pyPIRequirementName(entry))
-}
-
-// parseInlineDepsArray parses a Python dependency array like ["pkg1>=1.0", "pkg2"]
-func parseInlineDepsArray(line string, deps map[string]bool) {
-	// Find array content between [ ]
-	start := strings.Index(line, "[")
-	end := strings.LastIndex(line, "]")
-	if start == -1 || end == -1 || end <= start {
-		return
-	}
-
-	content := line[start+1 : end]
-	// Split by comma and parse each entry
-	for entry := range strings.SplitSeq(content, ",") {
-		entry = strings.TrimSpace(entry)
-		entry = strings.Trim(entry, "\"'")
-		parsePyPIDep(entry, deps)
-	}
 }
 
 // getRequirementsDirectDeps extracts package names from requirements.txt.

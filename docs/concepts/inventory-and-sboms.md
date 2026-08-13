@@ -30,9 +30,11 @@ flowchart TD
 
 A package is direct when the project declares it in its own manifest. Deputy reads
 that from the manifests of Go (`go.mod`), npm (`package.json`), Cargo (`Cargo.toml`),
-and PyPI (`pyproject.toml`, `requirements.txt`). Base images, workflow `uses`, and
-`mise` or `asdf` tools are direct by construction, since every one of them is
-written down in the file that declares it.
+and PyPI (`pyproject.toml`, `requirements.txt`). For PyPI that means every table
+the project declares for itself, including PEP 621 extras, PEP 735 dependency
+groups, and Poetry's named groups. Base images, workflow `uses`, and `mise` or
+`asdf` tools are direct by construction, since every one of them is written down
+in the file that declares it.
 
 Every other ecosystem Deputy inventories (Maven, RubyGems, NuGet, Hex, Pub,
 CocoaPods, Packagist, Hackage, CRAN, ConanCenter) has no manifest parser yet, and
