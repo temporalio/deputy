@@ -29,8 +29,12 @@
 # 2. Required Claims: Consider adding 'tenant' to auth.required_claims in your
 #    server config to ensure all authenticated requests have a tenant claim.
 #
-# 3. Admin Override: The admin-full-access policy allows admins to bypass tenant
-#    isolation. Audit log admin actions carefully in production.
+# 3. Allow Actions Do Not Override Denies: a deny from any policy is final at
+#    service entrypoints, so the admin-full-access rule below records that an
+#    admin was recognized without lifting the tenant rules. An admin who needs
+#    cross-tenant access needs the deny rules to exempt them, which is what the
+#    jwt.roles test in each rule would have to do. Audit admin actions carefully
+#    in production either way.
 
 policies:
   # Require tenant claim for authenticated users (defense in depth)
@@ -190,7 +194,8 @@ policies:
           !jwt.?scopes.orValue([]).exists(s, s == "secrets")
         reason: "Service account lacks 'secrets' scope"
 
-  # Admin override - admins can do everything
+  # Records that an admin was recognized. This does not override the deny rules
+  # above, because any deny is final; see the note at the top of this file.
   - name: admin-full-access
     entrypoints:
       - service_scan_request
