@@ -675,15 +675,91 @@ func TestPolicyLintRefusesMetadataTheEngineRefuses(t *testing.T) {
 					t.Fatalf("output missing %q:\n%s", want, reported)
 				}
 			}
-			// Whatever lint says, the engine has to agree: that equivalence is the
-			// whole point of the check, and it is what the fix restored.
+			// Whatever lint says, loading the document to run it has to agree, which
+			// is the equivalence the check exists for. Loading is asked as one
+			// question, since the refusal may come from either half of it: a
+			// compiled bundle's metadata is refused as it is loaded, and a source
+			// handed straight to the engine is refused there.
 			sources, loadErr := policy.LoadSourcesFromBytes([]byte(tc.document), "b.json")
-			if loadErr != nil {
-				t.Fatalf("LoadSourcesFromBytes: %v", loadErr)
+			runErr := loadErr
+			if loadErr == nil {
+				_, runErr = policy.NewEngine(sources)
 			}
-			_, engineErr := policy.NewEngine(sources)
-			if (err == nil) != (engineErr == nil) {
-				t.Fatalf("lint and the engine disagree: lint=%v, NewEngine=%v", err, engineErr)
+			if (err == nil) != (runErr == nil) {
+				t.Fatalf("lint and loading it to run disagree: lint=%v, load+NewEngine=%v", err, runErr)
+			}
+		})
+	}
+}
+
+// TestPolicyBundleRefusesMetadataTheEngineRefuses pins that the writer refuses what
+// the engine refuses. `deputy policy bundle` given a compiled bundle repackages the
+// sources it holds, and it compiled the CEL and stopped, so it rewrote a policy
+// declaring `advsiory` into a fresh artifact that would not load. A writer that
+// produces something Deputy cannot run is the same defect as a lint that passes it,
+// reached from the other side.
+func TestPolicyBundleRefusesMetadataTheEngineRefuses(t *testing.T) {
+	cases := []struct {
+		name     string
+		source   string
+		wantFail bool
+		wantText string
+	}{
+		{
+			name:     "a misspelled mode",
+			source:   "//! policy.mode = advsiory\n[]",
+			wantFail: true,
+			wantText: `invalid mode "advsiory"`,
+		},
+		{
+			name:     "a misspelled entrypoint",
+			source:   `//! policy.entrypoints = "scan_vulnerabilities"` + "\n[]",
+			wantFail: true,
+			wantText: `invalid entrypoint "scan_vulnerabilities"`,
+		},
+		{
+			name:   "metadata Deputy recognizes",
+			source: `//! policy.mode = "advisory"` + "\n[]",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(tc.source)
+			if err != nil {
+				t.Fatalf("marshal source: %v", err)
+			}
+			dir := t.TempDir()
+			in := filepath.Join(dir, "in.json")
+			document := `{"schemaVersion":"policy.deputy.sh/v1alpha1","policies":[{"name":"p","source":` + string(body) + `}]}`
+			if err := os.WriteFile(in, []byte(document), 0o600); err != nil {
+				t.Fatalf("write bundle: %v", err)
+			}
+			out := filepath.Join(dir, "out.json")
+
+			root := &cobra.Command{Use: "deputy"}
+			root.AddCommand(newPolicyBundleCommand())
+			var stdout bytes.Buffer
+			root.SetOut(&stdout)
+			root.SetErr(&stdout)
+			root.SetArgs([]string{"bundle", "--output", out, in})
+			err = root.Execute()
+
+			if !tc.wantFail {
+				if err != nil {
+					t.Fatalf("bundling a policy Deputy accepts failed: %v\n%s", err, stdout.String())
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected bundling to be refused, output:\n%s", stdout.String())
+			}
+			if !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("error %q should name the offending value as %q", err, tc.wantText)
+			}
+			// A refused bundle must not leave an artifact behind: a file that would
+			// not load is worse on disk than absent, since the next reader trusts it.
+			if _, statErr := os.Stat(out); statErr == nil {
+				t.Fatalf("a refused bundle still wrote %s", out)
 			}
 		})
 	}

@@ -392,13 +392,13 @@ func newPolicyLintCommand() *cobra.Command {
 // a compiled bundle holds one source per policy it was built from.
 //
 // The metadata check is the engine's own (policy.ValidateSourceMetadata) rather than
-// a second reading of it. Checking only the CEL let lint certify an artifact the
-// loader refuses: a compiled bundle carrying `//! policy.mode = advsiory` reported
-// OK and then failed to load in production, and a lint that passes what the loader
-// rejects is worse than no lint, since it is Deputy telling an operator their policy
-// is fine. An authored bundle reaches these vocabularies through the node walk
-// instead (see policy.ValidateBundle), which is why this is the compiled and raw
-// paths only.
+// a second reading of it, and it is here for the raw source lint reads off stdin,
+// which is the one source that reaches this without a loader having refused it
+// already. A loaded source is checked as it is loaded, and an authored bundle
+// reaches the same vocabularies through the node walk (see policy.ValidateBundle),
+// so every path lint takes asks what loading the source to run it asks. Checking
+// only the CEL let lint certify an artifact the loader refuses, which is worse than
+// no lint: it is Deputy telling an operator their policy is fine.
 func lintSources(sources []policy.Source, extraVars []string) error {
 	for _, src := range sources {
 		if err := policy.Compile(src.Body, extraVars); err != nil {

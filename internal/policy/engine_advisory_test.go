@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -197,6 +198,80 @@ func TestValidateSourceMetadataAgreesWithNewEngine(t *testing.T) {
 			}
 			if !strings.Contains(validateErr.Error(), src.Name) {
 				t.Fatalf("error %q should name the policy it refuses", validateErr)
+			}
+		})
+	}
+}
+
+// TestLoadSourcesRefusesMetadataInEitherFormat pins that loading a bundle means the
+// same thing in both formats it can be written in. An authored policy's mode and
+// entrypoints are fields, refused while the policy expands; a compiled policy's are
+// `//!` comments, and nothing read them, so the loader accepted a compiled bundle
+// that NewEngine then refused to load.
+//
+// That asymmetry is what let three readers wave the same artifact through: lint
+// certified it, `policy bundle` repackaged it, and only the engine said no. The
+// check belongs on the loader because that is where every reader of a compiled
+// bundle passes.
+func TestLoadSourcesRefusesMetadataInEitherFormat(t *testing.T) {
+	compiled := func(source string) string {
+		body, err := json.Marshal(source)
+		if err != nil {
+			t.Fatalf("marshal source: %v", err)
+		}
+		return `{"schemaVersion":"policy.deputy.sh/v1alpha1","policies":[{"name":"p","source":` + string(body) + `}]}`
+	}
+	cases := []struct {
+		name     string
+		document string
+		wantErr  string
+	}{
+		{
+			name:     "an authored bundle whose mode is misspelled",
+			document: "policies:\n  - name: p\n    mode: advsiory\n    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n",
+			wantErr:  `invalid mode "advsiory"`,
+		},
+		{
+			name:     "a compiled bundle whose mode is misspelled",
+			document: compiled("//! policy.mode = advsiory\n[]"),
+			wantErr:  `invalid mode "advsiory"`,
+		},
+		{
+			name:     "an authored bundle whose entrypoint is misspelled",
+			document: "policies:\n  - name: p\n    entrypoints: [\"scan_vulnerabilities\"]\n    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n",
+			wantErr:  `invalid entrypoint "scan_vulnerabilities"`,
+		},
+		{
+			name:     "a compiled bundle whose entrypoint is misspelled",
+			document: compiled(`//! policy.entrypoints = "scan_vulnerabilities"` + "\n[]"),
+			wantErr:  `invalid entrypoint "scan_vulnerabilities"`,
+		},
+		{
+			name:     "an authored bundle whose metadata is right",
+			document: "policies:\n  - name: p\n    mode: advisory\n    entrypoints: [\"scan_vulnerability\"]\n    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n",
+		},
+		{
+			name:     "a compiled bundle whose metadata is right",
+			document: compiled(`//! policy.mode = "advisory"` + "\n" + `//! policy.entrypoints = "scan_vulnerability"` + "\n[]"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sources, err := LoadSourcesFromBytes([]byte(tc.document), "b")
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("loading a bundle Deputy accepts failed: %v", err)
+				}
+				if _, err := NewEngine(sources); err != nil {
+					t.Fatalf("a loaded bundle has to build an engine: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("the loader accepted a bundle the engine refuses, got %d sources", len(sources))
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error %q should name the offending value as %q", err, tc.wantErr)
 			}
 		})
 	}

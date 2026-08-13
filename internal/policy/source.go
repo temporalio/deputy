@@ -82,10 +82,24 @@ func LoadSourcesFromBytes(data []byte, path string) ([]Source, error) {
 			if name == "" {
 				name = filepath.Base(path)
 			}
-			sources = append(sources, Source{
+			src := Source{
 				Name: fmt.Sprintf("%s::%s", path, name),
 				Body: p.Source,
-			})
+			}
+			// A compiled policy carries its mode and entrypoints as `//!` comments,
+			// and the authored branch below refuses a value outside either vocabulary
+			// while it expands the policy, so refusing one here is what makes loading
+			// a bundle mean the same thing in both of the formats this reads.
+			//
+			// This is the one place every reader of a compiled bundle passes through,
+			// which is why the check belongs here: each caller compiled the CEL and
+			// stopped, so `policy lint` certified a bundle declaring `advsiory` and
+			// `policy bundle` repackaged it, both of them producing an artifact
+			// NewEngine refuses to load.
+			if err := ValidateSourceMetadata(src); err != nil {
+				return nil, err
+			}
+			sources = append(sources, src)
 		}
 		return sources, nil
 	}

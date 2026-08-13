@@ -95,13 +95,15 @@ func sourceMetadata(src Source) (policyMetadata, error) {
 // engine refuses when it loads the source, naming the policy and the offending
 // value. A source it accepts is one NewEngine will not reject over its metadata.
 //
-// It exists for a reader that checks a source without running it, which is lint. A
-// compiled bundle carries its policies as compiled CEL with their metadata in `//!`
-// comments, so compiling the CEL is the only question lint used to ask of one: a
-// bundle declaring `advsiory` linted OK and then failed to load in production,
-// which is the mistake lint exists to catch first. Both readers go through
-// sourceMetadata rather than each reading the metadata, so lint cannot come to
-// certify an artifact the engine refuses.
+// It exists for a reader that has a source but is not about to run it: the loader,
+// which refuses a compiled bundle carrying metadata the engine will not load (see
+// LoadSourcesFromBytes), and lint, for the raw source it reads off stdin without a
+// loader. A compiled policy carries its metadata as `//!` comments, so compiling the
+// CEL was the only question either of them asked of one, and a bundle declaring
+// `advsiory` linted OK, repackaged, and then failed to load in production.
+//
+// Every reader goes through sourceMetadata rather than reading the metadata itself,
+// so a check added at the engine boundary is a check they all make.
 func ValidateSourceMetadata(src Source) error {
 	_, err := sourceMetadata(src)
 	return err
