@@ -17,6 +17,17 @@ func Used() string { return "used" }
 // reported: an in-package test lives inside the boundary an unexport draws.
 func Local() string { return "local" }
 
+// ForSDKOnly is referenced from the module-root sdk/ tree and from nowhere else.
+// It carries the invariant that an excluded tree still contributes references:
+// the exclusion decides whose surface is audited, not which references count, so
+// this must not be reported. A case written against a symbol main also uses
+// would pass whether or not sdk/ was scanned at all.
+func ForSDKOnly() string { return "sdk" }
+
+// ForExampleOnly is the same invariant for examples/, the other module-root tree
+// the audit excludes from findings.
+func ForExampleOnly() string { return "example" }
+
 // NamedInString is referenced nowhere, but its name appears in a string
 // literal below, which is a reason to doubt the finding.
 func NamedInString() string { return "named" }
