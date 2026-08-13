@@ -126,15 +126,23 @@ policies:
         remediation: "You can only diff resources within your tenant namespace"
 
   # A target that does not name the resource it fetches cannot be authorized by
-  # matching its string. Three shapes do that. Git drops a URL fragment, so
-  # "https://github.com/other/repo.git#/acme/x" reads as belonging to acme and
-  # clones other/repo.git. A query does the same. And a dot segment is resolved
-  # by whatever normalizes the path, so "https://github.com/acme/../other/repo"
-  # matches "/acme/" and can fetch "/other/repo".
+  # matching its string, so refuse those rather than trying to match them.
   #
-  # Refusing these is what makes the matching rules above sound. The alternative
-  # is enumerating the positions a tenant name can hide in, which is what the
-  # four earlier revisions of those rules each tried.
+  # Git drops a URL fragment, so "https://github.com/other/repo.git#/acme/x"
+  # reads as belonging to acme and clones other/repo.git. A query does the same.
+  # A dot segment is resolved by whatever normalizes the path, so
+  # "https://github.com/acme/../other/repo" matches "/acme/" and fetches
+  # "/other/repo". And percent-encoding hides all of it from a string
+  # comparison: "%2e%2e" is a dot segment the predicate cannot see, and the
+  # policy has no business decoding what the fetch will decode differently.
+  #
+  # The dot-segment test compares whole components rather than searching for the
+  # characters, so "repo..archive" is a legitimate name and stays allowed. That
+  # distinction is the point: earlier revisions of these rules kept enumerating
+  # the positions a tenant name could hide in, and each new position was another
+  # bypass. Authorizing only targets whose string is what gets fetched is the
+  # shape that ends that. Parsing the target properly is the real answer, and it
+  # belongs in the engine rather than in a policy expression.
   - name: reject-unauthorizable-targets
     description: |
       Deputy also rejects fragments during remote target validation. This rule
@@ -152,9 +160,11 @@ policies:
         when: |
           request.?target.orValue("").contains("#") ||
           request.?target.orValue("").contains("?") ||
-          request.?target.orValue("").contains("..")
-        reason: "Target must not carry a URL fragment, query, or dot segment"
-        remediation: "Name the resource directly, without a #fragment, ?query, or .. path segment"
+          request.?target.orValue("").contains("%") ||
+          ("/" + request.?target.orValue("").replace(":", "/"))
+            .split("/").exists(c, c == "..")
+        reason: "Target must name the resource it fetches, without a fragment, query, percent-encoding, or dot segment"
+        remediation: "Name the resource directly: no #fragment, no ?query, no %encoding, and no .. path component"
 
   # Same rule for the two sides of a diff, which request.target does not report.
   - name: reject-unauthorizable-diff-targets
@@ -166,10 +176,11 @@ policies:
           [diff_base, diff_target].exists(t,
             t.display_path.contains("#") ||
             t.display_path.contains("?") ||
-            t.display_path.contains("..")
+            t.display_path.contains("%") ||
+            ("/" + t.display_path.replace(":", "/")).split("/").exists(c, c == "..")
           )
-        reason: "Neither side of a diff may carry a URL fragment, query, or dot segment"
-        remediation: "Name both resources directly, without a #fragment, ?query, or .. path segment"
+        reason: "Both sides of a diff must name the resources they fetch"
+        remediation: "Name both resources directly: no #fragment, no ?query, no %encoding, and no .. path component"
 
   # Require authentication for all operations
   - name: require-authentication

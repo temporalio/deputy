@@ -169,15 +169,6 @@ type oidcIdentity struct {
 
 // oidcIdentities enumerates the providers the federation example gates on.
 func oidcIdentities() []oidcIdentity {
-	// Every service entrypoint except secrets, for the providers whose machine
-	// identities human-require-mfa does not recognize as machines.
-	exceptSecrets := []Entrypoint{
-		EntrypointServiceScanRequest, EntrypointServiceListRequest,
-		EntrypointServiceSBOMRequest, EntrypointServiceDiffRequest,
-		EntrypointServiceGraphRequest,
-	}
-	const mfaGap = "human-require-mfa identifies machine identities by sub prefix (system:, sa:, repo:), so this provider's machine identity is treated as a human without MFA"
-
 	return []oidcIdentity{
 		{
 			provider: "github-actions",
@@ -211,8 +202,6 @@ func oidcIdentities() []oidcIdentity {
 				Iss:          "https://gitlab.com",
 				CustomClaims: map[string]string{"namespace_path": "untrusted", "project_path": "untrusted/repo"},
 			},
-			admitOnly: exceptSecrets,
-			why:       mfaGap,
 		},
 		{
 			provider: "gcp-service-account",
@@ -226,8 +215,6 @@ func oidcIdentities() []oidcIdentity {
 				Iss:          "https://accounts.google.com",
 				CustomClaims: map[string]string{"email": "attacker@untrusted-project.iam.gserviceaccount.com"},
 			},
-			admitOnly: exceptSecrets,
-			why:       mfaGap,
 			// A Google service account subject is a 21-digit account id, and
 			// the payload conversion turns any numeric-looking string into a
 			// number, so kubernetes-namespace-restriction calls .startsWith on
@@ -246,8 +233,6 @@ func oidcIdentities() []oidcIdentity {
 				Sub:          "arn:aws:sts::999999999999:assumed-role/attacker",
 				CustomClaims: map[string]string{"amr": "[arn:aws:sts::999999999999:assumed-role/attacker]"},
 			},
-			admitOnly: exceptSecrets,
-			why:       mfaGap,
 		},
 		{
 			provider: "azure-ad",
@@ -267,8 +252,6 @@ func oidcIdentities() []oidcIdentity {
 					"oid": "ffffffff-ffff-ffff-ffff-ffffffffffff", "idtyp": "app",
 				},
 			},
-			admitOnly: exceptSecrets,
-			why:       mfaGap,
 		},
 		{
 			provider: "kubernetes",
@@ -382,6 +365,8 @@ func TestShippedTenantIsolationRejectsUnauthorizableTargets(t *testing.T) {
 		{"query naming the tenant", "https://github.com/other/repo.git?path=/acme/x"},
 		{"dot segment leaving the tenant", "https://github.com/acme/../other/repo"},
 		{"dot segments deeper in the path", "https://github.com/acme/group/../../other/repo"},
+		{"percent-encoded dot segment", "https://gitlab.com/acme/%2e%2e/other/repo"},
+		{"percent-encoded separator", "https://github.com/acme%2f..%2fother/repo"},
 	}
 
 	for _, ep := range EntrypointsService {
@@ -498,6 +483,143 @@ func TestShippedOIDCFederationTrustsWhatItsGatesAccept(t *testing.T) {
 			build := serviceRequestInput[EntrypointServiceScanRequest]
 			input := build(tt.jwt, "/deputy.scan.v1.ScanService/ScanDirectory", "github.com/acme-security/scanner")
 			actions, err := engine.EvaluateAll(t.Context(), input, "server", string(EntrypointServiceScanRequest))
+			if err != nil {
+				t.Fatalf("EvaluateAll: %v", err)
+			}
+			denied, by := false, ""
+			for _, action := range actions {
+				if ActionTypeIs(action.Type, ActionDeny) {
+					denied, by = true, action.Source+": "+action.Reason
+				}
+			}
+			if denied != tt.wantDenied {
+				t.Errorf("denied = %v (%s), want %v", denied, by, tt.wantDenied)
+			}
+		})
+	}
+}
+
+// TestShippedTenantIsolationAdmitsLegitimateNames tests the direction a refusal
+// rule can quietly get wrong.
+//
+// The rule that refuses targets Deputy cannot authorize by string comparison
+// searched for the characters ".." anywhere in the target, which rejects a
+// repository legitimately named "repo..archive". A guard has two failure modes
+// and testing what it catches says nothing about what it wrongly catches, so
+// both belong here. The dot-segment test now compares whole path components.
+func TestShippedTenantIsolationAdmitsLegitimateNames(t *testing.T) {
+	sources, err := LoadSources([]string{findExample(t, "service-multi-tenant.yaml")})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	engine, err := NewEngine(sources)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	targets := []struct {
+		name   string
+		target string
+	}{
+		{"dots inside a component", "github.com/acme/repo..archive"},
+		{"a trailing dotted name", "github.com/acme/repo.archive"},
+		{"a dotted namespace the tenant owns", "github.com/acme/group.v2/repo"},
+		{"an ordinary repository", "github.com/acme/repo"},
+		{"a tagged image the tenant owns", "ghcr.io/acme/app:v1.2.3"},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.name, func(t *testing.T) {
+			jwt := &policyv1.JWTClaims{
+				Sub: "user@example.com",
+				CustomClaims: map[string]string{
+					"tenant": "acme",
+					"roles":  "[scanner security]",
+					"teams":  "[security platform]",
+					"scopes": "[scan sbom secrets]",
+				},
+			}
+			build := serviceRequestInput[EntrypointServiceScanRequest]
+			input := build(jwt, "/deputy.scan.v1.ScanService/ScanDirectory", tc.target)
+			actions, err := engine.EvaluateAll(t.Context(), input, "server", string(EntrypointServiceScanRequest))
+			if err != nil {
+				t.Fatalf("EvaluateAll: %v", err)
+			}
+			for _, action := range actions {
+				if ActionTypeIs(action.Type, ActionDeny) {
+					t.Errorf("target %q was denied by %s: %s. It belongs to the tenant and names the resource it fetches, so refusing it makes the example reject legitimate repositories", tc.target, action.Source, action.Reason)
+				}
+			}
+		})
+	}
+}
+
+// TestShippedOIDCFederationStillChallengesHumans tests the direction that
+// widening a machine exemption can quietly break.
+//
+// human-require-mfa exempts identities it recognizes as machines, and the list
+// of recognized shapes grew so that GitLab, Google, AWS, and Azure machine
+// identities stopped being denied unconditionally at the secrets entrypoint.
+// An exemption list that grows too far stops challenging the people it exists
+// for, so both halves belong in a test: a human without a factor is still
+// refused, and a human with one still gets through.
+func TestShippedOIDCFederationStillChallengesHumans(t *testing.T) {
+	sources, err := LoadSources([]string{findExample(t, "service-oidc-federation.yaml")})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	engine, err := NewEngine(sources)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		claims     map[string]string
+		sub        string
+		iss        string
+		wantDenied bool
+	}{
+		{
+			name:       "human in an authorized group without a factor",
+			sub:        "alice@acme-corp.com",
+			iss:        "https://acme.okta.com",
+			claims:     map[string]string{"email": "alice@acme-corp.com", "groups": "[security-team]"},
+			wantDenied: true,
+		},
+		{
+			name:       "human in an authorized group with a hardware factor",
+			sub:        "alice@acme-corp.com",
+			iss:        "https://acme.okta.com",
+			claims:     map[string]string{"email": "alice@acme-corp.com", "groups": "[security-team]", "amr": "[pwd hwk]"},
+			wantDenied: false,
+		},
+		{
+			// A subject that looks like a GitLab job but is not from GitLab must
+			// not inherit the machine exemption, since the prefix is a name any
+			// issuer can mint.
+			name:       "GitLab-shaped subject from another issuer",
+			sub:        "project_path:acme/scanner:ref_type:branch:ref:main",
+			iss:        "https://acme.okta.com",
+			claims:     map[string]string{"email": "attacker@acme-corp.com", "groups": "[security-team]"},
+			wantDenied: true,
+		},
+		{
+			// Same for a service account email presented by another issuer.
+			name:       "service-account email from another issuer",
+			sub:        "attacker",
+			iss:        "https://acme.okta.com",
+			claims:     map[string]string{"email": "deputy-scanner@acme-prod.iam.gserviceaccount.com", "groups": "[security-team]"},
+			wantDenied: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jwt := &policyv1.JWTClaims{Sub: tt.sub, Iss: tt.iss, CustomClaims: tt.claims}
+			build := serviceRequestInput[EntrypointServiceSecretsRequest]
+			input := build(jwt, "/deputy.secrets.v1.SecretsService/ScanDirectory", "github.com/acme-corp/repo")
+			actions, err := engine.EvaluateAll(t.Context(), input, "server", string(EntrypointServiceSecretsRequest))
 			if err != nil {
 				t.Fatalf("EvaluateAll: %v", err)
 			}
