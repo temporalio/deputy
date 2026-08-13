@@ -1,8 +1,11 @@
 package surface
 
 import (
+	"context"
+	"errors"
 	"go/types"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -412,6 +415,49 @@ func TestForeignContractLookupIsLoud(t *testing.T) {
 	quiet := &dynamic{byMethod: map[string][]contract{}}
 	if err := quiet.addForeignContracts(loaded, map[string][]string{"database/sql": {"Absent"}}); err != nil {
 		t.Errorf("addForeignContracts for a package the graph lacks = %v, want nil", err)
+	}
+}
+
+// TestAssetScanHonorsCancellation pins the one phase that can run long after
+// the package load has finished. A signal-backed context has to be able to stop
+// the asset walk, or an audit interrupted on a large repository keeps reading
+// files and then prints a report for a run the user asked to end.
+//
+// The live case is half the test: a scan that stops for a context nobody
+// canceled would satisfy the assertion above while destroying the evidence
+// every "named as a string" doubt rests on.
+func TestAssetScanHonorsCancellation(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "policy.cel"), []byte("NamedOnlyInAnAsset"), 0o600); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		cancel   bool
+		wantErr  error
+		wantToks int
+	}{
+		{name: "canceled before the walk", cancel: true, wantErr: context.Canceled, wantToks: 0},
+		{name: "live context scans the tree", cancel: false, wantErr: nil, wantToks: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tt.cancel {
+				cancel()
+			}
+
+			d := &dynamic{tokens: map[string]string{}}
+			err := d.addAssets(ctx, dir)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("addAssets error = %v, want %v", err, tt.wantErr)
+			}
+			if got := len(d.tokens); got != tt.wantToks {
+				t.Errorf("tokens = %d, want %d: %v", got, tt.wantToks, d.tokens)
+			}
+		})
 	}
 }
 
