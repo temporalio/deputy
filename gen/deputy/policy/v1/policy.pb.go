@@ -1464,7 +1464,13 @@ type DiffDependencyChangePolicyInput struct {
 	// Change is the current dependency change.
 	Change *DependencyChange `protobuf:"bytes,1,opt,name=change,proto3" json:"change,omitempty"`
 	// Env provides execution environment context.
-	Env           *Environment `protobuf:"bytes,2,opt,name=env,proto3" json:"env,omitempty"`
+	Env *Environment `protobuf:"bytes,2,opt,name=env,proto3" json:"env,omitempty"`
+	// Repo is the repository the diff was taken in.
+	Repo string `protobuf:"bytes,3,opt,name=repo,proto3" json:"repo,omitempty"`
+	// BaseRef is the git ref the comparison starts from.
+	BaseRef string `protobuf:"bytes,4,opt,name=base_ref,json=baseRef,proto3" json:"base_ref,omitempty"`
+	// TargetRef is the git ref compared against the base.
+	TargetRef     string `protobuf:"bytes,5,opt,name=target_ref,json=targetRef,proto3" json:"target_ref,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1513,6 +1519,27 @@ func (x *DiffDependencyChangePolicyInput) GetEnv() *Environment {
 	return nil
 }
 
+func (x *DiffDependencyChangePolicyInput) GetRepo() string {
+	if x != nil {
+		return x.Repo
+	}
+	return ""
+}
+
+func (x *DiffDependencyChangePolicyInput) GetBaseRef() string {
+	if x != nil {
+		return x.BaseRef
+	}
+	return ""
+}
+
+func (x *DiffDependencyChangePolicyInput) GetTargetRef() string {
+	if x != nil {
+		return x.TargetRef
+	}
+	return ""
+}
+
 // DiffVulnerabilityPolicyInput is the input for the diff_vulnerability entrypoint.
 // Evaluated for each vulnerability that changed between refs.
 type DiffVulnerabilityPolicyInput struct {
@@ -1522,7 +1549,13 @@ type DiffVulnerabilityPolicyInput struct {
 	// ChangeKind indicates if this is "added" or "removed".
 	ChangeKind string `protobuf:"bytes,2,opt,name=change_kind,json=changeKind,proto3" json:"change_kind,omitempty"`
 	// Env provides execution environment context.
-	Env           *Environment `protobuf:"bytes,3,opt,name=env,proto3" json:"env,omitempty"`
+	Env *Environment `protobuf:"bytes,3,opt,name=env,proto3" json:"env,omitempty"`
+	// Repo is the repository the diff was taken in.
+	Repo string `protobuf:"bytes,4,opt,name=repo,proto3" json:"repo,omitempty"`
+	// BaseRef is the git ref the comparison starts from.
+	BaseRef string `protobuf:"bytes,5,opt,name=base_ref,json=baseRef,proto3" json:"base_ref,omitempty"`
+	// TargetRef is the git ref compared against the base.
+	TargetRef     string `protobuf:"bytes,6,opt,name=target_ref,json=targetRef,proto3" json:"target_ref,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1576,6 +1609,27 @@ func (x *DiffVulnerabilityPolicyInput) GetEnv() *Environment {
 		return x.Env
 	}
 	return nil
+}
+
+func (x *DiffVulnerabilityPolicyInput) GetRepo() string {
+	if x != nil {
+		return x.Repo
+	}
+	return ""
+}
+
+func (x *DiffVulnerabilityPolicyInput) GetBaseRef() string {
+	if x != nil {
+		return x.BaseRef
+	}
+	return ""
+}
+
+func (x *DiffVulnerabilityPolicyInput) GetTargetRef() string {
+	if x != nil {
+		return x.TargetRef
+	}
+	return ""
 }
 
 // ContainerDiffReportPolicyInput is the input for the container_diff_report entrypoint.
@@ -4667,15 +4721,23 @@ const file_deputy_policy_v1_policy_proto_rawDesc = "" +
 	"changeKind\x12!\n" +
 	"\fbase_version\x18\x03 \x01(\tR\vbaseVersion\x12%\n" +
 	"\x0etarget_version\x18\x04 \x01(\tR\rtargetVersion\x12\x1b\n" +
-	"\tis_direct\x18\x05 \x01(\bR\bisDirect\"\x8e\x01\n" +
+	"\tis_direct\x18\x05 \x01(\bR\bisDirect\"\xdc\x01\n" +
 	"\x1fDiffDependencyChangePolicyInput\x12:\n" +
 	"\x06change\x18\x01 \x01(\v2\".deputy.policy.v1.DependencyChangeR\x06change\x12/\n" +
-	"\x03env\x18\x02 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\"\xb8\x01\n" +
+	"\x03env\x18\x02 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\x12\x12\n" +
+	"\x04repo\x18\x03 \x01(\tR\x04repo\x12\x19\n" +
+	"\bbase_ref\x18\x04 \x01(\tR\abaseRef\x12\x1d\n" +
+	"\n" +
+	"target_ref\x18\x05 \x01(\tR\ttargetRef\"\x86\x02\n" +
 	"\x1cDiffVulnerabilityPolicyInput\x12F\n" +
 	"\rvulnerability\x18\x01 \x01(\v2 .deputy.vulnerability.v1.FindingR\rvulnerability\x12\x1f\n" +
 	"\vchange_kind\x18\x02 \x01(\tR\n" +
 	"changeKind\x12/\n" +
-	"\x03env\x18\x03 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\"\xe3\x03\n" +
+	"\x03env\x18\x03 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\x12\x12\n" +
+	"\x04repo\x18\x04 \x01(\tR\x04repo\x12\x19\n" +
+	"\bbase_ref\x18\x05 \x01(\tR\abaseRef\x12\x1d\n" +
+	"\n" +
+	"target_ref\x18\x06 \x01(\tR\ttargetRef\"\xe3\x03\n" +
 	"\x1eContainerDiffReportPolicyInput\x12Q\n" +
 	"\x0fpackage_changes\x18\x01 \x03(\v2(.deputy.policy.v1.ContainerPackageChangeR\x0epackageChanges\x12c\n" +
 	"\x15vulnerability_changes\x18\x02 \x03(\v2..deputy.policy.v1.ContainerVulnerabilityChangeR\x14vulnerabilityChanges\x12L\n" +

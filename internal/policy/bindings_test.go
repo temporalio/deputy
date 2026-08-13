@@ -297,3 +297,49 @@ func TestServiceEntrypointBindingsMatchTheirPayloads(t *testing.T) {
 		})
 	}
 }
+
+// TestDiffProfilesMatchTheirInputMessages tests that a variable a diff binding
+// profile advertises is declared by the proto message that documents the same
+// entrypoint.
+//
+// The two contracts diverged in both directions on this branch. The report
+// message declared two Target fields no caller populated, and both diff
+// profiles advertised the refs while neither message declared them, so
+// schema-driven tooling and CEL disagreed about the same entrypoint. Deriving
+// the profile from the descriptor is the end state and needs an import cycle
+// resolved first, so until then this test keeps the two hand-written lists in
+// agreement.
+func TestDiffProfilesMatchTheirInputMessages(t *testing.T) {
+	tests := []struct {
+		entrypoint Entrypoint
+		message    proto.Message
+	}{
+		{EntrypointDiffReport, &policyv1.DiffReportPolicyInput{}},
+		{EntrypointDiffVulnerability, &policyv1.DiffVulnerabilityPolicyInput{}},
+		{EntrypointDiffDependencyChange, &policyv1.DiffDependencyChangePolicyInput{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.entrypoint), func(t *testing.T) {
+			declared := map[string]bool{}
+			fields := tt.message.ProtoReflect().Descriptor().Fields()
+			for i := range fields.Len() {
+				declared[string(fields.Get(i).Name())] = true
+			}
+
+			profile := GetBindingProfile(tt.entrypoint)
+			for _, name := range append(append([]string{}, profile.Required...), profile.Optional...) {
+				// pkg and dependency are aliases the payload adds for
+				// consistency with scan and fix entrypoints, so they have no
+				// field of their own.
+				if name == "pkg" || name == "dependency" {
+					continue
+				}
+				if !declared[name] {
+					t.Errorf("profile advertises %q, which %s does not declare: a policy derived from the proto sees a different surface than CEL binds",
+						name, tt.message.ProtoReflect().Descriptor().FullName())
+				}
+			}
+		})
+	}
+}
