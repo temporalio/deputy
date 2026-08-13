@@ -55,26 +55,56 @@ func NewEngine(sources []Source) (*Engine, error) {
 		if err != nil {
 			return nil, err
 		}
-		meta := parsePolicyMetadata(src.Body)
-
-		// Validate entrypoints at load time - reject unknown entrypoints
-		if err := validateEntrypoints(meta.Entrypoints, src.Name); err != nil {
-			return nil, err
-		}
-		mode, err := declaredMode(meta.Mode, src.Name)
+		meta, err := sourceMetadata(src)
 		if err != nil {
 			return nil, err
 		}
-
 		compiled = append(compiled, compiledPolicy{
 			source:      src,
 			program:     prog,
 			entrypoints: collections.NewSetFunc(meta.Entrypoints, strings.TrimSpace),
 			commands:    collections.NewSetFunc(meta.Commands, NormalizeCommand),
-			mode:        mode,
+			mode:        meta.Mode,
 		})
 	}
 	return &Engine{compiled: compiled}, nil
+}
+
+// sourceMetadata reads the `//!` metadata a policy source declares and refuses the
+// closed vocabularies it gets wrong. It is the load-time boundary of the engine:
+// evaluation reads the mode to decide whether to downgrade a denial and the
+// entrypoints to decide whether to run the policy at all, so a spelling Deputy does
+// not recognize would silently change what the policy does rather than fail.
+//
+// The mode it returns is canonical, so every later reader compares it without
+// repeating the normalization.
+func sourceMetadata(src Source) (policyMetadata, error) {
+	meta := parsePolicyMetadata(src.Body)
+	if err := validateEntrypoints(meta.Entrypoints, src.Name); err != nil {
+		return policyMetadata{}, err
+	}
+	mode, err := declaredMode(meta.Mode, src.Name)
+	if err != nil {
+		return policyMetadata{}, err
+	}
+	meta.Mode = mode
+	return meta, nil
+}
+
+// ValidateSourceMetadata reports the metadata a policy source declares that the
+// engine refuses when it loads the source, naming the policy and the offending
+// value. A source it accepts is one NewEngine will not reject over its metadata.
+//
+// It exists for a reader that checks a source without running it, which is lint. A
+// compiled bundle carries its policies as compiled CEL with their metadata in `//!`
+// comments, so compiling the CEL is the only question lint used to ask of one: a
+// bundle declaring `advsiory` linted OK and then failed to load in production,
+// which is the mistake lint exists to catch first. Both readers go through
+// sourceMetadata rather than each reading the metadata, so lint cannot come to
+// certify an artifact the engine refuses.
+func ValidateSourceMetadata(src Source) error {
+	_, err := sourceMetadata(src)
+	return err
 }
 
 // declaredMode returns the canonical form of the mode a policy source declares,

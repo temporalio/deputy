@@ -102,6 +102,13 @@ checked like any other.
 An optional field written as an explicit null (`mode:`, `mode: null`, `mode:
 ~`) is read as unset, exactly as loading the bundle reads it.
 
+A compiled bundle and a raw CEL source are checked for more than their CEL. Each
+carries its `policy.mode` and `policy.entrypoints` as `//!` metadata comments,
+naming the same closed vocabularies an authored bundle names as fields, so lint
+refuses a value the engine refuses when it loads the source. A misspelled
+`advsiory` is caught here rather than at load time in production, because a lint
+that passes an artifact the loader rejects is worse than no lint.
+
 ```
 deputy policy lint <policy.yaml> [policy2.yaml ...]
 ```

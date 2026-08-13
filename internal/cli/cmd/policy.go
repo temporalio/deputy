@@ -349,18 +349,18 @@ func newPolicyLintCommand() *cobra.Command {
 					if err != nil {
 						return err
 					}
-					if err := compileSources(sources, extraVars); err != nil {
+					if err := lintSources(sources, extraVars); err != nil {
 						return err
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
 					continue
 				}
-				// Raw CEL. Stdin is compiled as the one source it is, while a file is
-				// loaded, since it may hold several.
+				// Raw CEL. Stdin is checked as the one source it is, while a file is
+				// loaded, since it may hold several. Both go through lintSources, so a
+				// source piped in is asked the same questions as the identical file.
 				if path == "-" {
-					if err := policy.Compile(string(data), extraVars); err != nil {
-						known := append(policy.DefaultVariableNames(), extraVars...)
-						return fmt.Errorf("%s: %s", path, formatCelCompileError(err, string(data), known))
+					if err := lintSources([]policy.Source{{Name: path, Body: string(data)}}, extraVars); err != nil {
+						return err
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
 					continue
@@ -369,7 +369,7 @@ func newPolicyLintCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := compileSources(sources, extraVars); err != nil {
+				if err := lintSources(sources, extraVars); err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
@@ -384,15 +384,29 @@ func newPolicyLintCommand() *cobra.Command {
 	return cmd
 }
 
-// compileSources compiles every source a policy file loaded into, stopping at
-// the first that does not compile and rendering it with the caret snippet lint
-// uses for a condition. A file may hold several policies, and a compiled bundle
-// holds one source per policy it was built from.
-func compileSources(sources []policy.Source, extraVars []string) error {
+// lintSources checks every source a policy file loaded into the way loading it to
+// run it does: the CEL has to compile, and the `//!` metadata beside it has to name
+// vocabularies Deputy recognizes. It stops at the first source that fails, in the
+// order the engine asks the same two questions, and renders a compiler failure with
+// the caret snippet lint uses for a condition. A file may hold several policies, and
+// a compiled bundle holds one source per policy it was built from.
+//
+// The metadata check is the engine's own (policy.ValidateSourceMetadata) rather than
+// a second reading of it. Checking only the CEL let lint certify an artifact the
+// loader refuses: a compiled bundle carrying `//! policy.mode = advsiory` reported
+// OK and then failed to load in production, and a lint that passes what the loader
+// rejects is worse than no lint, since it is Deputy telling an operator their policy
+// is fine. An authored bundle reaches these vocabularies through the node walk
+// instead (see policy.ValidateBundle), which is why this is the compiled and raw
+// paths only.
+func lintSources(sources []policy.Source, extraVars []string) error {
 	for _, src := range sources {
 		if err := policy.Compile(src.Body, extraVars); err != nil {
 			known := append(policy.DefaultVariableNames(), extraVars...)
 			return fmt.Errorf("%s: %s", src.Name, formatCelCompileError(err, src.Body, known))
+		}
+		if err := policy.ValidateSourceMetadata(src); err != nil {
+			return err
 		}
 	}
 	return nil

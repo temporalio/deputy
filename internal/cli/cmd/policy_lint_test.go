@@ -2,12 +2,15 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 // runPolicyLint writes a bundle to a temp file, lints it, and returns the
@@ -601,6 +604,86 @@ func TestPolicyLintAgreesAcrossStdinAndPath(t *testing.T) {
 			gotBody := strings.ReplaceAll(stdinOut, "stdin", "")
 			if wantBody != gotBody {
 				t.Fatalf("reports differ:\n path: %q\nstdin: %q", wantBody, gotBody)
+			}
+		})
+	}
+}
+
+// TestPolicyLintRefusesMetadataTheEngineRefuses pins that lint asks a compiled
+// bundle, and a raw source, the metadata questions loading one to run it asks. A
+// compiled bundle holds its policies as compiled CEL with their `//!` metadata in
+// comments, so compiling the CEL was the only question lint put to one: a bundle
+// declaring `advsiory` reported OK and then failed to load, and a misspelled mode is
+// exactly the mistake lint exists to catch before production does. A lint that
+// passes an artifact the loader rejects is worse than no lint.
+//
+// The valid spellings are here too, so the refusal cannot pass by rejecting
+// everything, and `deputy policy bundle` output still has to lint clean (see
+// TestPolicyLintAcceptsCompiledBundle).
+func TestPolicyLintRefusesMetadataTheEngineRefuses(t *testing.T) {
+	compiled := func(source string) string {
+		body, err := json.Marshal(source)
+		if err != nil {
+			t.Fatalf("marshal source: %v", err)
+		}
+		return `{"schemaVersion":"policy.deputy.sh/v1alpha1","policies":[{"name":"p","source":` + string(body) + `}]}`
+	}
+	cases := []struct {
+		name     string
+		document string
+		wantFail bool
+		wantText []string
+	}{
+		{
+			name:     "a compiled bundle whose mode is misspelled",
+			document: compiled("//! policy.mode = advsiory\n[]"),
+			wantFail: true,
+			wantText: []string{`invalid mode "advsiory"`, "advisory|enforce"},
+		},
+		{
+			name:     "a compiled bundle whose entrypoint is misspelled",
+			document: compiled(`//! policy.entrypoints = "scan_vulnerabilities"` + "\n[]"),
+			wantFail: true,
+			wantText: []string{`invalid entrypoint "scan_vulnerabilities"`},
+		},
+		{
+			name:     "a compiled bundle whose metadata is right",
+			document: compiled(`//! policy.mode = "advisory"` + "\n" + `//! policy.entrypoints = "scan_vulnerability"` + "\n[]"),
+			wantText: []string{"OK"},
+		},
+		{
+			name:     "a compiled bundle declaring no metadata",
+			document: compiled("[]"),
+			wantText: []string{"OK"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := runPolicyLint(t, tc.document)
+			if tc.wantFail && err == nil {
+				t.Fatalf("expected lint to refuse what the engine refuses, got:\n%s", out)
+			}
+			if !tc.wantFail && err != nil {
+				t.Fatalf("lint failed unexpectedly: %v\n%s", err, out)
+			}
+			reported := out
+			if err != nil {
+				reported += err.Error()
+			}
+			for _, want := range tc.wantText {
+				if !strings.Contains(reported, want) {
+					t.Fatalf("output missing %q:\n%s", want, reported)
+				}
+			}
+			// Whatever lint says, the engine has to agree: that equivalence is the
+			// whole point of the check, and it is what the fix restored.
+			sources, loadErr := policy.LoadSourcesFromBytes([]byte(tc.document), "b.json")
+			if loadErr != nil {
+				t.Fatalf("LoadSourcesFromBytes: %v", loadErr)
+			}
+			_, engineErr := policy.NewEngine(sources)
+			if (err == nil) != (engineErr == nil) {
+				t.Fatalf("lint and the engine disagree: lint=%v, NewEngine=%v", err, engineErr)
 			}
 		})
 	}

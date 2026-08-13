@@ -130,3 +130,74 @@ func TestStructuredPolicyModeAdvisory(t *testing.T) {
 		t.Fatalf("expected warn, got %+v", acts)
 	}
 }
+
+// TestValidateSourceMetadataAgreesWithNewEngine pins the equivalence a reader that
+// checks a source without running it depends on: ValidateSourceMetadata accepts a
+// source exactly when NewEngine will not reject it over its metadata, with the same
+// wording.
+//
+// Lint is that reader. A compiled bundle carries its policies as compiled CEL with
+// their metadata in `//!` comments, so compiling the CEL used to be the only question
+// lint asked of one, and a bundle declaring `advsiory` reported OK and then failed to
+// load in production. Both readers now go through one function, and this is what
+// keeps a check added to the engine boundary from being a check lint does not make.
+func TestValidateSourceMetadataAgreesWithNewEngine(t *testing.T) {
+	// Every body compiles, so the only thing either reader can object to is the
+	// metadata above it.
+	cases := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name:    "a misspelled mode",
+			body:    "//! policy.mode = advsiory\n[]",
+			wantErr: `invalid mode "advsiory"`,
+		},
+		{
+			name:    "a mode outside the vocabulary",
+			body:    "//! policy.mode = \"audit\"\n[]",
+			wantErr: `invalid mode "audit"`,
+		},
+		{
+			name:    "a misspelled entrypoint",
+			body:    "//! policy.entrypoints = \"scan_vulnerabilities\"\n[]",
+			wantErr: `invalid entrypoint "scan_vulnerabilities"`,
+		},
+		{name: "no metadata at all", body: "[]"},
+		{name: "an advisory mode", body: "//! policy.mode = \"advisory\"\n[]"},
+		{name: "an enforce mode", body: "//! policy.mode = \"enforce\"\n[]"},
+		{name: "a known entrypoint", body: "//! policy.entrypoints = \"scan_vulnerability\"\n[]"},
+		{name: "a name and a description only", body: "//! policy.name = \"p\"\n//! policy.description = \"d\"\n[]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := Source{Name: "b.json::p", Body: tc.body}
+			// The body compiling is what makes this a question about metadata: a
+			// reader that stopped at the CEL would agree by accident otherwise.
+			if err := Compile(src.Body, nil); err != nil {
+				t.Fatalf("the body should compile, so the metadata is the only thing left to refuse: %v", err)
+			}
+			validateErr := ValidateSourceMetadata(src)
+			_, engineErr := NewEngine([]Source{src})
+			if (validateErr == nil) != (engineErr == nil) {
+				t.Fatalf("the two readers disagree: ValidateSourceMetadata=%v, NewEngine=%v", validateErr, engineErr)
+			}
+			if tc.wantErr == "" {
+				if validateErr != nil {
+					t.Fatalf("expected the source to be accepted, got %v", validateErr)
+				}
+				return
+			}
+			if !strings.Contains(validateErr.Error(), tc.wantErr) {
+				t.Fatalf("error %q should name the offending value as %q", validateErr, tc.wantErr)
+			}
+			if validateErr.Error() != engineErr.Error() {
+				t.Fatalf("the two readers word one refusal differently: %q and %q", validateErr, engineErr)
+			}
+			if !strings.Contains(validateErr.Error(), src.Name) {
+				t.Fatalf("error %q should name the policy it refuses", validateErr)
+			}
+		})
+	}
+}
