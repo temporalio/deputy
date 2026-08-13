@@ -81,6 +81,15 @@ type Tagged struct {
 	Name string `json:"name"`
 }
 
+// NotAProto declares a method named ProtoReflect that returns a string, so it
+// satisfies protobuf's message contract in name only. Nothing registers it and
+// nothing can reach it through the proto registry, so it must not be called a
+// protobuf message.
+type NotAProto struct{}
+
+// ProtoReflect has protobuf's method name and none of its signature.
+func (NotAProto) ProtoReflect() string { return "not a message" }
+
 // ConstraintReached satisfies the constraint on ifaces.RunConstrained. No named
 // interface in the fixture declares a Constrained method, so the doubt on its
 // method can only come from the constraint.
