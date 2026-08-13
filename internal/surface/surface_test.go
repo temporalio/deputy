@@ -65,6 +65,7 @@ func TestAuditedPackagesExcludeGeneratedAndPublicTrees(t *testing.T) {
 		"fixture/internal/ifaces",
 		"fixture/internal/initonly",
 		"fixture/internal/orphan",
+		"fixture/internal/registered",
 		"fixture/internal/testonly",
 		"fixture/internal/used",
 	}
@@ -165,9 +166,10 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	// Every exported declaration under internal/, and nothing from the excluded
 	// trees: 14 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
 	// Orphaned, ForForeignTests, ForOwnBlackBoxTest, Run, Make, RunAnon,
-	// RunStringish, RunConstrained, Awkward), 19 types (Never, Stringish, Decoy,
+	// RunStringish, RunConstrained, Awkward), 20 types (Never, Stringish, Decoy,
 	// Scannable, Tagged, Handled, AnonReached, ConstraintReached, NotAProto,
-	// testonly.Shared, testonly.Decoyed, testonly.Holder, ifaces.Shared plus 6
+	// registered.BlankImportedOnly, testonly.Shared, testonly.Decoyed, testonly.Holder,
+	// ifaces.Shared plus 6
 	// interfaces), and 18 methods (Never.Method, Stringish.String, Decoy.Read,
 	// Scannable.Scan, Holder.Shared, AnonReached.Anon,
 	// ConstraintReached.Constrained, NotAProto.ProtoReflect, the four Handled
@@ -176,7 +178,7 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	// type declared inside used.localTagged is not one either.
 	want := map[SymbolKind]int{
 		KindFunc:   14,
-		KindType:   19,
+		KindType:   20,
 		KindMethod: 18,
 		KindVar:    0,
 		KindConst:  0,
@@ -191,6 +193,34 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 			if strings.Contains(f.Package, excluded) {
 				t.Errorf("reported %s.%s from the excluded %s tree", f.Package, f.Name, excluded)
 			}
+		}
+	}
+}
+
+// TestBlankImportIsNotASymbolDoubt pins which question a blank import answers.
+// It answers check 1: the package is reached, so it is not an unreachable-package
+// finding. It says nothing about the package's exports, because the registration
+// a blank import triggers runs inside the package, and nobody who blank-imports it
+// can name an export at all. Treating it as a symbol doubt marked the safest
+// unexport candidates in the repository as the ones to leave alone.
+func TestBlankImportIsNotASymbolDoubt(t *testing.T) {
+	report := analyzeFixture(t)
+
+	// main blank-imports this package, so its export is reachable by nobody and
+	// carries no other signal: the finding has to come back clean.
+	provider, ok := findSymbol(report, "fixture/internal/registered", "BlankImportedOnly")
+	if !ok {
+		t.Fatal("registered.BlankImportedOnly was not reported")
+	}
+	if !certain(provider.Doubts) {
+		t.Errorf("registered.BlankImportedOnly doubts = %v, want none", provider.Doubts)
+	}
+
+	// The other half: being blank-imported still keeps the package itself out of
+	// the unreachable-package findings, which is the one thing it does prove.
+	for _, got := range report.Packages {
+		if strings.HasSuffix(filepath.ToSlash(got.Dir), "internal/registered") {
+			t.Errorf("registered was reported unreachable, but main imports it for its side effects")
 		}
 	}
 }

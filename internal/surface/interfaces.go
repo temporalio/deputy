@@ -161,7 +161,7 @@ func (p *program) unusedInterfaces() ([]InterfaceFinding, int) {
 			Methods:  c.iface.NumMethods(),
 			Roles:    slices.Sorted(maps.Keys(roles[key])),
 			Reach:    reach[key],
-			Doubts:   p.dyn.interfaceDoubts(c.name, c.pkg),
+			Doubts:   p.dyn.interfaceDoubts(c.name),
 		})
 	}
 	slices.SortFunc(out, func(a, b InterfaceFinding) int {
