@@ -14,19 +14,32 @@ import (
 // package nothing reaches fails CI instead of passing unnoticed.
 const BaselinePath = "internal/surface/testdata/unreachable.txt"
 
+// baselineRemedy is what to do about a package nothing imports. Recording it is
+// not on the list, and stating that once is what keeps the file a ratchet: an
+// entry added for a newly orphaned package makes the check pass without the
+// package being wired up or deleted, which is the one edit that turns the
+// baseline from a shrinking record into a place to park dead code.
+const baselineRemedy = "wire it up or delete it"
+
+// baselineCommand regenerates the file. It belongs only in the message about an
+// entry that is no longer unreachable, because shrinking the baseline is the
+// only edit the ratchet accepts; offering it for a new orphan offers the remedy
+// [baselineRemedy] rules out.
+const baselineCommand = "go run ./internal/surface/cmd -baseline"
+
 // baselineHeader explains the file to whoever opens it after a failing test.
-const baselineHeader = `# Packages under internal/ that no other package imports, as measured by
+var baselineHeader = fmt.Sprintf(`# Packages under internal/ that no other package imports, as measured by
 # go/types. Each entry is code only its own tests reach, which is why
 # unused-symbol analysis does not flag it.
 #
-# This file is generated. Regenerate it with:
+# This file is generated, and regenerating it is how an entry leaves:
 #
-#	go run ./internal/surface/cmd -baseline
+#	%s
 #
 # Entries should only ever be removed. A new entry means a package was added
-# or orphaned with nothing importing it; wire it up or delete it rather than
-# recording it here.
-`
+# or orphaned with nothing importing it; %s
+# rather than recording it here.
+`, baselineCommand, baselineRemedy)
 
 // WriteBaseline writes the report's unreachable packages to path.
 func WriteBaseline(path string, r *Report) error {
