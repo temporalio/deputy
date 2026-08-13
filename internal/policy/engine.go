@@ -15,6 +15,8 @@ import (
 	"github.com/temporalio/deputy/internal/otel"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
 // Evaluator is the interface for evaluating policies against a payload.
@@ -390,8 +392,9 @@ func ProtoToMap(msg proto.Message) (map[string]any, error) {
 	if err := dec.Decode(&result); err != nil {
 		return nil, fmt.Errorf("unmarshal json: %w", err)
 	}
-	// Convert json.Number to proper numeric types for CEL
-	convertJSONNumbers(result)
+	// Give CEL numbers where the schema declares numbers, using the message
+	// descriptor rather than the shape of each value.
+	result = convertPayloadNumbers(result, msg.ProtoReflect().Descriptor())
 	// Remove null values so has() checks work correctly.
 	// EmitUnpopulated emits nil message fields as null, but CEL's has() returns
 	// true for keys that exist with null values, causing subsequent field access
@@ -400,50 +403,217 @@ func ProtoToMap(msg proto.Message) (map[string]any, error) {
 	return result, nil
 }
 
-// convertJSONNumbers recursively converts json.Number and numeric strings to
-// int64 or float64 for proper CEL numeric comparison. Protojson serializes
-// int64 as quoted strings to avoid JavaScript precision issues, but CEL needs
-// proper numeric types.
-func convertJSONNumbers(v any) {
-	switch val := v.(type) {
-	case map[string]any:
-		for k, elem := range val {
-			val[k] = convertNumericValue(elem)
-			convertJSONNumbers(val[k])
+// Well-known types whose protojson form the walk cannot read off a field kind.
+// Timestamp, Duration, FieldMask and the string-ish wrappers are absent because
+// they render as JSON strings, which the walk already leaves alone.
+const (
+	wktAny         protoreflect.FullName = "google.protobuf.Any"
+	wktStruct      protoreflect.FullName = "google.protobuf.Struct"
+	wktValue       protoreflect.FullName = "google.protobuf.Value"
+	wktListValue   protoreflect.FullName = "google.protobuf.ListValue"
+	wktInt64Value  protoreflect.FullName = "google.protobuf.Int64Value"
+	wktUint64Value protoreflect.FullName = "google.protobuf.UInt64Value"
+)
+
+// convertPayloadNumbers rewrites the numbers in doc, the protojson document for
+// md, so CEL sees a number wherever the schema declares one. It dispatches on md
+// rather than walking doc's keys directly, because a message with a JSON form of
+// its own (a Struct, or an Any) is a document whose keys are not its fields.
+//
+// protojson quotes the 64-bit integer kinds (int64, uint64, sint64, sfixed64,
+// fixed64) so they survive JavaScript's 53-bit floats, so those are the only
+// strings in the document that carry a number, and the only ones parsed back.
+// Every field the descriptor calls a string stays a string, however numeric its
+// contents look: a version of "1.20", a 21-digit account id, or base64 bytes
+// that happen to be all digits. Consulting the declared type is what keeps a
+// policy comparing such a field to a string literal working, and parsing by
+// shape instead is lossy in a way nothing downstream can repair ("1.20" becomes
+// 1.2). json.Number values become int64 or float64 because CEL cannot compare a
+// json.Number.
+func convertPayloadNumbers(doc map[string]any, md protoreflect.MessageDescriptor) map[string]any {
+	converted, ok := convertMessageNumbers(doc, md).(map[string]any)
+	if !ok {
+		return doc
+	}
+	return converted
+}
+
+// convertMessageFields converts each field of doc, an ordinary protojson object
+// for md.
+func convertMessageFields(doc map[string]any, md protoreflect.MessageDescriptor) {
+	fields := md.Fields()
+	for key, val := range doc {
+		fd := fields.ByTextName(key)
+		if fd == nil {
+			fd = fields.ByJSONName(key)
 		}
-	case []any:
-		for i, elem := range val {
-			val[i] = convertNumericValue(elem)
-			convertJSONNumbers(val[i])
+		if fd == nil {
+			// An extension, the "@type" of an Any, or a key from a newer
+			// schema. Leave it as protojson wrote it: guessing is the defect
+			// this walk exists to remove.
+			continue
 		}
+		doc[key] = convertFieldNumbers(val, fd)
 	}
 }
 
-// convertNumericValue converts json.Number or numeric strings to native Go numbers.
-func convertNumericValue(elem any) any {
-	switch v := elem.(type) {
-	case json.Number:
-		// Try int64 first, fall back to float64
-		if i, err := v.Int64(); err == nil {
-			return i
+// convertFieldNumbers converts one field's protojson value. Cardinality is
+// resolved first because a list holds element values and a map holds its value
+// type's values, so it is the element kind that decides, never the field's own
+// shape.
+func convertFieldNumbers(v any, fd protoreflect.FieldDescriptor) any {
+	switch {
+	case fd.IsMap():
+		entries, ok := v.(map[string]any)
+		if !ok {
+			return v
 		}
-		if f, err := v.Float64(); err == nil {
-			return f
+		// A JSON object key is always a string, so only the map's value type
+		// can carry a number.
+		value := fd.MapValue()
+		for key, elem := range entries {
+			entries[key] = convertSingularNumbers(elem, value)
 		}
-	case string:
-		// Protojson serializes int64/uint64 as quoted strings.
-		// Try to parse as int64 first (handles most cases), then float64.
-		if len(v) > 0 && (v[0] == '-' || (v[0] >= '0' && v[0] <= '9')) {
-			// Looks like it might be a number, try parsing
-			if i, err := strconv.ParseInt(v, 10, 64); err == nil {
-				return i
-			}
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
-				return f
-			}
+		return entries
+	case fd.IsList():
+		elems, ok := v.([]any)
+		if !ok {
+			return v
 		}
+		for i, elem := range elems {
+			elems[i] = convertSingularNumbers(elem, fd)
+		}
+		return elems
+	default:
+		return convertSingularNumbers(v, fd)
 	}
-	return elem
+}
+
+// convertSingularNumbers converts a single value of fd's declared type, which
+// for a repeated or map field is one element rather than the whole field.
+func convertSingularNumbers(v any, fd protoreflect.FieldDescriptor) any {
+	switch fd.Kind() {
+	case protoreflect.MessageKind, protoreflect.GroupKind:
+		return convertMessageNumbers(v, fd.Message())
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind,
+		protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		return parseQuotedInteger(v)
+	case protoreflect.StringKind, protoreflect.BytesKind, protoreflect.BoolKind:
+		// A declared string stays a string, and so does the base64 text of a
+		// bytes field.
+		return v
+	default:
+		// The 32-bit integer kinds, float, double, and enums (UseEnumNumbers)
+		// all arrive as JSON numbers.
+		return convertJSONNumber(v)
+	}
+}
+
+// convertMessageNumbers converts the protojson value of a message-typed field,
+// whose descriptor decides how protojson rendered it.
+func convertMessageNumbers(v any, md protoreflect.MessageDescriptor) any {
+	if md == nil {
+		return v
+	}
+	switch md.FullName() {
+	case wktStruct, wktValue, wktListValue:
+		// JSON with no schema behind it: a number is a number and a string is a
+		// string, whatever either looks like.
+		return convertSchemalessNumbers(v)
+	case wktAny:
+		return convertAnyNumbers(v)
+	case wktInt64Value, wktUint64Value:
+		// protojson quotes a wrapped 64-bit integer exactly as it quotes a bare
+		// one.
+		return parseQuotedInteger(v)
+	}
+	doc, ok := v.(map[string]any)
+	if !ok {
+		// Timestamp, Duration, FieldMask and the string-ish wrappers render as
+		// JSON strings, the numeric wrappers as JSON numbers, and an unset
+		// message field as null.
+		return convertJSONNumber(v)
+	}
+	convertMessageFields(doc, md)
+	return doc
+}
+
+// convertAnyNumbers converts a google.protobuf.Any document. protojson writes
+// the payload's fields beside an "@type" key, or under a "value" key when the
+// payload has a JSON form of its own, so the payload's descriptor is what
+// decides how to read either shape.
+func convertAnyNumbers(v any) any {
+	doc, ok := v.(map[string]any)
+	if !ok {
+		return convertJSONNumber(v)
+	}
+	url, _ := doc["@type"].(string)
+	mt, err := protoregistry.GlobalTypes.FindMessageByURL(url)
+	if err != nil || mt == nil {
+		// A payload this binary does not link: repair the JSON numbers CEL
+		// cannot read and leave every string alone.
+		return convertSchemalessNumbers(doc)
+	}
+	md := mt.Descriptor()
+	if inner, ok := doc["value"]; ok && md.Fields().ByTextName("value") == nil {
+		doc["value"] = convertMessageNumbers(inner, md)
+		return doc
+	}
+	convertMessageFields(doc, md)
+	return doc
+}
+
+// convertSchemalessNumbers converts the json.Number values in a document no
+// descriptor describes (a Struct, Value or ListValue field, or an Any whose
+// payload type is not registered), leaving every string untouched.
+func convertSchemalessNumbers(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		for key, elem := range val {
+			val[key] = convertSchemalessNumbers(elem)
+		}
+		return val
+	case []any:
+		for i, elem := range val {
+			val[i] = convertSchemalessNumbers(elem)
+		}
+		return val
+	default:
+		return convertJSONNumber(v)
+	}
+}
+
+// convertJSONNumber converts a json.Number to the int64 or float64 CEL can
+// compare, preferring int64. Any other value is returned unchanged.
+func convertJSONNumber(v any) any {
+	n, ok := v.(json.Number)
+	if !ok {
+		return v
+	}
+	if i, err := n.Int64(); err == nil {
+		return i
+	}
+	if f, err := n.Float64(); err == nil {
+		return f
+	}
+	return v
+}
+
+// parseQuotedInteger parses the string protojson writes for a 64-bit integer
+// field. A uint64 above the int64 range has no CEL integer to land in and
+// becomes a float64, which is lossy but is the only value CEL can hold.
+func parseQuotedInteger(v any) any {
+	s, ok := v.(string)
+	if !ok {
+		return convertJSONNumber(v)
+	}
+	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return i
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f
+	}
+	return v
 }
 
 // removeNullValues recursively removes null values from maps.
