@@ -617,9 +617,21 @@ func (d *dynamic) addAssets(ctx context.Context, root string) error {
 		if !assetExtensions[strings.ToLower(filepath.Ext(name))] {
 			return nil
 		}
-		info, statErr := entry.Info()
+		// Stat rather than entry.Info, and require a regular file. entry.Info
+		// describes the directory entry itself, so for a symlink it reports the
+		// size of the link and not of what os.ReadFile below would actually read:
+		// a committed symlink to a large file passes a limit measured in bytes of
+		// path. Size is also the wrong question for a FIFO, which reports zero and
+		// would then block the audit forever. Deputy answers this the same way
+		// wherever it reads a path it did not choose, by insisting on a regular
+		// file first.
+		info, statErr := os.Stat(path)
 		if statErr != nil {
 			d.skipAsset(path, root, fmt.Sprintf("could not be measured (%v), so the names it contains were not collected", statErr))
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			d.skipAsset(path, root, fmt.Sprintf("is not a regular file (mode %s), so it was not read", info.Mode().Type()))
 			return nil
 		}
 		if info.Size() > maxAssetBytes {
