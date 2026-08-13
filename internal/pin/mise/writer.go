@@ -398,19 +398,63 @@ func replaceVersionInValueTargeting(toolKey, value string, currents []string, pi
 		return value, false
 	}
 	if strings.Contains(token, "\n") {
-		// A multi-line string spread over several lines cannot be swapped for
-		// a single-line token: the caller splices the replacement back only
-		// when the line count matches, and forcing it would leave the tail of
-		// the string stranded as a bare line that no TOML parser will read.
-		// Refuse, so the caller reports an unapplied update instead of
-		// corrupting a config mise reads perfectly well.
-		return value, false
+		// A line-spanning token is rewritten inside its own delimiters rather
+		// than swapped for a single-line one: the caller splices the
+		// replacement back only when the line count matches, and a swap would
+		// leave the tail of the string stranded as a bare line that no TOML
+		// parser will read.
+		newToken, ok := replaceMultilineVersionToken(toolKey, token, currents, pinned)
+		if !ok {
+			return value, false
+		}
+		newValue := lead + newToken + trail
+		return newValue, newValue != value
 	}
 	if !selectorTargetsCurrent(toolKey, valueText(token), currents) {
 		return value, false
 	}
 	newValue := lead + `"` + pinned + `"` + trail
 	return newValue, newValue != value
+}
+
+// replaceMultilineVersionToken rewrites the version held by a multi-line TOML
+// string, keeping the delimiters and the lines the declaration occupies:
+// `go = """` then `1.22.12"""` becomes `go = """` then `1.24.3"""`. mise resolves
+// such a declaration and Deputy reports the tool at that version, so a finding
+// against it has to be applicable. Refusing left Deputy recommending an
+// executable fix that could only fail at apply time, with nothing for the user to
+// do but edit by hand, and swapping the token for a single-line one would strand
+// the rest of the string on a line of its own.
+//
+// Only a string whose text between the delimiters is exactly the version it
+// declares is rewritten. That is what keeps the edit clear of the rules this
+// function does not implement: an escape, a backslash line continuation, or a
+// quote adjacent to the delimiter all make the value TOML decodes differ from the
+// text that spells it, and rewriting that text by hand could change the value in
+// ways nobody asked for. Such a token keeps the old refusal, so the caller reports
+// an unapplied update rather than corrupting a config mise reads perfectly well.
+func replaceMultilineVersionToken(toolKey, token string, currents []string, pinned string) (string, bool) {
+	if !mise.IsMultilineStringOpener(token, 0) || len(token) < 6 {
+		return token, false
+	}
+	declared := valueText(token)
+	if declared == "" || !selectorTargetsCurrent(toolKey, declared, currents) {
+		return token, false
+	}
+	openDelim, closeDelim := token[:3], token[len(token)-3:]
+	inner := token[3 : len(token)-3]
+	start := 0
+	for start < len(inner) && isTomlSpace(inner[start]) {
+		start++
+	}
+	end := len(inner)
+	for end > start && isTomlSpace(inner[end-1]) {
+		end--
+	}
+	if inner[start:end] != declared {
+		return token, false
+	}
+	return openDelim + inner[:start] + pinned + inner[end:] + closeDelim, true
 }
 
 // splitScalarValue splits a TOML scalar value (the text after `=`) into its

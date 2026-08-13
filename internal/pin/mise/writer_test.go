@@ -1596,16 +1596,23 @@ func TestPinArrayOfTableDeclarations(t *testing.T) {
 	}
 }
 
-// TestRewriteRefusesLineSpanningVersionToken pins the fail-closed half of
-// multi-line string handling. TOML lets a version token run across lines
-// (`go = """` then `1.22.12"""`), and mise 2026.7.3 resolves that to 1.22.12,
-// but the token cannot be swapped for a single-line one without changing how
-// many lines the declaration occupies. Reading only the first line instead
-// replaces the opening delimiter and leaves the rest of the string stranded as
-// a bare line, turning a valid config into one no parser will read: a silent
-// corruption reported as success. The rewriter must decline the edit and leave
-// the file byte-for-byte alone.
-func TestRewriteRefusesLineSpanningVersionToken(t *testing.T) {
+// TestRewriteLineSpanningVersionToken pins how a version token that runs across
+// lines is handled. TOML lets a declaration be written that way (`go = """` then
+// `1.22.12"""`), mise 2026.7.3 resolves it to 1.22.12, and Deputy reports the tool
+// at that version, so a finding against it is one Deputy promises an executable
+// fix for. Refusing the edit made that promise impossible to keep: `fix --apply`
+// could only report "could not rewrite", leaving the user to edit by hand.
+//
+// The token is therefore rewritten inside its own delimiters, which keeps the
+// declaration on the same number of lines. Swapping it for a single-line token is
+// what must not happen: that strands the rest of the string as a bare line and
+// turns a valid config into one no parser will read.
+//
+// A token whose text is not exactly the version it declares keeps the old
+// refusal. A backslash line continuation makes the value TOML decodes differ from
+// the text that spells it, and rewriting that text could change the value in ways
+// nobody asked for, so the caller reports an unapplied update instead.
+func TestRewriteLineSpanningVersionToken(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -1614,24 +1621,47 @@ func TestRewriteRefusesLineSpanningVersionToken(t *testing.T) {
 		// currents is the finding's known vulnerable versions; nil is the
 		// pinning path, which targets whatever is declared.
 		currents []string
+		// want is the file after the rewrite. Empty means the rewrite must be
+		// refused and the file left byte-for-byte alone.
+		want string
 	}{
 		{
 			name:     "multiline basic string, targeted",
 			input:    "[tools]\ngo = \"\"\"\n1.22.12\"\"\"\n",
 			currents: []string{"1.22.12"},
+			want:     "[tools]\ngo = \"\"\"\n1.24.3\"\"\"\n",
 		},
 		{
 			name:  "multiline basic string, pinning",
 			input: "[tools]\ngo = \"\"\"\n1.22.12\"\"\"\n",
+			want:  "[tools]\ngo = \"\"\"\n1.24.3\"\"\"\n",
 		},
 		{
 			name:     "multiline literal string, targeted",
 			input:    "[tools]\ngo = '''\n1.22.12'''\n",
 			currents: []string{"1.22.12"},
+			want:     "[tools]\ngo = '''\n1.24.3'''\n",
 		},
 		{
 			name:  "multiline literal string, pinning",
 			input: "[tools]\ngo = '''\n1.22.12'''\n",
+			want:  "[tools]\ngo = '''\n1.24.3'''\n",
+		},
+		{
+			// A comment after the closing delimiter is trivia around the token,
+			// so it survives like any other.
+			name:     "a comment after the closing delimiter",
+			input:    "[tools]\ngo = \"\"\"\n1.22.12\"\"\" # pinned by hand\n",
+			currents: []string{"1.22.12"},
+			want:     "[tools]\ngo = \"\"\"\n1.24.3\"\"\" # pinned by hand\n",
+		},
+		{
+			// A line continuation swallows the newline and the indentation after
+			// it, so the text between the delimiters is not the version: TOML
+			// reads 1.22.12 from characters spread across two lines.
+			name:     "a backslash line continuation is refused",
+			input:    "[tools]\ngo = \"\"\"\n1.22.\\\n12\"\"\"\n",
+			currents: []string{"1.22.12"},
 		},
 	}
 
@@ -1640,7 +1670,7 @@ func TestRewriteRefusesLineSpanningVersionToken(t *testing.T) {
 			t.Parallel()
 
 			// The case only proves something if the parser reads the
-			// declaration, so the rewriter is refusing a real one.
+			// declaration, so the rewriter is acting on a real one.
 			cfg, err := mise.Parse("mise.toml", []byte(tt.input))
 			if err != nil {
 				t.Fatalf("mise.Parse: %v", err)
@@ -1662,18 +1692,42 @@ func TestRewriteRefusesLineSpanningVersionToken(t *testing.T) {
 			}
 			defer root.Close()
 
-			if err := RewriteToolVersion(root, "mise.toml", "go", tt.currents, "1.24.3"); err == nil {
-				t.Error("expected the line-spanning version token to be refused")
-			}
+			rewriteErr := RewriteToolVersion(root, "mise.toml", "go", tt.currents, "1.24.3")
 			got, err := os.ReadFile(configPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(got) != tt.input {
-				t.Errorf("refused rewrite still changed the file:\n--- got ---\n%s\n--- want ---\n%s", got, tt.input)
+			if tt.want == "" {
+				if rewriteErr == nil {
+					t.Error("expected a token that does not spell its own version to be refused")
+				}
+				if string(got) != tt.input {
+					t.Errorf("refused rewrite still changed the file:\n--- got ---\n%s\n--- want ---\n%s", got, tt.input)
+				}
+			} else {
+				if rewriteErr != nil {
+					t.Fatalf("RewriteToolVersion: %v", rewriteErr)
+				}
+				if string(got) != tt.want {
+					t.Errorf("rewrite mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+				}
+				// The point of rewriting in place: mise reads the new version
+				// from a file whose declaration still spans the same lines.
+				after, err := mise.Parse("mise.toml", got)
+				if err != nil {
+					t.Fatalf("config no longer parses after the rewrite: %v", err)
+				}
+				if !slices.ContainsFunc(after.Tools, func(s mise.ToolSpec) bool {
+					return s.Key == "go" && slices.Equal(s.Versions, []string{"1.24.3"})
+				}) {
+					t.Errorf("the rewritten config does not declare go@1.24.3: %+v", after.Tools)
+				}
 			}
 			if _, err := mise.Parse("mise.toml", got); err != nil {
-				t.Errorf("config no longer parses after a refused rewrite: %v", err)
+				t.Errorf("config no longer parses: %v", err)
+			}
+			if wantLines, gotLines := strings.Count(tt.input, "\n"), strings.Count(string(got), "\n"); wantLines != gotLines {
+				t.Errorf("line count changed from %d to %d:\n%s", wantLines, gotLines, got)
 			}
 		})
 	}
