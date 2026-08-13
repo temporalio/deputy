@@ -967,6 +967,19 @@ func inspectPolicyPath(w io.Writer, path string) error {
 		return err
 	}
 	if bundle, ok := policy.ParseBundle(data); ok {
+		// Describing a bundle is not the same question as loading one, and inspect
+		// used to answer only the first: it read the bundle's shape and reported the
+		// policies it holds, so a bundle whose `//! policy.mode` the loader refuses
+		// was described as if Deputy could run it. Ask the loader for its verdict
+		// before reporting anything, so every command that reads a compiled bundle
+		// agrees about which ones are bundles Deputy will load.
+		//
+		// The shape is still read separately because the loader returns the policy
+		// sources and not the schema version or the generation time, which are what
+		// inspect exists to show.
+		if _, err := policy.LoadSourcesFromBytes(data, path); err != nil {
+			return err
+		}
 		fmt.Fprintf(w, "Bundle: %s\n", path)
 		fmt.Fprintf(w, "  Schema: %s\n", bundle.SchemaVersion)
 		if bundle.Generated != "" {

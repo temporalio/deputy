@@ -764,3 +764,82 @@ func TestPolicyBundleRefusesMetadataTheEngineRefuses(t *testing.T) {
 		})
 	}
 }
+
+// TestPolicyInspectRefusesMetadataTheEngineRefuses pins that describing a compiled
+// bundle and loading one agree about which bundles Deputy will load. Inspect read
+// the bundle's shape and reported the policies it holds, which is a different
+// question from whether the loader accepts it, so it described a bundle declaring
+// `advsiory` as if it would run and exited 0. That is the same defect as a lint or a
+// writer waving one through, reached from the command whose whole job is to tell an
+// operator what an artifact is.
+//
+// A bundle Deputy accepts still has to be described in full, since refusing to
+// describe anything would satisfy the first half of this and be useless.
+func TestPolicyInspectRefusesMetadataTheEngineRefuses(t *testing.T) {
+	cases := []struct {
+		name     string
+		source   string
+		wantFail bool
+		wantText string
+	}{
+		{
+			name:     "a misspelled mode",
+			source:   "//! policy.mode = advsiory\n[]",
+			wantFail: true,
+			wantText: `invalid mode "advsiory"`,
+		},
+		{
+			name:     "a misspelled entrypoint",
+			source:   `//! policy.entrypoints = "scan_vulnerabilities"` + "\n[]",
+			wantFail: true,
+			wantText: `invalid entrypoint "scan_vulnerabilities"`,
+		},
+		{
+			name:     "metadata Deputy recognizes",
+			source:   `//! policy.mode = "advisory"` + "\n[]",
+			wantText: "described",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(tc.source)
+			if err != nil {
+				t.Fatalf("marshal source: %v", err)
+			}
+			path := filepath.Join(t.TempDir(), "bundle.json")
+			document := `{"schemaVersion":"policy.deputy.sh/v1alpha1","generated":"2026-01-01T00:00:00Z","policies":[{"name":"p","source":` + string(body) + `}]}`
+			if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+				t.Fatalf("write bundle: %v", err)
+			}
+
+			var out bytes.Buffer
+			err = inspectPolicyPath(&out, path)
+
+			if !tc.wantFail {
+				if err != nil {
+					t.Fatalf("inspecting a bundle Deputy accepts failed: %v\n%s", err, out.String())
+				}
+				// The fields inspect exists to show come from the bundle's shape
+				// rather than from its sources, so asking the loader for a verdict
+				// must not cost any of them.
+				for _, want := range []string{"policy.deputy.sh/v1alpha1", "2026-01-01T00:00:00Z", "p"} {
+					if !strings.Contains(out.String(), want) {
+						t.Fatalf("inspect output should still report %q, got:\n%s", want, out.String())
+					}
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected inspect to refuse a bundle the loader refuses, got:\n%s", out.String())
+			}
+			if !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("error %q should name the offending value as %q", err, tc.wantText)
+			}
+			// Reporting nothing is what keeps a refusal from reading as a
+			// description with a warning attached.
+			if out.Len() != 0 {
+				t.Fatalf("a refused bundle should be described as nothing, got:\n%s", out.String())
+			}
+		})
+	}
+}
