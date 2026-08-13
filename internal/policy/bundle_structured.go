@@ -3,6 +3,7 @@ package policy
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -243,9 +244,21 @@ func (p structuredPolicy) metadata() (Metadata, error) {
 		seenCommands[normalized] = struct{}{}
 		meta.Commands = append(meta.Commands, normalized)
 	}
-	normalizedEcosystems, err := validateEcosystems(p.Ecosystems)
+	normalizedEcosystems, unrecognizedEcosystems, err := validateEcosystems(p.Ecosystems)
 	if err != nil {
 		return Metadata{}, err
+	}
+	// Reported rather than refused: the value may be an ecosystem a scanner
+	// produces and Deputy holds no registration for, such as an OS package
+	// ecosystem, or it may be a typo. Neither can be told from the other by
+	// looking at the string, and only one of them is worth failing a load over.
+	// See [validateEcosystems].
+	if len(unrecognizedEcosystems) > 0 {
+		slog.Warn("policy names ecosystems deputy does not recognize; each will match only if a scanner reports exactly that value",
+			"policy", p.Name,
+			"ecosystems", unrecognizedEcosystems,
+			"known", AllowedEcosystems(),
+		)
 	}
 	meta.Ecosystems = normalizedEcosystems
 	if p.Mode != "" {
@@ -268,8 +281,9 @@ func (p structuredPolicy) toCELSource() (string, error) {
 	// Scope guards are generated from canonical tokens, because the payload a
 	// rule is evaluated against has already been canonicalized (see
 	// [canonicalizeEcosystemPayload]); an authored display spelling would
-	// compile into a guard that never matches.
-	ecosystems, err := validateEcosystems(p.Ecosystems)
+	// compile into a guard that never matches. An unrecognized value is folded
+	// and kept here too, and reported once by [structuredPolicy.metadata].
+	ecosystems, _, err := validateEcosystems(p.Ecosystems)
 	if err != nil {
 		return "", err
 	}
