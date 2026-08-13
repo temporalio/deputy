@@ -14,12 +14,14 @@ go run ./internal/surface/cmd
 # Per-symbol detail before unexporting anything in a package
 go run ./internal/surface/cmd -pkg vulnerability/weakness/cwe
 
-# Machine-readable, for filtering with jq
+# Dump the report for filtering with jq
 go run ./internal/surface/cmd -json
 
 # Rewrite the unreachable-package baseline after wiring up or deleting a package
 go run ./internal/surface/cmd -baseline
 ```
+
+`-json` dumps the in-process `surface.Report` keyed by Go field name. It is a reading aid, not an interface: nothing versions it, and renaming a field renames a key. That is deliberate rather than an oversight. Deputy defines its cross-surface output in proto because those consumers are versioned separately from the producer, and this one is not: the only readers are this repository's developers, running the tool from the same commit it lives in. The output that is pinned is the text baseline (`internal/surface/testdata/unreachable.txt`), which a test compares against. If something ever needs to consume the audit rather than read it (a CI gate that fails on a count, another tool ingesting findings), that consumer is what makes this a contract, and the contract belongs in proto with everything else.
 
 ## What it checks
 

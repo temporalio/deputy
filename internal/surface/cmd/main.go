@@ -6,13 +6,22 @@
 // Run it from anywhere in the repository:
 //
 //	go run ./internal/surface/cmd              # summary
-//	go run ./internal/surface/cmd -json        # machine-readable
+//	go run ./internal/surface/cmd -json        # dump for ad-hoc filtering
 //	go run ./internal/surface/cmd -pkg auth    # per-symbol detail for a package
 //	go run ./internal/surface/cmd -baseline    # rewrite the unreachable-package baseline
 //
 // Findings the audit has reason to doubt (reflection, encoding, interface
 // dispatch, lookup by name) are reported with those reasons rather than
 // asserted, because a symbol reached dynamically looks identical to a dead one.
+//
+// The -json output is a dump of the in-process [surface.Report], keyed by Go
+// field name. It exists to be piped through jq while reading a run, and it is
+// not a format to write a program against: nothing versions it and it changes
+// with the struct. The one output that is pinned is the text baseline at
+// [surface.BaselinePath], which a test compares against. If something ever needs
+// to consume the audit rather than read it, that consumer makes this a contract,
+// and a contract belongs in proto with the rest of Deputy's cross-surface
+// output.
 package main
 
 import (
@@ -39,7 +48,7 @@ func main() {
 // calling os.Exit from inside the logic.
 func run() error {
 	var (
-		asJSON   = flag.Bool("json", false, "write the report as JSON")
+		asJSON   = flag.Bool("json", false, "dump the report as JSON for ad-hoc filtering; keyed by Go field name and not a stable format")
 		pkg      = flag.String("pkg", "", "print per-symbol detail for packages whose path ends with this suffix")
 		baseline = flag.Bool("baseline", false, "rewrite the unreachable-package baseline the drift test pins")
 	)
