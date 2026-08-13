@@ -235,11 +235,25 @@ func isVendoredManifestPath(p string) bool {
 // proto.ExtractorPackageIsDirect, which keys the scanned package the same way,
 // so both sides build one key.
 //
-// Supported ecosystems:
+// The manifests parsed are exactly [manifestDirectDepParsers] plus go.mod:
 //   - Go (go.mod)
 //   - npm (package.json)
 //   - Cargo (Cargo.toml)
-//   - PyPI (pyproject.toml, setup.py, requirements.txt)
+//   - PyPI (pyproject.toml, requirements.txt)
+//
+// setup.py is not among them. It was listed here and never parsed, so a
+// distribution declared only in install_requires was collected by nothing and
+// read as indirect.
+//
+// Every other ecosystem Deputy inventories (Maven, RubyGems, NuGet, Hex, Pub,
+// CocoaPods, Packagist, Hackage, CRAN, ConanCenter) contributes no key at all, so
+// its packages are absent from the map rather than recorded as indirect. The
+// distinction is invisible downstream: proto.ExtractorPackageIsDirect returns
+// false for a missing key, and a direct-only rule reads that as "not a direct
+// dependency" rather than "not determined for this ecosystem". Those ecosystems
+// that are direct by construction (Docker and OCI base images, GitHub Actions
+// uses, mise and asdf tools) are classified there instead and need no manifest
+// parser here.
 //
 // For Go, this delegates to CollectGoDirectModulesFromWorkspace for its
 // specialized handling of module roots and the stdlib pseudo-dependency.
