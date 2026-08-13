@@ -294,6 +294,67 @@ func TestBundleRoundTripPreservesScoping(t *testing.T) {
 	}
 }
 
+// TestBundleCarriesScopingOnlyAsTypedFields records a decision rather than only
+// a behavior: a compiled bundle states each policy's scoping once, in its entry's
+// fields, and never as `//! policy.*` comments in the CEL body.
+//
+// Emitting the comments as well would let a Deputy built before those fields
+// existed recover the scoping from a bundle built after, because such a build
+// ignores fields it does not know and reads only the body. That trade is refused
+// here. The comment channel is the lossy, one-way mechanism this loader stopped
+// using, and a bundle that states its scoping twice can state it two ways: a
+// hand-edited or merged entry whose comments disagree with its fields would
+// enforce differently on two Deputy versions, silently, with no reader
+// cross-checking them. Every reader that has the schema version check refuses a
+// bundle it cannot read (see TestLoadSourcesRejectsUnreadableBundleVersion), so
+// the exposure is a build older than that check, which no release contains.
+//
+// If that trade is ever revisited, change this test first, deliberately.
+func TestBundleCarriesScopingOnlyAsTypedFields(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	yamlPath := filepath.Join(dir, "policy.yaml")
+	yaml := `policies:
+  - name: scan-only
+    description: Only applies to scan reports
+    entrypoints: [scan_report]
+    commands: [scan]
+    mode: advisory
+    rules:
+      - action: deny
+        when: "true"
+        reason: nope
+`
+	if err := os.WriteFile(yamlPath, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+	bundle, err := BuildBundle([]string{yamlPath})
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	if len(bundle.Policies) != 1 {
+		t.Fatalf("BuildBundle() produced %d entries, want 1", len(bundle.Policies))
+	}
+	entry := bundle.Policies[0]
+	want := Metadata{
+		Name:        "scan-only",
+		Description: "Only applies to scan reports",
+		Entrypoints: []Entrypoint{EntrypointScanReport},
+		Commands:    []string{"scan"},
+		Mode:        ModeAdvisory,
+	}
+	if diff := cmp.Diff(want, entry.Metadata); diff != "" {
+		t.Errorf("bundle entry metadata mismatch (-want +got):\n%s", diff)
+	}
+	// Everything the metadata says must be absent from the program text, so no
+	// reader can be tempted to recover scoping by parsing it.
+	for _, unwanted := range []string{legacyMetadataMarker, "//!", "scan-only", "Only applies to scan reports", "scan_report", "advisory"} {
+		if strings.Contains(entry.Source, unwanted) {
+			t.Errorf("bundle entry source contains %q, which belongs only in the entry's fields:\n%s", unwanted, entry.Source)
+		}
+	}
+}
+
 // TestLoadSourcesRejectsBundleWithCommentMetadata covers the one artifact that
 // can still carry metadata in comments: a JSON bundle compiled before the
 // fields became typed. Loading it would drop its scoping and run the policy
