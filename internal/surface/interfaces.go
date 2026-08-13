@@ -76,6 +76,15 @@ func (p *program) unusedInterfaces() ([]InterfaceFinding, int) {
 	// before its own method signatures.
 	methodSignatures := map[*ast.FuncType]bool{}
 
+	// typeSwitchClauses holds the case clauses that belong to a type switch, which
+	// are the only ones whose expressions are types. An ordinary expression switch
+	// has the same clause node holding values, and reading those as types recorded
+	// an assertion nobody wrote: "switch f { case defaultFormat: }" would report
+	// that something asserts on the interface defaultFormat happens to have. The
+	// same pre-order guarantee applies, so a type switch is seen before its
+	// clauses.
+	typeSwitchClauses := map[*ast.CaseClause]bool{}
+
 	p.files(func(v *variant, file *ast.File) bool {
 		info := v.pkg.TypesInfo
 		typeOf := func(e ast.Expr) types.Type {
@@ -132,7 +141,21 @@ func (p *program) unusedInterfaces() ([]InterfaceFinding, int) {
 				}
 			case *ast.TypeAssertExpr:
 				mention(typeOf(node.Type), roleAssertion)
+			case *ast.TypeSwitchStmt:
+				if node.Body == nil {
+					break
+				}
+				for _, stmt := range node.Body.List {
+					if clause, ok := stmt.(*ast.CaseClause); ok {
+						typeSwitchClauses[clause] = true
+					}
+				}
 			case *ast.CaseClause:
+				if !typeSwitchClauses[node] {
+					// An expression switch. Its cases are values, so nothing here
+					// asserts on a type.
+					break
+				}
 				for _, e := range node.List {
 					if t := typeOf(e); t != nil {
 						mention(t, roleAssertion)

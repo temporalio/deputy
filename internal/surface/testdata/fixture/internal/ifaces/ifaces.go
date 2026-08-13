@@ -16,6 +16,11 @@ type Returned interface{ R() }
 // Bare is only ever a type assertion target.
 type Bare interface{ Ba() }
 
+// Sentinel is compared in an ordinary expression switch and never asserted on. An
+// expression switch case holds a value, not a type, so nothing here asserts
+// anything and this interface must not be credited with an assertion role.
+type Sentinel interface{ S() }
+
 // SelfAccepting is accepted only by its own method, which is not a caller
 // depending on the abstraction.
 type SelfAccepting interface{ Merge(SelfAccepting) }
@@ -60,3 +65,17 @@ func assert(v any) bool {
 }
 
 var _ = assert
+
+var sentinelA, sentinelB Sentinel
+
+// compare switches on values, not on types. The case clause below looks exactly
+// like a type switch clause in the syntax tree.
+func compare() bool {
+	switch sentinelA {
+	case sentinelB:
+		return true
+	}
+	return false
+}
+
+var _ = compare
