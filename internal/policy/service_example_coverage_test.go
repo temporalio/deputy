@@ -225,12 +225,18 @@ func oidcIdentities() []oidcIdentity {
 		},
 		{
 			provider: "aws-sts",
+			// AWS does not mint this token: the ARN arrives as a claim on the
+			// workload's own identity provider's token, so the issuer here is
+			// that provider. The fixture carried no issuer at all, which is the
+			// same unrealistic shape the Kubernetes one had.
 			trusted: &policyv1.JWTClaims{
 				Sub:          "arn:aws:sts::123456789012:assumed-role/deputy-scanner",
+				Iss:          "https://acme.okta.com",
 				CustomClaims: map[string]string{"amr": "[arn:aws:sts::123456789012:assumed-role/deputy-scanner]"},
 			},
 			untrusted: &policyv1.JWTClaims{
 				Sub:          "arn:aws:sts::999999999999:assumed-role/attacker",
+				Iss:          "https://acme.okta.com",
 				CustomClaims: map[string]string{"amr": "[arn:aws:sts::999999999999:assumed-role/attacker]"},
 			},
 		},
@@ -494,6 +500,21 @@ func TestShippedOIDCFederationTrustsWhatItsGatesAccept(t *testing.T) {
 				Iss: "https://login.microsoftonline.com.attacker.example/tid/v2.0",
 				CustomClaims: map[string]string{
 					"tid": "12345678-1234-1234-1234-123456789abc", "idtyp": "app",
+				},
+			},
+			wantDenied: true,
+		},
+		{
+			// An amr entry is a claim like any other. AWS does not mint the token
+			// carrying the ARN, so without an issuer test any accepted issuer
+			// could assert an approved account number and be treated as a
+			// machine that the secrets rules then exempt.
+			name: "approved AWS account asserted by an untrusted issuer",
+			jwt: &policyv1.JWTClaims{
+				Sub: "arn:aws:sts::123456789012:assumed-role/deputy-scanner",
+				Iss: "https://gitlab.attacker.example",
+				CustomClaims: map[string]string{
+					"amr": "[arn:aws:sts::123456789012:assumed-role/deputy-scanner]",
 				},
 			},
 			wantDenied: true,

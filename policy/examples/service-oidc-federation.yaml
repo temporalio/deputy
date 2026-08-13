@@ -225,7 +225,19 @@ policies:
   # The AWS account/role context is in the assumed role ARN.
 
   - name: aws-account-restriction
-    description: Restrict based on AWS account ID in assumed role claims
+    description: |
+      Restrict based on the AWS account ID in assumed role claims.
+
+      AWS does not mint the token Deputy sees. A workload exchanges a token from
+      its own identity provider for AWS credentials, so the assumed-role ARN
+      arrives as a claim on that provider's token. The issuer named here is
+      therefore the identity provider, not AWS, and a deployment must set it to
+      whichever provider it trusts to assert an ARN.
+
+      Naming it is the whole point. Without an issuer, any other accepted issuer
+      able to set custom claims could present
+      amr: ["arn:aws:sts::123456789012:assumed-role/anything"], and this rule
+      would read the approved account number and admit it.
     entrypoints:
       - service_scan_request
       - service_list_request
@@ -236,6 +248,7 @@ policies:
     rules:
       - action: deny
         when: |
+          jwt.?iss.orValue("") == "https://acme.okta.com" &&
           has(jwt.amr) &&
           jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::")) &&
           !jwt.?amr.orValue([]).exists(a,
@@ -380,7 +393,8 @@ policies:
             (jwt.?iss.orValue("") == "https://gitlab.com" &&
              jwt.?sub.orValue("").startsWith("project_path:")) ||
             // AWS role assumed through web identity.
-            jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::")) ||
+            (jwt.?iss.orValue("") == "https://acme.okta.com" &&
+             jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::"))) ||
             // Google service account.
             (jwt.?iss.orValue("") == "https://accounts.google.com" &&
              jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com")) ||
@@ -419,7 +433,8 @@ policies:
              jwt.?sub.orValue("").startsWith("repo:")) ||
             (jwt.?iss.orValue("") == "https://gitlab.com" &&
              jwt.?sub.orValue("").startsWith("project_path:")) ||
-            jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::")) ||
+            (jwt.?iss.orValue("") == "https://acme.okta.com" &&
+             jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::"))) ||
             (jwt.?iss.orValue("") == "https://accounts.google.com" &&
              jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com")) ||
             (jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
@@ -480,7 +495,8 @@ policies:
             (jwt.?iss.orValue("") == "https://accounts.google.com" &&
              jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com")) ||
             // An assumed AWS role; aws-account-restriction picks the accounts.
-            jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::")) ||
+            (jwt.?iss.orValue("") == "https://acme.okta.com" &&
+             jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::"))) ||
             // An Azure AD identity; azure-tenant-restriction picks the tenants.
             jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") ||
             // A Kubernetes workload; kubernetes-namespace-restriction picks the
