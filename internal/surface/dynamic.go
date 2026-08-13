@@ -255,17 +255,11 @@ func (d *dynamic) addDeclaredInterfaces(pkg *packages.Package) {
 func (d *dynamic) addReferencedContracts(p *program) {
 	seenObj := map[types.Object]bool{}
 	seenType := map[types.Type]bool{}
-	consider := func(obj types.Object) {
-		if obj == nil || seenObj[obj] {
+	register := func(root types.Type) {
+		if root == nil {
 			return
 		}
-		seenObj[obj] = true
-		t := obj.Type()
-		if t == nil || seenType[t] {
-			return
-		}
-		seenType[t] = true
-		for mentioned := range typesIn(t) {
+		for mentioned := range typesIn(root) {
 			switch mentioned := mentioned.(type) {
 			case *types.Named:
 				tn := mentioned.Obj()
@@ -287,6 +281,21 @@ func (d *dynamic) addReferencedContracts(p *program) {
 			}
 		}
 	}
+	consider := func(obj types.Object) {
+		if obj == nil || seenObj[obj] {
+			return
+		}
+		seenObj[obj] = true
+		t := obj.Type()
+		if t == nil || seenType[t] {
+			return
+		}
+		seenType[t] = true
+		register(t)
+		for _, constraint := range constraintsOf(t) {
+			register(constraint)
+		}
+	}
 	for _, v := range p.variants() {
 		for _, obj := range v.pkg.TypesInfo.Defs {
 			consider(obj)
@@ -295,6 +304,35 @@ func (d *dynamic) addReferencedContracts(p *program) {
 			consider(obj)
 		}
 	}
+}
+
+// constraintsOf returns the constraints on a generic declaration's type
+// parameters. A constraint is a dispatch contract: calling F[T interface{ Run()
+// }] with an internal type lets F reach that type's Run with nothing in this
+// module naming the method, exactly as passing it to a parameter of interface
+// type would.
+//
+// Constraints are collected here rather than inside [typesIn] because they are
+// not part of the structure of a value's type. Folding them into that walk makes
+// [namedTypes] report a constraint from every parameter declared as a type
+// parameter, which the interface check would then read as an interface something
+// accepts, erasing the distinction roleConstraint exists to draw.
+func constraintsOf(t types.Type) []types.Type {
+	var params *types.TypeParamList
+	switch t := t.(type) {
+	case *types.Signature:
+		params = t.TypeParams()
+	case *types.Named:
+		params = t.TypeParams()
+	}
+	if params == nil {
+		return nil
+	}
+	out := make([]types.Type, 0, params.Len())
+	for i := range params.Len() {
+		out = append(out, params.At(i).Constraint())
+	}
+	return out
 }
 
 // addForeignContracts indexes the interfaces from table that the load graph

@@ -81,6 +81,14 @@ type Tagged struct {
 	Name string `json:"name"`
 }
 
+// ConstraintReached satisfies the constraint on ifaces.RunConstrained. No named
+// interface in the fixture declares a Constrained method, so the doubt on its
+// method can only come from the constraint.
+type ConstraintReached struct{}
+
+// Constrained is reached only through a generic type constraint.
+func (ConstraintReached) Constrained() {}
+
 // AnonReached satisfies the anonymous interface ifaces.RunAnon accepts. No named
 // interface anywhere in the fixture declares an Anon method, so the doubt on its
 // method can only come from the anonymous interface in that signature.
