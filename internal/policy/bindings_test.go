@@ -251,7 +251,7 @@ func messageFieldNames(msg proto.Message) []string {
 // set for each service entrypoint from its payload message instead of trusting
 // the hand-written binding profile, because the two drifted: the
 // service_diff_request profile advertised "target", which its payload has never
-// carried, while the base_target and target_target the payload does carry were
+// carried, while the diff_base and diff_target the payload does carry were
 // undeclared and so could not compile. The entrypoint's whole purpose is to
 // authorize a request against its target, and neither side was reachable.
 //

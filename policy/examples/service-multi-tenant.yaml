@@ -96,7 +96,7 @@ policies:
   - name: tenant-isolation-diff
     description: |
       A diff compares two targets, so both sides need authorizing. This rule is
-      separate from tenant-isolation because base_target and target_target exist
+      separate from tenant-isolation because diff_base and diff_target exist
       only on service_diff_request, and request.target reports the base side
       alone, which would let an authorized base carry another tenant's target.
 
@@ -110,7 +110,7 @@ policies:
         when: |
           !jwt.anonymous &&
           jwt.?tenant.orValue("") != "" &&
-          ![base_target, target_target].all(t,
+          ![diff_base, diff_target].all(t,
             ("/" + t.display_path.replace(":", "/")).contains("/" + jwt.tenant + "/")
           )
         reason: "Cross-tenant diff denied - both sides must belong to your tenant"

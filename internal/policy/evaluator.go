@@ -52,8 +52,8 @@ var (
 		// Service diff request targets. A diff authorizes two independent
 		// resources, so service_diff_request binds a target per side instead
 		// of the single "target" the other service entrypoints bind.
-		"base_target",
-		"target_target",
+		"diff_base",
+		"diff_target",
 		// Container diff specific variables
 		"base_image",
 		"target_image",

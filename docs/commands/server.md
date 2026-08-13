@@ -222,11 +222,11 @@ Streaming operations (`StreamScan`) are listed for completeness but are not
 enforced as of August 2026.
 
 A diff compares two independent resources, so `service_diff_request` binds
-`base_target` and `target_target` instead of the single `target` the other
+`diff_base` and `diff_target` instead of the single `target` the other
 service entrypoints bind. Authorize both sides: a policy that checks only one
 lets a caller pair an authorized base with a target they should not reach.
 `request.target` reports the base side for these requests, so it is not a
-substitute for checking `target_target`.
+substitute for checking `diff_target`.
 
 Both sides are always bound, so neither needs a null guard. A side the caller
 omitted reads as an empty `display_path`, which fails an allowlist check and so
@@ -240,13 +240,13 @@ policies:
       - action: deny
         when: |
           jwt.?tenant.orValue("") != "" &&
-          ![base_target, target_target].all(t,
+          ![diff_base, diff_target].all(t,
             ("/" + t.display_path.replace(":", "/")).contains("/" + jwt.tenant + "/")
           )
         reason: "Cross-tenant diff denied"
 ```
 
-`[base_target, target_target].all(t, ...)` states the both-sides requirement once
+`[diff_base, diff_target].all(t, ...)` states the both-sides requirement once
 instead of repeating the test per side, and `jwt.?tenant.orValue("")` replaces
 `has(jwt.tenant) && jwt.tenant != ""` with the optional selector.
 

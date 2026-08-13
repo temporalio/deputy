@@ -57,8 +57,9 @@ var (
 
 	// diffTargetVars provide the two sides of a diff request. A diff compares
 	// independent resources, so each side is bound separately and a policy can
-	// authorize them separately.
-	diffTargetVars = []string{"base_target", "target_target"}
+	// authorize them separately. The diff_ prefix keeps them distinct from the
+	// single "target" that other entrypoints bind in the same flat namespace.
+	diffTargetVars = []string{"diff_base", "diff_target"}
 
 	// dockerfileVars provide Dockerfile analysis
 	dockerfileVars = []string{"dockerfile", "dockerfile_analysis"}

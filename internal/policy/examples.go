@@ -179,9 +179,9 @@ func generateVariableValue(ep Entrypoint, varName string, level ExampleLevel, re
 		return generateJWT(level), "JWT claims (anonymous if no auth)"
 	case "target":
 		return generateTarget(ep, level), "scan target metadata"
-	case "base_target":
+	case "diff_base":
 		return generateDiffTarget(level, "base"), "the base side of the diff"
-	case "target_target":
+	case "diff_target":
 		return generateDiffTarget(level, "target"), "the target side of the diff"
 	case "image", "image_info":
 		return generateImageInfo(level), "container image configuration"

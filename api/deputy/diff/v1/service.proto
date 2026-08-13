@@ -48,12 +48,12 @@ service DiffService {
 
 // DiffPackagesRequest specifies the targets to compare for package differences.
 message DiffPackagesRequest {
-  // BaseTarget is the baseline target (older version, e.g., "main", "v1.0.0").
+  // Base is the baseline target (older version, e.g., "main", "v1.0.0").
   // Can be a git ref, container image tag, or directory path.
-  string base_target = 1;
+  string base = 1;
 
-  // TargetTarget is the target to compare against base (newer version, e.g., "HEAD", "v2.0.0").
-  string target_target = 2;
+  // Target is the target to compare against base (newer version, e.g., "HEAD", "v2.0.0").
+  string target = 2;
 
   // Options configure diff behavior.
   DiffOptions options = 3;
@@ -72,11 +72,11 @@ message DiffOptions {
   // Platform specifies target platform for container images (e.g., "linux/amd64").
   string platform = 3;
 
-  // BaseTargetHint provides disambiguation for the base target.
-  deputy.target.v1.TargetKind base_target_hint = 4;
+  // BaseHint provides disambiguation for the base target.
+  deputy.target.v1.TargetKind base_hint = 4;
 
-  // TargetTargetHint provides disambiguation for the target target.
-  deputy.target.v1.TargetKind target_target_hint = 5;
+  // TargetHint provides disambiguation for the target being compared.
+  deputy.target.v1.TargetKind target_hint = 5;
 
   // ExcludePaths lists glob patterns for directory paths to skip during the
   // filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
@@ -85,11 +85,11 @@ message DiffOptions {
 
 // DiffPackagesResponse contains the package differences.
 message DiffPackagesResponse {
-  // BaseTarget describes what was used as the baseline.
-  deputy.target.v1.Target base_target = 1;
+  // Base describes what was used as the baseline.
+  deputy.target.v1.Target base = 1;
 
-  // TargetTarget describes what was compared against the baseline.
-  deputy.target.v1.Target target_target = 2;
+  // Target describes what was compared against the baseline.
+  deputy.target.v1.Target target = 2;
 
   // GeneratedAt is when this diff was computed.
   google.protobuf.Timestamp generated_at = 3;
@@ -169,11 +169,11 @@ message DiffStats {
 
 // DiffVulnerabilitiesRequest specifies targets for vulnerability comparison.
 message DiffVulnerabilitiesRequest {
-  // BaseTarget is the baseline target.
-  string base_target = 1;
+  // Base is the baseline target.
+  string base = 1;
 
-  // TargetTarget is the target to compare against base.
-  string target_target = 2;
+  // Target is the target to compare against base.
+  string target = 2;
 
   // Options configure diff behavior.
   DiffOptions diff_options = 3;
@@ -184,11 +184,11 @@ message DiffVulnerabilitiesRequest {
 
 // DiffVulnerabilitiesResponse contains vulnerability differences.
 message DiffVulnerabilitiesResponse {
-  // BaseTarget describes what was used as the baseline.
-  deputy.target.v1.Target base_target = 1;
+  // Base describes what was used as the baseline.
+  deputy.target.v1.Target base = 1;
 
-  // TargetTarget describes what was compared against the baseline.
-  deputy.target.v1.Target target_target = 2;
+  // Target describes what was compared against the baseline.
+  deputy.target.v1.Target target = 2;
 
   // GeneratedAt is when this diff was computed.
   google.protobuf.Timestamp generated_at = 3;

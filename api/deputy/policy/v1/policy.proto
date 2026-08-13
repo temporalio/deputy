@@ -280,10 +280,10 @@ message SbomComponentPolicyInput {
 message DiffReportPolicyInput {
   // Changes lists all dependency changes between refs.
   repeated DependencyChange changes = 1;
-  // BaseTarget is the baseline (older) target.
-  deputy.target.v1.Target base_target = 2;
-  // TargetTarget is the target (newer) being compared.
-  deputy.target.v1.Target target_target = 3;
+  // DiffBase is the baseline (older) target.
+  deputy.target.v1.Target diff_base = 2;
+  // DiffTarget is the target (newer) being compared.
+  deputy.target.v1.Target diff_target = 3;
   // Env provides execution environment context.
   Environment env = 4;
 }
@@ -717,8 +717,8 @@ message ServiceSbomRequestPolicyInput {
 message ServiceDiffRequestPolicyInput {
   JWTClaims jwt = 1;
   ServiceRequest request = 2;
-  deputy.target.v1.Target base_target = 3;
-  deputy.target.v1.Target target_target = 4;
+  deputy.target.v1.Target diff_base = 3;
+  deputy.target.v1.Target diff_target = 4;
   Environment env = 5;
 }
 

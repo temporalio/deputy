@@ -306,8 +306,8 @@ func TestShippedTenantIsolationAuthorizesBothDiffSides(t *testing.T) {
 					// policy cannot rely on it.
 					Target: tt.base,
 				},
-				BaseTarget:   side(tt.base),
-				TargetTarget: side(tt.target),
+				DiffBase:   side(tt.base),
+				DiffTarget: side(tt.target),
 				Env: &policyv1.Environment{
 					Command:    "server",
 					Entrypoint: string(EntrypointServiceDiffRequest),

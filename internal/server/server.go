@@ -1240,7 +1240,7 @@ func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint 
 
 	// ServiceRequest.target is a single string, so a two-sided request reports
 	// its base there (falling back to the target side when the base is
-	// absent). base_target and target_target on the typed diff input below are
+	// absent). diff_base and diff_target on the typed diff input below are
 	// what a diff policy should match on.
 	svcReq.Target = cmp.Or(extracted.base, extracted.target)
 
@@ -1270,14 +1270,14 @@ func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint 
 			Env:     env,
 		}
 	case policy.EntrypointServiceDiffRequest:
-		// Diff has base_target and target_target instead of target, and each
+		// Diff has diff_base and diff_target instead of target, and each
 		// carries its own side of the comparison.
 		return &policyv1.ServiceDiffRequestPolicyInput{
-			Jwt:          jwtClaims,
-			Request:      svcReq,
-			BaseTarget:   diffSideTarget(extracted.base),
-			TargetTarget: diffSideTarget(extracted.target),
-			Env:          env,
+			Jwt:        jwtClaims,
+			Request:    svcReq,
+			DiffBase:   diffSideTarget(extracted.base),
+			DiffTarget: diffSideTarget(extracted.target),
+			Env:        env,
 		}
 	case policy.EntrypointServiceSecretsRequest:
 		return &policyv1.ServiceSecretsRequestPolicyInput{
@@ -1321,14 +1321,16 @@ type requestTargets struct {
 func extractRequestTargets(msg any) requestTargets {
 	// Two-sided requests are matched first, and on both getters at once, so a
 	// diff can never fall through to a single-target case and report one side
-	// as if it were the whole request.
+	// as if it were the whole request. Order matters here: a diff request also
+	// satisfies the single GetTarget() case below, so moving or dropping this
+	// case would silently reduce a diff to its target side.
 	switch m := msg.(type) {
 	case interface {
-		GetBaseTarget() string
-		GetTargetTarget() string
+		GetBase() string
+		GetTarget() string
 	}:
 		// DiffPackages, DiffVulnerabilities.
-		return requestTargets{base: m.GetBaseTarget(), target: m.GetTargetTarget()}
+		return requestTargets{base: m.GetBase(), target: m.GetTarget()}
 	case interface {
 		GetBaseImage() string
 		GetTargetImage() string

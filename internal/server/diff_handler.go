@@ -64,23 +64,23 @@ func (h *DiffHandler) DiffPackages(
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	baseTarget := req.Msg.GetBaseTarget()
-	targetTarget := req.Msg.GetTargetTarget()
+	base := req.Msg.GetBase()
+	target := req.Msg.GetTarget()
 
-	if baseTarget == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base_target is required"))
+	if base == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base is required"))
 	}
-	if targetTarget == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target_target is required"))
+	if target == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
 	}
 
 	// Security: Validate targets are accessible from remote server (skip in local mode)
 	if !h.localMode {
-		if err := targets.ValidateRemoteTargetWithPolicy(baseTarget, h.targetPolicy); err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base_target: %w", err))
+		if err := targets.ValidateRemoteTargetWithPolicy(base, h.targetPolicy); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base: %w", err))
 		}
-		if err := targets.ValidateRemoteTargetWithPolicy(targetTarget, h.targetPolicy); err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target_target: %w", err))
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target: %w", err))
 		}
 	}
 
@@ -93,7 +93,7 @@ func (h *DiffHandler) DiffPackages(
 	}
 
 	// Collect inventory from base target
-	baseExec, err := h.collectInventory(ctx, baseTarget, opts)
+	baseExec, err := h.collectInventory(ctx, base, opts)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect base inventory: %w", err))
 	}
@@ -101,8 +101,8 @@ func (h *DiffHandler) DiffPackages(
 		defer baseExec.Close()
 	}
 
-	// Collect inventory from target target
-	targetExec, err := h.collectInventory(ctx, targetTarget, opts)
+	// Collect inventory from the target side
+	targetExec, err := h.collectInventory(ctx, target, opts)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect target inventory: %w", err))
 	}
@@ -121,11 +121,11 @@ func (h *DiffHandler) DiffPackages(
 
 	// Build response
 	response := &diffv1.DiffPackagesResponse{
-		BaseTarget: &targetv1.Target{
+		Base: &targetv1.Target{
 			Kind:        baseExec.Result.Target.Kind,
 			DisplayPath: baseExec.Result.Target.DisplayPath,
 		},
-		TargetTarget: &targetv1.Target{
+		Target: &targetv1.Target{
 			Kind:        targetExec.Result.Target.Kind,
 			DisplayPath: targetExec.Result.Target.DisplayPath,
 		},
@@ -169,23 +169,23 @@ func (h *DiffHandler) DiffVulnerabilities(
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	baseTarget := req.Msg.GetBaseTarget()
-	targetTarget := req.Msg.GetTargetTarget()
+	base := req.Msg.GetBase()
+	target := req.Msg.GetTarget()
 
-	if baseTarget == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base_target is required"))
+	if base == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base is required"))
 	}
-	if targetTarget == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target_target is required"))
+	if target == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
 	}
 
 	// Security: Validate targets are accessible from remote server (skip in local mode)
 	if !h.localMode {
-		if err := targets.ValidateRemoteTargetWithPolicy(baseTarget, h.targetPolicy); err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base_target: %w", err))
+		if err := targets.ValidateRemoteTargetWithPolicy(base, h.targetPolicy); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base: %w", err))
 		}
-		if err := targets.ValidateRemoteTargetWithPolicy(targetTarget, h.targetPolicy); err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target_target: %w", err))
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target: %w", err))
 		}
 	}
 
@@ -197,7 +197,7 @@ func (h *DiffHandler) DiffVulnerabilities(
 	}
 
 	// Scan base target using scanning package
-	baseExec, err := scanning.Scan(ctx, baseTarget, opts)
+	baseExec, err := scanning.Scan(ctx, base, opts)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to scan base target: %w", err))
 	}
@@ -205,10 +205,10 @@ func (h *DiffHandler) DiffVulnerabilities(
 		defer baseExec.Close()
 	}
 
-	// Scan target target
-	targetExec, err := scanning.Scan(ctx, targetTarget, opts)
+	// Scan the target side
+	targetExec, err := scanning.Scan(ctx, target, opts)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to scan target target: %w", err))
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to scan target: %w", err))
 	}
 	if targetExec != nil {
 		defer targetExec.Close()
@@ -260,11 +260,11 @@ func (h *DiffHandler) DiffVulnerabilities(
 
 	// Build response
 	response := &diffv1.DiffVulnerabilitiesResponse{
-		BaseTarget: &targetv1.Target{
+		Base: &targetv1.Target{
 			Kind:        baseExec.Result.Target.Kind,
 			DisplayPath: baseExec.Result.Target.DisplayPath,
 		},
-		TargetTarget: &targetv1.Target{
+		Target: &targetv1.Target{
 			Kind:        targetExec.Result.Target.Kind,
 			DisplayPath: targetExec.Result.Target.DisplayPath,
 		},

@@ -32,13 +32,13 @@ func TestBuildPolicyPayloadCarriesBothDiffSides(t *testing.T) {
 	}{
 		{
 			name:       "diff packages",
-			request:    connect.NewRequest(&diffv1.DiffPackagesRequest{BaseTarget: "base-repo", TargetTarget: "target-repo"}),
+			request:    connect.NewRequest(&diffv1.DiffPackagesRequest{Base: "base-repo", Target: "target-repo"}),
 			wantBase:   "base-repo",
 			wantTarget: "target-repo",
 		},
 		{
 			name:       "diff vulnerabilities",
-			request:    connect.NewRequest(&diffv1.DiffVulnerabilitiesRequest{BaseTarget: "base-repo", TargetTarget: "target-repo"}),
+			request:    connect.NewRequest(&diffv1.DiffVulnerabilitiesRequest{Base: "base-repo", Target: "target-repo"}),
 			wantBase:   "base-repo",
 			wantTarget: "target-repo",
 		},
@@ -52,7 +52,7 @@ func TestBuildPolicyPayloadCarriesBothDiffSides(t *testing.T) {
 			// An omitted side is still bound, as an empty display path, so a
 			// policy referencing it denies instead of failing to evaluate.
 			name:       "diff with only a base",
-			request:    connect.NewRequest(&diffv1.DiffPackagesRequest{BaseTarget: "base-repo"}),
+			request:    connect.NewRequest(&diffv1.DiffPackagesRequest{Base: "base-repo"}),
 			wantBase:   "base-repo",
 			wantTarget: "",
 		},
@@ -69,17 +69,17 @@ func TestBuildPolicyPayloadCarriesBothDiffSides(t *testing.T) {
 			// Both sides must be bound, not merely read as empty: an unset
 			// message is stripped from the CEL activation, which turns every
 			// policy that mentions it into an evaluation error.
-			if input.GetBaseTarget() == nil {
-				t.Error("base_target is unset, want it bound even when the caller omits it")
+			if input.GetDiffBase() == nil {
+				t.Error("diff_base is unset, want it bound even when the caller omits it")
 			}
-			if input.GetTargetTarget() == nil {
-				t.Error("target_target is unset, want it bound even when the caller omits it")
+			if input.GetDiffTarget() == nil {
+				t.Error("diff_target is unset, want it bound even when the caller omits it")
 			}
-			if got := input.GetBaseTarget().GetDisplayPath(); got != tt.wantBase {
-				t.Errorf("base_target.display_path = %q, want %q", got, tt.wantBase)
+			if got := input.GetDiffBase().GetDisplayPath(); got != tt.wantBase {
+				t.Errorf("diff_base.display_path = %q, want %q", got, tt.wantBase)
 			}
-			if got := input.GetTargetTarget().GetDisplayPath(); got != tt.wantTarget {
-				t.Errorf("target_target.display_path = %q, want %q", got, tt.wantTarget)
+			if got := input.GetDiffTarget().GetDisplayPath(); got != tt.wantTarget {
+				t.Errorf("diff_target.display_path = %q, want %q", got, tt.wantTarget)
 			}
 		})
 	}
@@ -151,8 +151,8 @@ func TestServicePolicyEnforcement(t *testing.T) {
 			t.Helper()
 			client := diffv1connect.NewDiffServiceClient(ts.Client(), ts.URL)
 			_, err := client.DiffPackages(context.Background(), connect.NewRequest(&diffv1.DiffPackagesRequest{
-				BaseTarget:   base,
-				TargetTarget: target,
+				Base:   base,
+				Target: target,
 			}))
 			return err
 		}
@@ -169,8 +169,8 @@ func TestServicePolicyEnforcement(t *testing.T) {
 	denyScan := denyPolicy("deny-scan", "true", policy.EntrypointServiceScanRequest)
 	denyNothing := denyPolicy("deny-nothing", "false", policy.EntrypointServiceDiffRequest)
 	denyEverywhere := denyPolicy("deny-everywhere", "true")
-	denyBaseSide := denyPolicy("deny-base-side", "base_target.display_path == 'forbidden'", policy.EntrypointServiceDiffRequest)
-	denyTargetSide := denyPolicy("deny-target-side", "target_target.display_path == 'forbidden'", policy.EntrypointServiceDiffRequest)
+	denyBaseSide := denyPolicy("deny-base-side", "diff_base.display_path == 'forbidden'", policy.EntrypointServiceDiffRequest)
+	denyTargetSide := denyPolicy("deny-target-side", "diff_target.display_path == 'forbidden'", policy.EntrypointServiceDiffRequest)
 
 	tests := []struct {
 		name     string
