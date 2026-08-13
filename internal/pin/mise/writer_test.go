@@ -2245,3 +2245,108 @@ func TestRewriteToolVersionReadsBareNumberDeclarations(t *testing.T) {
 		})
 	}
 }
+
+// TestRewriteRefusesToWriteAnOlderVersion pins the floor under a plan: an
+// element that already asks for a release newer than the fix's target is not
+// rewritten, so no plan can move a tool backwards through this rewriter. One
+// advisory fixing two release branches at different versions produced exactly
+// that command, naming a 1.24 toolchain as a vulnerable version of a 1.23 fix,
+// and rewriting it collapsed both declarations onto the older release.
+//
+// The rule holds only where a finding names the vulnerable versions. Pinning
+// passes none, and it may legitimately write a version older than the text
+// declares, since it resolves a declaration to the release the lockfile records.
+func TestRewriteRefusesToWriteAnOlderVersion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		currents []string
+		pinned   string
+		want     string
+		// wantErr is set when no declaration was left for the fix to write, so
+		// the caller has to hear that nothing was applied.
+		wantErr bool
+	}{
+		{
+			// The reported shape: the 1.23 element is fixed, the 1.24 element is
+			// left for a fix of its own line.
+			name:     "an array element newer than the target survives",
+			input:    "[tools]\ngo = [\"1.23.9\", \"1.24.3\"]\n",
+			currents: []string{"1.23.9", "1.24.3"},
+			pinned:   "1.23.10",
+			want:     "[tools]\ngo = [\"1.23.10\", \"1.24.3\"]\n",
+		},
+		{
+			// A second config declaring the newer line gets the same command,
+			// and there is nothing in it the target can replace.
+			name:     "a scalar newer than the target is refused",
+			input:    "[tools]\ngo = \"1.24.3\"\n",
+			currents: []string{"1.23.9", "1.24.3"},
+			pinned:   "1.23.10",
+			want:     "[tools]\ngo = \"1.24.3\"\n",
+			wantErr:  true,
+		},
+		{
+			// The Go project's own spelling is the same release, so it is
+			// compared as one rather than read as an unordered tag.
+			name:     "the go-prefixed spelling of a newer release is refused",
+			input:    "[tools]\ngo = \"go1.24.3\"\n",
+			currents: []string{"1.23.9", "1.24.3"},
+			pinned:   "1.23.10",
+			want:     "[tools]\ngo = \"go1.24.3\"\n",
+			wantErr:  true,
+		},
+		{
+			// The ordinary fix, where the target is newer than everything
+			// declared, is untouched by the rule.
+			name:     "an upgrade is still applied",
+			input:    "[tools]\ngo = [\"1.22.12\", \"1.23.8\"]\n",
+			currents: []string{"1.22.12", "1.23.8"},
+			pinned:   "1.24.3",
+			want:     "[tools]\ngo = [\"1.24.3\", \"1.24.3\"]\n",
+		},
+		{
+			// Pinning resolves a declaration to the release the lockfile
+			// records, which can be older than the text declares, and it names
+			// no vulnerable versions. The rule must not reach it.
+			name:   "pinning may still write an older version",
+			input:  "[tools]\ngo = \"1.24.3\"\n",
+			pinned: "1.24.2",
+			want:   "[tools]\ngo = \"1.24.2\"\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "mise.toml")
+			if err := os.WriteFile(configPath, []byte(tt.input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			err = RewriteToolVersion(root, "mise.toml", "go", tt.currents, tt.pinned)
+			if tt.wantErr && err == nil {
+				t.Error("expected an unapplied update to be reported")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("RewriteToolVersion: %v", err)
+			}
+			got, readErr := os.ReadFile(configPath)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if string(got) != tt.want {
+				t.Errorf("config mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+		})
+	}
+}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/pin"
+	"golang.org/x/mod/semver"
 )
 
 // scalarTrailRe matches the trivia allowed after a scalar value token: spaces
@@ -397,6 +398,9 @@ func replaceVersionInValueTargeting(toolKey, value string, currents []string, pi
 	if !ok {
 		return value, false
 	}
+	if declaresNewerThan(toolKey, []string{valueText(token)}, pinned, currents) {
+		return value, false
+	}
 	if strings.Contains(token, "\n") {
 		// A line-spanning token is rewritten inside its own delimiters rather
 		// than swapped for a single-line one: the caller splices the
@@ -497,6 +501,54 @@ func isTomlSpace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
+// declaresNewerThan reports whether a declaration already asks for a release
+// newer than the one a fix would write, which makes writing it a downgrade. It
+// is the last gate before an edit, so a plan that names a version its target
+// cannot replace cannot move a tool backwards through this rewriter, whichever
+// caller built the plan and however stale it is.
+//
+// The question is only asked when the finding names the vulnerable versions.
+// With none of them known this is the pinning path, which resolves a declaration
+// to the release the lockfile records and may legitimately write an older
+// version than the text declares.
+//
+// A token that cannot be ordered against the target answers false: mise versions
+// are release tags, not all of them comparable ("lts", "ref:main",
+// "temurin-21.0.6+7"), and refusing on an unordered pair would decline fixes the
+// config can take. The plan side is where completeness lives; this is the floor
+// under it.
+func declaresNewerThan(toolKey string, declared []string, pinned string, currents []string) bool {
+	if len(currents) == 0 {
+		return false
+	}
+	target := comparableVersion(toolKey, pinned)
+	if target == "" {
+		return false
+	}
+	return slices.ContainsFunc(declared, func(version string) bool {
+		v := comparableVersion(toolKey, version)
+		return v != "" && semver.Compare(v, target) > 0
+	})
+}
+
+// comparableVersion returns a mise version token as a semver string two releases
+// can be ordered by, or "" when the token is not one. The tool's own release
+// prefix comes off first through [mise.TrimVersionPrefix], the same normalization
+// equality uses, so "go1.24.3" and "1.24.3" order as the one release they are.
+func comparableVersion(toolKey, version string) string {
+	v := mise.TrimVersionPrefix(toolKey, strings.TrimSpace(version))
+	if v == "" {
+		return ""
+	}
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	if !semver.IsValid(v) {
+		return ""
+	}
+	return v
+}
+
 // selectorTargetsCurrent reports whether a sole declared version token may be
 // rewritten to pinned, given the versions the finding says are vulnerable. It
 // is what keeps an exact declaration from being rolled backwards: a plan built
@@ -555,6 +607,9 @@ func replaceArrayElements(toolKey, value string, spans [][2]int, currents []stri
 		elem := value[span[0]:span[1]]
 		if !namesCurrentVersion(toolKey, elem, currents) &&
 			!(sole && soleElementTargetsCurrent(toolKey, elementVersions(elem), currents)) {
+			continue
+		}
+		if declaresNewerThan(toolKey, elementVersions(elem), pinned, currents) {
 			continue
 		}
 		repl := quoted
