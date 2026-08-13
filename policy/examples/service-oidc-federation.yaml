@@ -15,6 +15,13 @@
 #   - Azure AD: https://login.microsoftonline.com/{tenant}/v2.0
 #   - Kubernetes: https://kubernetes.default.svc.cluster.local
 #
+# A subject prefix is a claim, not a proof of origin, so every rule below pairs a
+# subject shape with the issuer allowed to mint it. Without that, any accepted
+# issuer that can carry custom claims can present sub=system:serviceaccount:...
+# and be treated as a Kubernetes workload. Replace these issuer URLs with your
+# own: a cluster issuer is deployment-specific, and "sa:" here stands for
+# Deputy's own service account issuer.
+#
 # JWT claims vary by provider. See examples below for provider-specific patterns.
 #
 # Two kinds of rule appear below, and the difference decides which entrypoints
@@ -308,6 +315,7 @@ policies:
     rules:
       - action: deny
         when: |
+          jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
           jwt.?sub.orValue("").startsWith("system:serviceaccount:") &&
           !("kubernetes.io/serviceaccount/namespace" in jwt &&
             jwt["kubernetes.io/serviceaccount/namespace"] in ["security", "ci-cd", "production"])
@@ -320,6 +328,7 @@ policies:
     rules:
       - action: deny
         when: |
+          jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
           jwt.?sub.orValue("").startsWith("system:serviceaccount:") &&
           !jwt.?sub.orValue("").matches("^system:serviceaccount:(security|ci-cd):(deputy-scanner|security-bot)$")
         reason: "Service account not authorized for secrets scanning"
@@ -361,9 +370,12 @@ policies:
           !jwt.anonymous &&
           !(
             // Deputy service account, Kubernetes workload, or GitHub Actions.
-            jwt.?sub.orValue("").startsWith("system:") ||
-            jwt.?sub.orValue("").startsWith("sa:") ||
-            jwt.?sub.orValue("").startsWith("repo:") ||
+            (jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
+             jwt.?sub.orValue("").startsWith("system:")) ||
+            (jwt.?iss.orValue("") == "https://deputy.acme-corp.internal" &&
+             jwt.?sub.orValue("").startsWith("sa:")) ||
+            (jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+             jwt.?sub.orValue("").startsWith("repo:")) ||
             // GitLab CI job.
             (jwt.?iss.orValue("") == "https://gitlab.com" &&
              jwt.?sub.orValue("").startsWith("project_path:")) ||
@@ -399,9 +411,12 @@ policies:
           !jwt.anonymous &&
           jwt.?email.orValue("") != "" &&
           !(
-            jwt.?sub.orValue("").startsWith("system:") ||
-            jwt.?sub.orValue("").startsWith("sa:") ||
-            jwt.?sub.orValue("").startsWith("repo:") ||
+            (jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
+             jwt.?sub.orValue("").startsWith("system:")) ||
+            (jwt.?iss.orValue("") == "https://deputy.acme-corp.internal" &&
+             jwt.?sub.orValue("").startsWith("sa:")) ||
+            (jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+             jwt.?sub.orValue("").startsWith("repo:")) ||
             (jwt.?iss.orValue("") == "https://gitlab.com" &&
              jwt.?sub.orValue("").startsWith("project_path:")) ||
             jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::")) ||
@@ -469,8 +484,10 @@ policies:
             // An Azure AD identity; azure-tenant-restriction picks the tenants.
             jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") ||
             // A Kubernetes workload; kubernetes-namespace-restriction picks the
-            // namespaces.
-            jwt.?sub.orValue("").startsWith("system:serviceaccount:") ||
+            // namespaces. The issuer is part of the shape: any issuer that can
+            // carry custom claims could otherwise mint this subject.
+            (jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
+             jwt.?sub.orValue("").startsWith("system:serviceaccount:")) ||
             // A human with an authorized group membership. This one carries its
             // own allowlist because no other rule in this file gates humans on
             // group membership outside secrets scanning.

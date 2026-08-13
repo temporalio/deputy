@@ -255,12 +255,19 @@ func oidcIdentities() []oidcIdentity {
 		},
 		{
 			provider: "kubernetes",
+			// A projected service account token carries the cluster issuer, and
+			// the fixture omitted it, so pinning the subject shape to its issuer
+			// broke this case before it broke any policy. A fixture that is not
+			// a token a provider would actually mint cannot test a rule about
+			// where tokens come from.
 			trusted: &policyv1.JWTClaims{
 				Sub:          "system:serviceaccount:security:deputy-scanner",
+				Iss:          "https://kubernetes.default.svc.cluster.local",
 				CustomClaims: map[string]string{"kubernetes.io/serviceaccount/namespace": "security"},
 			},
 			untrusted: &policyv1.JWTClaims{
 				Sub:          "system:serviceaccount:untrusted:attacker",
+				Iss:          "https://kubernetes.default.svc.cluster.local",
 				CustomClaims: map[string]string{"kubernetes.io/serviceaccount/namespace": "untrusted"},
 			},
 		},
@@ -367,6 +374,8 @@ func TestShippedTenantIsolationRejectsUnauthorizableTargets(t *testing.T) {
 		{"dot segments deeper in the path", "https://github.com/acme/group/../../other/repo"},
 		{"percent-encoded dot segment", "https://gitlab.com/acme/%2e%2e/other/repo"},
 		{"percent-encoded separator", "https://github.com/acme%2f..%2fother/repo"},
+		{"trailing slash making the repository look like an owner", "https://github.com/other/acme/"},
+		{"trailing slash on an SCP-style target", "git@github.com:other/acme/"},
 	}
 
 	for _, ep := range EntrypointsService {
@@ -488,6 +497,34 @@ func TestShippedOIDCFederationTrustsWhatItsGatesAccept(t *testing.T) {
 				},
 			},
 			wantDenied: true,
+		},
+		{
+			// A subject prefix is a claim, so any accepted issuer able to carry
+			// custom claims could present a Kubernetes subject and be treated as
+			// a cluster workload. Every machine shape is now paired with the
+			// issuer allowed to mint it.
+			name: "Kubernetes subject minted by another issuer",
+			jwt: &policyv1.JWTClaims{
+				Sub: "system:serviceaccount:security:deputy-scanner",
+				Iss: "https://acme.okta.com",
+				CustomClaims: map[string]string{
+					"kubernetes.io/serviceaccount/namespace": "security",
+				},
+			},
+			wantDenied: true,
+		},
+		{
+			// And the real cluster issuer still works, or the gate locks out the
+			// provider it exists to admit.
+			name: "Kubernetes subject from the cluster issuer",
+			jwt: &policyv1.JWTClaims{
+				Sub: "system:serviceaccount:security:deputy-scanner",
+				Iss: "https://kubernetes.default.svc.cluster.local",
+				CustomClaims: map[string]string{
+					"kubernetes.io/serviceaccount/namespace": "security",
+				},
+			},
+			wantDenied: false,
 		},
 		{
 			// The real GitLab issuer must still be trusted, since an exact test

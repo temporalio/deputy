@@ -128,6 +128,12 @@ policies:
   # A target that does not name the resource it fetches cannot be authorized by
   # matching its string, so refuse those rather than trying to match them.
   #
+  # A trailing slash is the subtlest of them. The tenant rules require the tenant
+  # to own something, expressed as "/<tenant>/" appearing in the path, and a
+  # trailing slash makes the repository name look like an owner:
+  # "https://github.com/other/acme/" contains "/acme/" while Git fetches the
+  # repository acme owned by other.
+  #
   # Git drops a URL fragment, so "https://github.com/other/repo.git#/acme/x"
   # reads as belonging to acme and clones other/repo.git. A query does the same.
   # A dot segment is resolved by whatever normalizes the path, so
@@ -161,6 +167,7 @@ policies:
           request.?target.orValue("").contains("#") ||
           request.?target.orValue("").contains("?") ||
           request.?target.orValue("").contains("%") ||
+          request.?target.orValue("").endsWith("/") ||
           ("/" + request.?target.orValue("").replace(":", "/"))
             .split("/").exists(c, c == "..")
         reason: "Target must name the resource it fetches, without a fragment, query, percent-encoding, or dot segment"
@@ -177,6 +184,7 @@ policies:
             t.display_path.contains("#") ||
             t.display_path.contains("?") ||
             t.display_path.contains("%") ||
+            t.display_path.endsWith("/") ||
             ("/" + t.display_path.replace(":", "/")).split("/").exists(c, c == "..")
           )
         reason: "Both sides of a diff must name the resources they fetch"
