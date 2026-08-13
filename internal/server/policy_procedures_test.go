@@ -18,7 +18,7 @@ import (
 	"github.com/temporalio/deputy/internal/policy"
 )
 
-// TestBuildPolicyPayloadCarriesBothDiffSides pins that a diff policy sees each
+// TestBuildPolicyPayloadCarriesBothDiffSides tests that a diff policy sees each
 // side of the comparison as the caller sent it. The two sides are independent
 // resources, so collapsing them lets a caller pair an authorized base with an
 // unauthorized target and have the policy authorize the base twice, and
@@ -134,7 +134,7 @@ func commandScopedDenyPolicy(name, when string, commands ...string) string {
 	return b.String()
 }
 
-// TestServicePolicyEnforcement pins the two behavior changes that have to ship
+// TestServicePolicyEnforcement tests the two behavior changes that have to ship
 // together. Mapping the real DiffService procedures makes DiffPackages evaluate
 // service_diff_request, and forwarding that entrypoint to the engine keeps a
 // policy scoped to some other entrypoint from firing on it. Without the second

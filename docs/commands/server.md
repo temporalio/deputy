@@ -219,8 +219,7 @@ Service-level policy entrypoints enable authorization based on JWT claims:
 | `service_graph_request` | BuildGraph, WhyDependency, QueryGraph |
 
 Streaming operations (`StreamScan`) are listed for completeness but are not
-enforced yet: the policy interceptor is a unary interceptor, so streaming RPCs
-pass through without evaluation.
+enforced as of August 2026.
 
 A diff compares two independent resources, so `service_diff_request` binds
 `base_target` and `target_target` instead of the single `target` the other
@@ -268,7 +267,7 @@ Three shortcuts all fail, and each one looks reasonable until it does not:
 
 - `display_path.contains(jwt.tenant)` accepts the tenant anywhere in the path,
   so tenant `acme` reaches `github.com/acme-corp-archive/...`, and an empty
-  claim makes it true for every path, retiring the rule entirely.
+  claim makes it true for every path, causing an unintended allow effect.
 - Interpolating the claim into a regex, as in
   `matches("(^|[/:])" + jwt.tenant + "([/:]|$)")`, fixes the substring case but
   lets the claim change the pattern. Tenant `acme.com` then matches

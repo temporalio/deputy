@@ -7,7 +7,7 @@ import (
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 )
 
-// TestShippedTenantIsolationCoversListRequests pins that enumerating a resource
+// TestShippedTenantIsolationCoversListRequests tests that enumerating a resource
 // is subject to the same tenant check as scanning it.
 //
 // Listing takes a target and reports what is inside it, so leaving it out of the
@@ -80,7 +80,7 @@ func TestShippedTenantIsolationCoversListRequests(t *testing.T) {
 	}
 }
 
-// TestShippedTenantIsolationSkipsTargetlessProcedures pins the other half of the
+// TestShippedTenantIsolationSkipsTargetlessProcedures tests the other half of the
 // contract: several procedures the single-target rule covers name no resource at
 // all (SecretsService Verify, ListDetectors, RegisterDetector, and SBOMService
 // Diff), so request.target is empty for them. A tenant rule that treats an empty
@@ -158,7 +158,7 @@ func TestShippedTenantIsolationSkipsTargetlessProcedures(t *testing.T) {
 	}
 }
 
-// TestShippedTenantIsolationAuthorizesBothDiffSides pins the security property
+// TestShippedTenantIsolationAuthorizesBothDiffSides tests the security property
 // of the shipped multi-tenant example, which operators are invited to copy.
 //
 // The example's original tenant-isolation rule covered service_diff_request but
