@@ -29,16 +29,16 @@ import (
 // that name a field in text rather than in Go.
 type dynamic struct {
 	// tokens maps every identifier-shaped token found in a Go string literal or
-	// an executable repository asset (templates, policies, configuration) to a
-	// description of where it was found. A symbol whose name appears there may
-	// be looked up by name rather than referenced, and naming the source lets a
-	// reader judge that in one step: a name in a CEL policy is a reachability
+	// an executable repository asset (templates, policies, configuration) to the
+	// strongest evidence of where it was found. A symbol whose name appears there
+	// may be looked up by name rather than referenced, and naming the source lets
+	// a reader judge that in one step: a name in a CEL policy is a reachability
 	// path, and a name in a code fence is not.
 	//
 	// Documentation is deliberately not scanned. Prose that mentions a symbol
 	// does not execute it, so treating docs as evidence would attach a doubt to
 	// every well documented symbol and make the signal meaningless.
-	tokens map[string]string
+	tokens map[string]evidence
 
 	// byMethod indexes the dispatch contracts of the whole program by method
 	// name, so a method finding is checked only against the interfaces that
@@ -82,6 +82,35 @@ type dynamic struct {
 	// unexport.
 	blankImported map[string]bool
 }
+
+// evidence is one place a name was found, and how strongly being there implies
+// the name is looked up at run time.
+type evidence struct {
+	// where describes the source in the terms a doubt uses, such as "a Go string
+	// literal" or a repository-relative asset path.
+	where string
+
+	// strength orders the kinds of source against each other.
+	strength evidenceStrength
+}
+
+// evidenceStrength ranks token sources, so a name found in more than one place is
+// reported by its best evidence rather than by whichever phase happened to run
+// first.
+type evidenceStrength int
+
+const (
+	// evidenceGoLiteral is a name inside a Go string literal. It may be a registry
+	// key, and it may equally be an error message or a test's assertion text, so it
+	// is the weakest thing that still counts.
+	evidenceGoLiteral evidenceStrength = iota
+
+	// evidenceAsset is a name inside an executable repository asset: a CEL policy,
+	// a template, configuration a decoder binds. Something reads that file and acts
+	// on the name, which is the closest this audit gets to proof that a symbol is
+	// reached dynamically.
+	evidenceAsset
+)
 
 // contract is an interface a method can be reached through. Holding the
 // interface itself, and not just its method names, lets the audit verify that
@@ -165,7 +194,7 @@ var assetExtensions = map[string]bool{
 // caller asked for no report at all.
 func newDynamic(ctx context.Context, p *program, roots []*packages.Package) (*dynamic, error) {
 	d := &dynamic{
-		tokens:        map[string]string{},
+		tokens:        map[string]evidence{},
 		byMethod:      map[string][]contract{},
 		taggedTypes:   map[string]bool{},
 		blankImported: map[string]bool{},
@@ -189,7 +218,7 @@ func newDynamic(ctx context.Context, p *program, roots []*packages.Package) (*dy
 			case *ast.BasicLit:
 				if node.Kind == token.STRING && !importPaths[node] {
 					if s, err := strconv.Unquote(node.Value); err == nil {
-						d.addTokens(s, "a Go string literal")
+						d.addTokens(s, "a Go string literal", evidenceGoLiteral)
 					}
 				}
 			case *ast.TypeSpec:
@@ -454,16 +483,23 @@ func (d *dynamic) dispatchedThrough(fn *types.Func) []string {
 }
 
 // addTokens splits text into identifier-shaped tokens, recording source as
-// where they came from. Splitting beats substring matching: it will not let
-// "Expirable" match inside "NotExpirableAtAll", and it costs one pass.
+// where they came from and strength as how much being there proves. Splitting
+// beats substring matching: it will not let "Expirable" match inside
+// "NotExpirableAtAll", and it costs one pass.
 //
-// The first source to claim a token wins, so the description stays stable
-// regardless of walk order.
-func (d *dynamic) addTokens(text, source string) {
+// The strongest source to claim a token wins, and ties go to the first, so the
+// description is stable regardless of walk order. Ordering by strength rather
+// than by arrival is what keeps the real evidence visible: Go literals are
+// scanned before assets, so first-writer-wins reported an incidental mention in
+// an error string and hid the CEL policy that actually looks the symbol up. A
+// reviewer shown the weaker reason can reasonably dismiss it and unexport
+// something live, which is the one outcome this whole signal exists to prevent.
+func (d *dynamic) addTokens(text, source string, strength evidenceStrength) {
 	add := func(tok string) {
-		if _, seen := d.tokens[tok]; !seen {
-			d.tokens[tok] = source
+		if seen, ok := d.tokens[tok]; ok && seen.strength >= strength {
+			return
 		}
+		d.tokens[tok] = evidence{where: source, strength: strength}
 	}
 	start := -1
 	for i, r := range text {
@@ -595,7 +631,7 @@ func (d *dynamic) addAssets(ctx context.Context, root string) error {
 			d.skipAsset(path, root, fmt.Sprintf("could not be read (%v), so the names it contains were not collected", readErr))
 			return nil
 		}
-		d.addTokens(string(data), filepath.ToSlash(trimRoot(path, root)))
+		d.addTokens(string(data), filepath.ToSlash(trimRoot(path, root)), evidenceAsset)
 		return nil
 	})
 	if walkErr != nil {
@@ -628,7 +664,7 @@ func (d *dynamic) symbolDoubts(obj types.Object, kind SymbolKind, pkgPath string
 		}
 	}
 	if src, ok := d.tokens[obj.Name()]; ok {
-		doubts = append(doubts, "name appears in "+src+", so it may be looked up by name")
+		doubts = append(doubts, "name appears in "+src.where+", so it may be looked up by name")
 	}
 	if tn, ok := obj.(*types.TypeName); ok {
 		if d.protoLike(tn) {
@@ -683,7 +719,7 @@ func (d *dynamic) protoLike(tn *types.TypeName) bool {
 func (d *dynamic) interfaceDoubts(obj types.Object) []string {
 	var doubts []string
 	if src, ok := d.tokens[obj.Name()]; ok {
-		doubts = append(doubts, "name appears in "+src)
+		doubts = append(doubts, "name appears in "+src.where)
 	}
 	return doubts
 }

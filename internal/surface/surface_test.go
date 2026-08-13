@@ -169,8 +169,8 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	report := analyzeFixture(t)
 
 	// Every exported declaration under internal/, and nothing from the excluded
-	// trees: 14 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
-	// Orphaned, ForForeignTests, ForOwnBlackBoxTest, Run, Make, RunAnon,
+	// trees: 15 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
+	// NamedInAssetAndLiteral, Orphaned, ForForeignTests, ForOwnBlackBoxTest, Run, Make, RunAnon,
 	// RunStringish, RunConstrained, Awkward), 20 types (Never, Stringish, Decoy,
 	// Scannable, Tagged, Handled, AnonReached, ConstraintReached, NotAProto,
 	// registered.BlankImportedOnly, testonly.Shared, testonly.Decoyed, testonly.Holder,
@@ -182,7 +182,7 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	// struct fields such as Tagged.Name are not counted as symbols, and that the
 	// type declared inside used.localTagged is not one either.
 	want := map[SymbolKind]int{
-		KindFunc:   14,
+		KindFunc:   15,
 		KindType:   20,
 		KindMethod: 18,
 		KindVar:    0,
@@ -247,6 +247,22 @@ func TestDynamicDoubtOnNameInStringLiteral(t *testing.T) {
 		t.Errorf("Doubts = %v, want one naming the string literal", named.Doubts)
 	}
 
+	// A name in more than one place is reported by its strongest evidence, not by
+	// whichever phase ran first. Go literals are tokenized before assets, so
+	// arrival order names the literal and hides the policy that actually looks the
+	// symbol up, and a reviewer who reasonably discounts an incidental string is
+	// then led to unexport something live.
+	both, ok := findSymbol(report, "fixture/internal/used", "NamedInAssetAndLiteral")
+	if !ok {
+		t.Fatal("NamedInAssetAndLiteral was not reported")
+	}
+	if !slices.ContainsFunc(both.Doubts, func(d string) bool { return strings.Contains(d, "policy/example.cel") }) {
+		t.Errorf("Doubts = %v, want the CEL policy named: it is the evidence that matters", both.Doubts)
+	}
+	if slices.ContainsFunc(both.Doubts, func(d string) bool { return strings.Contains(d, "string literal") }) {
+		t.Errorf("Doubts = %v, want the weaker string-literal source not to mask the policy", both.Doubts)
+	}
+
 	// The doubt must be specific: a symbol whose name appears nowhere must come
 	// back clean, or every finding would carry it.
 	never, ok := findSymbol(report, "fixture/internal/used", "Never")
@@ -284,6 +300,7 @@ func TestUnusedInterfacesDistinguishDependencyFromMention(t *testing.T) {
 		"Returned":      {roleResult},
 		"SelfAccepting": {roleMethodParam},
 	}
+
 	if diff := cmp.Diff(wantRoles, roles); diff != "" {
 		t.Errorf("interface roles mismatch (-want +got):\n%s", diff)
 	}
@@ -615,7 +632,7 @@ func TestUnwalkableDirectoryIsReportedNotSilentlySkipped(t *testing.T) {
 		t.Skip("directory permissions are not enforced for this user, so the walk cannot fail")
 	}
 
-	d := &dynamic{tokens: map[string]string{}}
+	d := &dynamic{tokens: map[string]evidence{}}
 	if err := d.addAssets(t.Context(), dir); err != nil {
 		t.Fatalf("addAssets error = %v, want nil: one unreadable tree must not end the scan", err)
 	}
@@ -674,7 +691,7 @@ func TestAssetScanHonorsCancellation(t *testing.T) {
 				cancel()
 			}
 
-			d := &dynamic{tokens: map[string]string{}}
+			d := &dynamic{tokens: map[string]evidence{}}
 			err := d.addAssets(ctx, dir)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("addAssets error = %v, want %v", err, tt.wantErr)
