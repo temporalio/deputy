@@ -471,6 +471,35 @@ func TestProtoToMapConvertsSchemalessValues(t *testing.T) {
 			t.Errorf("payload[value] = %#v (%T), want %#v", got["value"], got["value"], want)
 		}
 	})
+
+	// An Any is the one payload whose JSON "value" is not its "value" field: the
+	// field carries wire-level bytes while the JSON carries another Any document.
+	// Read as a bytes field, the entire nested payload goes unconverted, which is
+	// the silent half of the defect this walk removes.
+	t.Run("any payload nested in an any is walked", func(t *testing.T) {
+		inner, err := anypb.New(&vulnerabilityv1.Severity{Score: 9, Raw: "1.20"})
+		if err != nil {
+			t.Fatalf("anypb.New: %v", err)
+		}
+		outer, err := anypb.New(inner)
+		if err != nil {
+			t.Fatalf("anypb.New: %v", err)
+		}
+		got, err := ProtoToMap(outer)
+		if err != nil {
+			t.Fatalf("ProtoToMap: %v", err)
+		}
+		nested, ok := got["value"].(map[string]any)
+		if !ok {
+			t.Fatalf("payload[value] = %#v (%T), want an object", got["value"], got["value"])
+		}
+		if want := float64(9); nested["score"] != want {
+			t.Errorf("payload[value][score] = %#v (%T), want %#v", nested["score"], nested["score"], want)
+		}
+		if want := "1.20"; nested["raw"] != want {
+			t.Errorf("payload[value][raw] = %#v (%T), want %#v", nested["raw"], nested["raw"], want)
+		}
+	})
 }
 
 // quotedIntegerShapes builds a message descriptor for the 64-bit integer field

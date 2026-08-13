@@ -561,7 +561,15 @@ func convertAnyNumbers(v any) any {
 		return convertSchemalessNumbers(doc)
 	}
 	md := mt.Descriptor()
-	if inner, ok := doc["value"]; ok && md.Fields().ByTextName("value") == nil {
+	// A payload with a JSON form of its own is nested under "value", and one
+	// that flattens writes its fields beside "@type". The two are told apart by
+	// whether the payload declares a field of that name, because the wrappers
+	// declare a "value" whose kind is the JSON value, so reading it as a field
+	// converts it correctly. An Any payload is the exception: its "value" field
+	// holds the wire-level bytes while its JSON "value" is another Any document,
+	// so reading that as a bytes field would leave the whole nested payload
+	// unconverted.
+	if inner, ok := doc["value"]; ok && (md.FullName() == wktAny || md.Fields().ByTextName("value") == nil) {
 		doc["value"] = convertMessageNumbers(inner, md)
 		return doc
 	}
