@@ -219,11 +219,11 @@ func (LayerChangeKind) EnumDescriptor() ([]byte, []int) {
 // DiffPackagesRequest specifies the targets to compare for package differences.
 type DiffPackagesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// BaseTarget is the baseline target (older version, e.g., "main", "v1.0.0").
+	// Base is the baseline target (older version, e.g., "main", "v1.0.0").
 	// Can be a git ref, container image tag, or directory path.
-	BaseTarget string `protobuf:"bytes,1,opt,name=base_target,json=baseTarget,proto3" json:"base_target,omitempty"`
-	// TargetTarget is the target to compare against base (newer version, e.g., "HEAD", "v2.0.0").
-	TargetTarget string `protobuf:"bytes,2,opt,name=target_target,json=targetTarget,proto3" json:"target_target,omitempty"`
+	Base string `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Target is the target to compare against base (newer version, e.g., "HEAD", "v2.0.0").
+	Target string `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
 	// Options configure diff behavior.
 	Options       *DiffOptions `protobuf:"bytes,3,opt,name=options,proto3" json:"options,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -260,16 +260,16 @@ func (*DiffPackagesRequest) Descriptor() ([]byte, []int) {
 	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *DiffPackagesRequest) GetBaseTarget() string {
+func (x *DiffPackagesRequest) GetBase() string {
 	if x != nil {
-		return x.BaseTarget
+		return x.Base
 	}
 	return ""
 }
 
-func (x *DiffPackagesRequest) GetTargetTarget() string {
+func (x *DiffPackagesRequest) GetTarget() string {
 	if x != nil {
-		return x.TargetTarget
+		return x.Target
 	}
 	return ""
 }
@@ -292,10 +292,10 @@ type DiffOptions struct {
 	IncludeTransitive bool `protobuf:"varint,2,opt,name=include_transitive,json=includeTransitive,proto3" json:"include_transitive,omitempty"`
 	// Platform specifies target platform for container images (e.g., "linux/amd64").
 	Platform string `protobuf:"bytes,3,opt,name=platform,proto3" json:"platform,omitempty"`
-	// BaseTargetHint provides disambiguation for the base target.
-	BaseTargetHint v1.TargetKind `protobuf:"varint,4,opt,name=base_target_hint,json=baseTargetHint,proto3,enum=deputy.target.v1.TargetKind" json:"base_target_hint,omitempty"`
-	// TargetTargetHint provides disambiguation for the target target.
-	TargetTargetHint v1.TargetKind `protobuf:"varint,5,opt,name=target_target_hint,json=targetTargetHint,proto3,enum=deputy.target.v1.TargetKind" json:"target_target_hint,omitempty"`
+	// BaseHint provides disambiguation for the base target.
+	BaseHint v1.TargetKind `protobuf:"varint,4,opt,name=base_hint,json=baseHint,proto3,enum=deputy.target.v1.TargetKind" json:"base_hint,omitempty"`
+	// TargetHint provides disambiguation for the target being compared.
+	TargetHint v1.TargetKind `protobuf:"varint,5,opt,name=target_hint,json=targetHint,proto3,enum=deputy.target.v1.TargetKind" json:"target_hint,omitempty"`
 	// ExcludePaths lists glob patterns for directory paths to skip during the
 	// filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
 	ExcludePaths  []string `protobuf:"bytes,6,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
@@ -354,16 +354,16 @@ func (x *DiffOptions) GetPlatform() string {
 	return ""
 }
 
-func (x *DiffOptions) GetBaseTargetHint() v1.TargetKind {
+func (x *DiffOptions) GetBaseHint() v1.TargetKind {
 	if x != nil {
-		return x.BaseTargetHint
+		return x.BaseHint
 	}
 	return v1.TargetKind(0)
 }
 
-func (x *DiffOptions) GetTargetTargetHint() v1.TargetKind {
+func (x *DiffOptions) GetTargetHint() v1.TargetKind {
 	if x != nil {
-		return x.TargetTargetHint
+		return x.TargetHint
 	}
 	return v1.TargetKind(0)
 }
@@ -378,10 +378,10 @@ func (x *DiffOptions) GetExcludePaths() []string {
 // DiffPackagesResponse contains the package differences.
 type DiffPackagesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// BaseTarget describes what was used as the baseline.
-	BaseTarget *v1.Target `protobuf:"bytes,1,opt,name=base_target,json=baseTarget,proto3" json:"base_target,omitempty"`
-	// TargetTarget describes what was compared against the baseline.
-	TargetTarget *v1.Target `protobuf:"bytes,2,opt,name=target_target,json=targetTarget,proto3" json:"target_target,omitempty"`
+	// Base describes what was used as the baseline.
+	Base *v1.Target `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Target describes what was compared against the baseline.
+	Target *v1.Target `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
 	// GeneratedAt is when this diff was computed.
 	GeneratedAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"`
 	// Changes lists all dependency changes.
@@ -424,16 +424,16 @@ func (*DiffPackagesResponse) Descriptor() ([]byte, []int) {
 	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *DiffPackagesResponse) GetBaseTarget() *v1.Target {
+func (x *DiffPackagesResponse) GetBase() *v1.Target {
 	if x != nil {
-		return x.BaseTarget
+		return x.Base
 	}
 	return nil
 }
 
-func (x *DiffPackagesResponse) GetTargetTarget() *v1.Target {
+func (x *DiffPackagesResponse) GetTarget() *v1.Target {
 	if x != nil {
-		return x.TargetTarget
+		return x.Target
 	}
 	return nil
 }
@@ -651,10 +651,10 @@ func (x *DiffStats) GetTotalChanges() int32 {
 // DiffVulnerabilitiesRequest specifies targets for vulnerability comparison.
 type DiffVulnerabilitiesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// BaseTarget is the baseline target.
-	BaseTarget string `protobuf:"bytes,1,opt,name=base_target,json=baseTarget,proto3" json:"base_target,omitempty"`
-	// TargetTarget is the target to compare against base.
-	TargetTarget string `protobuf:"bytes,2,opt,name=target_target,json=targetTarget,proto3" json:"target_target,omitempty"`
+	// Base is the baseline target.
+	Base string `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Target is the target to compare against base.
+	Target string `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
 	// Options configure diff behavior.
 	DiffOptions *DiffOptions `protobuf:"bytes,3,opt,name=diff_options,json=diffOptions,proto3" json:"diff_options,omitempty"`
 	// ScanOptions configure vulnerability scanning behavior.
@@ -693,16 +693,16 @@ func (*DiffVulnerabilitiesRequest) Descriptor() ([]byte, []int) {
 	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *DiffVulnerabilitiesRequest) GetBaseTarget() string {
+func (x *DiffVulnerabilitiesRequest) GetBase() string {
 	if x != nil {
-		return x.BaseTarget
+		return x.Base
 	}
 	return ""
 }
 
-func (x *DiffVulnerabilitiesRequest) GetTargetTarget() string {
+func (x *DiffVulnerabilitiesRequest) GetTarget() string {
 	if x != nil {
-		return x.TargetTarget
+		return x.Target
 	}
 	return ""
 }
@@ -724,10 +724,10 @@ func (x *DiffVulnerabilitiesRequest) GetScanOptions() *v12.ScanOptions {
 // DiffVulnerabilitiesResponse contains vulnerability differences.
 type DiffVulnerabilitiesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// BaseTarget describes what was used as the baseline.
-	BaseTarget *v1.Target `protobuf:"bytes,1,opt,name=base_target,json=baseTarget,proto3" json:"base_target,omitempty"`
-	// TargetTarget describes what was compared against the baseline.
-	TargetTarget *v1.Target `protobuf:"bytes,2,opt,name=target_target,json=targetTarget,proto3" json:"target_target,omitempty"`
+	// Base describes what was used as the baseline.
+	Base *v1.Target `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Target describes what was compared against the baseline.
+	Target *v1.Target `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
 	// GeneratedAt is when this diff was computed.
 	GeneratedAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"`
 	// AddedVulnerabilities are vulnerabilities newly introduced in the target.
@@ -795,16 +795,16 @@ func (*DiffVulnerabilitiesResponse) Descriptor() ([]byte, []int) {
 	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *DiffVulnerabilitiesResponse) GetBaseTarget() *v1.Target {
+func (x *DiffVulnerabilitiesResponse) GetBase() *v1.Target {
 	if x != nil {
-		return x.BaseTarget
+		return x.Base
 	}
 	return nil
 }
 
-func (x *DiffVulnerabilitiesResponse) GetTargetTarget() *v1.Target {
+func (x *DiffVulnerabilitiesResponse) GetTarget() *v1.Target {
 	if x != nil {
-		return x.TargetTarget
+		return x.Target
 	}
 	return nil
 }
@@ -2363,25 +2363,24 @@ var File_deputy_diff_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_diff_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdeputy/diff/v1/service.proto\x12\x0edeputy.diff.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/policy/v1/policy.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a#deputy/container/v1/container.proto\x1a\x1cdeputy/scan/v1/service.proto\"\x92\x01\n" +
-	"\x13DiffPackagesRequest\x12\x1f\n" +
-	"\vbase_target\x18\x01 \x01(\tR\n" +
-	"baseTarget\x12#\n" +
-	"\rtarget_target\x18\x02 \x01(\tR\ftargetTarget\x125\n" +
-	"\aoptions\x18\x03 \x01(\v2\x1b.deputy.diff.v1.DiffOptionsR\aoptions\"\xc2\x02\n" +
+	"\x1cdeputy/diff/v1/service.proto\x12\x0edeputy.diff.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/policy/v1/policy.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a#deputy/container/v1/container.proto\x1a\x1cdeputy/scan/v1/service.proto\"x\n" +
+	"\x13DiffPackagesRequest\x12\x12\n" +
+	"\x04base\x18\x01 \x01(\tR\x04base\x12\x16\n" +
+	"\x06target\x18\x02 \x01(\tR\x06target\x125\n" +
+	"\aoptions\x18\x03 \x01(\v2\x1b.deputy.diff.v1.DiffOptionsR\aoptions\"\xa8\x02\n" +
 	"\vDiffOptions\x12\x1e\n" +
 	"\n" +
 	"ecosystems\x18\x01 \x03(\tR\n" +
 	"ecosystems\x12-\n" +
 	"\x12include_transitive\x18\x02 \x01(\bR\x11includeTransitive\x12\x1a\n" +
-	"\bplatform\x18\x03 \x01(\tR\bplatform\x12F\n" +
-	"\x10base_target_hint\x18\x04 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x0ebaseTargetHint\x12J\n" +
-	"\x12target_target_hint\x18\x05 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x10targetTargetHint\x124\n" +
-	"\rexclude_paths\x18\x06 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\fexcludePaths\"\xd5\x02\n" +
-	"\x14DiffPackagesResponse\x129\n" +
-	"\vbase_target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\n" +
-	"baseTarget\x12=\n" +
-	"\rtarget_target\x18\x02 \x01(\v2\x18.deputy.target.v1.TargetR\ftargetTarget\x12=\n" +
+	"\bplatform\x18\x03 \x01(\tR\bplatform\x129\n" +
+	"\tbase_hint\x18\x04 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\bbaseHint\x12=\n" +
+	"\vtarget_hint\x18\x05 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\n" +
+	"targetHint\x124\n" +
+	"\rexclude_paths\x18\x06 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\fexcludePaths\"\xbb\x02\n" +
+	"\x14DiffPackagesResponse\x12,\n" +
+	"\x04base\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x04base\x120\n" +
+	"\x06target\x18\x02 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x127\n" +
 	"\achanges\x18\x04 \x03(\v2\x1d.deputy.diff.v1.PackageChangeR\achanges\x12/\n" +
 	"\x05stats\x18\x05 \x01(\v2\x19.deputy.diff.v1.DiffStatsR\x05stats\x12\x1a\n" +
@@ -2401,17 +2400,15 @@ const file_deputy_diff_v1_service_proto_rawDesc = "" +
 	"\x0eupgraded_count\x18\x03 \x01(\x05R\rupgradedCount\x12)\n" +
 	"\x10downgraded_count\x18\x04 \x01(\x05R\x0fdowngradedCount\x12#\n" +
 	"\rupdated_count\x18\x05 \x01(\x05R\fupdatedCount\x12#\n" +
-	"\rtotal_changes\x18\x06 \x01(\x05R\ftotalChanges\"\xe2\x01\n" +
-	"\x1aDiffVulnerabilitiesRequest\x12\x1f\n" +
-	"\vbase_target\x18\x01 \x01(\tR\n" +
-	"baseTarget\x12#\n" +
-	"\rtarget_target\x18\x02 \x01(\tR\ftargetTarget\x12>\n" +
+	"\rtotal_changes\x18\x06 \x01(\x05R\ftotalChanges\"\xc8\x01\n" +
+	"\x1aDiffVulnerabilitiesRequest\x12\x12\n" +
+	"\x04base\x18\x01 \x01(\tR\x04base\x12\x16\n" +
+	"\x06target\x18\x02 \x01(\tR\x06target\x12>\n" +
 	"\fdiff_options\x18\x03 \x01(\v2\x1b.deputy.diff.v1.DiffOptionsR\vdiffOptions\x12>\n" +
-	"\fscan_options\x18\x04 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\vscanOptions\"\xee\a\n" +
-	"\x1bDiffVulnerabilitiesResponse\x129\n" +
-	"\vbase_target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\n" +
-	"baseTarget\x12=\n" +
-	"\rtarget_target\x18\x02 \x01(\v2\x18.deputy.target.v1.TargetR\ftargetTarget\x12=\n" +
+	"\fscan_options\x18\x04 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\vscanOptions\"\xd4\a\n" +
+	"\x1bDiffVulnerabilitiesResponse\x12,\n" +
+	"\x04base\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x04base\x120\n" +
+	"\x06target\x18\x02 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12U\n" +
 	"\x15added_vulnerabilities\x18\x04 \x03(\v2 .deputy.vulnerability.v1.FindingR\x14addedVulnerabilities\x12Y\n" +
 	"\x17removed_vulnerabilities\x18\x05 \x03(\v2 .deputy.vulnerability.v1.FindingR\x16removedVulnerabilities\x12[\n" +
@@ -2665,10 +2662,10 @@ var file_deputy_diff_v1_service_proto_goTypes = []any{
 }
 var file_deputy_diff_v1_service_proto_depIdxs = []int32{
 	4,  // 0: deputy.diff.v1.DiffPackagesRequest.options:type_name -> deputy.diff.v1.DiffOptions
-	28, // 1: deputy.diff.v1.DiffOptions.base_target_hint:type_name -> deputy.target.v1.TargetKind
-	28, // 2: deputy.diff.v1.DiffOptions.target_target_hint:type_name -> deputy.target.v1.TargetKind
-	29, // 3: deputy.diff.v1.DiffPackagesResponse.base_target:type_name -> deputy.target.v1.Target
-	29, // 4: deputy.diff.v1.DiffPackagesResponse.target_target:type_name -> deputy.target.v1.Target
+	28, // 1: deputy.diff.v1.DiffOptions.base_hint:type_name -> deputy.target.v1.TargetKind
+	28, // 2: deputy.diff.v1.DiffOptions.target_hint:type_name -> deputy.target.v1.TargetKind
+	29, // 3: deputy.diff.v1.DiffPackagesResponse.base:type_name -> deputy.target.v1.Target
+	29, // 4: deputy.diff.v1.DiffPackagesResponse.target:type_name -> deputy.target.v1.Target
 	30, // 5: deputy.diff.v1.DiffPackagesResponse.generated_at:type_name -> google.protobuf.Timestamp
 	6,  // 6: deputy.diff.v1.DiffPackagesResponse.changes:type_name -> deputy.diff.v1.PackageChange
 	7,  // 7: deputy.diff.v1.DiffPackagesResponse.stats:type_name -> deputy.diff.v1.DiffStats
@@ -2676,8 +2673,8 @@ var file_deputy_diff_v1_service_proto_depIdxs = []int32{
 	0,  // 9: deputy.diff.v1.PackageChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
 	4,  // 10: deputy.diff.v1.DiffVulnerabilitiesRequest.diff_options:type_name -> deputy.diff.v1.DiffOptions
 	32, // 11: deputy.diff.v1.DiffVulnerabilitiesRequest.scan_options:type_name -> deputy.scan.v1.ScanOptions
-	29, // 12: deputy.diff.v1.DiffVulnerabilitiesResponse.base_target:type_name -> deputy.target.v1.Target
-	29, // 13: deputy.diff.v1.DiffVulnerabilitiesResponse.target_target:type_name -> deputy.target.v1.Target
+	29, // 12: deputy.diff.v1.DiffVulnerabilitiesResponse.base:type_name -> deputy.target.v1.Target
+	29, // 13: deputy.diff.v1.DiffVulnerabilitiesResponse.target:type_name -> deputy.target.v1.Target
 	30, // 14: deputy.diff.v1.DiffVulnerabilitiesResponse.generated_at:type_name -> google.protobuf.Timestamp
 	33, // 15: deputy.diff.v1.DiffVulnerabilitiesResponse.added_vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
 	33, // 16: deputy.diff.v1.DiffVulnerabilitiesResponse.removed_vulnerabilities:type_name -> deputy.vulnerability.v1.Finding

@@ -1279,10 +1279,10 @@ type DiffReportPolicyInput struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Changes lists all dependency changes between refs.
 	Changes []*DependencyChange `protobuf:"bytes,1,rep,name=changes,proto3" json:"changes,omitempty"`
-	// BaseTarget is the baseline (older) target.
-	BaseTarget *v12.Target `protobuf:"bytes,2,opt,name=base_target,json=baseTarget,proto3" json:"base_target,omitempty"`
-	// TargetTarget is the target (newer) being compared.
-	TargetTarget *v12.Target `protobuf:"bytes,3,opt,name=target_target,json=targetTarget,proto3" json:"target_target,omitempty"`
+	// DiffBase is the baseline (older) target.
+	DiffBase *v12.Target `protobuf:"bytes,2,opt,name=diff_base,json=diffBase,proto3" json:"diff_base,omitempty"`
+	// DiffTarget is the target (newer) being compared.
+	DiffTarget *v12.Target `protobuf:"bytes,3,opt,name=diff_target,json=diffTarget,proto3" json:"diff_target,omitempty"`
 	// Env provides execution environment context.
 	Env           *Environment `protobuf:"bytes,4,opt,name=env,proto3" json:"env,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1326,16 +1326,16 @@ func (x *DiffReportPolicyInput) GetChanges() []*DependencyChange {
 	return nil
 }
 
-func (x *DiffReportPolicyInput) GetBaseTarget() *v12.Target {
+func (x *DiffReportPolicyInput) GetDiffBase() *v12.Target {
 	if x != nil {
-		return x.BaseTarget
+		return x.DiffBase
 	}
 	return nil
 }
 
-func (x *DiffReportPolicyInput) GetTargetTarget() *v12.Target {
+func (x *DiffReportPolicyInput) GetDiffTarget() *v12.Target {
 	if x != nil {
-		return x.TargetTarget
+		return x.DiffTarget
 	}
 	return nil
 }
@@ -4314,8 +4314,8 @@ type ServiceDiffRequestPolicyInput struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Jwt           *JWTClaims             `protobuf:"bytes,1,opt,name=jwt,proto3" json:"jwt,omitempty"`
 	Request       *ServiceRequest        `protobuf:"bytes,2,opt,name=request,proto3" json:"request,omitempty"`
-	BaseTarget    *v12.Target            `protobuf:"bytes,3,opt,name=base_target,json=baseTarget,proto3" json:"base_target,omitempty"`
-	TargetTarget  *v12.Target            `protobuf:"bytes,4,opt,name=target_target,json=targetTarget,proto3" json:"target_target,omitempty"`
+	DiffBase      *v12.Target            `protobuf:"bytes,3,opt,name=diff_base,json=diffBase,proto3" json:"diff_base,omitempty"`
+	DiffTarget    *v12.Target            `protobuf:"bytes,4,opt,name=diff_target,json=diffTarget,proto3" json:"diff_target,omitempty"`
 	Env           *Environment           `protobuf:"bytes,5,opt,name=env,proto3" json:"env,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4365,16 +4365,16 @@ func (x *ServiceDiffRequestPolicyInput) GetRequest() *ServiceRequest {
 	return nil
 }
 
-func (x *ServiceDiffRequestPolicyInput) GetBaseTarget() *v12.Target {
+func (x *ServiceDiffRequestPolicyInput) GetDiffBase() *v12.Target {
 	if x != nil {
-		return x.BaseTarget
+		return x.DiffBase
 	}
 	return nil
 }
 
-func (x *ServiceDiffRequestPolicyInput) GetTargetTarget() *v12.Target {
+func (x *ServiceDiffRequestPolicyInput) GetDiffTarget() *v12.Target {
 	if x != nil {
-		return x.TargetTarget
+		return x.DiffTarget
 	}
 	return nil
 }
@@ -4624,12 +4624,12 @@ const file_deputy_policy_v1_policy_proto_rawDesc = "" +
 	"\x18SbomComponentPolicyInput\x12/\n" +
 	"\x03pkg\x18\x01 \x01(\v2\x1d.deputy.dependency.v1.PackageR\x03pkg\x12/\n" +
 	"\x03env\x18\x02 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\x120\n" +
-	"\x06target\x18\x03 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\"\x80\x02\n" +
+	"\x06target\x18\x03 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\"\xf8\x01\n" +
 	"\x15DiffReportPolicyInput\x12<\n" +
-	"\achanges\x18\x01 \x03(\v2\".deputy.policy.v1.DependencyChangeR\achanges\x129\n" +
-	"\vbase_target\x18\x02 \x01(\v2\x18.deputy.target.v1.TargetR\n" +
-	"baseTarget\x12=\n" +
-	"\rtarget_target\x18\x03 \x01(\v2\x18.deputy.target.v1.TargetR\ftargetTarget\x12/\n" +
+	"\achanges\x18\x01 \x03(\v2\".deputy.policy.v1.DependencyChangeR\achanges\x125\n" +
+	"\tdiff_base\x18\x02 \x01(\v2\x18.deputy.target.v1.TargetR\bdiffBase\x129\n" +
+	"\vdiff_target\x18\x03 \x01(\v2\x18.deputy.target.v1.TargetR\n" +
+	"diffTarget\x12/\n" +
 	"\x03env\x18\x04 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\"\xcb\x01\n" +
 	"\x10DependencyChange\x12/\n" +
 	"\x03pkg\x18\x01 \x01(\v2\x1d.deputy.dependency.v1.PackageR\x03pkg\x12\x1f\n" +
@@ -4899,13 +4899,13 @@ const file_deputy_policy_v1_policy_proto_rawDesc = "" +
 	"\x03jwt\x18\x01 \x01(\v2\x1b.deputy.policy.v1.JWTClaimsR\x03jwt\x12:\n" +
 	"\arequest\x18\x02 \x01(\v2 .deputy.policy.v1.ServiceRequestR\arequest\x120\n" +
 	"\x06target\x18\x03 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12/\n" +
-	"\x03env\x18\x04 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\"\xb5\x02\n" +
+	"\x03env\x18\x04 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\"\xad\x02\n" +
 	"\x1dServiceDiffRequestPolicyInput\x12-\n" +
 	"\x03jwt\x18\x01 \x01(\v2\x1b.deputy.policy.v1.JWTClaimsR\x03jwt\x12:\n" +
-	"\arequest\x18\x02 \x01(\v2 .deputy.policy.v1.ServiceRequestR\arequest\x129\n" +
-	"\vbase_target\x18\x03 \x01(\v2\x18.deputy.target.v1.TargetR\n" +
-	"baseTarget\x12=\n" +
-	"\rtarget_target\x18\x04 \x01(\v2\x18.deputy.target.v1.TargetR\ftargetTarget\x12/\n" +
+	"\arequest\x18\x02 \x01(\v2 .deputy.policy.v1.ServiceRequestR\arequest\x125\n" +
+	"\tdiff_base\x18\x03 \x01(\v2\x18.deputy.target.v1.TargetR\bdiffBase\x129\n" +
+	"\vdiff_target\x18\x04 \x01(\v2\x18.deputy.target.v1.TargetR\n" +
+	"diffTarget\x12/\n" +
 	"\x03env\x18\x05 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\"\xf0\x01\n" +
 	" ServiceSecretsRequestPolicyInput\x12-\n" +
 	"\x03jwt\x18\x01 \x01(\v2\x1b.deputy.policy.v1.JWTClaimsR\x03jwt\x12:\n" +
@@ -5057,8 +5057,8 @@ var file_deputy_policy_v1_policy_proto_depIdxs = []int32{
 	3,   // 43: deputy.policy.v1.SbomComponentPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	65,  // 44: deputy.policy.v1.SbomComponentPolicyInput.target:type_name -> deputy.target.v1.Target
 	16,  // 45: deputy.policy.v1.DiffReportPolicyInput.changes:type_name -> deputy.policy.v1.DependencyChange
-	65,  // 46: deputy.policy.v1.DiffReportPolicyInput.base_target:type_name -> deputy.target.v1.Target
-	65,  // 47: deputy.policy.v1.DiffReportPolicyInput.target_target:type_name -> deputy.target.v1.Target
+	65,  // 46: deputy.policy.v1.DiffReportPolicyInput.diff_base:type_name -> deputy.target.v1.Target
+	65,  // 47: deputy.policy.v1.DiffReportPolicyInput.diff_target:type_name -> deputy.target.v1.Target
 	3,   // 48: deputy.policy.v1.DiffReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	64,  // 49: deputy.policy.v1.DependencyChange.pkg:type_name -> deputy.dependency.v1.Package
 	16,  // 50: deputy.policy.v1.DiffDependencyChangePolicyInput.change:type_name -> deputy.policy.v1.DependencyChange
@@ -5137,8 +5137,8 @@ var file_deputy_policy_v1_policy_proto_depIdxs = []int32{
 	3,   // 123: deputy.policy.v1.ServiceSbomRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	4,   // 124: deputy.policy.v1.ServiceDiffRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	51,  // 125: deputy.policy.v1.ServiceDiffRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	65,  // 126: deputy.policy.v1.ServiceDiffRequestPolicyInput.base_target:type_name -> deputy.target.v1.Target
-	65,  // 127: deputy.policy.v1.ServiceDiffRequestPolicyInput.target_target:type_name -> deputy.target.v1.Target
+	65,  // 126: deputy.policy.v1.ServiceDiffRequestPolicyInput.diff_base:type_name -> deputy.target.v1.Target
+	65,  // 127: deputy.policy.v1.ServiceDiffRequestPolicyInput.diff_target:type_name -> deputy.target.v1.Target
 	3,   // 128: deputy.policy.v1.ServiceDiffRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	4,   // 129: deputy.policy.v1.ServiceSecretsRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	51,  // 130: deputy.policy.v1.ServiceSecretsRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
