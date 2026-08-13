@@ -75,8 +75,14 @@ func Analyze(ctx context.Context, dir string) (*Report, error) {
 		return nil, err
 	}
 
-	prog, err := newProgram(dir, loaded)
+	prog, err := newProgram(ctx, dir, loaded)
 	if err != nil {
+		return nil, err
+	}
+	// The checks below only read the loaded graph, so they are bounded by it and
+	// need no cancellation of their own. One check here keeps a run the user
+	// interrupted during them from still producing a report.
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
@@ -165,7 +171,9 @@ type variant struct {
 
 // newProgram indexes the loaded packages by canonical path, dropping the
 // synthetic test-main packages and everything outside the module under audit.
-func newProgram(dir string, loaded []*packages.Package) (*program, error) {
+// ctx is carried through to the evidence gathering, whose filesystem walk is the
+// part of an audit long enough to want interrupting.
+func newProgram(ctx context.Context, dir string, loaded []*packages.Package) (*program, error) {
 	p := &program{pkgs: map[string][]*variant{}, fset: loaded[0].Fset}
 
 	for _, pkg := range loaded {
@@ -199,7 +207,7 @@ func newProgram(dir string, loaded []*packages.Package) (*program, error) {
 	}
 	p.root = root
 	p.constrained = constrainedFiles(p.variants())
-	if p.dyn, err = newDynamic(p, loaded); err != nil {
+	if p.dyn, err = newDynamic(ctx, p, loaded); err != nil {
 		return nil, err
 	}
 	return p, nil

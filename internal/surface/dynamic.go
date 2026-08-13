@@ -1,6 +1,7 @@
 package surface
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -129,8 +130,9 @@ var assetExtensions = map[string]bool{
 // newDynamic gathers the dynamic-reachability evidence for the whole module. It
 // fails if the dispatch contract list does not resolve: missing evidence makes
 // findings look more certain than they are, so an audit that cannot gather it is
-// not one to report.
-func newDynamic(p *program, roots []*packages.Package) (*dynamic, error) {
+// not one to report. It fails the same way when ctx is canceled, since the
+// caller asked for no report at all.
+func newDynamic(ctx context.Context, p *program, roots []*packages.Package) (*dynamic, error) {
 	d := &dynamic{
 		tokens:        map[string]string{},
 		byMethod:      map[string][]contract{},
@@ -174,7 +176,9 @@ func newDynamic(p *program, roots []*packages.Package) (*dynamic, error) {
 	if err := d.addForeignContracts(roots, dispatchContracts); err != nil {
 		return nil, err
 	}
-	d.addAssets(p.root)
+	if err := d.addAssets(ctx, p.root); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 
@@ -429,11 +433,21 @@ func hasEncodingTag(tag string) bool {
 // named only in a template, a CEL policy, or fixture data is not reported as
 // unreferenced. Dot-prefixed and vendored trees are skipped; testdata is not,
 // because fixtures do name the fields a decoder binds.
-func (d *dynamic) addAssets(root string) {
+//
+// This is the audit's one unbounded filesystem phase, and it runs after the
+// package load, so it is where a Ctrl-C lands on a large repository. The walk
+// therefore checks ctx on every entry and returns the cancellation, which fails
+// the audit rather than letting a report print for a run the user stopped. The
+// check comes before the tolerance for unreadable entries below, so an
+// unreadable tree cannot swallow a cancellation.
+func (d *dynamic) addAssets(ctx context.Context, root string) error {
 	if root == "" {
-		return
+		return nil
 	}
-	filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			return nil //nolint:nilerr // an unreadable tree only costs evidence
 		}
@@ -458,6 +472,10 @@ func (d *dynamic) addAssets(root string) {
 		d.addTokens(string(data), filepath.ToSlash(trimRoot(path, root)))
 		return nil
 	})
+	if walkErr != nil {
+		return fmt.Errorf("scan assets under %s: %w", root, walkErr)
+	}
+	return nil
 }
 
 // maxAssetBytes caps the asset files scanned for identifier tokens, so a large
