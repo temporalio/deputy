@@ -403,6 +403,45 @@ func TestPolicyLintReportsYAMLSyntaxErrors(t *testing.T) {
 	}
 }
 
+// TestPolicyLintReportsErrorsWithNothingToPointAt pins that lint reports a CEL
+// error naming a line that holds no characters instead of crashing on it. The
+// caret is drawn under the offending column, and clamping that column to the end
+// of an empty line put it before the start of the line, which panicked the
+// process on input a user can pipe in: a compiled bundle whose policy carries no
+// source, and a policy whose error falls on a blank line. A malformed policy has
+// to be refused, and a refusal is a message.
+func TestPolicyLintReportsErrorsWithNothingToPointAt(t *testing.T) {
+	const compiledHeader = `{"schemaVersion":"policy.deputy.sh/v1alpha1","generated":"2026-01-01T00:00:00Z","policies":[`
+	cases := []struct {
+		name     string
+		document string
+	}{
+		{
+			name:     "a compiled bundle whose policy has an empty source",
+			document: compiledHeader + `{"name":"empty","source":""}]}`,
+		},
+		{
+			name:     "a compiled bundle whose policy has no source at all",
+			document: compiledHeader + `{"name":"sourceless"}]}`,
+		},
+		{
+			name:     "raw CEL whose error falls on a blank line",
+			document: "true &&\n\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := lintStdin(t, tc.document)
+			if err == nil {
+				t.Fatalf("expected the document to be refused, got output %q", out)
+			}
+			if strings.TrimSpace(err.Error()) == "" {
+				t.Fatalf("expected the refusal to say something, got %q with output %q", err, out)
+			}
+		})
+	}
+}
+
 // lintStdin pipes a policy to `lint -` and returns the output plus whether the
 // run failed, so a document can be linted the way a pipeline supplies it.
 func lintStdin(t *testing.T, document string) (string, error) {

@@ -532,6 +532,14 @@ func formatCelCompileError(err error, src string, known []string) string {
 		return celDetail(msg)
 	}
 	line := strings.ReplaceAll(lines[lineNum-1], "\t", " ")
+	// A caret needs a character to sit under. CEL names a line with none when the
+	// source is empty, as a compiled bundle carrying no source for a policy is, and
+	// when the error falls on a blank line inside one. Clamping the column to the
+	// end of that line put it before the line's start and panicked the process, so
+	// the detail is reported without a snippet, as the editor's formatter does.
+	if line == "" {
+		return celDetail(msg)
+	}
 	target := colNum - 1
 	if name := extractUndeclaredName(msg); name != "" {
 		if idx := strings.Index(line, name); idx >= 0 {
