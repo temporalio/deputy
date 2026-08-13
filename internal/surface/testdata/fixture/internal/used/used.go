@@ -5,7 +5,9 @@ import (
 	// interface the load graph contains, and a real module gets sql.Scanner
 	// that way, through a dependency, with no file of its own naming it. An
 	// import that named the interface would prove less.
+	"context"
 	_ "database/sql"
+	"log/slog"
 )
 
 // Used is referenced by package main, so it is not a finding.
@@ -67,3 +69,23 @@ func (*Scannable) Scan(src any) error { return nil }
 type Tagged struct {
 	Name string `json:"name"`
 }
+
+// Handled satisfies [log/slog.Handler], which is the shape that showed a
+// hand-maintained contract list cannot carry this check. Nothing here calls its
+// methods; slog does, once a handler is installed. The audit's supplemental list
+// does not name slog.Handler, so the only way these methods earn their doubt is
+// by deriving the contract from the WithAttrs and WithGroup results below, which
+// are the one place this module mentions the interface.
+type Handled struct{}
+
+// Enabled implements [log/slog.Handler].
+func (Handled) Enabled(context.Context, slog.Level) bool { return true }
+
+// Handle implements [log/slog.Handler].
+func (Handled) Handle(context.Context, slog.Record) error { return nil }
+
+// WithAttrs implements [log/slog.Handler].
+func (Handled) WithAttrs([]slog.Attr) slog.Handler { return Handled{} }
+
+// WithGroup implements [log/slog.Handler].
+func (Handled) WithGroup(string) slog.Handler { return Handled{} }
