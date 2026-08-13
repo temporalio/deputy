@@ -1,6 +1,7 @@
 package remediation
 
 import (
+	"path"
 	"slices"
 	"strings"
 	"testing"
@@ -641,5 +642,86 @@ func TestStdlibCommandsSkipsVendoredGoMod(t *testing.T) {
 
 	if len(commands) != 0 {
 		t.Errorf("expected no commands for a stdlib finding sourced only from a vendored go.mod, got %d: %+v", len(commands), commands)
+	}
+}
+
+// TestDeputyCommandsRoundTripOrAreNotExecutable pins the invariant behind every
+// deputy-internal command: the text is re-parsed at apply time, so a command
+// marked executable has to parse back to the tokens it was built from. Anything
+// else is a fix Deputy generated and its own applier refuses, or worse accepts
+// as different arguments than intended.
+//
+// The shapes here are ordinary paths, not hostile ones: directories with spaces
+// are everywhere, and a newline is legal in a POSIX path. A step Deputy cannot
+// express as a command is offered as guidance rather than as a fix that must
+// fail, and it is rendered on one line either way.
+func TestDeputyCommandsRoundTripOrAreNotExecutable(t *testing.T) {
+	// render covers every generator that emits a deputy: command with a
+	// filesystem path in it, so a new one cannot quietly skip the invariant.
+	renders := map[string]func(manifestPath string) commandResult{
+		"mise": func(p string) commandResult {
+			return miseUpdateCommand(p, "go", []string{"1.22.12"}, "1.24.3")
+		},
+		"github actions": func(p string) commandResult {
+			return recommendCommand("github-actions", p, "actions/checkout", nil, "v4.2.2", nil, "")
+		},
+		"dockerfile": func(p string) commandResult {
+			return recommendCommand("docker", p, "nginx", nil, "1.27.3", nil, "")
+		},
+	}
+
+	paths := []struct {
+		name string
+		path string
+		// wantExecutable says whether the command can be applied at all; when
+		// it is false the command is guidance and must still be one line.
+		wantExecutable bool
+	}{
+		{name: "a plain path", path: "config/mise.toml", wantExecutable: true},
+		{name: "a directory with a space", path: "my project/mise.toml", wantExecutable: true},
+		{name: "a directory with a quote", path: `quote"dir/mise.toml`, wantExecutable: true},
+		{name: "a directory with a backslash", path: `back\slash/mise.toml`, wantExecutable: true},
+		{name: "a projected mount", path: "..data/mise.toml", wantExecutable: true},
+		{name: "a newline in the path", path: "line\nbreak/mise.toml"},
+		{name: "a carriage return in the path", path: "line\rbreak/mise.toml"},
+	}
+
+	for generator, render := range renders {
+		for _, tt := range paths {
+			t.Run(generator+"/"+tt.name, func(t *testing.T) {
+				// The generators key off the manifest's extension, so give each
+				// one a path it recognizes while keeping the directory shape.
+				manifest := tt.path
+				switch generator {
+				case "github actions":
+					manifest = path.Dir(tt.path) + "/workflow.yml"
+				case "dockerfile":
+					manifest = path.Dir(tt.path) + "/Dockerfile"
+				}
+
+				res := render(manifest)
+				if !strings.HasPrefix(res.command, "deputy:") {
+					t.Fatalf("generator produced no deputy command: %q", res.command)
+				}
+				if res.executable != tt.wantExecutable {
+					t.Errorf("executable = %v, want %v for %q", res.executable, tt.wantExecutable, res.command)
+				}
+				if strings.ContainsAny(res.command, "\r\n") {
+					t.Errorf("the rendered command spans lines: %q", res.command)
+				}
+				if !res.executable {
+					return
+				}
+				// An executable command has to parse back to the manifest it
+				// was rendered for, in the argument position the applier reads.
+				args, err := ParseCommandArgs(res.command)
+				if err != nil {
+					t.Fatalf("ParseCommandArgs(%q): %v", res.command, err)
+				}
+				if len(args) < 2 || args[1] != manifest {
+					t.Errorf("command %q parses to %q, want %q in the file position", res.command, args, manifest)
+				}
+			})
+		}
 	}
 }

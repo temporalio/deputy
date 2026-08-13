@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -615,12 +616,45 @@ type commandResult struct {
 	executable   bool
 }
 
-// quoteCommandArg quotes a command token for a display command string that
-// round-trips through ParseCommandArgs (deputy-internal commands are re-parsed
-// from the command text at apply time, so a manifest path with spaces must not
-// split into separate tokens). Tokens without whitespace or quotes are
-// returned unchanged to keep the common case readable.
+// deputyCommand renders a deputy-internal command from its tokens and reports
+// whether Deputy can execute what it rendered. A deputy: command is re-parsed
+// from its own text at apply time, so a token that does not survive that round
+// trip is a command Deputy would refuse or, worse, misread: an unquoted manifest
+// path containing a space splits into two tokens and the applier edits whatever
+// the first one names.
+//
+// Executability is decided by parsing the rendered text back and comparing it to
+// the tokens it came from, not by a list of characters to watch out for. A shape
+// no quoting can carry (ParseCommandArgs refuses a command holding a newline,
+// carriage return, or NUL outright) therefore reports false by construction
+// rather than by being remembered, and the step is offered as guidance instead
+// of as a fix that must fail.
+func deputyCommand(tokens ...string) (command string, executable bool) {
+	quoted := make([]string, len(tokens))
+	for i, token := range tokens {
+		quoted[i] = quoteCommandArg(token)
+	}
+	command = strings.Join(quoted, " ")
+	parsed, err := ParseCommandArgs(command)
+	return command, err == nil && slices.Equal(parsed, tokens)
+}
+
+// quoteCommandArg quotes a command token for a command string that round-trips
+// through ParseCommandArgs (deputy-internal commands are re-parsed from the
+// command text at apply time, so a manifest path with spaces must not split into
+// separate tokens). Tokens without whitespace or quotes are returned unchanged
+// to keep the common case readable.
+//
+// A token holding a control character is rendered with Go quoting, which keeps
+// the command on one line and shows what the path really is. That form does not
+// parse back to the same token, and it is not meant to: [ParseCommandArgs]
+// refuses such a command whatever the quoting, so the caller learns from the
+// round-trip check that the command cannot be executed. Rendering the character
+// raw instead would split the command across lines wherever it is displayed.
 func quoteCommandArg(s string) string {
+	if strings.ContainsAny(s, "\x00\r\n") {
+		return strconv.Quote(s)
+	}
 	if !strings.ContainsAny(s, " \t\"'\\") {
 		return s
 	}
@@ -638,9 +672,9 @@ func quoteCommandArg(s string) string {
 func miseUpdateCommand(manifestPath, tool string, currentVersions []string, version string) commandResult {
 	parts := []string{
 		"deputy:mise:update",
-		quoteCommandArg(manifestPath),
-		quoteCommandArg(tool),
-		quoteCommandArg(version),
+		manifestPath,
+		tool,
+		version,
 	}
 	currents := make([]string, 0, len(currentVersions))
 	for _, cur := range currentVersions {
@@ -649,13 +683,12 @@ func miseUpdateCommand(manifestPath, tool string, currentVersions []string, vers
 		}
 	}
 	slices.Sort(currents)
-	for _, cur := range slices.Compact(currents) {
-		parts = append(parts, quoteCommandArg(cur))
-	}
+	parts = append(parts, slices.Compact(currents)...)
+	command, executable := deputyCommand(parts...)
 	return commandResult{
-		command:    strings.Join(parts, " "),
+		command:    command,
 		hint:       "then run: mise install",
-		executable: true,
+		executable: executable,
 	}
 }
 
@@ -974,8 +1007,8 @@ func recommendCommand(manager, manifestPath, pkg string, currentVersions []strin
 			// Return a deputy-internal command that will be handled by the fix applier
 			// Format: deputy:action:update <file> <owner/repo> <new-version>
 			actionRef := fmt.Sprintf("%s/%s", owner, repo)
-			cmd := fmt.Sprintf("deputy:action:update %s %s %s", manifestPath, actionRef, version)
-			return commandResult{command: cmd, hint: fmt.Sprintf("consider pinning to full commit SHA: %s/%s@<sha> # %s", owner, repo, version), executable: true}
+			cmd, executable := deputyCommand("deputy:action:update", manifestPath, actionRef, version)
+			return commandResult{command: cmd, hint: fmt.Sprintf("consider pinning to full commit SHA: %s/%s@<sha> # %s", owner, repo, version), executable: executable}
 		default:
 			return commandResult{command: fmt.Sprintf("Update action %s to %s", pkg, version), hint: "edit workflow YAML file", executable: false}
 		}
@@ -986,8 +1019,8 @@ func recommendCommand(manager, manifestPath, pkg string, currentVersions []strin
 		if isContainerfilePath(base) {
 			// Return a deputy-internal command that will be handled by the fix applier
 			// Format: deputy:dockerfile:update <file> <image> <new-version>
-			cmd := fmt.Sprintf("deputy:dockerfile:update %s %s %s", manifestPath, pkg, version)
-			return commandResult{command: cmd, hint: "pin to digest for reproducibility: FROM image@sha256:...", executable: true}
+			cmd, executable := deputyCommand("deputy:dockerfile:update", manifestPath, pkg, version)
+			return commandResult{command: cmd, hint: "pin to digest for reproducibility: FROM image@sha256:...", executable: executable}
 		}
 		// Generic container image update (e.g., docker-compose.yml, k8s manifests)
 		return commandResult{command: fmt.Sprintf("Update container image %s to %s", pkg, version), executable: false}
