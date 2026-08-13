@@ -799,3 +799,88 @@ func TestCommandsFromConsolidatedCarriesEveryMergedVersion(t *testing.T) {
 		}
 	}
 }
+
+// TestCommandsFromConsolidatedNeverDowngradesAMergedVersion pins that carrying
+// every merged version into one command cannot move a tool backwards. One
+// advisory can fix several release branches at different versions, so a record
+// merged from findings on both branches has one target computed from one of its
+// versions while holding another that is newer than it.
+//
+// Handing them all to a single edit rewrote the newer declaration to the older
+// target: `go = ["1.23.9", "1.24.3"]` under an advisory fixing 1.23 at 1.23.10
+// became `["1.23.10", "1.23.10"]`, moving the 1.24 toolchain back a minor line
+// and deleting its lock entry, reported as a successful fix. A version the target
+// cannot replace is therefore left out of the command: the declaration stays as it
+// is and the next scan reports it again, which is what a partial fix has to look
+// like.
+func TestCommandsFromConsolidatedNeverDowngradesAMergedVersion(t *testing.T) {
+	finding := func(version string) vulnerability.Finding {
+		return vulnerability.Finding{
+			AdvisoryID: "GO-2025-4444",
+			Dependency: dependency.ID{Name: "stdlib", Ecosystem: "Go"},
+			Version:    version,
+			Affected:   true,
+			Direct:     true,
+			ManifestRefs: []dependencyv1.ManifestRef{
+				dependency.NewManifestRef("mise.toml", "mise", nil, "go"),
+			},
+		}
+	}
+	cons := vulnerability.Consolidate(
+		[]vulnerability.Finding{finding("1.23.9"), finding("1.24.3")},
+		map[string]*vulnerabilityv1.Advisory{
+			// The advisory fixes the 1.23 line at 1.23.10 and the 1.24 line at
+			// 1.24.4, the shape of a real Go security release.
+			"GO-2025-4444": {
+				Id:            "GO-2025-4444",
+				Aliases:       []string{"CVE-2025-4444"},
+				FixedVersions: []string{"1.23.10", "1.24.4"},
+			},
+		},
+	)
+	if len(cons) != 1 {
+		t.Fatalf("expected the two findings to merge into one record, got %d", len(cons))
+	}
+
+	commands, _ := CommandsFromConsolidated(cons)
+	const want = "deputy:mise:update mise.toml go 1.23.10 1.23.9"
+	if !slices.ContainsFunc(commands, func(c Command) bool { return c.Command == want }) {
+		t.Fatalf("expected %q, so the 1.24 toolchain is not an argument of a 1.23 fix; commands=%+v", want, commands)
+	}
+
+	// Applying the plan must leave the version it cannot fix exactly as it was,
+	// lock entry included: unfixed and still reported beats quietly older.
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "mise.toml")
+	if err := os.WriteFile(configPath, []byte("[tools]\ngo = [\"1.23.9\", \"1.24.3\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(dir, "mise.lock")
+	lock := "[[tools.go]]\nversion = \"1.23.9\"\n\n[[tools.go]]\nversion = \"1.24.3\"\n\n[tools.go.platforms.linux-x64]\nchecksum = \"sha256:keep24\"\n"
+	if err := os.WriteFile(lockPath, []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range commands {
+		if !strings.HasPrefix(c.Command, "deputy:") {
+			continue
+		}
+		if err := ApplyDeputyCommand(dir, c.Command); err != nil {
+			t.Fatalf("ApplyDeputyCommand(%q): %v", c.Command, err)
+		}
+	}
+
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(after), "[tools]\ngo = [\"1.23.10\", \"1.24.3\"]\n"; got != want {
+		t.Errorf("config after the fix:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	lockAfter, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(lockAfter), "sha256:keep24") {
+		t.Errorf("the lock entry of the version the fix could not replace was pruned:\n%s", lockAfter)
+	}
+}

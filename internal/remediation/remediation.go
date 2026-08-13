@@ -188,10 +188,45 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 
 	upgrades := make([]packageUpgrade, 0, len(pkgBest))
 	for _, u := range pkgBest {
+		u.Currents = currentsReplacedBy(u.Recommended, u.Currents)
 		upgrades = append(upgrades, *u)
 	}
 
-	return upgrades, stdlibRec, stdlibRefs, stdlibVulnIDs, stdlibCurrents
+	return upgrades, stdlibRec, stdlibRefs, stdlibVulnIDs, currentsReplacedBy(stdlibRec, stdlibCurrents)
+}
+
+// currentsReplacedBy returns the installed versions a single upgrade to target
+// may actually rewrite: the ones target does not move backwards. It is applied
+// once the target is final, since the target is the highest of the merged
+// findings' and a version can only be judged against it.
+//
+// One advisory can fix several release branches at different versions, and a
+// declaration can hold a version from each. A record merged from those findings
+// carries one target, computed from one of its versions, so the others may be
+// newer than it. Handing them all to one edit rewrote the newer declaration to
+// the older target: `go = ["1.23.9", "1.24.3"]` under an advisory fixing 1.23 at
+// 1.23.10 became `["1.23.10", "1.23.10"]`, moving the 1.24 toolchain backwards
+// and deleting its lock entry, reported as a successful fix.
+//
+// A version this target cannot replace is left out of the command rather than
+// downgraded. The declaration then stays as it is and the next scan reports it
+// again, which is the outcome a partial fix has to have: visible and unfixed,
+// never quietly older. Covering both branches means one command per target,
+// which is a plan shape this does not have yet.
+func currentsReplacedBy(target string, currents []string) []string {
+	if target == "" || len(currents) == 0 {
+		return currents
+	}
+	out := make([]string, 0, len(currents))
+	for _, current := range currents {
+		if compareVersions(target, current) >= 0 {
+			out = append(out, current)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // upgradeTargetFor determines the remediation target for a consolidated
