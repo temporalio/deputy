@@ -47,7 +47,7 @@ type policyMetadata struct {
 	Entrypoints []string // Entrypoints lists the entrypoints this policy applies to.
 	Commands    []string // Commands lists the commands this policy applies to.
 	Ecosystems  []string // Ecosystems lists the ecosystems this policy applies to.
-	Mode        string   // Mode defines the execution mode (e.g., "enforce", "audit").
+	Mode        string   // Mode is the execution mode the source declares, validated when it is loaded (see declaredMode).
 }
 
 // parsePolicyMetadata reads leading `//! key = value` comments from a CEL source body.

@@ -36,7 +36,7 @@ type compiledPolicy struct {
 	program     celProgram              // program is the compiled CEL executable.
 	entrypoints collections.Set[string] // entrypoints is the set of entrypoints this policy applies to.
 	commands    collections.Set[string] // commands is the set of commands this policy applies to.
-	mode        string                  // mode defines the execution mode (e.g., "enforce", "audit").
+	mode        string                  // mode is the canonical execution mode (see Modes), or empty for the enforce default.
 }
 
 // celProgram is the minimal interface we need from cel.Program for testing/abstraction.
@@ -61,16 +61,44 @@ func NewEngine(sources []Source) (*Engine, error) {
 		if err := validateEntrypoints(meta.Entrypoints, src.Name); err != nil {
 			return nil, err
 		}
+		mode, err := declaredMode(meta.Mode, src.Name)
+		if err != nil {
+			return nil, err
+		}
 
 		compiled = append(compiled, compiledPolicy{
 			source:      src,
 			program:     prog,
 			entrypoints: collections.NewSetFunc(meta.Entrypoints, strings.TrimSpace),
 			commands:    collections.NewSetFunc(meta.Commands, NormalizeCommand),
-			mode:        meta.Mode,
+			mode:        mode,
 		})
 	}
 	return &Engine{compiled: compiled}, nil
+}
+
+// declaredMode returns the canonical form of the mode a policy source declares,
+// refusing one Deputy does not recognize. Evaluation asks whether a policy's mode
+// is advisory and enforces when it is not, so an unrecognized spelling would turn
+// a policy the author meant to observe with into one that blocks, which is both
+// the opposite of what they asked for and silent. It is the load-time counterpart
+// of validateEntrypoints, and of the check the structured bundle format runs while
+// expanding a policy, so a mode is refused the same way whether it arrives as a
+// bundle field or as a comment on a raw CEL source.
+//
+// Canonicalizing here is what lets every reader of the mode compare it without
+// repeating the normalization: an authored " ADVISORY " is stored as advisory. An
+// empty mode is absent rather than unknown and means enforce, the default, so it
+// loads.
+func declaredMode(mode, policyName string) (string, error) {
+	if NormalizeMode(mode) == "" {
+		return "", nil
+	}
+	canonical, err := ValidateMode(mode)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", policyName, err)
+	}
+	return canonical, nil
 }
 
 // validateEntrypoints checks that all entrypoints are known canonical values.
@@ -176,7 +204,7 @@ func (e *Engine) EvaluateAll(ctx context.Context, input proto.Message, command, 
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", pol.source.Name, err)
 		}
-		if strings.EqualFold(pol.mode, "advisory") {
+		if strings.EqualFold(pol.mode, ModeAdvisory) {
 			normalized = downgradeAdvisory(normalized)
 		}
 		// Record individual policy result as span event
@@ -282,7 +310,7 @@ func (e *Engine) EvaluateAllMap(ctx context.Context, payload map[string]any, com
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", pol.source.Name, err)
 		}
-		if strings.EqualFold(pol.mode, "advisory") {
+		if strings.EqualFold(pol.mode, ModeAdvisory) {
 			normalized = downgradeAdvisory(normalized)
 		}
 		// Record individual policy result as span event
