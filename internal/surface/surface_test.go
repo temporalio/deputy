@@ -1,12 +1,15 @@
 package surface
 
 import (
+	"go/types"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"golang.org/x/tools/go/packages"
 )
 
 // analyzeFixture audits testdata/fixture, a self-contained module whose every
@@ -121,14 +124,15 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 
 	// Every exported declaration under internal/, and nothing from the excluded
 	// trees: 8 funcs (Used, Local, NamedInString, Orphaned, ForForeignTests,
-	// ForOwnBlackBoxTest, Run, Make), 10 types (Never, Stringish, Decoy, Tagged
-	// plus 6 interfaces), and 9 methods (Never.Method, Stringish.String,
-	// Decoy.Read plus one per interface). Vars and consts are zero, which also
-	// pins that struct fields such as Tagged.Name are not counted as symbols.
+	// ForOwnBlackBoxTest, Run, Make), 11 types (Never, Stringish, Decoy,
+	// Scannable, Tagged plus 6 interfaces), and 10 methods (Never.Method,
+	// Stringish.String, Decoy.Read, Scannable.Scan plus one per interface). Vars
+	// and consts are zero, which also pins that struct fields such as Tagged.Name
+	// are not counted as symbols.
 	want := map[SymbolKind]int{
 		KindFunc:   8,
-		KindType:   10,
-		KindMethod: 9,
+		KindType:   11,
+		KindMethod: 10,
 		KindVar:    0,
 		KindConst:  0,
 	}
@@ -241,6 +245,12 @@ func TestDispatchDoubtRequiresImplementingTheInterface(t *testing.T) {
 			wantDoubt:  "encoding-tagged",
 			wantDoubts: true,
 		},
+		{
+			name:       "a standard-library contract no file names still earns the doubt",
+			symbol:     "Scannable.Scan",
+			wantDoubt:  "database/sql.Scanner",
+			wantDoubts: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -258,6 +268,86 @@ func TestDispatchDoubtRequiresImplementingTheInterface(t *testing.T) {
 				t.Errorf("%s doubts = %v, want one mentioning %q", tt.symbol, got.Doubts, tt.wantDoubt)
 			}
 		})
+	}
+}
+
+// TestDispatchContractsResolveToInterfaces checks the audit's one
+// hand-maintained list against the packages it names. A name filed under the
+// wrong package resolves to nothing, the contract is never registered, and every
+// method reached only through it is then reported as certainly unused: the tool
+// invents evidence of deadness. Nothing about that failure is visible in the
+// output, which is why the list is verified directly instead of trusted.
+func TestDispatchContractsResolveToInterfaces(t *testing.T) {
+	paths := slices.Sorted(maps.Keys(dispatchContracts))
+	loaded, err := packages.Load(&packages.Config{
+		Context: t.Context(),
+		Mode:    packages.NeedName | packages.NeedTypes,
+	}, paths...)
+	if err != nil {
+		t.Fatalf("load dispatch contract packages: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for _, pkg := range loaded {
+		names, ok := dispatchContracts[pkg.PkgPath]
+		if !ok {
+			t.Errorf("loaded %s, which dispatchContracts does not name", pkg.PkgPath)
+			continue
+		}
+		seen[pkg.PkgPath] = true
+		if pkg.Types == nil {
+			t.Errorf("%s did not type-check, so its contracts cannot be verified", pkg.PkgPath)
+			continue
+		}
+		for _, name := range names {
+			obj := pkg.Types.Scope().Lookup(name)
+			if obj == nil {
+				t.Errorf("%s.%s does not exist, so that contract is never registered", pkg.PkgPath, name)
+				continue
+			}
+			if _, ok := obj.Type().Underlying().(*types.Interface); !ok {
+				t.Errorf("%s.%s underlying type is %s, want an interface", pkg.PkgPath, name, obj.Type().Underlying())
+			}
+		}
+	}
+	for _, path := range paths {
+		if !seen[path] {
+			t.Errorf("%s did not load, so its contracts were not verified", path)
+		}
+	}
+}
+
+// TestForeignContractLookupIsLoud pins the behavior that makes the list above
+// worth verifying at all: a lookup that fails is an error, not a skip. It also
+// pins the case that must stay quiet, since a module is not required to depend
+// on every package the list names.
+func TestForeignContractLookupIsLoud(t *testing.T) {
+	loaded, err := packages.Load(&packages.Config{
+		Context: t.Context(),
+		Mode:    packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps,
+	}, "fmt")
+	if err != nil {
+		t.Fatalf("load fmt: %v", err)
+	}
+
+	d := &dynamic{byMethod: map[string][]contract{}}
+	err = d.addForeignContracts(loaded, map[string][]string{"fmt": {"Stringer", "Sprintf", "Absent"}})
+	if err == nil {
+		t.Fatal("addForeignContracts with a misfiled contract returned nil, so a wrong list stays invisible")
+	}
+	for _, want := range []string{"fmt.Absent", "fmt.Sprintf"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to name %s", err, want)
+		}
+	}
+	if _, ok := d.byMethod["String"]; !ok {
+		t.Error("the contracts that did resolve were dropped, so one bad entry costs the rest")
+	}
+
+	// A package outside the load graph is the ordinary case, not a defect.
+	quiet := &dynamic{byMethod: map[string][]contract{}}
+	if err := quiet.addForeignContracts(loaded, map[string][]string{"database/sql": {"Absent"}}); err != nil {
+		t.Errorf("addForeignContracts for a package the graph lacks = %v, want nil", err)
 	}
 }
 

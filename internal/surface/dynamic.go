@@ -1,6 +1,7 @@
 package surface
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -74,6 +75,11 @@ type contract struct {
 // other interface. It only has to name contracts satisfied by accident of
 // method signature, which is why membership is verified with [types.Implements]
 // rather than by method name.
+//
+// Because it cannot be derived it has to be checked. Every name must resolve to
+// an interface in the package it is filed under, which
+// [dynamic.addForeignContracts] enforces at run time and
+// TestDispatchContractsResolveToInterfaces enforces for the whole list.
 var dispatchContracts = map[string][]string{
 	"fmt":                 {"Stringer", "GoStringer", "Formatter"},
 	"encoding":            {"TextMarshaler", "TextUnmarshaler", "BinaryMarshaler", "BinaryUnmarshaler"},
@@ -81,7 +87,8 @@ var dispatchContracts = map[string][]string{
 	"io":                  {"Reader", "Writer", "Closer", "ReaderAt", "WriterAt", "Seeker", "ReaderFrom", "WriterTo", "StringWriter"},
 	"sort":                {"Interface"},
 	"net/http":            {"Handler", "RoundTripper", "ResponseWriter", "Flusher"},
-	"database/sql/driver": {"Valuer", "Scanner"},
+	"database/sql":        {"Scanner"},
+	"database/sql/driver": {"Valuer"},
 	"google.golang.org/protobuf/reflect/protoreflect": {"ProtoMessage", "Message"},
 }
 
@@ -104,8 +111,11 @@ var assetExtensions = map[string]bool{
 	".textproto": true,
 }
 
-// newDynamic gathers the dynamic-reachability evidence for the whole module.
-func newDynamic(p *program, roots []*packages.Package) *dynamic {
+// newDynamic gathers the dynamic-reachability evidence for the whole module. It
+// fails if the dispatch contract list does not resolve: missing evidence makes
+// findings look more certain than they are, so an audit that cannot gather it is
+// not one to report.
+func newDynamic(p *program, roots []*packages.Package) (*dynamic, error) {
 	d := &dynamic{
 		tokens:        map[string]string{},
 		byMethod:      map[string][]contract{},
@@ -145,9 +155,11 @@ func newDynamic(p *program, roots []*packages.Package) *dynamic {
 	for _, v := range p.variants() {
 		d.addDeclaredInterfaces(v.pkg)
 	}
-	d.addForeignContracts(roots)
+	if err := d.addForeignContracts(roots, dispatchContracts); err != nil {
+		return nil, err
+	}
 	d.addAssets(p.root)
-	return d
+	return d, nil
 }
 
 // addContract indexes one dispatch contract under each of its method names.
@@ -180,29 +192,47 @@ func (d *dynamic) addDeclaredInterfaces(pkg *packages.Package) {
 	}
 }
 
-// addForeignContracts indexes the interfaces from [dispatchContracts] that the
-// load graph contains, plus the builtin error interface. Without these, a method
-// reached only by the standard library (Marshaler dispatched from json.Marshal,
-// Stringer from fmt) looks unreferenced with nothing to doubt.
-func (d *dynamic) addForeignContracts(roots []*packages.Package) {
+// addForeignContracts indexes the interfaces from table that the load graph
+// contains, plus the builtin error interface. Without these, a method reached
+// only by the standard library (Marshaler dispatched from json.Marshal, Stringer
+// from fmt) looks unreferenced with nothing to doubt.
+//
+// A name the table files under the wrong package is an error rather than a skip.
+// Skipping it costs a whole dispatch contract, and the methods that contract
+// reaches are then reported as certainly unused: the audit would invent evidence
+// of deadness, which is worse than not running. A package the load graph does
+// not contain is not an error, because the table names contracts a module may or
+// may not depend on.
+func (d *dynamic) addForeignContracts(roots []*packages.Package, table map[string][]string) error {
 	if errType, ok := types.Universe.Lookup("error").Type().Underlying().(*types.Interface); ok {
 		d.addContract("error", errType)
 	}
+	var unresolved []string
 	packages.Visit(roots, nil, func(pkg *packages.Package) {
-		names, wanted := dispatchContracts[pkg.PkgPath]
+		names, wanted := table[pkg.PkgPath]
 		if !wanted || pkg.Types == nil {
 			return
 		}
 		for _, name := range names {
-			tn, ok := pkg.Types.Scope().Lookup(name).(*types.TypeName)
-			if !ok {
+			qualified := pkg.PkgPath + "." + name
+			obj := pkg.Types.Scope().Lookup(name)
+			if obj == nil {
+				unresolved = append(unresolved, qualified+" does not exist")
 				continue
 			}
-			if iface, ok := tn.Type().Underlying().(*types.Interface); ok {
-				d.addContract(pkg.PkgPath+"."+name, iface)
+			iface, ok := obj.Type().Underlying().(*types.Interface)
+			if !ok {
+				unresolved = append(unresolved, fmt.Sprintf("%s is %s, not an interface", qualified, obj.Type().Underlying()))
+				continue
 			}
+			d.addContract(qualified, iface)
 		}
 	})
+	if len(unresolved) > 0 {
+		slices.Sort(unresolved)
+		return fmt.Errorf("dispatch contracts do not resolve: %s", strings.Join(unresolved, "; "))
+	}
+	return nil
 }
 
 // dispatchedThrough returns the contracts a method can be reached through: those

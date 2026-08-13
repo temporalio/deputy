@@ -199,7 +199,9 @@ func newProgram(dir string, loaded []*packages.Package) (*program, error) {
 	}
 	p.root = root
 	p.constrained = constrainedFiles(p.variants())
-	p.dyn = newDynamic(p, loaded)
+	if p.dyn, err = newDynamic(p, loaded); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 

@@ -1,5 +1,13 @@
 package used
 
+import (
+	// Blank on purpose: the audit can only check implementations against an
+	// interface the load graph contains, and a real module gets sql.Scanner
+	// that way, through a dependency, with no file of its own naming it. An
+	// import that named the interface would prove less.
+	_ "database/sql"
+)
+
 // Used is referenced by package main, so it is not a finding.
 func Used() string { return "used" }
 
@@ -33,6 +41,14 @@ type Decoy struct{}
 
 // Read is not io.Reader's Read.
 func (Decoy) Read() {}
+
+// Scannable satisfies [database/sql.Scanner] by signature alone. Nothing in
+// this module calls Scan; a database driver does, through the interface, so the
+// audit has to find the contract in the standard library to doubt the finding.
+type Scannable struct{}
+
+// Scan implements [database/sql.Scanner].
+func (*Scannable) Scan(src any) error { return nil }
 
 // Tagged carries an encoding tag, so a decoder can construct it without any
 // caller naming the type.
