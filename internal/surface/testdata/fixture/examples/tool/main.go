@@ -8,4 +8,6 @@ import (
 	"fixture/internal/used"
 )
 
-func main() { fmt.Println(used.Used()) }
+// ForExampleOnly is named here and nowhere else, so a scan that stopped counting
+// references from this tree would report it.
+func main() { fmt.Println(used.Used(), used.ForExampleOnly()) }

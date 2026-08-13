@@ -34,8 +34,8 @@ func analyzeFixture(t *testing.T) *Report {
 // TestAuditedPackagesExcludeGeneratedAndPublicTrees pins the exclusions: only
 // packages under internal/ are candidates, generated code under internal/ is
 // skipped even so, and the module-root sdk/ and examples/ trees are excluded
-// while still counting as usage (see TestSymbolReachGrading, where a symbol
-// referenced only from sdk/ is not reported).
+// while still counting as usage (see TestSymbolReachGrading, where the symbol
+// each of those trees is the sole referencer of is not reported).
 func TestAuditedPackagesExcludeGeneratedAndPublicTrees(t *testing.T) {
 	report := analyzeFixture(t)
 
@@ -91,7 +91,11 @@ func TestSymbolReachGrading(t *testing.T) {
 		want Reach // ReachProduction means "must not be reported at all"
 	}{
 		{"referenced by main", "fixture/internal/used", "Used", ReachProduction},
-		{"referenced only from an excluded tree still counts", "fixture/internal/used", "Used", ReachProduction},
+		// These two are the only symbols their tree names, which is what makes
+		// them a test of the exclusion. Asserting on a symbol main also uses
+		// would pass even if the excluded trees were never scanned.
+		{"referenced only from sdk/ still counts", "fixture/internal/used", "ForSDKOnly", ReachProduction},
+		{"referenced only from examples/ still counts", "fixture/internal/used", "ForExampleOnly", ReachProduction},
 		{"in-package test does not count as outside use", "fixture/internal/used", "Local", ReachNone},
 		{"unreferenced type", "fixture/internal/used", "Never", ReachNone},
 		{"unreferenced method", "fixture/internal/used", "Never.Method", ReachNone},
@@ -126,17 +130,17 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	report := analyzeFixture(t)
 
 	// Every exported declaration under internal/, and nothing from the excluded
-	// trees: 8 funcs (Used, Local, NamedInString, Orphaned, ForForeignTests,
-	// ForOwnBlackBoxTest, Run, Make), 15 types (Never, Stringish, Decoy,
-	// Scannable, Tagged, Handled, testonly.Shared, testonly.Holder,
-	// ifaces.Shared plus 6 interfaces), and 15 methods (Never.Method,
-	// Stringish.String, Decoy.Read, Scannable.Scan, Holder.Shared, the four
-	// Handled methods, plus one per interface). Vars and consts are zero, which
-	// also pins that struct fields such as Tagged.Name are not counted as
+	// trees: 10 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
+	// Orphaned, ForForeignTests, ForOwnBlackBoxTest, Run, Make), 15 types (Never,
+	// Stringish, Decoy, Scannable, Tagged, Handled, testonly.Shared,
+	// testonly.Holder, ifaces.Shared plus 6 interfaces), and 15 methods
+	// (Never.Method, Stringish.String, Decoy.Read, Scannable.Scan, Holder.Shared,
+	// the four Handled methods, plus one per interface). Vars and consts are zero,
+	// which also pins that struct fields such as Tagged.Name are not counted as
 	// symbols, and that the type declared inside used.localTagged is not one
 	// either.
 	want := map[SymbolKind]int{
-		KindFunc:   8,
+		KindFunc:   10,
 		KindType:   15,
 		KindMethod: 15,
 		KindVar:    0,
