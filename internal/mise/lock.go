@@ -84,10 +84,20 @@ func ParseLock(path string, data []byte) (*Lockfile, error) {
 // LoadSiblingLock reads and parses the mise.lock next to a TOML config. It
 // returns nil when the config format has no sibling lockfile path or when the
 // lockfile is absent.
+//
+// The path is held to readableInTree first: a scan reads through a filesystem
+// that follows a symlink wherever it points, so a checkout naming a host file as
+// its mise.lock would have that file read and parsed here.
 func LoadSiblingLock(fsys fs.FS, configPath string) (*Lockfile, error) {
 	lockPath := LockfilePath(configPath)
 	if lockPath == "" || fsys == nil {
 		return nil, nil
+	}
+	if err := readableInTree(fsys, lockPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("mise: reading lockfile %s: %w", lockPath, err)
 	}
 	data, err := fs.ReadFile(fsys, lockPath)
 	if err != nil {
@@ -459,6 +469,51 @@ func ResolveLinkedPath(fsys fs.FS, relPath string) (target string, linked bool, 
 	return "", false, fmt.Errorf("resolving %s: more than %d symbolic links", relPath, maxLinkHops)
 }
 
+// readableInTree reports why relPath may not be read as a file of the tree
+// being scanned, or nil when it may. It is the guard every read of a discovered
+// path goes through, because the filesystem a scan reads through does not
+// enforce containment: an [os.DirFS] open follows a symlink wherever it points,
+// absolute targets included, and it is a scanned repository that chooses where
+// its config and lockfile paths point. Without this, listing a tree and reading
+// what looks like a config in it is enough to read a host file on an untrusted
+// repository's behalf. Only [os.Root] refuses that in the kernel, and a scan has
+// no root to work through, so containment here is resolution plus a refusal.
+//
+// Two shapes are refused. A path whose symlink chain leaves the tree is out of
+// scope by the same rule the rest of the package applies, from the lockfile
+// candidate that stops being a claimant to the writer that will not publish
+// through such a link. A path that does not resolve to a regular file is refused
+// because reading one is not bounded work: a fifo blocks the scan until someone
+// writes to it, and a character device such as /dev/zero has no end, so
+// [fs.ReadFile] grows its buffer until the process dies. Neither is a config or
+// a lockfile mise could use either.
+//
+// The refusal is deliberately an error rather than a silent skip. Both readers of
+// a lockfile answer "ownership could not be established" by setting the whole
+// lockfile aside, and a config Deputy may not read hides exactly the
+// declarations that would have contested a name, so counting the rest would
+// leave a name looking uncontested and its entry free to be lent or pruned.
+//
+// Containment is provable only on a filesystem that reports links, which the
+// filesystem of a real scan is. One that cannot resolves every path to itself,
+// as [ResolveLinkedPath] documents, and there the regular-file check is all that
+// is left; such a filesystem is virtual (a container layer, a test map) and its
+// paths do not reach the scanning host.
+func readableInTree(fsys fs.FS, relPath string) error {
+	target, _, err := ResolveLinkedPath(fsys, relPath)
+	if err != nil {
+		return fmt.Errorf("resolving %s: %w", relPath, err)
+	}
+	info, err := fs.Stat(fsys, target)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("refusing to read %s: %s is not a regular file (%s)", relPath, target, info.Mode().Type())
+	}
+	return nil
+}
+
 // LockClaims counts, over every config that shares configPath's lockfile, how
 // many declarations could own a lock entry keyed by a given name. It is
 // [NameClaims] widened to the scope the lockfile actually has.
@@ -516,9 +571,17 @@ func (s *LockScope) Claims(configPath string) (map[string]int, error) {
 // that cannot be read or parsed is an error rather than a zero contribution,
 // because the declarations it hides are exactly the ones that would have
 // contested a name.
+//
+// Every path is held to readableInTree before it is opened. The paths come from
+// walking the scanned tree, which lists a symlink without following it, and the
+// filesystem underneath follows one on open: a config path that names a host file
+// would otherwise be read here and its declarations counted.
 func countClaims(fsys fs.FS, shared []string) (map[string]int, error) {
 	claims := make(map[string]int)
 	for _, cfgPath := range shared {
+		if err := readableInTree(fsys, cfgPath); err != nil {
+			return nil, fmt.Errorf("reading %s: %w", cfgPath, err)
+		}
 		data, err := fs.ReadFile(fsys, cfgPath)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", cfgPath, err)

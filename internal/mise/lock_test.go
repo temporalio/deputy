@@ -1,8 +1,11 @@
 package mise
 
 import (
+	"errors"
 	"io/fs"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"testing/fstest"
@@ -736,5 +739,170 @@ func TestLockClaimsSeparatesRefusalFromFailure(t *testing.T) {
 				t.Errorf("LockClaims(%q) = %v, want %v", tt.config, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestLockOwnershipRefusesToReadOutsideTheTree pins the containment of every
+// read that answers "who owns this lock entry". The enumeration lists a
+// symlinked config without following it, and the scan filesystem is an
+// os.DirFS, which is not a containment boundary: an open through it follows a
+// symlink wherever it points, absolute paths included. A checkout can therefore
+// name a host file from a config path that shares the queried lockfile, and
+// counting claimants would read it, parse it as TOML, and count its
+// declarations. That is a host file read on behalf of an untrusted repository,
+// which the scanning invariants forbid whatever the file turns out to contain.
+//
+// Refusing is also the fail-closed answer for ownership: a config Deputy may
+// not read hides declarations that would have contested a name, so the lockfile
+// is set aside rather than read permissively.
+//
+// The escaping config is named ".mise.toml" because [LockfilePath] drops a
+// leading dot, which is what makes it share "mise.lock" with the config being
+// scanned.
+func TestLockOwnershipRefusesToReadOutsideTheTree(t *testing.T) {
+	t.Parallel()
+
+	// The sentinel is a tool name only the out-of-tree file declares, so a
+	// claim counted under it proves the read happened.
+	const outsideDecl = "[tools]\nleaked = \"1.0.0\"\n"
+
+	tests := []struct {
+		name string
+		// files are written inside the tree. links are created inside it with
+		// the target written verbatim, and "OUTSIDE" in a target stands for the
+		// out-of-tree file's absolute path.
+		files  map[string]string
+		links  map[string]string
+		config string
+	}{
+		{
+			name:   "a config link to an absolute path outside the tree",
+			files:  map[string]string{"mise.toml": "[tools]\ngo = \"1.24.3\"\n", "mise.lock": ""},
+			links:  map[string]string{".mise.toml": "OUTSIDE"},
+			config: "mise.toml",
+		},
+		{
+			name:   "a config link climbing out of the tree",
+			files:  map[string]string{"mise.toml": "[tools]\ngo = \"1.24.3\"\n", "mise.lock": ""},
+			links:  map[string]string{".mise.toml": "../outside/host.toml"},
+			config: "mise.toml",
+		},
+		{
+			// The escape is one hop further along a chain that starts in tree.
+			name:   "a config link that leaves the tree on its second hop",
+			files:  map[string]string{"mise.toml": "[tools]\ngo = \"1.24.3\"\n", "mise.lock": ""},
+			links:  map[string]string{".mise.toml": "hop.toml", "hop.toml": "../outside/host.toml"},
+			config: "mise.toml",
+		},
+		{
+			// The config being scanned is held to the same rule: it is read
+			// again to count its own declarations.
+			name:   "the scanned config is itself a link out of the tree",
+			files:  map[string]string{"mise.lock": ""},
+			links:  map[string]string{"mise.toml": "OUTSIDE"},
+			config: "mise.toml",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// One parent holding the tree and a sibling directory outside it,
+			// so a relative escape has somewhere real to land.
+			parent := t.TempDir()
+			tree := filepath.Join(parent, "tree")
+			outsideDir := filepath.Join(parent, "outside")
+			for _, dir := range []string{tree, outsideDir} {
+				if err := os.Mkdir(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			outside := filepath.Join(outsideDir, "host.toml")
+			if err := os.WriteFile(outside, []byte(outsideDecl), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for rel, content := range tt.files {
+				if err := os.WriteFile(filepath.Join(tree, rel), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, target := range tt.links {
+				if target == "OUTSIDE" {
+					target = outside
+				}
+				if err := os.Symlink(target, filepath.Join(tree, rel)); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+
+			got, err := LockClaims(os.DirFS(tree), tt.config)
+			if _, leaked := got["leaked"]; leaked {
+				t.Errorf("claims counted the out-of-tree config: %v", got)
+			}
+			if err == nil {
+				t.Fatalf("LockClaims(%q) = %v, want an error refusing the config outside the tree", tt.config, got)
+			}
+			if !errors.Is(err, ErrLinkLeavesTree) {
+				t.Errorf("LockClaims(%q) error = %v, want one wrapping ErrLinkLeavesTree", tt.config, err)
+			}
+		})
+	}
+}
+
+// TestLockOwnershipStillCountsInTreeLinks pins the other half: containment is
+// about where a path lands, not about ignoring links. A config reached through
+// an in-tree link is one mise reads, so its declarations still contest a name,
+// and dropping it would leave a name looking uncontested and its entry free to
+// be lent or pruned.
+func TestLockOwnershipStillCountsInTreeLinks(t *testing.T) {
+	t.Parallel()
+
+	files := fstest.MapFS{
+		"mise.toml":       {Data: []byte("[tools]\ngo = \"1.24.3\"\n")},
+		"mise.lock":       {Data: []byte("")},
+		"real/other.toml": {Data: []byte("[tools]\ngo = \"1.23.0\"\n")},
+		".mise.toml":      {Mode: fs.ModeSymlink, Data: []byte("real/other.toml")},
+	}
+
+	got, err := LockClaims(files, "mise.toml")
+	if err != nil {
+		t.Fatalf("LockClaims: %v", err)
+	}
+	if want := map[string]int{"go": 2}; !maps.Equal(got, want) {
+		t.Errorf("LockClaims = %v, want %v", got, want)
+	}
+}
+
+// TestLoadSiblingLockRefusesALockOutsideTheTree pins the same containment for
+// the other read of a scan: the lockfile itself. A checkout that names a host
+// file as its mise.lock had that file read and parsed as TOML, so a scan of an
+// untrusted repository could be used to read outside the tree without any
+// config trickery at all.
+func TestLoadSiblingLockRefusesALockOutsideTheTree(t *testing.T) {
+	t.Parallel()
+
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "host.lock")
+	if err := os.WriteFile(outside, []byte("[[tools.leaked]]\nversion = \"9.9.9\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tree, "mise.toml"), []byte("[tools]\nleaked = \"9\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(tree, "mise.lock")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	lock, err := LoadSiblingLock(os.DirFS(tree), "mise.toml")
+	if lock != nil {
+		t.Errorf("LoadSiblingLock returned the out-of-tree lockfile: %+v", lock.Tools)
+	}
+	if err == nil {
+		t.Fatal("LoadSiblingLock = nil error, want one refusing the lockfile outside the tree")
+	}
+	if !errors.Is(err, ErrLinkLeavesTree) {
+		t.Errorf("LoadSiblingLock error = %v, want one wrapping ErrLinkLeavesTree", err)
 	}
 }

@@ -2,12 +2,17 @@ package misex
 
 import (
 	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"github.com/google/osv-scalibr/extractor/filesystem"
+	scalibrfs "github.com/google/osv-scalibr/fs"
 
 	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/purlx"
@@ -404,4 +409,98 @@ func TestExtractKeepsLockWhenAnotherConfigLocksOutsideTheTree(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestExtractNeverOpensALockfileOutsideTheTree pins the containment of the
+// lockfile read a scan does. The filesystem a scan reads through follows a
+// symlink wherever it points, absolute targets included, so a checkout whose
+// mise.lock names a file outside the scan root had that file opened, read, and
+// parsed as a lockfile: a host file read on an untrusted repository's behalf.
+//
+// The assertion is on the open, not on the version reported, because ownership
+// resolution already refused to enrich from a lockfile it could not place, so the
+// reported version looked right while the read had already happened.
+func TestExtractNeverOpensALockfileOutsideTheTree(t *testing.T) {
+	t.Parallel()
+
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "host.lock")
+	if err := os.WriteFile(outside, []byte("[[tools.go]]\nversion = \"1.0.0\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tree, "mise.toml"), []byte("[tools]\ngo = \"1.24.3\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(tree, "mise.lock")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	// The filesystem of a real scan, scalibrfs.DirFS over the scan root, with
+	// every open recorded.
+	fsys := &recordingFS{FS: scalibrfs.DirFS(tree)}
+	f, err := fsys.Open("mise.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	inv, err := New().Extract(t.Context(), &filesystem.ScanInput{Path: "mise.toml", Reader: f, FS: fsys})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if opened := fsys.openedPaths(); slices.Contains(opened, "mise.lock") {
+		t.Errorf("the extractor opened the lockfile linking outside the tree; opens: %v", opened)
+	}
+	if len(inv.Packages) != 1 {
+		t.Fatalf("Extract reported %d packages, want 1", len(inv.Packages))
+	}
+	pkg := inv.Packages[0]
+	if pkg.Version != "1.24.3" {
+		t.Errorf("go version = %q, want the declared 1.24.3", pkg.Version)
+	}
+	md, ok := pkg.Metadata.(*mise.Metadata)
+	if !ok {
+		t.Fatalf("metadata is %T, want *mise.Metadata", pkg.Metadata)
+	}
+	if md.LockedVersion != "" {
+		t.Errorf("locked version = %q, want none: nothing outside the tree may enrich a scan", md.LockedVersion)
+	}
+}
+
+// recordingFS is a scan filesystem that records which paths were opened, so a
+// test can assert that a read never happened rather than inferring it from what
+// the read would have changed.
+type recordingFS struct {
+	scalibrfs.FS
+
+	mu     sync.Mutex
+	opened []string
+}
+
+// Open records the path and delegates.
+func (r *recordingFS) Open(name string) (fs.File, error) {
+	r.mu.Lock()
+	r.opened = append(r.opened, name)
+	r.mu.Unlock()
+	return r.FS.Open(name)
+}
+
+// Lstat delegates, keeping the wrapper an [fs.ReadLinkFS] like the filesystem it
+// wraps: containment resolution needs to read links without following them, and a
+// wrapper that hid that would test a filesystem a scan never uses.
+func (r *recordingFS) Lstat(name string) (fs.FileInfo, error) {
+	return r.FS.(fs.ReadLinkFS).Lstat(name)
+}
+
+// ReadLink delegates for the same reason as [recordingFS.Lstat].
+func (r *recordingFS) ReadLink(name string) (string, error) {
+	return r.FS.(fs.ReadLinkFS).ReadLink(name)
+}
+
+// openedPaths returns the paths opened so far.
+func (r *recordingFS) openedPaths() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.opened)
 }
