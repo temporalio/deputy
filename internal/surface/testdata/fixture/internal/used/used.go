@@ -81,6 +81,14 @@ type Tagged struct {
 	Name string `json:"name"`
 }
 
+// AnonReached satisfies the anonymous interface ifaces.RunAnon accepts. No named
+// interface anywhere in the fixture declares an Anon method, so the doubt on its
+// method can only come from the anonymous interface in that signature.
+type AnonReached struct{}
+
+// Anon is reached only through an anonymous interface.
+func (AnonReached) Anon() {}
+
 // Handled satisfies [log/slog.Handler], which is the shape that showed a
 // hand-maintained contract list cannot carry this check. Nothing here calls its
 // methods; slog does, once a handler is installed. The audit's supplemental list

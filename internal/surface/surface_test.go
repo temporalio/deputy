@@ -149,19 +149,19 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	report := analyzeFixture(t)
 
 	// Every exported declaration under internal/, and nothing from the excluded
-	// trees: 10 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
-	// Orphaned, ForForeignTests, ForOwnBlackBoxTest, Run, Make), 15 types (Never,
-	// Stringish, Decoy, Scannable, Tagged, Handled, testonly.Shared,
-	// testonly.Holder, ifaces.Shared plus 6 interfaces), and 15 methods
-	// (Never.Method, Stringish.String, Decoy.Read, Scannable.Scan, Holder.Shared,
-	// the four Handled methods, plus one per interface). Vars and consts are zero,
-	// which also pins that struct fields such as Tagged.Name are not counted as
-	// symbols, and that the type declared inside used.localTagged is not one
-	// either.
+	// trees: 12 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
+	// Orphaned, ForForeignTests, ForOwnBlackBoxTest, Run, Make, RunAnon,
+	// RunStringish), 16 types (Never, Stringish, Decoy, Scannable, Tagged, Handled,
+	// AnonReached, testonly.Shared, testonly.Holder, ifaces.Shared plus 6
+	// interfaces), and 16 methods (Never.Method, Stringish.String, Decoy.Read,
+	// Scannable.Scan, Holder.Shared, AnonReached.Anon, the four Handled methods,
+	// plus one per interface). Vars and consts are zero, which also pins that
+	// struct fields such as Tagged.Name are not counted as symbols, and that the
+	// type declared inside used.localTagged is not one either.
 	want := map[SymbolKind]int{
-		KindFunc:   10,
-		KindType:   15,
-		KindMethod: 15,
+		KindFunc:   12,
+		KindType:   16,
+		KindMethod: 16,
 		KindVar:    0,
 		KindConst:  0,
 	}
@@ -250,12 +250,16 @@ func TestDispatchDoubtRequiresImplementingTheInterface(t *testing.T) {
 		name       string
 		symbol     string
 		wantDoubt  string
+		wantAbsent string
 		wantDoubts bool
 	}{
 		{
-			name:       "satisfying fmt.Stringer earns the doubt",
-			symbol:     "Stringish.String",
-			wantDoubt:  "fmt.Stringer",
+			name:      "satisfying fmt.Stringer earns the doubt",
+			symbol:    "Stringish.String",
+			wantDoubt: "fmt.Stringer",
+			// ifaces.RunStringish spells the same contract anonymously, and naming
+			// both would restate one fact in every Stringer doubt in the report.
+			wantAbsent: "interface{String() string}",
 			wantDoubts: true,
 		},
 		{
@@ -286,6 +290,14 @@ func TestDispatchDoubtRequiresImplementingTheInterface(t *testing.T) {
 			wantDoubt:  "log/slog.Handler",
 			wantDoubts: true,
 		},
+		{
+			// An anonymous interface has no name for any list to hold, so this is
+			// the contract that can only ever be derived.
+			name:       "an anonymous interface in a signature is a contract too",
+			symbol:     "AnonReached.Anon",
+			wantDoubt:  "interface{Anon()}",
+			wantDoubts: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -295,6 +307,9 @@ func TestDispatchDoubtRequiresImplementingTheInterface(t *testing.T) {
 			}
 			if hasDoubts := !certain(got.Doubts); hasDoubts != tt.wantDoubts {
 				t.Fatalf("%s doubts = %v, want any = %v", tt.symbol, got.Doubts, tt.wantDoubts)
+			}
+			if tt.wantAbsent != "" && slices.ContainsFunc(got.Doubts, func(d string) bool { return strings.Contains(d, tt.wantAbsent) }) {
+				t.Errorf("%s doubts = %v, want none mentioning %q", tt.symbol, got.Doubts, tt.wantAbsent)
 			}
 			if tt.wantDoubt == "" {
 				return
