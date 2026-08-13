@@ -41,6 +41,9 @@ import (
 // information, per-file syntax, and the transitive import graph. Syntax and
 // type info are both required: uses are read from the type checker, and the
 // interface audit walks declaration syntax to tell a parameter from a field.
+// packages.NeedForTest is what tells a test variant apart from the package it
+// tests. Without it that has to be guessed from the import path, and the guess is
+// wrong for a package whose own path ends in "_test".
 const loadMode = packages.NeedName |
 	packages.NeedFiles |
 	packages.NeedSyntax |
@@ -48,7 +51,8 @@ const loadMode = packages.NeedName |
 	packages.NeedTypesInfo |
 	packages.NeedImports |
 	packages.NeedDeps |
-	packages.NeedModule
+	packages.NeedModule |
+	packages.NeedForTest
 
 // Analyze audits the module rooted at dir. It loads every package in the
 // module along with its test variants, because a symbol referenced only by
@@ -247,6 +251,16 @@ func constrainedFiles(variants []*variant) []string {
 // classify decides whether a loaded package belongs to the module under audit
 // and, if so, which compilation variant it is. The generated "p.test" main
 // package is skipped: it is not source anyone maintains.
+//
+// Which variant a package is comes from [packages.Package.ForTest], the import
+// path of the package whose test binary it was compiled for, rather than from the
+// shape of its own import path. The distinction matters for a package whose path
+// ends in "_test", which is a legal path and not the same thing as being the
+// external test package of something else. Reading the suffix instead folded such
+// a package's ordinary in-package test variant onto a path with the suffix
+// stripped, which invented an audited package with no plain variant, took the
+// real package's test files out of its own accounting, and credited its tests'
+// imports and references to a package that does not exist.
 func classify(pkg *packages.Package, module string) (*variant, bool) {
 	if pkg.Types == nil || len(pkg.Syntax) == 0 {
 		return nil, false
@@ -259,21 +273,23 @@ func classify(pkg *packages.Package, module string) (*variant, bool) {
 		return nil, false
 	}
 
-	// go/packages labels a test variant's ID with the test binary in
-	// brackets; the plain package has no bracket.
-	isTestVariant := strings.Contains(pkg.ID, ".test]")
-	switch {
-	case isTestVariant && strings.HasSuffix(path, "_test"):
+	switch tested := pkg.ForTest; {
+	case tested == "":
+		// Not compiled for any test binary: the package as production builds it.
+		return &variant{pkg: pkg, canonical: path}, true
+	case tested == path:
+		// The package recompiled with its own in-package test files.
+		return &variant{pkg: pkg, canonical: path, test: true}, true
+	default:
+		// A black-box "…_test" package, whose declarations and references belong
+		// to the package it tests. ForTest names that package outright, so there
+		// is no suffix to strip.
 		return &variant{
 			pkg:          pkg,
-			canonical:    strings.TrimSuffix(path, "_test"),
+			canonical:    tested,
 			test:         true,
 			externalTest: true,
 		}, true
-	case isTestVariant:
-		return &variant{pkg: pkg, canonical: path, test: true}, true
-	default:
-		return &variant{pkg: pkg, canonical: path}, true
 	}
 }
 

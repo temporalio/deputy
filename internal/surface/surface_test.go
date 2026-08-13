@@ -59,6 +59,7 @@ func TestAuditedPackagesExcludeGeneratedAndPublicTrees(t *testing.T) {
 	report := analyzeFixture(t)
 
 	want := []string{
+		"fixture/internal/awkward_test",
 		"fixture/internal/blackbox",
 		"fixture/internal/doconly",
 		"fixture/internal/ifaces",
@@ -71,14 +72,19 @@ func TestAuditedPackagesExcludeGeneratedAndPublicTrees(t *testing.T) {
 	}
 }
 
-// TestUnreachablePackagesFindTestOnlyReachability covers check 1 and the three
+// TestUnreachablePackagesFindTestOnlyReachability covers check 1 and the four
 // cases that make it worth having: a package reached only by its own in-package
 // test counts as unreachable, so does one reached only by its own black-box test
-// package, and a package that declares nothing does not count at all.
+// package, a package that declares nothing does not count at all, and a package
+// whose own import path ends in "_test" is one of these packages rather than
+// somebody's external test package. The TestFiles assertion below is where that
+// last one bites: misreading the path moves those test files onto a package that
+// does not exist, and this package's count drops to zero.
 func TestUnreachablePackagesFindTestOnlyReachability(t *testing.T) {
 	report := analyzeFixture(t)
 
 	want := []string{
+		filepath.Join("internal", "awkward_test"),
 		filepath.Join("internal", "blackbox"),
 		filepath.Join("internal", "orphan"),
 	}
@@ -149,17 +155,17 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	report := analyzeFixture(t)
 
 	// Every exported declaration under internal/, and nothing from the excluded
-	// trees: 12 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
+	// trees: 13 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
 	// Orphaned, ForForeignTests, ForOwnBlackBoxTest, Run, Make, RunAnon,
-	// RunStringish), 16 types (Never, Stringish, Decoy, Scannable, Tagged, Handled,
-	// AnonReached, testonly.Shared, testonly.Holder, ifaces.Shared plus 6
+	// RunStringish, Awkward), 16 types (Never, Stringish, Decoy, Scannable, Tagged,
+	// Handled, AnonReached, testonly.Shared, testonly.Holder, ifaces.Shared plus 6
 	// interfaces), and 16 methods (Never.Method, Stringish.String, Decoy.Read,
 	// Scannable.Scan, Holder.Shared, AnonReached.Anon, the four Handled methods,
 	// plus one per interface). Vars and consts are zero, which also pins that
 	// struct fields such as Tagged.Name are not counted as symbols, and that the
 	// type declared inside used.localTagged is not one either.
 	want := map[SymbolKind]int{
-		KindFunc:   12,
+		KindFunc:   13,
 		KindType:   16,
 		KindMethod: 16,
 		KindVar:    0,
