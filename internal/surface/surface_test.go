@@ -9,19 +9,38 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"golang.org/x/tools/go/packages"
 )
 
-// analyzeFixture audits testdata/fixture, a self-contained module whose every
-// package exists to pin one behavior of the audit. Asserting against a fixture
-// rather than against Deputy itself means the expectations are exact: a wrong
-// answer is a failing diff, not a number nobody can check.
+// fixtureReport audits testdata/fixture once for the whole package. Every test
+// below asks the same question of the same immutable module, so loading and
+// type-checking it once per test paid for the type checker eight times over and
+// bought no coverage.
+//
+// The context is deliberately not a test's. A value computed once outlives
+// whichever test happened to trigger it, so wiring it to that test's
+// cancellation would make the shared result depend on run order. The load is
+// bounded by the fixture, which is a handful of files, so there is nothing here
+// worth interrupting.
+var fixtureReport = sync.OnceValues(func() (*Report, error) {
+	return Analyze(context.Background(), filepath.Join("testdata", "fixture"))
+})
+
+// analyzeFixture returns the shared audit of testdata/fixture, a self-contained
+// module whose every package exists to pin one behavior of the audit. Asserting
+// against a fixture rather than against Deputy itself means the expectations are
+// exact: a wrong answer is a failing diff, not a number nobody can check.
+//
+// The returned report is shared, so callers must only read it. Sorting a slice
+// of it or editing a finding in place would make the suite order-dependent, and
+// the failure would land in whichever test ran second.
 func analyzeFixture(t *testing.T) *Report {
 	t.Helper()
-	report, err := Analyze(t.Context(), filepath.Join("testdata", "fixture"))
+	report, err := fixtureReport()
 	if err != nil {
 		t.Fatalf("Analyze(testdata/fixture) error: %v", err)
 	}
