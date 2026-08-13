@@ -42,6 +42,7 @@ func ReplaceFileAtomically(root *os.Root, relPath string, content []byte, perm o
 	if err != nil {
 		return err
 	}
+	adoptOwner(root, relPath, f)
 	if writeErr := writeAndSync(f, content); writeErr != nil {
 		_ = root.Remove(tmpRel)
 		return fmt.Errorf("writing %s: %w", tmpRel, writeErr)
@@ -101,6 +102,35 @@ func createUniqueTemp(root *os.Root, relPath string, perm os.FileMode) (*os.File
 		}
 	}
 	return nil, "", fmt.Errorf("creating a temporary file beside %s: too many name collisions", relPath)
+}
+
+// adoptOwner gives the temporary the ownership of the file it will replace, so
+// a rename publishes the edit without also handing the file to whoever ran
+// Deputy. The temporary is created by this process, and Deputy is not always the
+// owner of the tree it fixes: run as root in an agent container or as a CI
+// service account, it would leave a developer's config and lockfile owned by
+// that identity and no longer writable by the checkout's owner. Mode is carried
+// over for the same reason (see createUniqueTemp); ownership is the other half
+// of the file's identity.
+//
+// It is best effort by necessity. Changing a file's owner needs privilege the
+// unprivileged case does not have, and there the ownership is already right,
+// because a file this process can rename over in a directory it can write is
+// one it is publishing as the same user. A failure therefore leaves the
+// temporary as it was, which is what publication did before ownership was
+// considered at all; refusing to publish instead would break every fix that
+// works today. A path that does not exist has no ownership to adopt, and the
+// caller may be about to create it.
+func adoptOwner(root *os.Root, relPath string, f *os.File) {
+	info, err := fs.Stat(root.FS(), relPath)
+	if err != nil {
+		return
+	}
+	uid, gid, ok := fileOwner(info)
+	if !ok {
+		return
+	}
+	_ = f.Chown(uid, gid)
 }
 
 // writeAndSync writes content to f and flushes it to stable storage before
