@@ -75,6 +75,12 @@ type contract struct {
 	// name is how the contract is described in a doubt, such as "fmt.Stringer".
 	name string
 
+	// anonymous marks a contract with no declared type behind it, whose name is
+	// the type expression that spelled it out. Such a contract is worth reporting
+	// only when no named one says the same thing, which
+	// [dynamic.dispatchedThrough] decides.
+	anonymous bool
+
 	iface *types.Interface
 }
 
@@ -184,10 +190,16 @@ func newDynamic(ctx context.Context, p *program, roots []*packages.Package) (*dy
 
 // addContract indexes one dispatch contract under each of its method names.
 func (d *dynamic) addContract(name string, iface *types.Interface) {
+	d.addNamedContract(name, iface, false)
+}
+
+// addNamedContract indexes a contract, recording whether its name is a type
+// expression rather than a declared type's name.
+func (d *dynamic) addNamedContract(name string, iface *types.Interface, anonymous bool) {
 	if iface == nil || iface.NumMethods() == 0 {
 		return
 	}
-	c := contract{name: name, iface: iface}
+	c := contract{name: name, anonymous: anonymous, iface: iface}
 	for i := range iface.NumMethods() {
 		method := iface.Method(i).Name()
 		if !slices.ContainsFunc(d.byMethod[method], func(have contract) bool { return have.name == c.name }) {
@@ -213,8 +225,8 @@ func (d *dynamic) addDeclaredInterfaces(pkg *packages.Package) {
 }
 
 // addReferencedContracts derives the dispatch contracts of foreign packages from
-// the module's own type graph: every named interface mentioned by the type of
-// anything the module declares or references.
+// the module's own type graph: every interface mentioned by the type of anything
+// the module declares or references, named or anonymous.
 //
 // This is what keeps the audit from depending on a hand-maintained list of
 // interfaces. A [log/slog.Handler] implementation is the case that motivated it:
@@ -253,12 +265,25 @@ func (d *dynamic) addReferencedContracts(p *program) {
 			return
 		}
 		seenType[t] = true
-		for _, tn := range namedTypes(t) {
-			if tn.Pkg() == nil {
-				continue
-			}
-			if iface, ok := tn.Type().Underlying().(*types.Interface); ok {
-				d.addContract(tn.Pkg().Path()+"."+tn.Name(), iface)
+		for mentioned := range typesIn(t) {
+			switch mentioned := mentioned.(type) {
+			case *types.Named:
+				tn := mentioned.Obj()
+				if tn.Pkg() == nil {
+					continue
+				}
+				if iface, ok := mentioned.Underlying().(*types.Interface); ok {
+					d.addContract(tn.Pkg().Path()+"."+tn.Name(), iface)
+				}
+			case *types.Interface:
+				// An anonymous interface, spelled out in the signature or field
+				// that uses it. Only these reach this branch, since typesIn does
+				// not open a named type, and they are the contracts no lookup by
+				// name could ever find: there is no TypeName to look up. A
+				// parameter declared as interface{ Run() } dispatches to the Run
+				// of whatever is passed, so the doubt is named by the type
+				// expression itself.
+				d.addNamedContract(types.TypeString(mentioned, nil), mentioned, true)
 			}
 		}
 	}
@@ -337,14 +362,29 @@ func (d *dynamic) dispatchedThrough(fn *types.Func) []string {
 		forms = append(forms, types.NewPointer(recv))
 	}
 
-	var out []string
+	var matched []contract
 	for _, c := range candidates {
 		for _, form := range forms {
 			if types.Implements(form, c.iface) {
-				out = append(out, c.name)
+				matched = append(matched, c)
 				break
 			}
 		}
+	}
+
+	var out []string
+	for _, c := range matched {
+		// An anonymous contract identical to a named one in the same match is the
+		// same fact spelled twice: "interface{String() string}" beside
+		// "fmt.Stringer" lengthens the doubt without telling a reader anything, and
+		// identical interfaces cannot differ in who implements them. Named contracts
+		// are always kept, so the reason is never lost, only its duplicate.
+		if c.anonymous && slices.ContainsFunc(matched, func(other contract) bool {
+			return !other.anonymous && types.Identical(c.iface, other.iface)
+		}) {
+			continue
+		}
+		out = append(out, c.name)
 	}
 	slices.Sort(out)
 	return slices.Compact(out)

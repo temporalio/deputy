@@ -36,6 +36,18 @@ func Run(a Accepted, b []Behind) *holder { return &holder{} }
 // Make returns Returned.
 func Make() Returned { return nil }
 
+// RunAnon accepts an anonymous interface, which is the one dispatch contract no
+// lookup by name can find: there is no declared type to file it under. It stands
+// in for a foreign API declared the same way, since the audit reads such a
+// signature out of the type graph either way.
+func RunAnon(v interface{ Anon() }) { v.Anon() }
+
+// RunStringish accepts an anonymous interface identical to [fmt.Stringer]. A
+// doubt must not name both spellings: identical interfaces cannot differ in who
+// implements them, so the anonymous one would lengthen every Stringer doubt in
+// the report without adding a reason.
+func RunStringish(v interface{ String() string }) string { return v.String() }
+
 func assert(v any) bool {
 	_, ok := v.(Bare)
 	return ok

@@ -3,6 +3,7 @@ package surface
 import (
 	"go/ast"
 	"go/types"
+	"iter"
 	"maps"
 	"slices"
 	"strings"
@@ -220,69 +221,104 @@ func (p *program) interfaceReach(candidates map[string]candidate) map[string]Rea
 	return p.referenceReach(declared)
 }
 
-// namedTypes collects the named types a type expression mentions, descending
-// through pointers, slices, arrays, maps, channels, function signatures, and
-// generic type arguments. Recursion is bounded by a seen set so a recursive
-// type cannot loop.
-func namedTypes(t types.Type) []*types.TypeName {
-	var out []*types.TypeName
-	seen := map[types.Type]bool{}
+// typesIn yields every type a type expression mentions, descending through
+// pointers, slices, arrays, maps, channels, function signatures, structs,
+// unions, and generic type arguments. Recursion is bounded by a seen set so a
+// recursive type cannot loop.
+//
+// A named type is yielded but not opened. Its definition belongs to its own
+// declaration, and descending into it would credit a struct's field types to
+// every signature that merely mentions the struct.
+//
+// Two callers share this walk because they want different nodes out of the same
+// traversal, and a second copy of it is how one of them would quietly stop
+// matching the other: [namedTypes] takes the declarations a type expression
+// mentions, and [dynamic.addReferencedContracts] takes the interfaces, which
+// include the anonymous ones that have no [types.TypeName] to be found by name.
+func typesIn(root types.Type) iter.Seq[types.Type] {
+	return func(yield func(types.Type) bool) {
+		seen := map[types.Type]bool{}
 
-	var walk func(types.Type)
-	walk = func(t types.Type) {
-		if t == nil || seen[t] {
-			return
-		}
-		seen[t] = true
-		switch t := t.(type) {
-		case *types.Named:
-			out = append(out, t.Obj())
-			if args := t.TypeArgs(); args != nil {
-				for i := range args.Len() {
-					walk(args.At(i))
+		var walk func(types.Type) bool
+		walk = func(t types.Type) bool {
+			if t == nil || seen[t] {
+				return true
+			}
+			seen[t] = true
+			if !yield(t) {
+				return false
+			}
+			switch t := t.(type) {
+			case *types.Named:
+				if args := t.TypeArgs(); args != nil {
+					for i := range args.Len() {
+						if !walk(args.At(i)) {
+							return false
+						}
+					}
+				}
+			case *types.Alias:
+				return walk(types.Unalias(t))
+			case *types.Pointer:
+				return walk(t.Elem())
+			case *types.Slice:
+				return walk(t.Elem())
+			case *types.Array:
+				return walk(t.Elem())
+			case *types.Chan:
+				return walk(t.Elem())
+			case *types.Map:
+				return walk(t.Key()) && walk(t.Elem())
+			case *types.Signature:
+				return walkTuple(t.Params(), walk) && walkTuple(t.Results(), walk)
+			case *types.Interface:
+				for i := range t.NumEmbeddeds() {
+					if !walk(t.EmbeddedType(i)) {
+						return false
+					}
+				}
+			case *types.Struct:
+				for i := range t.NumFields() {
+					if !walk(t.Field(i).Type()) {
+						return false
+					}
+				}
+			case *types.Union:
+				for i := range t.Len() {
+					if !walk(t.Term(i).Type()) {
+						return false
+					}
 				}
 			}
+			return true
+		}
+		walk(root)
+	}
+}
+
+// namedTypes collects the named types a type expression mentions.
+func namedTypes(t types.Type) []*types.TypeName {
+	var out []*types.TypeName
+	for mentioned := range typesIn(t) {
+		switch mentioned := mentioned.(type) {
+		case *types.Named:
+			out = append(out, mentioned.Obj())
 		case *types.Alias:
-			out = append(out, t.Obj())
-			walk(types.Unalias(t))
-		case *types.Pointer:
-			walk(t.Elem())
-		case *types.Slice:
-			walk(t.Elem())
-		case *types.Array:
-			walk(t.Elem())
-		case *types.Chan:
-			walk(t.Elem())
-		case *types.Map:
-			walk(t.Key())
-			walk(t.Elem())
-		case *types.Signature:
-			walkTuple(t.Params(), walk)
-			walkTuple(t.Results(), walk)
-		case *types.Interface:
-			for i := range t.NumEmbeddeds() {
-				walk(t.EmbeddedType(i))
-			}
-		case *types.Struct:
-			for i := range t.NumFields() {
-				walk(t.Field(i).Type())
-			}
-		case *types.Union:
-			for i := range t.Len() {
-				walk(t.Term(i).Type())
-			}
+			out = append(out, mentioned.Obj())
 		}
 	}
-	walk(t)
 	return out
 }
 
-// walkTuple applies walk to every type in a tuple.
-func walkTuple(tuple *types.Tuple, walk func(types.Type)) {
+// walkTuple applies walk to every type in a tuple, stopping early if walk does.
+func walkTuple(tuple *types.Tuple, walk func(types.Type) bool) bool {
 	if tuple == nil {
-		return
+		return true
 	}
 	for i := range tuple.Len() {
-		walk(tuple.At(i).Type())
+		if !walk(tuple.At(i).Type()) {
+			return false
+		}
 	}
+	return true
 }
