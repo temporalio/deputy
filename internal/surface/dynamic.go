@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -498,9 +499,17 @@ func (d *dynamic) addTaggedTypes(v *variant, spec *ast.TypeSpec) {
 }
 
 // hasEncodingTag reports whether a struct tag names a reflective codec.
+//
+// The tag is parsed with [reflect.StructTag], the same reader every codec in this
+// module uses, rather than searched for a substring. Substring matching cannot
+// tell a key from the end of a longer key: a field tagged `notjson:"value"`
+// contains `json:"` and would have lent its type an encoding doubt no decoder
+// justifies, which makes a finding read as uncertain forever with nothing behind
+// it.
 func hasEncodingTag(tag string) bool {
+	st := reflect.StructTag(tag)
 	for _, key := range encodingTags {
-		if strings.Contains(tag, key+":\"") {
+		if _, ok := st.Lookup(key); ok {
 			return true
 		}
 	}
