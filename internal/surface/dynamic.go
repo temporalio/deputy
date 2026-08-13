@@ -52,6 +52,12 @@ type dynamic struct {
 	// common name such as Run or Stats would otherwise lend this doubt to every
 	// object called that, in any package and of any kind, which is evidence the
 	// audit does not have.
+	//
+	// The package is the declaring object's own path, not the variant's canonical
+	// path, and the difference matters in one case: canonical folds an external
+	// "…_test" package back onto the package it tests, so a tagged type declared
+	// in a black-box test file would lend its doubt to an unrelated production
+	// type of the same name.
 	taggedTypes map[string]bool
 
 	// blankImported holds canonical paths imported for side effects only. Such
@@ -217,6 +223,10 @@ func (d *dynamic) addForeignContracts(roots []*packages.Package, table map[strin
 	packages.Visit(roots, nil, func(pkg *packages.Package) {
 		names, wanted := table[pkg.PkgPath]
 		if !wanted || pkg.Types == nil {
+			// A wanted package with no type information would hide its contracts
+			// as surely as a wrong name does. [Analyze] has already refused any
+			// graph with load errors by this point, so reaching that state means
+			// the load mode stopped asking for types, not that a lookup failed.
 			return
 		}
 		for _, name := range names {
