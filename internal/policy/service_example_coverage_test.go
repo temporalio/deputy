@@ -198,3 +198,64 @@ func TestShippedOIDCFederationCoversEveryServiceEntrypoint(t *testing.T) {
 		})
 	}
 }
+
+// TestShippedTenantIsolationRejectsUnauthorizableTargets tests the bypass that
+// no amount of care in the matching expression can close.
+//
+// The tenant rules authorize the string a caller submitted, and a remote git
+// target is not fetched as that whole string: the fragment is dropped. So
+// "https://github.com/other/repo.git#/acme/x" contains "/acme/" for the
+// predicate and clones other/repo.git for real. Four earlier revisions of these
+// rules each fixed a different position the tenant name could hide in, which is
+// the evidence that positions are the wrong thing to enumerate.
+func TestShippedTenantIsolationRejectsUnauthorizableTargets(t *testing.T) {
+	sources, err := LoadSources([]string{findExample(t, "service-multi-tenant.yaml")})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	engine, err := NewEngine(sources)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	targets := []struct {
+		name   string
+		target string
+	}{
+		{"fragment naming the tenant", "https://github.com/other/repo.git#/acme/x"},
+		{"query naming the tenant", "https://github.com/other/repo.git?path=/acme/x"},
+	}
+
+	for _, ep := range EntrypointsService {
+		build, ok := serviceRequestInput[ep]
+		if !ok {
+			continue
+		}
+		for _, tc := range targets {
+			t.Run(string(ep)+"/"+tc.name, func(t *testing.T) {
+				jwt := &policyv1.JWTClaims{
+					Sub: "user@example.com",
+					CustomClaims: map[string]string{
+						"tenant": "acme",
+						"roles":  "[scanner security]",
+						"teams":  "[security platform]",
+						"scopes": "[scan sbom secrets]",
+					},
+				}
+				input := build(jwt, "/deputy.test.v1.TestService/Probe", tc.target)
+
+				actions, err := engine.EvaluateAll(t.Context(), input, "server", string(ep))
+				if err != nil {
+					t.Fatalf("EvaluateAll: %v", err)
+				}
+
+				for _, action := range actions {
+					if ActionTypeIs(action.Type, ActionDeny) {
+						return
+					}
+				}
+				t.Errorf("target %q was not denied at %s: it satisfies the tenant predicate and names a resource another tenant owns", tc.target, ep)
+			})
+		}
+	}
+}

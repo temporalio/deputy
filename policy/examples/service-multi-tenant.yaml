@@ -125,6 +125,45 @@ policies:
         reason: "Cross-tenant diff denied - both sides must belong to your tenant"
         remediation: "You can only diff resources within your tenant namespace"
 
+  # A target carrying a URL fragment or query cannot be authorized by matching
+  # the string, because the fetch does not use the whole string. Git drops the
+  # fragment, so "https://github.com/other/repo.git#/acme/x" reads as belonging
+  # to acme and clones other/repo.git. Refusing those targets is what makes the
+  # matching rules above sound, rather than another position for the tenant name
+  # to hide in.
+  - name: reject-unauthorizable-targets
+    description: |
+      Deputy also rejects fragments during remote target validation. This rule
+      exists because a policy that authorizes a string has to see the same
+      string the fetch will use, and an operator copying the tenant rules above
+      into a deployment on an older build should not inherit the bypass.
+    entrypoints:
+      - service_scan_request
+      - service_list_request
+      - service_sbom_request
+      - service_secrets_request
+      - service_graph_request
+    rules:
+      - action: deny
+        when: |
+          request.?target.orValue("").contains("#") ||
+          request.?target.orValue("").contains("?")
+        reason: "Target must not carry a URL fragment or query"
+        remediation: "Name the resource directly, without a #fragment or ?query suffix"
+
+  # Same rule for the two sides of a diff, which request.target does not report.
+  - name: reject-unauthorizable-diff-targets
+    entrypoints:
+      - service_diff_request
+    rules:
+      - action: deny
+        when: |
+          [diff_base, diff_target].exists(t,
+            t.display_path.contains("#") || t.display_path.contains("?")
+          )
+        reason: "Neither side of a diff may carry a URL fragment or query"
+        remediation: "Name both resources directly, without a #fragment or ?query suffix"
+
   # Require authentication for all operations
   - name: require-authentication
     entrypoints:
