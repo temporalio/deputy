@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"fixture/internal/ifaces"
+	_ "fixture/internal/registered"
 	"fixture/internal/used"
 )
 

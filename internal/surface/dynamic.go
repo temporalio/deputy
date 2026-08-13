@@ -62,9 +62,17 @@ type dynamic struct {
 	// type of the same name.
 	taggedTypes map[string]bool
 
-	// blankImported holds canonical paths imported for side effects only. Such
-	// a package's exported symbols are wired up by its own init, not by a
-	// caller naming them.
+	// blankImported holds canonical paths imported for side effects only. This
+	// answers check 1 and nothing else: such a package is reached, so it is not an
+	// unreachable-package finding.
+	//
+	// It is deliberately not a doubt about the package's symbols. A blank import
+	// runs init, and whatever init registers it registers from inside the package,
+	// which is a reference the audit already counts as internal. So being
+	// blank-imported is not evidence that an export is needed; it is evidence that
+	// nobody outside can name one, since nobody imports the package by name. A
+	// doubt here told a reader to keep exactly the identifiers that were safest to
+	// unexport.
 	blankImported map[string]bool
 }
 
@@ -589,9 +597,6 @@ func (d *dynamic) symbolDoubts(obj types.Object, kind SymbolKind, pkgPath string
 	if src, ok := d.tokens[obj.Name()]; ok {
 		doubts = append(doubts, "name appears in "+src+", so it may be looked up by name")
 	}
-	if d.blankImported[pkgPath] {
-		doubts = append(doubts, "declaring package is imported for side effects only, so its exports are wired up by registration")
-	}
 	if tn, ok := obj.(*types.TypeName); ok {
 		if d.protoLike(tn) {
 			doubts = append(doubts, "type is a protobuf message, reachable through the proto registry")
@@ -642,13 +647,10 @@ func (d *dynamic) protoLike(tn *types.TypeName) bool {
 }
 
 // interfaceDoubts returns the reasons an interface finding might be wrong.
-func (d *dynamic) interfaceDoubts(obj types.Object, pkgPath string) []string {
+func (d *dynamic) interfaceDoubts(obj types.Object) []string {
 	var doubts []string
 	if src, ok := d.tokens[obj.Name()]; ok {
 		doubts = append(doubts, "name appears in "+src)
-	}
-	if d.blankImported[pkgPath] {
-		doubts = append(doubts, "declaring package is imported for side effects only")
 	}
 	return doubts
 }
