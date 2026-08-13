@@ -788,12 +788,14 @@ Finding represents a scan-time occurrence of an advisory in a dependency.
 
 ## Canonical ecosystems
 
-Every ecosystem value in a policy input is canonicalized before evaluation, so a policy sees exactly one spelling no matter which scanner produced the data: a lowercase, hyphenated token. Inventory, graph resolution, and OSV report display names (`Go`, `PyPI`, `crates.io`, `GitHub Actions`); those are for rendering only and never reach a policy.
+Every ecosystem value in a policy input is canonicalized before evaluation, so a policy sees exactly one spelling no matter which scanner produced the data: a lowercase, hyphenated name. Inventory, graph resolution, and OSV report display names (`Go`, `PyPI`, `crates.io`, `GitHub Actions`); those are for rendering only and never reach a policy.
+
+It happens once, at the boundary rather than per rule. Each of the three places `internal/policy` builds a CEL payload (a proto input, a map input, and the standalone evaluator behind filter expressions) rewrites the whole payload before any expression compiles, so every entrypoint on both the CLI and the server reads the same vocabulary and no rule has to normalize for itself. Only the payload is rewritten, which is why the display names below still appear in rendered output, in generated SBOMs, and in the queries Deputy sends to OSV.
 
 The proxy entrypoints use `go`, `npm`, `pypi`, `rubygems`, and `oci`. The full vocabulary comes from the ecosystem registry:
 
 <!-- BEGIN GENERATED: canonical-ecosystems -->
-| Canonical token | Display name |
+| Canonical name | Display name |
 | --- | --- |
 | `asdf` | asdf |
 | `cargo` | Cargo |
@@ -818,6 +820,18 @@ The proxy entrypoints use `go`, `npm`, `pypi`, `rubygems`, and `oci`. The full v
 
 Write `pkg.ecosystem == "go"`, not `pkg.ecosystem == "Go"`, and drop any `lowerAscii()` workaround. Ecosystems Deputy does not recognize (OS package ecosystems such as `Alpine:v3.19`) are lowercased rather than remapped, so they stay comparable without losing their release suffix.
 
+A rule against an ecosystem is therefore one comparison per ecosystem, whatever the scanner that found the package called it:
+
+```cel
+// "Go" and "golang" both arrive as "go"; "GitHub Actions", "githubactions",
+// "github", and "gha" all arrive as "github-actions". One literal each.
+pkg.ecosystem in ["go", "github-actions"]
+  ? [{"action": "deny", "reason": "ecosystem not allowed for this target"}]
+  : [{"action": "allow"}]
+```
+
+An ecosystem Deputy does not recognize is the one case where the value is not from this vocabulary, and it is still folded, so match it in lowercase and keep the suffix: `pkg.ecosystem.startsWith("alpine:")` matches a package the scanner reported as `Alpine:v3.19`.
+
 ## Canonical package identity
 
 The ecosystem selects how the rest of a package's identity is normalized, so name and version are canonicalized alongside it, using the same rules Deputy applies when it queries OSV or compares two trees:
@@ -834,7 +848,7 @@ An object that names no ecosystem but spells its own identity as a package URL r
 
 An object that names no ecosystem and carries no package URL belongs to the one that contains it. A change carries base and target versions next to its package, and both are normalized with that package's ecosystem; a finding's `advisory.fixed_versions` are versions of `vulnerability.package`, so they are normalized with that package's ecosystem too. An object that does name an ecosystem overrides the inherited one for itself and everything below it, which is how an advisory's `package_fixes` entries keep their own.
 
-Free-form key/value maps are never rewritten. `jwt.custom_claims`, container image `labels`, `target.provenance`, and an advisory's `database_specific` hold caller- or source-supplied data, so an entry that happens to be named `ecosystem` or `version` reaches a policy exactly as it arrived.
+Free-form key/value maps are never canonicalized. `jwt.custom_claims`, container image `labels`, `target.provenance`, and an advisory's `database_specific` hold caller- or source-supplied data, so an entry that happens to be named `ecosystem` or `version` keeps the spelling it arrived with. Their values are not exempt from the payload-wide numeric coercion, though: a claim of `"12345"` reaches a policy as an integer, which is the same defect [issue #248](https://github.com/temporalio/deputy/issues/248) tracks for version strings. [Issue #276](https://github.com/temporalio/deputy/issues/276) audits whether each of these maps should be a map at all.
 
 Outside a package's own identity fields, only the fields documented as holding package URLs are canonicalized: the graph's `roots`, an edge's `from` and `to`, `sbom.purls`, and any `*_purl` or `*_purls` field. Every other string reaches a policy byte for byte, whatever it looks like. A sandbox request's `command` is the argv the caller asked to execute, so `command.exists(a, a == "pkg:golang/example.com/mod@1.2.3")` matches the argument exactly as requested rather than a rewritten spelling of it. A path is one of those strings: `step.path`, `pkg.manifest_refs[].path`, `dockerfile.path`, and a finding's `path` are compared exactly as Deputy received them, since the same field name means a file on most of the messages that declare it.
 
@@ -945,6 +959,20 @@ parse fields in CEL:
     ]
   }
 }
+```
+
+Because both sides are canonicalized, membership holds without reformatting either one. An SBOM that spells a Go component `pkg:golang/example.com/mod@1.2.3` still matches a package whose own `purl` carries the `v`, so the rule is the plain test rather than a normalization of the list:
+
+```cel
+pkg.purl in sbom.purls
+  ? [{"action": "deny", "reason": "component is in the scanned SBOM"}]
+  : [{"action": "allow"}]
+```
+
+Reach for `purl()` when a rule needs one field of an entry rather than the whole string. It returns `type`, `namespace`, `name`, `version`, `qualifiers`, `subpath`, and the reassembled `purl`, and it returns `null` for a string that does not parse, so guard the result when the list can hold one:
+
+```cel
+sbom.purls.exists(p, purl(p) != null && purl(p).type == "oci")
 ```
 
 `image` is a convenience object for image targets and OCI proxy requests. It includes both provenance fields and extracted container configuration:

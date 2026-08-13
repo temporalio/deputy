@@ -40,12 +40,17 @@ const CanonicalEcosystemsSection = "canonical-ecosystems"
 const PolicyInputsDocPath = "docs/reference/policy-inputs.md"
 
 // CanonicalEcosystemsMarkdown renders the ecosystem vocabulary policies compare
-// against: every canonical token with the display name Deputy renders for it.
+// against: every canonical name with the display name Deputy renders for it.
 // Both come from the ecosystem registry, so adding an ecosystem updates the
 // docs instead of leaving a hand-copied list to drift.
+//
+// The columns are named "Canonical name" and "Display name" rather than
+// "token": a policy author reading the table is choosing which of two names to
+// write, and the parallel wording says which one is which without asking them
+// to learn what Deputy means by a token.
 func CanonicalEcosystemsMarkdown() string {
 	var b strings.Builder
-	b.WriteString("| Canonical token | Display name |\n")
+	b.WriteString("| Canonical name | Display name |\n")
 	b.WriteString("| --- | --- |\n")
 	for _, token := range ecosystem.CanonicalEcosystems() {
 		b.WriteString(fmt.Sprintf("| `%s` | %s |\n", token, tableCell(ecosystem.Display(ecosystem.Ecosystem(token)))))
