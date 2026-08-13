@@ -77,8 +77,12 @@ func DirectVersionMarker(name string) string {
 // it rather than reimplementing the key construction, for the same reason the
 // name keys are folded on both sides by one function: two spellings of one rule
 // is how the manifest side and the lookup side come to disagree.
+// A package with no version is answered by name, which it has to be: the marker
+// is DirectVersionKey's key for an empty version, so consulting the versioned
+// answer for one would read the marker itself and report every copy of a resolved
+// name direct.
 func LookupDirect(direct map[string]bool, name, version string) bool {
-	if direct[DirectVersionMarker(name)] {
+	if version != "" && direct[DirectVersionMarker(name)] {
 		return direct[DirectVersionKey(name, version)]
 	}
 	return direct[name]

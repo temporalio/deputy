@@ -537,3 +537,88 @@ func TestEcosystemFromPURLType(t *testing.T) {
 		})
 	}
 }
+
+// TestProtoRoundTripPreservesNpmVersionDirectness drives the classification
+// through the proto round trip and asserts it against the direct path, because
+// the answer has to be the same on both. The CLI in local mode classifies in
+// process, while the server and the MCP surface decode a ScanResponse and
+// reconstruct the direct set from it, so a distinction that survives one path and
+// not the other is worse than a uniform wrong answer: which surface a caller came
+// through is not something a policy author can reason about.
+func TestProtoRoundTripPreservesNpmVersionDirectness(t *testing.T) {
+	const manifest = `{"name":"app","dependencies":{"lodash":"^4.17.21","legacy-thing":"^1.0.0"}}`
+	const lockfile = `{
+  "name": "app",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "app", "dependencies": {"lodash": "^4.17.21", "legacy-thing": "^1.0.0"}},
+    "node_modules/lodash": {"version": "4.17.21"},
+    "node_modules/legacy-thing": {"version": "1.0.0", "dependencies": {"lodash": "3.10.1"}},
+    "node_modules/legacy-thing/node_modules/lodash": {"version": "3.10.1"}
+  }
+}`
+
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+	for name, contents := range map[string]string{"package.json": manifest, "package-lock.json": lockfile} {
+		if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	direct := compare.CollectDirectDependenciesFromWorkspace(ws)
+
+	scanned := []*extractor.Package{
+		{Name: "lodash", Version: "4.17.21", PURLType: "npm"},
+		{Name: "lodash", Version: "3.10.1", PURLType: "npm"},
+		{Name: "legacy-thing", Version: "1.0.0", PURLType: "npm"},
+	}
+	want := map[string]bool{
+		"lodash@4.17.21":     true,
+		"lodash@3.10.1":      false,
+		"legacy-thing@1.0.0": true,
+	}
+
+	// The direct path is the reference answer, and is asserted rather than
+	// assumed so a regression there cannot make the round trip look correct.
+	protos := ExtractorPackagesToProto(scanned, direct)
+	for _, p := range protos {
+		key := p.GetName() + "@" + p.GetVersion()
+		if got := p.GetDirect(); got != want[key] {
+			t.Fatalf("direct path: %s direct=%v, want %v", key, got, want[key])
+		}
+	}
+
+	// Reconstructing from the protos and re-running the lookup has to reach the
+	// same answer, since that is what a decoded ScanResponse does.
+	rebuilt, rebuiltDirect := ExtractorPackagesFromProto(protos)
+	for _, p := range rebuilt {
+		key := p.Name + "@" + p.Version
+		if got := ExtractorPackageIsDirect(p, rebuiltDirect); got != want[key] {
+			t.Errorf("after proto round trip: %s direct=%v, want %v (rebuilt map %v)",
+				key, got, want[key], rebuiltDirect)
+		}
+	}
+}
+
+// TestProtoRoundTripKeepsUnresolvedNamesDirect pins the under-claiming guard
+// across the round trip. A project with no committed lockfile has no resolution,
+// so every copy of a declared name is direct; rebuilding the set from protos must
+// not turn the absence of a version marker into an absence of directness.
+func TestProtoRoundTripKeepsUnresolvedNamesDirect(t *testing.T) {
+	scanned := []*extractor.Package{
+		{Name: "lodash", Version: "4.17.21", PURLType: "npm"},
+		{Name: "lodash", Version: "3.10.1", PURLType: "npm"},
+	}
+	// Both copies are direct on the way in, which is what a name-only
+	// classification produces for an unlocked project.
+	direct := map[string]bool{"lodash": true}
+
+	protos := ExtractorPackagesToProto(scanned, direct)
+	rebuilt, rebuiltDirect := ExtractorPackagesFromProto(protos)
+	for _, p := range rebuilt {
+		if !ExtractorPackageIsDirect(p, rebuiltDirect) {
+			t.Errorf("%s@%s lost its directness through the round trip (rebuilt map %v)",
+				p.Name, p.Version, rebuiltDirect)
+		}
+	}
+}
