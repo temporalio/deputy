@@ -378,6 +378,16 @@ policies:
       everyone. Writing the trusted set once and negating it keeps the two in
       agreement, at the cost of one long expression. Whether an allow should be
       able to lift a deny is a separate question.
+
+      Each branch recognizes a provider, and deliberately does not repeat which
+      organizations, namespaces, projects, accounts, or tenants that provider is
+      allowed to present. Those live in the per-provider rules above, and every
+      one of them denies at every service entrypoint, so the two compose: this
+      rule refuses an identity that matches no provider at all, and each gate
+      refuses the callers its own provider should not admit. Restating an
+      allowlist here would create a second copy to drift, which it did: an
+      earlier version trusted two organizations while the allowlist accepted
+      three, so the third was admitted by one rule and denied by the other.
     entrypoints:
       - service_scan_request
       - service_list_request
@@ -390,27 +400,26 @@ policies:
         when: |
           !jwt.anonymous &&
           !(
-            // GitHub Actions from a trusted organization.
-            (jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
-             jwt.?repository_owner.orValue("") in ["acme-corp", "acme-infra"]) ||
-            // GitLab CI from a trusted namespace.
-            (jwt.?iss.orValue("").contains("gitlab") &&
-             jwt.?namespace_path.orValue("").startsWith("acme")) ||
-            // GCP service account from a trusted project.
-            (jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com") &&
-             jwt.?email.orValue("").matches("@acme-(prod|staging|ci)\\.iam")) ||
-            // AWS role assumed from an approved account.
-            jwt.?amr.orValue([]).exists(a,
-              a.matches("^arn:aws:sts::(123456789012|234567890123):assumed-role/")) ||
-            // Azure AD identity from an approved tenant.
-            (jwt.?iss.orValue("").contains("login.microsoftonline.com") &&
-             jwt.?tid.orValue("") in [
-               "12345678-1234-1234-1234-123456789abc",
-               "87654321-4321-4321-4321-cba987654321"
-             ]) ||
-            // Kubernetes workload in the security namespace.
-            jwt.?sub.orValue("").startsWith("system:serviceaccount:security:") ||
-            // Human with an authorized group membership.
+            // A GitHub Actions workflow. Which organizations are acceptable is
+            // github-actions-organization-allowlist's decision, not this rule's.
+            jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" ||
+            // A GitLab CI job; gitlab-namespace-restriction picks the namespaces.
+            jwt.?iss.orValue("").contains("gitlab") ||
+            // A Google service account; the two gcp- rules pick the accounts and
+            // projects. The issuer is part of the shape, because the email claim
+            // alone is a name any issuer can mint.
+            (jwt.?iss.orValue("") == "https://accounts.google.com" &&
+             jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com")) ||
+            // An assumed AWS role; aws-account-restriction picks the accounts.
+            jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::")) ||
+            // An Azure AD identity; azure-tenant-restriction picks the tenants.
+            jwt.?iss.orValue("").contains("login.microsoftonline.com") ||
+            // A Kubernetes workload; kubernetes-namespace-restriction picks the
+            // namespaces.
+            jwt.?sub.orValue("").startsWith("system:serviceaccount:") ||
+            // A human with an authorized group membership. This one carries its
+            // own allowlist because no other rule in this file gates humans on
+            // group membership outside secrets scanning.
             (jwt.?email.orValue("") != "" &&
              jwt.?groups.orValue([]).exists(g, g in ["developers", "security-team", "platform"]))
           )

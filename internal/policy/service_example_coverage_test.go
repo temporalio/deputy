@@ -415,3 +415,99 @@ func TestShippedTenantIsolationRejectsUnauthorizableTargets(t *testing.T) {
 		}
 	}
 }
+
+// TestShippedOIDCFederationTrustsWhatItsGatesAccept tests that the unified rule
+// and the per-provider gates agree about the same caller.
+//
+// The unified rule denies any identity matching no trusted shape, and an earlier
+// version of it restated each provider's allowlist inline. Two copies of a
+// trusted set drift: it trusted two GitHub organizations while
+// github-actions-organization-allowlist accepted three, so a workflow from the
+// third was admitted by the gate and denied by the unified rule. The branches
+// now recognize a provider and leave the allowlist to that provider's own rule.
+//
+// The GCP branch keeps its issuer check, because a service account email is a
+// name any issuer can mint, and the gcp- rules that examine the email are all
+// guarded on the Google issuer. Without it, a token from any other accepted
+// issuer presenting a crafted email would satisfy the unified rule while every
+// gcp- rule skipped it.
+func TestShippedOIDCFederationTrustsWhatItsGatesAccept(t *testing.T) {
+	sources, err := LoadSources([]string{findExample(t, "service-oidc-federation.yaml")})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	engine, err := NewEngine(sources)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		jwt        *policyv1.JWTClaims
+		wantDenied bool
+	}{
+		{
+			// Accepted by the organization allowlist, which names three
+			// organizations. The unified rule named two.
+			name: "workflow from every organization the allowlist accepts",
+			jwt: &policyv1.JWTClaims{
+				Sub: "repo:acme-security/scanner:ref:refs/heads/main",
+				Iss: "https://token.actions.githubusercontent.com",
+				CustomClaims: map[string]string{
+					"repository": "acme-security/scanner", "repository_owner": "acme-security",
+					"ref": "refs/heads/main", "event_name": "push",
+				},
+			},
+			wantDenied: false,
+		},
+		{
+			// The organization allowlist denies this one, and must keep doing
+			// so now that the unified rule no longer repeats the list.
+			name: "workflow from an organization the allowlist rejects",
+			jwt: &policyv1.JWTClaims{
+				Sub: "repo:untrusted-org/repo:ref:refs/heads/main",
+				Iss: "https://token.actions.githubusercontent.com",
+				CustomClaims: map[string]string{
+					"repository": "untrusted-org/repo", "repository_owner": "untrusted-org",
+					"ref": "refs/heads/main", "event_name": "push",
+				},
+			},
+			wantDenied: true,
+		},
+		{
+			// A service account email is a claim, not a proof of issuer. Every
+			// gcp- rule is guarded on the Google issuer, so a trusted-looking
+			// email from elsewhere must not satisfy the unified rule either.
+			name: "trusted-looking service account email from another issuer",
+			jwt: &policyv1.JWTClaims{
+				Sub: "attacker",
+				Iss: "https://idp.example.com",
+				CustomClaims: map[string]string{
+					"email": "attacker@acme-prod.iam.gserviceaccount.com",
+				},
+			},
+			wantDenied: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Scanning, so the secrets-only rules stay out of the way.
+			build := serviceRequestInput[EntrypointServiceScanRequest]
+			input := build(tt.jwt, "/deputy.scan.v1.ScanService/ScanDirectory", "github.com/acme-security/scanner")
+			actions, err := engine.EvaluateAll(t.Context(), input, "server", string(EntrypointServiceScanRequest))
+			if err != nil {
+				t.Fatalf("EvaluateAll: %v", err)
+			}
+			denied, by := false, ""
+			for _, action := range actions {
+				if ActionTypeIs(action.Type, ActionDeny) {
+					denied, by = true, action.Source+": "+action.Reason
+				}
+			}
+			if denied != tt.wantDenied {
+				t.Errorf("denied = %v (%s), want %v", denied, by, tt.wantDenied)
+			}
+		})
+	}
+}
