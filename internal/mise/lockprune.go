@@ -66,14 +66,18 @@ func PruneLockedVersions(content []byte, toolKeys []string, stale func(version s
 
 		// A [[tools.<key>]] entry: it spans until the next header that is not
 		// one of its own sub-tables (platform data lives in single-bracket
-		// [tools.<key>...] headers attached to the preceding entry).
+		// [tools.<key>...] headers attached to the preceding entry, and a
+		// nested array of tables such as [[tools.<key>.metadata]] is attached
+		// the same way).
 		end := i + 1
 		version := ""
 		sawVersion := false
 		sawSubHeader := false
 		for end < len(lines) {
 			if segs2, isArr2, ok2 := lockHeaderPath(lines[end]); ok2 {
-				if isArr2 || !isTool(segs2) {
+				if !isTool(segs2) || isArr2 && len(segs2) == 2 {
+					// Another tool, or this tool's next entry: either way the
+					// current entry has ended.
 					break
 				}
 				sawSubHeader = true

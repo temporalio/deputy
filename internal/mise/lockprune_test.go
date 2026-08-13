@@ -663,3 +663,116 @@ notes = """
 		})
 	}
 }
+
+// TestPruneLockedVersionsKeepsNestedTablesWithTheirEntry pins what belongs to a
+// lock entry. TOML attaches a nested array of tables, [[tools.go.metadata]], to
+// the entry above it exactly as a single-bracket [tools.go.platforms.linux-x64]
+// table is attached, and mise still resolves the parent's locked version. The
+// boundary scan ended an entry at any array header, so pruning a stale entry
+// left its own nested tables behind: the file then opened with
+// [[tools.go.metadata]], which makes tools.go a table rather than an array of
+// them, and [ParseLock] rejects a lockfile it accepted before the edit. Every
+// tool in that file loses its locked versions and checksums with it.
+func TestPruneLockedVersionsKeepsNestedTablesWithTheirEntry(t *testing.T) {
+	tests := []struct {
+		name     string
+		lock     string
+		toolKeys []string
+		stale    string
+		want     string
+	}{
+		{
+			// The nested table belongs to the pruned entry, so it goes too.
+			name: "a nested array table under the pruned entry",
+			lock: `[[tools.go]]
+version = "1.22.12"
+backend = "core:go"
+
+[[tools.go.metadata]]
+source = "release"
+
+[[tools.node]]
+version = "20.11.0"
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+			want: `[[tools.node]]
+version = "20.11.0"
+`,
+		},
+		{
+			// Several nested tables, and a single-bracket one among them.
+			name: "nested tables of both bracket forms",
+			lock: `[[tools.go]]
+version = "1.22.12"
+
+[[tools.go.metadata]]
+source = "release"
+
+[tools.go.platforms.linux-x64]
+checksum = "sha256:oldgo"
+
+[[tools.go.metadata]]
+source = "mirror"
+
+[[tools.node]]
+version = "20.11.0"
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+			want: `[[tools.node]]
+version = "20.11.0"
+`,
+		},
+		{
+			// The next entry of the same tool still ends the current one, so a
+			// surviving sibling keeps its own nested tables.
+			name: "the next entry of the same tool ends the current one",
+			lock: `[[tools.go]]
+version = "1.22.12"
+
+[[tools.go.metadata]]
+source = "release"
+
+[[tools.go]]
+version = "1.23.8"
+
+[[tools.go.metadata]]
+source = "kept"
+`,
+			toolKeys: []string{"go"}, stale: "1.22.12",
+			want: `[[tools.go]]
+version = "1.23.8"
+
+[[tools.go.metadata]]
+source = "kept"
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The premise: this is a lockfile the parser reads, at the version
+			// the pruner is asked about.
+			lf, err := ParseLock("mise.lock", []byte(tt.lock))
+			if err != nil {
+				t.Fatalf("fixture does not parse: %v", err)
+			}
+			if len(lf.Tools["go"]) == 0 || lf.Tools["go"][0].Version != tt.stale {
+				t.Fatalf("fixture locks go at %+v, want %q first", lf.Tools["go"], tt.stale)
+			}
+
+			got, changed := PruneLockedVersions([]byte(tt.lock), tt.toolKeys, func(v string) bool {
+				return v == tt.stale
+			})
+			if !changed {
+				t.Fatalf("expected the stale entry to be pruned:\n%s", got)
+			}
+			if string(got) != tt.want {
+				t.Errorf("prune mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+			// The file has to stay one mise can read, which is the whole point.
+			if _, err := ParseLock("mise.lock", got); err != nil {
+				t.Errorf("pruned lockfile no longer parses: %v\n%s", err, got)
+			}
+		})
+	}
+}
