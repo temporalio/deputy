@@ -1858,3 +1858,76 @@ func TestDocumentedPayloadsAreCanonical(t *testing.T) {
 		})
 	}
 }
+
+// notPackageReference records, with a reason, the string fields whose own
+// documentation mentions a package URL but which must not be canonicalized as a
+// reference. Every one of them is a value a caller supplied and Deputy has to
+// hand back or match byte for byte, or a field folded as a package name because
+// it accepts a name just as readily as a PURL.
+var notPackageReference = map[string]string{
+	"query":         "an MCP result echoes the target purl exactly as the caller requested it",
+	"package":       "a request input that accepts a name, name@version, or a PURL; folded as a package name",
+	"dependency":    "a request input that accepts a name, name@version, or a PURL",
+	"focus_package": "a request option that accepts a name or a PURL",
+}
+
+// TestReferenceKeysCoverSchema derives the reference vocabulary from the proto
+// contract rather than trusting the list in [packageReferenceKeys] to be
+// complete: every string field the protos themselves document as holding a
+// package URL has to be classified, as an object's own identity
+// ([packagePURLKeys]), as a reference to another package
+// ([isPackageReferenceKey]), as a package name or version, or in
+// [notPackageReference] with the reason it is none of those.
+//
+// The pass this guards decides what to rewrite from the field, not from the
+// value, because a string that parses as a package URL is not necessarily one
+// Deputy may rewrite: a sandbox request's argv can carry a package URL as an
+// argument. That makes the list load-bearing in both directions, so an
+// unclassified field is either a reference a policy reads in the wrong spelling
+// or an argument authorization must see verbatim.
+func TestReferenceKeysCoverSchema(t *testing.T) {
+	versionKeys := append(slices.Clone(packageVersionKeys), packageVersionListKey)
+	documented := make(map[string][]string)
+	if err := descriptorset.RangeMessages(func(md protoreflect.MessageDescriptor) bool {
+		fields := md.Fields()
+		for i := range fields.Len() {
+			f := fields.Get(i)
+			if f.Kind() != protoreflect.StringKind || f.IsMap() {
+				continue
+			}
+			comment := descriptorset.Comment(f.FullName())
+			if !documentsPackageURL(comment) {
+				continue
+			}
+			name := string(f.Name())
+			switch {
+			case isPackageReferenceKey(name),
+				slices.Contains(packagePURLKeys, name),
+				slices.Contains(packageNameKeys, name),
+				slices.Contains(versionKeys, name):
+				continue
+			}
+			if _, known := notPackageReference[name]; known {
+				continue
+			}
+			documented[name] = append(documented[name], string(f.FullName()))
+		}
+		return true
+	}); err != nil {
+		t.Fatalf("RangeMessages: %v", err)
+	}
+	if len(documented) == 0 && len(packageReferenceKeys) == 0 {
+		t.Fatal("no fields reached the reference coverage walk")
+	}
+	for _, name := range slices.Sorted(maps.Keys(documented)) {
+		t.Errorf("%q is documented as holding a package URL (%v) but is not classified: add it to packageReferenceKeys if a policy should read it canonicalized, or to notPackageReference with the reason it must stay as it arrived",
+			name, documented[name])
+	}
+}
+
+// documentsPackageURL reports whether a proto field's own comment says the field
+// holds a package URL, which is the only place that contract is written down.
+func documentsPackageURL(comment string) bool {
+	lower := strings.ToLower(comment)
+	return strings.Contains(lower, "purl") || strings.Contains(lower, "package url")
+}

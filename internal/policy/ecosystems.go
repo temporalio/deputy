@@ -115,7 +115,7 @@ func canonicalizeEcosystemPayload(payload map[string]any) {
 			canonicalizeEcosystemValue(value, "")
 		}
 		if !isCallerExtendedVariable(name) {
-			payload[name] = canonicalizePackageReferences(value)
+			payload[name] = canonicalizePackageReferences(name, value)
 		}
 	}
 }
@@ -286,37 +286,70 @@ func canonicalizeEcosystemValue(value any, inherited ecosystem.Ecosystem) {
 // fold it, which is the stricter rule. A package whose ecosystem is Cargo but
 // whose purl is a pkg:github reference must come back untouched.
 //
+// Which fields hold references is the contract's answer, not the value's. That a
+// string parses as a package URL says nothing about whether Deputy may rewrite
+// it: a sandbox request's "command" is the argv a caller asked to execute, and an
+// argument that is a package URL is ordinary for a supply-chain tool, so
+// canonicalizing it authorized one string and ran another. The walk therefore
+// descends looking for the keys [isPackageReferenceKey] recognizes and rewrites
+// nothing else.
+//
 // It returns the value to store in place of the one it was given, because not
-// every list can be rewritten through the reference it arrived by. A repeated
-// proto field reaches the walk as []any, but a payload a caller assembled itself
-// commonly carries []string: "deputy scan --input" injects the scanned SBOM's
-// PURLs that way, and the graph entrypoints name the direct dependencies that way
-// in "roots". Descending into map[string]any and []any alone skipped those lists
-// whole, so a policy comparing a package against the list it belongs to read two
-// spellings of one identity. A []string comes back as a new slice: the engine's
-// payload clone is shallow and [convertProtosInMap] passes a scalar slice through
-// by reference, so the list a caller still holds must not be rewritten under it.
+// every reference can be rewritten through the container it arrived in: a
+// repeated proto field reaches the walk as []any, and a payload a caller
+// assembled itself commonly carries []string. See [canonicalizeReferenceValue].
 //
 // A typed string map (map[string]string) is deliberately not descended into. That
 // is the shape caller- and source-supplied data arrives in, and the
 // descriptor-derived [isFreeFormMap] skip cannot see inside a map keyed by an
 // arbitrary string, so rewriting there would risk exactly the caller data this
 // pass is careful to leave alone.
-func canonicalizePackageReferences(value any) any {
+func canonicalizePackageReferences(key string, value any) any {
+	if isFreeFormMap(key) || slices.Contains(packagePURLKeys, key) {
+		return value
+	}
+	if isPackageReferenceKey(key) {
+		return canonicalizeReferenceValue(value)
+	}
 	switch v := value.(type) {
-	case string:
-		return canonicalizePackageReference(v)
 	case map[string]any:
-		for key, child := range v {
-			if isFreeFormMap(key) || slices.Contains(packagePURLKeys, key) {
-				continue
-			}
-			v[key] = canonicalizePackageReferences(child)
+		for childKey, child := range v {
+			v[childKey] = canonicalizePackageReferences(childKey, child)
 		}
 		return v
 	case []any:
+		// A list carries its field's name, so elements of a repeated field are
+		// classified by the field that holds them.
 		for i, elem := range v {
-			v[i] = canonicalizePackageReferences(elem)
+			v[i] = canonicalizePackageReferences(key, elem)
+		}
+		return v
+	default:
+		return value
+	}
+}
+
+// canonicalizeReferenceValue canonicalizes the package URLs a reference field
+// holds, in every shape one reaches the walk in: a single string, the []any a
+// repeated proto field becomes, and the []string a hand-built payload uses
+// ("deputy scan --input" injects the scanned SBOM's PURLs that way, and the graph
+// entrypoints name the direct dependencies that way in "roots").
+//
+// A []string comes back as a new slice. The engine's payload clone is shallow and
+// [convertProtosInMap] passes a scalar slice through by reference, so rewriting
+// one in place would rewrite a list the caller still holds.
+//
+// A value that is not a package URL is returned exactly as it arrived, which is
+// what leaves a manifest path in "path" and a module path in "from" byte for
+// byte: the key says the field may hold a reference, and the parser says whether
+// this value is one.
+func canonicalizeReferenceValue(value any) any {
+	switch v := value.(type) {
+	case string:
+		return canonicalizePackageReference(v)
+	case []any:
+		for i, elem := range v {
+			v[i] = canonicalizeReferenceValue(elem)
 		}
 		return v
 	case []string:
@@ -328,6 +361,41 @@ func canonicalizePackageReferences(value any) any {
 	default:
 		return value
 	}
+}
+
+// packageReferenceKeys are the payload fields that hold a package URL naming
+// some other object's package, rather than the identity of the object carrying
+// them: the graph's roots, an edge's two endpoints, a finding's dependency chain,
+// and the PURL list a scanned SBOM contributes to a scan payload.
+//
+// The list is what bounds the rewrite. Deciding from the value instead, rewriting
+// any string that parses as a package URL, reached fields whose contract is not a
+// package reference at all and turned a sandbox argv into a string the caller
+// never asked to run.
+var packageReferenceKeys = []string{
+	"roots",
+	"from",
+	"to",
+	"path",
+	"purls",
+	"affected_packages",
+	"malicious_packages",
+}
+
+// isPackageReferenceKey reports whether a payload key holds package URL
+// references. Besides the named fields, any key ending in "_purl" or "_purls" is
+// one: that is how Deputy's protos spell a reference to another package
+// (root_purl, target_purl, matched_purls), so a field named the way the existing
+// ones are named is covered without being listed.
+//
+// TestReferenceKeysCoverSchema derives the check from the descriptors: a string
+// field the protos document as holding a package URL has to be classified here or
+// in [packagePURLKeys].
+func isPackageReferenceKey(key string) bool {
+	if slices.Contains(packageReferenceKeys, key) {
+		return true
+	}
+	return strings.HasSuffix(key, "_purl") || strings.HasSuffix(key, "_purls")
 }
 
 // canonicalizePackageReference canonicalizes one package URL against the

@@ -106,3 +106,67 @@ func TestEvaluateExecutionPolicyBindingTypes(t *testing.T) {
 		})
 	}
 }
+
+// TestExecutionPolicyReadsTheRequestedArgv pins the argv a sandbox policy
+// authorizes to the argv the request carries. command is the request's argv, not
+// a package reference field, so nothing in the policy pipeline may rewrite it: a
+// command allowlist or denylist matches the exact string that will run, and a
+// rewritten element is a string the caller never asked to execute.
+//
+// Package-URL canonicalization broke that. An argument that is a package URL is
+// ordinary for a supply-chain tool ("deputy list pkg:golang/..."), and rewriting
+// it to the canonical spelling meant a deny on the requested argument stopped
+// firing while the sandbox still ran the original command.
+func TestExecutionPolicyReadsTheRequestedArgv(t *testing.T) {
+	const requested = "pkg:golang/example.com/mod@1.2.3"
+
+	tests := []struct {
+		name string
+		req  *sandboxv1.ExecuteRequest
+		body string
+	}{
+		{
+			name: "an argv element that is a package url",
+			req: &sandboxv1.ExecuteRequest{
+				Command:      []string{"deputy", "list", requested},
+				WorkspaceDir: "/workspace/app",
+			},
+			body: `command.exists(a, a == "` + requested + `")
+  ? [{"action": "deny", "reason": "argv matched"}]
+  : [{"action": "allow"}]`,
+		},
+		{
+			name: "a wrapped command that is a package url",
+			req: &sandboxv1.ExecuteRequest{
+				Command:      []string{"deputy", "list"},
+				WorkspaceDir: "/workspace/app",
+				Context: &sandboxv1.ExecutionContext{
+					Source:         sandboxv1.ExecutionSource_EXECUTION_SOURCE_EXEC,
+					WrappedCommand: requested,
+				},
+			},
+			body: `context.wrapped_command == "` + requested + `"
+  ? [{"action": "deny", "reason": "argv matched"}]
+  : [{"action": "allow"}]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, err := policy.NewEngine([]policy.Source{{Name: "argv-allowlist", Body: tc.body}})
+			if err != nil {
+				t.Fatalf("NewEngine() error: %v", err)
+			}
+			mgr, err := NewManager(t.Context(), WithPolicyEngine(eng))
+			if err != nil {
+				t.Fatalf("NewManager() error: %v", err)
+			}
+
+			err = mgr.evaluateExecutionPolicy(t.Context(), tc.req)
+			if err == nil || !strings.Contains(err.Error(), "argv matched") {
+				t.Fatalf("evaluateExecutionPolicy() error = %v, want a denial on the requested argv %q (command %v, wrapped %q)",
+					err, requested, tc.req.GetCommand(), tc.req.GetContext().GetWrappedCommand())
+			}
+		})
+	}
+}

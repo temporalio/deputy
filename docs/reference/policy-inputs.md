@@ -836,6 +836,8 @@ An object that names no ecosystem and carries no package URL belongs to the one 
 
 Free-form key/value maps are never rewritten. `jwt.custom_claims`, container image `labels`, `target.provenance`, and an advisory's `database_specific` hold caller- or source-supplied data, so an entry that happens to be named `ecosystem` or `version` reaches a policy exactly as it arrived.
 
+Outside a package's own identity fields, only the fields documented as holding package URLs are canonicalized: the graph's `roots`, an edge's `from` and `to`, a finding's `path`, `sbom.purls`, and any `*_purl` or `*_purls` field. Every other string reaches a policy byte for byte, whatever it looks like. A sandbox request's `command` is the argv the caller asked to execute, so `command.exists(a, a == "pkg:golang/example.com/mod@1.2.3")` matches the argument exactly as requested rather than a rewritten spelling of it.
+
 The `<unknown>` sentinel described below is never normalized, and neither is a string that is not a version: an unstamped Go binary reports its main module as `(devel)`, so `pkg.version == "(devel)"` still matches.
 
 ## Proxy version semantics
