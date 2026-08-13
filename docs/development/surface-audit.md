@@ -59,29 +59,44 @@ audit does not guess: findings carry the reasons they might be wrong, and each
 reason names its own evidence.
 
 - **Dispatch.** A method whose receiver satisfies an interface can be called
-  without the call site naming it. Membership is checked with `types.Implements`
-  against the interfaces the module declares plus the standard-library contracts
-  whose implementations are dispatched from code this module does not contain
-  (`error`, `fmt.Stringer`, `json.Marshaler`, the `io` interfaces,
-  `sort.Interface`, `http.Handler`, `protoreflect.Message`). Sharing a method
-  name is not enough: `Read()` with no arguments does not implement `io.Reader`
-  and earns no doubt.
+  without the call site naming it. Contracts are derived from the module's own
+  type graph: any interface mentioned by the type of anything the module declares
+  or references, named or anonymous, including a generic type parameter's
+  constraint. A short floor list adds the classic standard-library contracts a
+  type can satisfy by signature alone while nothing here mentions the interface,
+  such as `database/sql.Scanner` on a value handed to a driver. Membership is
+  always checked with `types.Implements`, never by method name: `Read()` with no
+  arguments does not implement `io.Reader`, and `ProtoReflect() string` is not a
+  protobuf message.
 - **Lookup by name.** The audit tokenizes Go string literals and the repository's
   executable assets (CEL policies, templates, configuration, fixtures) and
   reports which one named the symbol. Documentation is deliberately not scanned:
   prose that mentions a symbol does not execute it, and treating docs as evidence
   would attach a doubt to everything well documented.
 - **Encoding.** A type with encoding-tagged fields is normally built by a decoder
-  rather than by a caller naming it.
-- **Registration.** A package imported only for its side effects wires up its own
-  exports.
+  rather than by a caller naming it. Tags are read with `reflect.StructTag`, so a
+  key that merely ends in a codec name (`notjson:"..."`) earns nothing.
 
 A finding with no such reason is one you can act on mechanically.
 
-The report also prints a caveat listing any files this platform's build
-constraints excluded from the load. Nothing in them is type-checked, so
-references they make are invisible to every check; auditing on another platform,
-or with the relevant tags, closes that gap.
+A blank import is deliberately *not* one of these reasons. It proves the package
+is reached, so the package is not an unreachable-package finding, but it says
+nothing about the package's exports: the registration it triggers runs in that
+package's own `init`, and nobody who blank-imports a package can name an export
+at all. Treating it as a doubt argued for keeping precisely the identifiers that
+were safest to unexport.
+
+## What the run did not look at
+
+The report ends with a caveat listing every path the run skipped and why: files
+this platform's build constraints excluded from the load, and assets too large or
+too unreadable to tokenize. Each entry bounds every finding above it, because
+evidence that was never read cannot contradict one. A skipped 4 MiB policy file
+could be the only place a reflectively consumed symbol is named.
+
+The audit is allowed to be bounded. It is not allowed to present bounded results
+as exhaustive, which is why the limits report themselves instead of applying
+quietly.
 
 ## Interpreting a finding
 

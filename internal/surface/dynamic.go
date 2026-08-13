@@ -62,6 +62,13 @@ type dynamic struct {
 	// type of the same name.
 	taggedTypes map[string]bool
 
+	// unexamined records the assets this run did not read. Every one of them is a
+	// place a reflectively consumed name could have been, so a finding is only as
+	// certain as this list is short. Skipping a file is acceptable and saying
+	// nothing about it is not: the audit would present a symbol as safe to
+	// unexport while knowing it had passed over the evidence.
+	unexamined []Unexamined
+
 	// blankImported holds canonical paths imported for side effects only. This
 	// answers check 1 and nothing else: such a package is reached, so it is not an
 	// unreachable-package finding.
@@ -566,11 +573,17 @@ func (d *dynamic) addAssets(ctx context.Context, root string) error {
 			return nil
 		}
 		info, statErr := entry.Info()
-		if statErr != nil || info.Size() > maxAssetBytes {
+		if statErr != nil {
+			d.skipAsset(path, root, fmt.Sprintf("could not be measured (%v), so the names it contains were not collected", statErr))
+			return nil
+		}
+		if info.Size() > maxAssetBytes {
+			d.skipAsset(path, root, fmt.Sprintf("is %d bytes, over the %d byte asset limit, so the names it contains were not collected", info.Size(), maxAssetBytes))
 			return nil
 		}
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
+			d.skipAsset(path, root, fmt.Sprintf("could not be read (%v), so the names it contains were not collected", readErr))
 			return nil
 		}
 		d.addTokens(string(data), filepath.ToSlash(trimRoot(path, root)))
@@ -583,8 +596,19 @@ func (d *dynamic) addAssets(ctx context.Context, root string) error {
 }
 
 // maxAssetBytes caps the asset files scanned for identifier tokens, so a large
-// generated fixture cannot dominate the audit's runtime.
+// generated fixture cannot dominate the audit's runtime. Exceeding it is recorded
+// rather than ignored, because the limit is a bound on the audit's evidence and a
+// reader cannot weigh a finding without knowing one applied.
 const maxAssetBytes = 4 << 20
+
+// skipAsset records that an asset was not read. The path is made relative to the
+// module root so the caveat reads the same way finding positions do.
+func (d *dynamic) skipAsset(path, root, reason string) {
+	d.unexamined = append(d.unexamined, Unexamined{
+		Path:   filepath.ToSlash(trimRoot(path, root)),
+		Reason: reason,
+	})
+}
 
 // symbolDoubts returns the reasons a symbol finding might be wrong.
 func (d *dynamic) symbolDoubts(obj types.Object, kind SymbolKind, pkgPath string) []string {

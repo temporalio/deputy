@@ -91,10 +91,10 @@ func Analyze(ctx context.Context, dir string) (*Report, error) {
 	}
 
 	report := &Report{
-		Module:      prog.module,
-		Audited:     prog.auditedPaths(),
-		Packages:    prog.unreachablePackages(),
-		Constrained: prog.relativeConstrained(),
+		Module:     prog.module,
+		Audited:    prog.auditedPaths(),
+		Packages:   prog.unreachablePackages(),
+		Unexamined: prog.unexaminedCoverage(),
 	}
 	report.Symbols, report.SymbolTotals = prog.unusedSymbols()
 	report.Interfaces, report.InterfaceTotal = prog.unusedInterfaces()
@@ -144,6 +144,11 @@ type program struct {
 	// excluded from the load. Nothing in them is type-checked, so references
 	// they make are invisible to every check.
 	constrained []string
+
+	// unexamined accumulates what this run did not read, from every phase, so the
+	// report can state its own coverage in one place instead of each phase
+	// deciding on its own whether a skip is worth mentioning.
+	unexamined []Unexamined
 
 	// dyn is the check 4 evidence: the ways a declaration can be reached
 	// without a package naming it. Every check consults it before asserting a
@@ -214,6 +219,7 @@ func newProgram(ctx context.Context, dir string, loaded []*packages.Package) (*p
 	if p.dyn, err = newDynamic(ctx, p, loaded); err != nil {
 		return nil, err
 	}
+	p.unexamined = append(p.unexamined, p.dyn.unexamined...)
 	return p, nil
 }
 
@@ -306,13 +312,26 @@ func (p *program) auditedPaths() []string {
 	return out
 }
 
-// relativeConstrained returns the build-constraint-excluded files relative to
-// the module root, for the report's caveat.
-func (p *program) relativeConstrained() []string {
-	out := make([]string, 0, len(p.constrained))
+// unexaminedCoverage returns everything this run did not read, in one sorted
+// list: the files build constraints excluded from the load, plus whatever the
+// evidence-gathering phases skipped. Both are the same fact about the report, so
+// they are reported through one channel rather than each phase choosing whether
+// its own limits are worth a mention.
+func (p *program) unexaminedCoverage() []Unexamined {
+	out := make([]Unexamined, 0, len(p.constrained)+len(p.unexamined))
 	for _, name := range p.constrained {
-		out = append(out, filepath.ToSlash(trimRoot(name, p.root)))
+		out = append(out, Unexamined{
+			Path:   filepath.ToSlash(trimRoot(name, p.root)),
+			Reason: "excluded by this platform's build constraints, so it was never type-checked and any reference it makes is invisible to every check",
+		})
 	}
+	out = append(out, p.unexamined...)
+	slices.SortFunc(out, func(a, b Unexamined) int {
+		if a.Path != b.Path {
+			return strings.Compare(a.Path, b.Path)
+		}
+		return strings.Compare(a.Reason, b.Reason)
+	})
 	return out
 }
 
