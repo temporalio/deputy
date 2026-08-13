@@ -450,6 +450,10 @@ func varCompileIssues(pol structuredPolicy, item *yaml.Node, source string, extr
 	var (
 		issues []Issue
 		bound  orderedVars
+		// unwritable holds the names whose value has no CEL spelling, in author
+		// order. They are dropped from every nest and declared to the compiler as
+		// unknowns instead, which is what they are.
+		unwritable []string
 	)
 	// backstop renders a failure of the expansion as an issue folded against what
 	// the walk already located, which is where a var holding a value with no CEL
@@ -457,30 +461,55 @@ func varCompileIssues(pol structuredPolicy, item *yaml.Node, source string, extr
 	backstop := func(err error) []Issue {
 		return backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, err), source, item, located)
 	}
-	// nested asks what wrapping a body in vars finds: a var Deputy cannot write into
-	// the generated CEL at all, or generated CEL that does not compile.
+	// nested asks what wrapping a body in vars finds, which is generated CEL that
+	// does not compile.
+	//
+	// A var already set aside is left out of the nest, since there is no expression
+	// to bind its name to, and its name is declared as an unknown alongside the
+	// caller's extra names. Leaving the name undeclared made the compiler report an
+	// undeclared reference against every expression that reads it, which is a second
+	// error the author did not make: the name is written right there. Declaring it
+	// without a type is the honest form of what Deputy knows, that the var exists and
+	// its value cannot be written, and it is what keeps one mistake to one issue
+	// while the expressions around it are still asked about.
 	nested := func(vars orderedVars, body string) []Issue {
-		expr, err := nestVars(vars, body)
+		writable := make(orderedVars, 0, len(vars))
+		for _, v := range vars {
+			if slices.Contains(unwritable, v.Name) {
+				continue
+			}
+			writable = append(writable, v)
+		}
+		expr, err := nestVars(writable, body)
 		if err != nil {
 			return backstop(err)
 		}
-		return celIssues(expr, extraVars, item, pol.Name)
+		return celIssues(expr, slices.Concat(extraVars, unwritable), item, pol.Name)
 	}
 	for _, binding := range pol.Vars.bindings() {
-		if binding.err == nil {
-			bound = append(bound, binding.kv)
+		// A var whose value Deputy cannot write into CEL is set aside like a name
+		// that binds nothing: there is no expression to nest, and stopping at it
+		// would withhold every var beside it. The walk names it on its own line, so
+		// the restatement folds to nothing and the defect is still reported once.
+		expr, exprErr := binding.kv.exprString()
+		if binding.err != nil {
+			issues = append(issues, backstop(binding.err)...)
+		}
+		if exprErr != nil {
+			issues = append(issues, backstop(exprErr)...)
+			unwritable = append(unwritable, binding.kv.Name)
 			continue
 		}
-		issues = append(issues, backstop(binding.err)...)
-		expr, err := binding.kv.exprString()
-		if err != nil {
-			issues = append(issues, backstop(err)...)
+		if binding.err == nil {
+			bound = append(bound, binding.kv)
 			continue
 		}
 		issues = append(issues, nested(binding.scope, expr)...)
 	}
 	// The vars that do bind are compiled as one nest, since each is in scope for
-	// the next, and wrapping an empty body asks about them and nothing else.
+	// the next, and wrapping an empty body asks about them and nothing else. Every
+	// var set aside above is absent from it, so the nest holds only expressions
+	// that exist and the compiler answers about the vars that are left.
 	return append(issues, nested(bound, "[]")...)
 }
 

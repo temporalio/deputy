@@ -1862,6 +1862,37 @@ func TestValidateBundleAsksEveryVarItsOwnQuestion(t *testing.T) {
 			wantCodes: []string{"duplicate-var", "cel-error"},
 			wantText:  []string{"no_such_function"},
 		},
+		{
+			// The nest is compiled once for every var that binds, so a value with
+			// no CEL spelling used to return before the compiler ran and reveal
+			// the var below it only after the first was fixed.
+			name:      "an unrepresentable value above a var that does not compile",
+			vars:      "      impossible: .nan\n      broken: 'no_such_function()'\n",
+			wantCodes: []string{"var-not-representable", "cel-error"},
+			wantText:  []string{"cannot be represented", "no_such_function"},
+		},
+		{
+			name:      "an unrepresentable value below a var that does not compile",
+			vars:      "      broken: 'no_such_function()'\n      impossible: .nan\n",
+			wantCodes: []string{"var-not-representable", "cel-error"},
+			wantText:  []string{"cannot be represented", "no_such_function"},
+		},
+		{
+			// The name is written right where the reader looks for it, so an
+			// undeclared reference would be a mistake the author did not make.
+			// Deputy cannot say what the var holds, and declaring it without a
+			// type is the honest form of that.
+			name:      "a var reading a name whose value cannot be represented",
+			vars:      "      impossible: .nan\n      derived: 'impossible + 1'\n",
+			wantCodes: []string{"var-not-representable"},
+			denyCodes: []string{"cel-error"},
+		},
+		{
+			name:      "an unnamed var reading a name whose value cannot be represented",
+			vars:      "      impossible: .nan\n      \"\": 'impossible + 1'\n",
+			wantCodes: []string{"var-not-representable", "empty-var-name"},
+			denyCodes: []string{"cel-error"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
