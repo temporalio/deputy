@@ -1933,6 +1933,83 @@ func TestDocumentedPayloadsAreCanonical(t *testing.T) {
 	}
 }
 
+// TestDocumentedCELExamplesFire drives the rules the canonical identity
+// reference tells an author to write, against payloads spelled the way a
+// scanner actually reports them. [TestDocumentedPayloadsAreCanonical] pins the
+// JSON samples, which are what a policy reads; these are the expressions beside
+// them, which are what a policy author copies, and a documented rule that does
+// not fire is worse than an undocumented one because it reads as if it works.
+//
+// Each case pairs the expression with the input it is documented to cover: the
+// display name and the alias for the ecosystem set, the OS package ecosystem
+// whose release suffix survives the fold, the SBOM list whose entries carry a
+// Go version without its "v" prefix, and a purl list holding a string that does
+// not parse, which is why the documented guard tests for null first.
+func TestDocumentedCELExamplesFire(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		payload map[string]any
+	}{
+		{
+			name: "an ecosystem set matches the scanner's display name",
+			body: `pkg.ecosystem in ["go", "github-actions"]
+  ? [{"action": "deny", "reason": "ecosystem not allowed for this target"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{"pkg": map[string]any{"ecosystem": "GitHub Actions", "name": "actions/checkout", "version": "v4"}},
+		},
+		{
+			name: "an ecosystem set matches an alias",
+			body: `pkg.ecosystem in ["go", "github-actions"]
+  ? [{"action": "deny", "reason": "ecosystem not allowed for this target"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{"pkg": map[string]any{"ecosystem": "gha", "name": "actions/checkout", "version": "v4"}},
+		},
+		{
+			name: "an unrecognized ecosystem is folded, not remapped",
+			body: `pkg.ecosystem.startsWith("alpine:")
+  ? [{"action": "deny", "reason": "os package"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{"pkg": map[string]any{"ecosystem": "Alpine:v3.19", "name": "musl", "version": "1.2.4"}},
+		},
+		{
+			name: "a package belongs to the sbom purl list it appears in",
+			body: `pkg.purl in sbom.purls
+  ? [{"action": "deny", "reason": "component is in the scanned SBOM"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"pkg":  map[string]any{"ecosystem": "Go", "name": "example.com/mod", "version": "1.2.3", "purl": "pkg:golang/example.com/mod@1.2.3"},
+				"sbom": map[string]any{"purls": []string{"pkg:golang/example.com/mod@1.2.3"}},
+			},
+		},
+		{
+			name: "purl() reads one field, guarded for entries that do not parse",
+			body: `sbom.purls.exists(p, purl(p) != null && purl(p).type == "oci")
+  ? [{"action": "deny", "reason": "image component"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"sbom": map[string]any{"purls": []string{"not-a-purl", "pkg:oci/ghcr.io/acme/app@sha256:abc"}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eng, err := NewEngine([]Source{{Name: "documented-example", Body: tt.body}})
+			if err != nil {
+				t.Fatalf("NewEngine() error: %v", err)
+			}
+			actions, err := eng.EvaluateAllMap(t.Context(), tt.payload, "scan", "")
+			if err != nil {
+				t.Fatalf("EvaluateAllMap: %v", err)
+			}
+			if len(actions) != 1 || actions[0].Type != ActionDeny {
+				t.Errorf("documented rule did not fire: actions=%v (payload %v)", actions, tt.payload)
+			}
+		})
+	}
+}
+
 // notPackageReference records, with a reason, the string fields whose own
 // documentation mentions a package URL but which must not be canonicalized as a
 // reference. Every one of them is a value a caller supplied and Deputy has to
