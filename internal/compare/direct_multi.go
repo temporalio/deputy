@@ -37,7 +37,7 @@ var manifestDirectDepParsers = map[string]func([]byte) map[string]bool{
 // and the stdlib pseudo-dependency, which a content-only parser cannot see.
 const goDirectDepManifest = "go.mod"
 
-// EcosystemsWithDirectDependencyCollection returns the ecosystems whose direct
+// ecosystemsWithDirectDependencyCollection returns the ecosystems whose direct
 // dependencies these collectors actually read, sorted by canonical token. It is
 // derived by matching the manifests the parsers above are registered for against
 // the file patterns the ecosystem registry declares, so an ecosystem joins the
@@ -50,10 +50,11 @@ const goDirectDepManifest = "go.mod"
 // images, workflow uses, mise and asdf tools) are classified from the PURL type
 // instead and are deliberately absent.
 //
-// Nothing outside this package's tests calls it yet. It is the input the reporting
-// side of issue #246 needs, which is where an undetermined ecosystem becomes
-// something a caller can render rather than a value it has to guess at.
-func EcosystemsWithDirectDependencyCollection() []ecosystem.Ecosystem {
+// It is the input the reporting side of issue #246 needs, which is where an
+// undetermined ecosystem becomes something a caller can render rather than a
+// value it has to guess at. Exporting it belongs with that caller, whose needs
+// are what make the signature knowable.
+func ecosystemsWithDirectDependencyCollection() []ecosystem.Ecosystem {
 	collected := make([]ecosystem.Ecosystem, 0, len(manifestDirectDepParsers)+1)
 	for _, reg := range ecosystem.Default().All() {
 		for _, pattern := range slices.Concat(reg.Manifests, reg.Lockfiles) {

@@ -931,7 +931,7 @@ my-serde = { workspace = true }
 // widens the answer, and registering an ecosystem nobody parses cannot quietly
 // leave a caller thinking its packages were classified.
 func TestDirectDependencyCollectionIsDerivedFromTheParsers(t *testing.T) {
-	collected := EcosystemsWithDirectDependencyCollection()
+	collected := ecosystemsWithDirectDependencyCollection()
 
 	for _, reg := range ecosystem.Default().All() {
 		parsed := false
