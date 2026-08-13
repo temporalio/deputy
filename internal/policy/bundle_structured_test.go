@@ -395,3 +395,79 @@ func TestGeneratedMetadataCannotCarryADirective(t *testing.T) {
 		})
 	}
 }
+
+// TestVarValueWithoutACELSpellingRefusesThePolicy pins that a var Deputy cannot
+// write into the CEL a policy generates refuses the policy rather than binding
+// something else. A non-string var value is marshaled to JSON, which is a subset of
+// CEL's literal syntax, and YAML writes values JSON has no spelling for.
+//
+// Substituting `null` for the marshal failure bound a name to a value the bundle
+// does not declare: `threshold: .nan` compiled, validated clean, and made
+// `threshold == null` true, so the policy that ran was not the policy that was
+// reviewed. The refusal is only correct if it cannot fire for a value the author is
+// entitled to write, so the values a bundle can legitimately hold are pinned here
+// beside the ones it cannot, each checked for the literal it binds.
+func TestVarValueWithoutACELSpellingRefusesThePolicy(t *testing.T) {
+	refused := []struct {
+		name  string
+		value string
+	}{
+		{name: "a not-a-number", value: ".nan"},
+		{name: "a positive infinity", value: ".inf"},
+		{name: "a negative infinity", value: "-.inf"},
+		{name: "a not-a-number written in capitals", value: ".NaN"},
+		{name: "an infinity inside a list", value: "[1, .inf]"},
+		{name: "a not-a-number inside a nested mapping", value: "{a: {b: .nan}}"},
+		// A CEL map may be keyed by an integer, but JSON has no spelling for
+		// one, so this used to bind null as well. Refusing it says so, and the
+		// author can write the map as a CEL expression instead.
+		{name: "a mapping keyed by something other than a string", value: "{1: a}"},
+	}
+	for _, tc := range refused {
+		t.Run("refuses "+tc.name, func(t *testing.T) {
+			_, err := ParseStructuredSources([]byte(varBundle(tc.value)), "b.yaml")
+			if err == nil {
+				t.Fatalf("a var holding %s was accepted", tc.value)
+			}
+			if !strings.Contains(err.Error(), `var "threshold" holds a value that cannot be represented`) {
+				t.Fatalf("error %q should name the var and what is wrong with it", err)
+			}
+		})
+	}
+	accepted := []struct {
+		name    string
+		value   string
+		literal string
+	}{
+		{name: "an integer", value: "5", literal: "([5])"},
+		{name: "a float", value: "5.5", literal: "([5.5])"},
+		{name: "the largest float64", value: "1.7976931348623157e308", literal: "([1.7976931348623157e+308])"},
+		{name: "a boolean", value: "true", literal: "([true])"},
+		{name: "an explicit null", value: "null", literal: "([null])"},
+		{name: "a list", value: "[1, 2, 3]", literal: "([[1,2,3]])"},
+		{name: "an empty list", value: "[]", literal: "([[]])"},
+		{name: "a nested mapping", value: "{a: 1, b: [x, y]}", literal: `([{"a":1,"b":["x","y"]}])`},
+		{name: "a string, which is the author's own CEL", value: "'1 + 1'", literal: "([1 + 1])"},
+	}
+	for _, tc := range accepted {
+		t.Run("accepts "+tc.name, func(t *testing.T) {
+			sources, err := ParseStructuredSources([]byte(varBundle(tc.value)), "b.yaml")
+			if err != nil {
+				t.Fatalf("a var holding %s was refused: %v", tc.value, err)
+			}
+			if !strings.Contains(sources[0].Body, tc.literal) {
+				t.Fatalf("a var holding %s should bind %s, got:\n%s", tc.value, tc.literal, sources[0].Body)
+			}
+			if _, err := NewEngine(sources); err != nil {
+				t.Fatalf("NewEngine: %v", err)
+			}
+		})
+	}
+}
+
+// varBundle writes the smallest bundle that binds one var, for the cases that ask
+// only what a var value expands to.
+func varBundle(value string) string {
+	return "policies:\n  - name: thresholded\n    vars:\n      threshold: " + value +
+		"\n    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n"
+}

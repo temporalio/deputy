@@ -204,6 +204,40 @@ policies:
 			wantText:  []string{"9:11: error: policy \"nan-details\" rule[0]: 'details' holds a value that cannot be represented"},
 		},
 		{
+			name: "a var value that cannot be represented",
+			bundle: `
+policies:
+  - name: nan-var
+    vars:
+      threshold: .nan
+    rules:
+      - when: "threshold == null"
+        action: deny
+        reason: "x"
+`,
+			wantCodes: []string{"var-not-representable"},
+			wantText:  []string{"5:18: error: policy \"nan-var\": var \"threshold\" holds a value that cannot be represented"},
+		},
+		{
+			// A name that binds nothing says nothing about the value beside it,
+			// so both are reported: stopping at the name left the value to the
+			// expansion's unlocated backstop, which reported one mistake at a
+			// different severity and line depending on an unrelated one.
+			name: "a var value that cannot be represented under a name that binds nothing",
+			bundle: `
+policies:
+  - name: nan-unnamed-var
+    vars:
+      "": .nan
+    rules:
+      - when: "true"
+        action: deny
+        reason: "x"
+`,
+			wantCodes: []string{"empty-var-name", "var-not-representable"},
+			wantText:  []string{`var "" holds a value that cannot be represented`},
+		},
+		{
 			name: "duplicate var names",
 			bundle: `
 policies:
@@ -1291,6 +1325,21 @@ policies:
 policies:
   - name: once
     rules: []
+`,
+		},
+		{
+			// The walk names the value on its line and the expansion refuses the
+			// policy over it, so both readers describe one mistake.
+			name: "a var value that cannot be represented",
+			bundle: `
+policies:
+  - name: once
+    vars:
+      threshold: .nan
+    rules:
+      - when: "threshold == null"
+        action: deny
+        reason: "x"
 `,
 		},
 		{

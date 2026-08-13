@@ -43,20 +43,42 @@ type varKV struct {
 	IsString bool   // IsString indicates if the value was parsed as a string.
 }
 
-// exprString converts the variable's value into a CEL-compatible string representation.
-// Strings are returned as-is (quoted by the caller if needed), while other types
-// are JSON-marshaled.
-func (kv varKV) exprString() string {
+// exprString renders the var's value as the CEL expression the policy binds the
+// name to. A string is the author's own CEL and is returned as written; every
+// other value is marshaled to JSON, which is a subset of CEL's literal syntax.
+//
+// A value JSON has no spelling for refuses the var rather than standing in for it.
+// Substituting `null` bound a name to a value the bundle does not declare: a
+// `threshold: .nan` compiled, linted clean, and made `threshold == null` true, so
+// the policy that ran was not the policy that was reviewed. Every value the
+// decoder reads and JSON can represent is unaffected, which is every var Deputy
+// ships; what is refused is the handful YAML can write and JSON cannot, the
+// not-a-number and the infinities among them.
+func (kv varKV) exprString() (string, error) {
 	if kv.IsString {
 		if s, ok := kv.Value.(string); ok {
-			return s
+			return s, nil
 		}
 	}
 	b, err := json.Marshal(kv.Value)
 	if err != nil {
-		return "null"
+		return "", varNotRepresentableError(kv.Name, err)
 	}
-	return string(b)
+	return string(b), nil
+}
+
+// varNotRepresentableFormat is how a reader of a bundle says that a var holds a
+// value Deputy cannot write into the CEL a policy generates. The node walk locates
+// the same defect from the document, so validation matches this spelling to fold
+// the loader's restatement of it; one constant is what keeps the two readers from
+// reporting one mistake twice.
+const varNotRepresentableFormat = "var %q holds a value that cannot be represented: %w"
+
+// varNotRepresentableError renders that message for one var and the marshal
+// failure behind it. Both readers go through it rather than through the format, so
+// neither can spell the message the other has to recognize.
+func varNotRepresentableError(name string, err error) error {
+	return fmt.Errorf(varNotRepresentableFormat, name, err)
 }
 
 // normalizeVarName trims surrounding whitespace from a variable name, so that
@@ -92,7 +114,7 @@ func (o *orderedVars) UnmarshalYAML(node *yaml.Node) error {
 		}
 		kv.Name = normalizeVarName(kv.Name)
 		// Detect string vs other scalars/collections
-		if v.Kind == yaml.ScalarNode && v.Tag == "!!str" {
+		if v.Kind == yaml.ScalarNode && v.Tag == strTag {
 			if err := v.Decode(&kv.Value); err != nil {
 				return err
 			}
@@ -180,14 +202,22 @@ func (o orderedVars) bindings() []varBinding {
 }
 
 // nestVars wraps a CEL body in one comprehension per var, in reverse author order
-// so an earlier var is in scope for a later one. It does no checking: a caller
-// that runs a policy validates the names first (wrapVars), and validation uses it
-// to compile the expression of a var whose name it has already reported.
-func nestVars(vars orderedVars, body string) string {
+// so an earlier var is in scope for a later one. It checks no name: a caller that
+// runs a policy validates those first (wrapVars), and validation uses this to
+// compile the expression of a var whose name it has already reported.
+//
+// A var whose value has no CEL spelling refuses the nest, since there is no
+// expression to bind the name to and standing something else in would bind a value
+// the bundle does not declare (see exprString).
+func nestVars(vars orderedVars, body string) (string, error) {
 	for _, v := range slices.Backward(vars) {
-		body = fmt.Sprintf("([%s]).map(%s, %s)[0]", v.exprString(), v.Name, body)
+		expr, err := v.exprString()
+		if err != nil {
+			return "", err
+		}
+		body = fmt.Sprintf("([%s]).map(%s, %s)[0]", expr, v.Name, body)
 	}
-	return body
+	return body, nil
 }
 
 // Names returns the ordered variable names.
@@ -463,7 +493,8 @@ func (m *metadataComments) setList(key string, values []string) {
 //
 // A name the policy cannot bind refuses the whole policy, which is what a reader
 // that runs it must do; validation reports every one of them and compiles the rest
-// (see bindings).
+// (see bindings). A value with no CEL spelling refuses it for the same reason: the
+// name would bind something the bundle does not declare (see exprString).
 func (p structuredPolicy) wrapVars(body string) (string, error) {
 	if len(p.Vars) == 0 {
 		return body, nil
@@ -473,7 +504,7 @@ func (p structuredPolicy) wrapVars(body string) (string, error) {
 			return "", binding.err
 		}
 	}
-	return nestVars(p.Vars, body), nil
+	return nestVars(p.Vars, body)
 }
 
 // toRuleExpr converts a structured rule into a CEL expression string.

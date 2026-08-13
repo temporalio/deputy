@@ -451,17 +451,37 @@ func varCompileIssues(pol structuredPolicy, item *yaml.Node, source string, extr
 		issues []Issue
 		bound  orderedVars
 	)
+	// backstop renders a failure of the expansion as an issue folded against what
+	// the walk already located, which is where a var holding a value with no CEL
+	// spelling is named on its own line (see validateVars).
+	backstop := func(err error) []Issue {
+		return backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, err), source, item, located)
+	}
+	// nested asks what wrapping a body in vars finds: a var Deputy cannot write into
+	// the generated CEL at all, or generated CEL that does not compile.
+	nested := func(vars orderedVars, body string) []Issue {
+		expr, err := nestVars(vars, body)
+		if err != nil {
+			return backstop(err)
+		}
+		return celIssues(expr, extraVars, item, pol.Name)
+	}
 	for _, binding := range pol.Vars.bindings() {
 		if binding.err == nil {
 			bound = append(bound, binding.kv)
 			continue
 		}
-		issues = append(issues, backstopIssue(fmt.Errorf("%s/%s: %w", source, pol.Name, binding.err), source, item, located)...)
-		issues = append(issues, celIssues(nestVars(binding.scope, binding.kv.exprString()), extraVars, item, pol.Name)...)
+		issues = append(issues, backstop(binding.err)...)
+		expr, err := binding.kv.exprString()
+		if err != nil {
+			issues = append(issues, backstop(err)...)
+			continue
+		}
+		issues = append(issues, nested(binding.scope, expr)...)
 	}
 	// The vars that do bind are compiled as one nest, since each is in scope for
 	// the next, and wrapping an empty body asks about them and nothing else.
-	return append(issues, celIssues(nestVars(bound, "[]"), extraVars, item, pol.Name)...)
+	return append(issues, nested(bound, "[]")...)
 }
 
 // celIssues reports generated CEL that does not compile as an issue anchored on the
@@ -571,9 +591,9 @@ func varKeyName(key *yaml.Node) string {
 	return normalizeVarName(key.Value)
 }
 
-// validateVars checks the vars mapping: it must be a mapping, and every variable
+// validateVars checks the vars mapping: it must be a mapping, every variable
 // needs a unique non-empty name, since duplicates silently shadow each other
-// when the policy is expanded.
+// when the policy is expanded, and every value has to have a CEL spelling.
 func validateVars(item *yaml.Node) []Issue {
 	node := MappingValue(item, "vars")
 	if node == nil {
@@ -587,16 +607,52 @@ func validateVars(item *yaml.Node) []Issue {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := node.Content[i]
 		name := varKeyName(key)
-		if name == "" {
+		switch {
+		case name == "":
 			issues = append(issues, issueAt(key, IssueError, "empty-var-name", emptyVarNameMessage))
-			continue
+		default:
+			if _, dup := seen[name]; dup {
+				issues = append(issues, issueAt(key, IssueError, "duplicate-var", fmt.Sprintf(duplicateVarNameFormat, name)))
+			}
+			seen[name] = struct{}{}
 		}
-		if _, dup := seen[name]; dup {
-			issues = append(issues, issueAt(key, IssueError, "duplicate-var", fmt.Sprintf(duplicateVarNameFormat, name)))
-		}
-		seen[name] = struct{}{}
+		// The value is asked about whatever the name above it says, since a name
+		// that binds nothing says nothing about the value beside it. Stopping at
+		// the name reported the value as the expansion's unlocated backstop
+		// instead, so one mistake changed severity and line depending on an
+		// unrelated one.
+		issues = append(issues, varValueIssues(name, node.Content[i+1])...)
 	}
 	return issues
+}
+
+// varValueIssues reports a var holding a value Deputy cannot write into the CEL a
+// policy generates. A non-string value is marshaled to JSON when the policy is
+// expanded, and YAML writes values JSON has no spelling for, a not-a-number and
+// the infinities among them, so a var holding one cannot be expanded at all.
+//
+// It asks encoding/json rather than judging the value itself, and it reads string
+// against non-string the way the decoder does, so it recognizes exactly what the
+// expansion recognizes: a string is the author's own CEL and goes in as written,
+// which is why it is not asked about here.
+//
+// Locating it here is what reports it on the line it is written on and beside the
+// policy's other defects. The expansion stops at the first var it cannot write, so
+// on its own it named one value per lint run and anchored it on the policy.
+func varValueIssues(name string, value *yaml.Node) []Issue {
+	if value == nil || (value.Kind == yaml.ScalarNode && value.Tag == strTag) {
+		return nil
+	}
+	var decoded any
+	// A value the decoder cannot read at all is the decoder's to report, on the
+	// line it names; this asks only about the values it can read.
+	if err := value.Decode(&decoded); err != nil {
+		return nil
+	}
+	if _, err := json.Marshal(decoded); err != nil {
+		return []Issue{issueAt(value, IssueError, "var-not-representable", varNotRepresentableError(name, err).Error())}
+	}
+	return nil
 }
 
 // validateListEnum checks that every entry of a string-list field belongs to a
@@ -1016,6 +1072,11 @@ const nullTag = "!!null"
 
 // mergeTag is YAML's resolved tag for the merge key, in every spelling of it.
 const mergeTag = "!!merge"
+
+// strTag is YAML's resolved tag for a string scalar. It is what tells a var whose
+// value is the author's own CEL from one Deputy has to marshal into CEL for them,
+// so the decoder and the walk share the spelling rather than each writing it out.
+const strTag = "!!str"
 
 // rewritesItsText reports whether a scalar's value is not the text the document
 // writes for it. A YAML tag can arrange exactly that: `action: !!binary ZGVueQ==`
