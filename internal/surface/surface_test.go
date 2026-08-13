@@ -605,6 +605,82 @@ func TestOversizedAssetIsReportedNotSilentlyDropped(t *testing.T) {
 	}
 }
 
+// TestAssetScanReadsOnlyRegularFiles covers the limit that a size check cannot
+// enforce on its own. A directory entry describes the link, not its target, so a
+// symlink's size is the length of a path and passes any byte limit while the read
+// that follows it is unbounded. A FIFO has no meaningful size at all and would
+// block the audit indefinitely. Deputy answers this the same way wherever it reads
+// a path it did not choose, by requiring a regular file first.
+func TestAssetScanReadsOnlyRegularFiles(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	oversized := bytes.Repeat([]byte("x"), maxAssetBytes+1)
+	copy(oversized, []byte("NamedBeyondTheLimit "))
+	if err := os.WriteFile(target, oversized, 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	// The link is named like an asset and is a few bytes long, so a size check
+	// reading the entry rather than the target lets the whole target through.
+	link := filepath.Join(dir, "link.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "real.cel"), []byte("NamedInARegularFile"), 0o600); err != nil {
+		t.Fatalf("write regular: %v", err)
+	}
+
+	// A symlink to a directory stands in for every entry whose contents are not a
+	// file to read. A FIFO takes this same branch, and is the case that would
+	// otherwise block the audit forever rather than merely overrun the limit.
+	if err := os.Symlink(t.TempDir(), filepath.Join(dir, "linkdir.json")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "absent"), filepath.Join(dir, "dangling.json")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	d := &dynamic{tokens: map[string]evidence{}}
+	if err := d.addAssets(t.Context(), dir); err != nil {
+		t.Fatalf("addAssets error = %v, want nil", err)
+	}
+
+	if _, ok := d.tokens["NamedBeyondTheLimit"]; ok {
+		t.Error("the symlink target was read, so the asset limit was bypassed by following a link")
+	}
+
+	reasons := map[string]string{}
+	for _, gap := range d.unexamined {
+		reasons[gap.Path] = gap.Reason
+	}
+	tests := []struct {
+		path string
+		want string
+	}{
+		// Resolving the link is what makes the limit mean anything: the entry itself
+		// is a few bytes of path and would have passed any size check.
+		{path: "link.json", want: "over the 4194304 byte asset limit"},
+		{path: "linkdir.json", want: "not a regular file"},
+		{path: "dangling.json", want: "could not be measured"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got, ok := reasons[tt.path]
+			if !ok {
+				t.Fatalf("unexamined = %v, want an entry for %s", d.unexamined, tt.path)
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("reason = %q, want it to mention %q", got, tt.want)
+			}
+		})
+	}
+
+	// Ordinary assets still have to be read, or the check would cost the evidence
+	// it exists to bound.
+	if _, ok := d.tokens["NamedInARegularFile"]; !ok {
+		t.Errorf("tokens = %v, want the regular asset still scanned", d.tokens)
+	}
+}
+
 // TestUnwalkableDirectoryIsReportedNotSilentlySkipped covers the largest way the
 // asset scan can miss evidence. A directory it cannot enter costs every file
 // underneath it, not one, and WalkDir reports that as an error the callback is
