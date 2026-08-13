@@ -2140,6 +2140,21 @@ func TestExplainVulnerability(t *testing.T) {
 					},
 				},
 			},
+			"MAL-2024-1234": {
+				ID:      "MAL-2024-1234",
+				Summary: "Malicious code in evil-package (npm)",
+				Details: "The package contained a credential-stealing install script.",
+				Aliases: []string{"GHSA-aaaa-bbbb-cccc"},
+				Affected: []osvschema.Affected{
+					{
+						Package: osvschema.Package{Name: "evil-package", Ecosystem: "npm"},
+						Ranges: []osvschema.Range{{
+							Type:   osvschema.RangeSemVer,
+							Events: []osvschema.Event{{Introduced: "0"}},
+						}},
+					},
+				},
+			},
 		},
 	}
 
@@ -2181,6 +2196,15 @@ func TestExplainVulnerability(t *testing.T) {
 		if result.Severity != "CRITICAL" {
 			t.Errorf("expected severity CRITICAL, got %q", result.Severity)
 		}
+		if result.SeverityType != "CVSS_V3" {
+			t.Errorf("severityType = %q, want CVSS_V3", result.SeverityType)
+		}
+		if result.Kind != "vulnerability" {
+			t.Errorf("kind = %q, want vulnerability", result.Kind)
+		}
+		if !slices.Equal(result.Sources, []string{"osv"}) {
+			t.Errorf("sources = %v, want [osv]", result.Sources)
+		}
 		if result.Published != "2021-12-10T10:15:30Z" {
 			t.Errorf("published = %q, want RFC3339 timestamp", result.Published)
 		}
@@ -2201,6 +2225,23 @@ func TestExplainVulnerability(t *testing.T) {
 		}
 		if !slices.Equal(result.PackageFixes[0].FixedVersions, []string{"2.17.0"}) {
 			t.Errorf("expected package fix versions [2.17.0], got %v", result.PackageFixes[0].FixedVersions)
+		}
+	})
+
+	t.Run("malicious package advisory", func(t *testing.T) {
+		result, err := callProtoTool(t, ctx, s.explainVulnerability,
+			&mcpv1.ExplainVulnerabilityRequest{Id: "MAL-2024-1234"}, &mcpv1.VulnExplanation{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Id != "MAL-2024-1234" {
+			t.Errorf("expected ID MAL-2024-1234, got %s", result.Id)
+		}
+		if result.Kind != "malware" {
+			t.Errorf("kind = %q, want malware", result.Kind)
+		}
+		if !slices.Equal(result.Sources, []string{"osv"}) {
+			t.Errorf("sources = %v, want [osv]", result.Sources)
 		}
 	})
 

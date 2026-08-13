@@ -17,10 +17,12 @@ import (
 	mcpv1 "github.com/temporalio/deputy/gen/deputy/mcp/v1"
 	remediationv1 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/advisorysource"
 	"github.com/temporalio/deputy/internal/mcp/protoschema"
 	"github.com/temporalio/deputy/internal/otel"
 	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/vulnerability"
+	vulnseverity "github.com/temporalio/deputy/internal/vulnerability/severity"
 )
 
 // This file adapts tool handlers to the deputy.mcp.v1 proto contracts: results
@@ -158,20 +160,26 @@ func vulnExplanationProto(v vulnerability.Consolidated, opts vulnExplanationOpti
 
 // advisoryExplanationProto builds the mcp.v1 explanation of a raw advisory for
 // the explain tools: full details are always included, and reference lists are
-// truncated only when the caller asked for a limit. Advisory lookups have no
-// finding context, so kind, sources, and severityType stay absent.
+// truncated only when the caller asked for a limit. Kind and severityType
+// carry over from the advisory so a malicious-package record is never
+// presented as an ordinary vulnerability; sources is always OSV because
+// advisory lookups are served by the OSV-backed vulnerability service.
 func advisoryExplanationProto(advisory *vulnerabilityv1.Advisory, referenceLimit int) *mcpv1.VulnExplanation {
 	if advisory == nil {
 		return &mcpv1.VulnExplanation{Severity: "UNKNOWN"}
 	}
 
+	_, severityType := vulnseverity.Strings(advisory.GetSeverity())
 	refs, truncated := referencesForMCP(advisory.GetReferences(), referenceLimit)
 	out := &mcpv1.VulnExplanation{
 		Id:            advisory.GetId(),
 		Aliases:       stringsForMCP(advisory.GetAliases()),
 		Summary:       advisory.GetSummary(),
 		Details:       advisory.GetDetails(),
+		Kind:          mcpFindingKind(advisory.GetKind()),
 		Severity:      protoSeverityStringForMCP(advisory.GetSeverity()),
+		SeverityType:  strings.TrimSpace(severityType),
+		Sources:       []string{advisorysource.SourceNameOSV},
 		FixedVersions: stringsForMCP(advisory.GetFixedVersions()),
 		PackageFixes:  packageFixesProto(advisory.GetPackageFixes()),
 		ResolvedFix:   protoFixVerdictProto(advisory.GetResolvedFix()),
