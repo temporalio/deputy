@@ -10,6 +10,13 @@ type Shared struct {
 	Name string `json:"name"`
 }
 
+// Decoyed carries a tag whose key merely ends in a codec name. reflect's tag
+// reader finds no "json" key here, so no decoder can construct this type from a
+// json document and it must not inherit the encoding doubt.
+type Decoyed struct {
+	Name string `notjson:"name"`
+}
+
 // Holder declares a method named after the tagged type above.
 type Holder struct{}
 

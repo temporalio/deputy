@@ -157,17 +157,17 @@ func TestSymbolTotalsCountTheWholeSurface(t *testing.T) {
 	// Every exported declaration under internal/, and nothing from the excluded
 	// trees: 14 funcs (Used, Local, ForSDKOnly, ForExampleOnly, NamedInString,
 	// Orphaned, ForForeignTests, ForOwnBlackBoxTest, Run, Make, RunAnon,
-	// RunStringish, RunConstrained, Awkward), 17 types (Never, Stringish, Decoy,
+	// RunStringish, RunConstrained, Awkward), 18 types (Never, Stringish, Decoy,
 	// Scannable, Tagged, Handled, AnonReached, ConstraintReached, testonly.Shared,
-	// testonly.Holder, ifaces.Shared plus 6 interfaces), and 17 methods
-	// (Never.Method, Stringish.String, Decoy.Read, Scannable.Scan, Holder.Shared,
+	// testonly.Decoyed, testonly.Holder, ifaces.Shared plus 6 interfaces), and 17
+	// methods (Never.Method, Stringish.String, Decoy.Read, Scannable.Scan, Holder.Shared,
 	// AnonReached.Anon, ConstraintReached.Constrained, the four Handled methods,
 	// plus one per interface). Vars and consts are zero, which also pins that
 	// struct fields such as Tagged.Name are not counted as symbols, and that the
 	// type declared inside used.localTagged is not one either.
 	want := map[SymbolKind]int{
 		KindFunc:   14,
-		KindType:   17,
+		KindType:   18,
 		KindMethod: 17,
 		KindVar:    0,
 		KindConst:  0,
@@ -374,6 +374,14 @@ func TestEncodingDoubtBelongsToOneType(t *testing.T) {
 			name:   "a tagged type declared inside a function lends nothing to the name it shadows",
 			pkg:    "fixture/internal/used",
 			symbol: "Never",
+			want:   false,
+		},
+		{
+			// `notjson:"name"` contains `json:"`. Only a real tag key counts, or the
+			// doubt attaches to types no codec can reach.
+			name:   "a tag key that merely ends in a codec name does not earn it",
+			pkg:    "fixture/internal/testonly",
+			symbol: "Decoyed",
 			want:   false,
 		},
 	}
