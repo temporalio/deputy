@@ -206,12 +206,63 @@ type manifestScan struct {
 // else goes by that name.
 type npmResolution struct {
 	versionKeys map[string]bool
-	resolved    map[string]bool
+	// resolved is keyed by declaration site, spelled as the lockfile spells its
+	// own "packages" keys: "" for the root, and a member's directory relative to
+	// the lockfile otherwise. One workspace lockfile answers for several
+	// package.json files, and which of them a resolution came from is the whole
+	// question a suppression asks, so the sites cannot be unioned. Member A
+	// resolving foo to a registry version says nothing about member B declaring
+	// its own foo as a "file:" dependency the lockfile gave no version, and
+	// reading one map for the pair denied B the bare key its declaration earned.
+	//
+	// The versioned keys stay unioned, because each is a positive statement about
+	// a package rather than about a project. See [LookupDirect].
+	resolved map[string]map[string]bool
 	// members are the workspace globs the lockfile's root declares, which is what
 	// says whose declarations this lockfile is allowed to answer for. A lockfile
 	// in an ancestor directory governs a manifest below it only if it claims that
 	// directory as a member.
 	members []string
+}
+
+// recordResolved notes that the declaration spelled declared at site resolved to
+// the package named name, so neither spelling needs a bare key for that site.
+// The two spellings differ only for an alias, and both have to be recorded or
+// the one the manifest used keeps answering for every version of its name.
+func (r npmResolution) recordResolved(site, name, declared string) {
+	resolved, ok := r.resolved[site]
+	if !ok {
+		resolved = make(map[string]bool, 2)
+		r.resolved[site] = resolved
+	}
+	resolved[name] = true
+	resolved[declared] = true
+}
+
+// mergeNpmResolved folds one lockfile's per-site resolutions into another's,
+// keeping the sites apart. Merging is a union within a site and never across
+// them, which is what stops one member's resolution from suppressing another
+// member's declaration.
+func mergeNpmResolved(dst, src map[string]map[string]bool) {
+	for site, names := range src {
+		existing, ok := dst[site]
+		if !ok {
+			dst[site] = maps.Clone(names)
+			continue
+		}
+		maps.Copy(existing, names)
+	}
+}
+
+// cloneNpmResolved deep-copies a per-site resolution map so a governing entry
+// can be merged into without writing through to the scan's own record of the
+// lockfile it came from.
+func cloneNpmResolved(src map[string]map[string]bool) map[string]map[string]bool {
+	cloned := make(map[string]map[string]bool, len(src))
+	for site, names := range src {
+		cloned[site] = maps.Clone(names)
+	}
+	return cloned
 }
 
 // newManifestScan starts a scan from the direct dependencies already collected
@@ -251,7 +302,7 @@ func (s *manifestScan) recordNpmLock(scope manifestScope, resolution npmResoluti
 		return
 	}
 	maps.Copy(existing.versionKeys, resolution.versionKeys)
-	maps.Copy(existing.resolved, resolution.resolved)
+	mergeNpmResolved(existing.resolved, resolution.resolved)
 }
 
 // governingNpmLocks reduces the lockfiles the walk found to the one per directory
@@ -283,23 +334,30 @@ func (s *manifestScan) governingNpmLocks() map[string]npmResolution {
 		if !ok {
 			governing[scope.dir] = npmResolution{
 				versionKeys: maps.Clone(resolution.versionKeys),
-				resolved:    maps.Clone(resolution.resolved),
+				resolved:    cloneNpmResolved(resolution.resolved),
 				members:     slices.Clone(resolution.members),
 			}
 			continue
 		}
 		maps.Copy(existing.versionKeys, resolution.versionKeys)
-		maps.Copy(existing.resolved, resolution.resolved)
+		mergeNpmResolved(existing.resolved, resolution.resolved)
 		existing.members = append(existing.members, resolution.members...)
 		governing[scope.dir] = existing
 	}
 	return governing
 }
 
-// governingNpmResolutions returns the names resolved by the nearest npm lockfile
-// at or above dir, which is the lockfile that governs a manifest there: npm
-// workspace members keep their declarations in their own package.json while the
-// lockfile sits at the workspace root.
+// governingNpmResolutions returns the names the nearest npm lockfile at or above
+// dir resolved for the manifest at dir specifically, which is the lockfile that
+// governs a manifest there: npm workspace members keep their declarations in
+// their own package.json while the lockfile sits at the workspace root.
+//
+// The answer is the declaration site's own resolutions, not the lockfile's whole
+// set. A workspace lockfile answers for every member at once, and a name one
+// member resolved to a registry version is not a name another member resolved:
+// a member declaring the same name as a "file:" or link dependency gets no
+// version key of its own, and reading the lockfile-wide union suppressed its
+// bare key anyway, so the copy it explicitly declared reported transitive.
 //
 // The search stops at the first lockfile it finds, for the same reason
 // [manifestScan.governingRenames] does: a nearer lockfile is the only one that
@@ -320,8 +378,13 @@ func (s *manifestScan) governingNpmLocks() map[string]npmResolution {
 func governingNpmResolutions(governing map[string]npmResolution, dir string) map[string]bool {
 	for probe := dir; ; {
 		if resolution, ok := governing[probe]; ok {
-			if probe == dir || npmLockClaims(resolution, probe, dir) {
-				return resolution.resolved
+			// A lockfile in the manifest's own directory answers for it as the
+			// root site, which is the key npm writes the root's tables under.
+			if probe == dir {
+				return resolution.resolved[""]
+			}
+			if site, claimed := npmLockClaims(resolution, probe, dir); claimed {
+				return resolution.resolved[site]
 			}
 			// The nearest lockfile does not claim this directory, and a further
 			// one cannot: npm workspaces have a single root, and reaching past
@@ -338,21 +401,27 @@ func governingNpmResolutions(governing map[string]npmResolution, dir string) map
 }
 
 // npmLockClaims reports whether the lockfile at lockDir claims dir as one of its
-// workspace members. The globs a root declares are relative to the root, so the
-// directory is made relative before it is matched.
-func npmLockClaims(resolution npmResolution, lockDir, dir string) bool {
+// workspace members, and returns the declaration site the member's resolutions
+// are recorded under. The globs a root declares are relative to the root, so the
+// directory is made relative before it is matched, and that relative spelling is
+// also the key npm writes the member's own entry under in "packages", which is
+// what makes it usable as the site.
+func npmLockClaims(resolution npmResolution, lockDir, dir string) (string, bool) {
 	if len(resolution.members) == 0 {
-		return false
+		return "", false
 	}
 	relative := dir
 	if lockDir != "." {
 		trimmed, under := strings.CutPrefix(dir, lockDir+"/")
 		if !under {
-			return false
+			return "", false
 		}
 		relative = trimmed
 	}
-	return isNpmWorkspaceMember(relative, resolution.members)
+	if !isNpmWorkspaceMember(relative, resolution.members) {
+		return "", false
+	}
+	return relative, true
 }
 
 // recordWorkspaceRoot notes that the manifest at a scope declares a workspace,
@@ -428,15 +497,19 @@ func (s *manifestScan) resolve() map[string]bool {
 	}
 
 	// An npm name gets a bare key only when the lockfile governing its project
-	// did not resolve it to a version. A resolved name already has its versioned
-	// key, and adding the bare one beside it would answer for every other copy
-	// of that name in the scan, which is the over-claiming the resolution exists
-	// to stop.
+	// did not resolve that project's own declaration of it to a version. A
+	// resolved name already has its versioned key, and adding the bare one beside
+	// it would answer for every other copy of that name in the scan, which is the
+	// over-claiming the resolution exists to stop.
 	//
-	// Suppression is per name and per project, which is what keeps it from
-	// deciding anything about a project it did not read. A declaration the
-	// lockfile could not resolve keeps its bare key even when its neighbours in
-	// the same manifest were resolved, and a project with no lockfile at all
+	// Suppression is per name and per declaration site, which is what keeps it
+	// from deciding anything about a manifest it did not read. The site rather
+	// than the lockfile is the unit because one workspace lockfile answers for
+	// every member: a member that declares a name the lockfile gave no version,
+	// a "file:" or link dependency, keeps its bare key even when a sibling member
+	// declared the same name and had it resolved. A declaration the lockfile
+	// could not resolve likewise keeps its bare key when its neighbours in the
+	// same manifest were resolved, and a project with no lockfile at all
 	// keeps every one of them. The consequence, once a repository mixes an
 	// npm-locked project with a Yarn or pnpm one that declares the same name, is
 	// that the bare key from the unresolved project answers for every version of
@@ -824,7 +897,7 @@ func getNpmLockDirectDeps(data []byte) map[string]bool {
 func npmLockResolution(data []byte) npmResolution {
 	resolution := npmResolution{
 		versionKeys: make(map[string]bool),
-		resolved:    make(map[string]bool),
+		resolved:    make(map[string]map[string]bool),
 	}
 
 	var lock npmLockfile
@@ -849,8 +922,7 @@ func npmLockResolution(data []byte) npmResolution {
 				// reports and therefore the name the lookup will ask about.
 				name := cmp.Or(installed.Name, declared)
 				resolution.versionKeys[DirectVersionKey(name, installed.Version)] = true
-				resolution.resolved[name] = true
-				resolution.resolved[declared] = true
+				resolution.recordResolved(site, name, declared)
 			}
 		}
 	}

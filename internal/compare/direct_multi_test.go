@@ -1497,3 +1497,100 @@ func TestWorkspaceMemberIsStillGovernedByTheRootLock(t *testing.T) {
 		t.Errorf("the nested copy is direct, so the member kept a bare key\nset: %v", direct)
 	}
 }
+
+// TestOneMembersResolutionDoesNotDenyAnothersDeclaration is the two-member case
+// that a per-project scoping of the lockfile does not by itself get right. One
+// governing lockfile answers for every member of the workspace, so scoping the
+// lookup to the lockfile leaves every member reading the same set of resolved
+// names.
+//
+// Here @acme/api declares lodash and the lockfile resolves it to a registry
+// version, while @acme/tools declares lodash as a "file:" dependency whose entry
+// is a link with no version. The second declaration produced no version key, so
+// the bare name is the only answer it can have; consulting the lockfile-wide
+// union took that away, because the first member's declaration had marked the
+// name resolved. The copy @acme/tools explicitly depends on then reached SBOMs
+// and direct-only policies as transitive.
+//
+// left-pad is the control that keeps the answer from being "stop suppressing".
+// @acme/web declares it and the lockfile resolves it, so the nested copy a
+// transitive package pins stays transitive.
+func TestOneMembersResolutionDoesNotDenyAnothersDeclaration(t *testing.T) {
+	files := map[string]string{
+		"package.json":                `{"name":"monorepo","workspaces":["packages/*"]}`,
+		"packages/api/package.json":   `{"name":"@acme/api","dependencies":{"lodash":"^4.17.21"}}`,
+		"packages/tools/package.json": `{"name":"@acme/tools","dependencies":{"lodash":"file:../../local/lodash"}}`,
+		"packages/web/package.json":   `{"name":"@acme/web","dependencies":{"left-pad":"^1.3.0"}}`,
+		"local/lodash/package.json":   `{"name":"lodash","version":"0.0.0-local"}`,
+		"package-lock.json": `{
+  "name": "monorepo",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "monorepo", "workspaces": ["packages/*"]},
+    "packages/api": {"name": "@acme/api", "dependencies": {"lodash": "^4.17.21"}},
+    "packages/tools": {"name": "@acme/tools", "dependencies": {"lodash": "file:../../local/lodash"}},
+    "packages/web": {"name": "@acme/web", "dependencies": {"left-pad": "^1.3.0"}},
+    "node_modules/@acme/api": {"resolved": "packages/api", "link": true},
+    "node_modules/@acme/tools": {"resolved": "packages/tools", "link": true},
+    "node_modules/@acme/web": {"resolved": "packages/web", "link": true},
+    "node_modules/lodash": {"version": "4.17.21"},
+    "node_modules/left-pad": {"version": "1.3.0"},
+    "node_modules/legacy": {"version": "1.0.0", "dependencies": {"left-pad": "0.0.9"}},
+    "node_modules/legacy/node_modules/left-pad": {"version": "0.0.9"},
+    "packages/tools/node_modules/lodash": {"resolved": "local/lodash", "link": true}
+  }
+}`,
+	}
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+	for name, contents := range files {
+		if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	direct := CollectDirectDependenciesFromWorkspace(ws)
+
+	tests := []struct {
+		name    string
+		pkg     string
+		version string
+		want    bool
+	}{
+		{
+			name:    "the member whose declaration the lockfile resolved is direct",
+			pkg:     "lodash",
+			version: "4.17.21",
+			want:    true,
+		},
+		{
+			name:    "the member whose file: declaration got no version is direct too",
+			pkg:     "lodash",
+			version: "0.0.0-local",
+			want:    true,
+		},
+		{
+			name:    "a fully resolved member's declaration is still direct",
+			pkg:     "left-pad",
+			version: "1.3.0",
+			want:    true,
+		},
+		{
+			// The control. Every member that declares left-pad had its
+			// declaration resolved, so nothing contributes a bare key for the
+			// name and a copy nobody declared stays transitive. Suppression is
+			// narrowed to the declaration site, not switched off.
+			name:    "a nested copy no member declared stays transitive",
+			pkg:     "left-pad",
+			version: "0.0.9",
+			want:    false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := LookupDirect(direct, tt.pkg, tt.version); got != tt.want {
+				t.Errorf("LookupDirect(%s, %s) = %v, want %v\nset: %v",
+					tt.pkg, tt.version, got, tt.want, direct)
+			}
+		})
+	}
+}
