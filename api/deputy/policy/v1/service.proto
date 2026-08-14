@@ -84,10 +84,21 @@ message EvaluateResponse {
   repeated Action actions = 1;
 
   // Overall outcome based on triggered actions.
-  // DENY if any deny action, WARN if any warn action, ALLOW otherwise.
+  // DENY if any deny action, WARN if any warn action, ALLOW if every policy
+  // ran and none of them denied or warned.
+  //
+  // Evaluate fails closed, so this is always a real decision: a policy that
+  // could not be loaded, compiled, or evaluated is reported as an RPC error
+  // and no response is returned at all. ALLOW therefore never means "we could
+  // not tell".
   ActionType outcome = 2;
 
-  // Errors encountered during evaluation (syntax errors, missing vars, etc).
+  // Errors is populated by Validate, not by Evaluate.
+  //
+  // Evaluate reports load, compile, and runtime failures as RPC errors:
+  // INVALID_ARGUMENT for a source it could not load or compile, INTERNAL for
+  // an evaluation failure, and CANCELED or DEADLINE_EXCEEDED when the request
+  // context ended first. It leaves this field empty.
   repeated PolicyError errors = 3;
 }
 
