@@ -35,6 +35,19 @@ Deputy searches these locations (in order):
 
 Override with `DEPUTY_CONFIG=/path/to/config.yaml`.
 
+## Invalid Configuration
+
+Having no config file is normal: Deputy runs on built-in defaults without comment. A config file that *is* found but cannot be read, parsed, or validated is a different situation, and Deputy refuses to run rather than falling back to defaults, because settings such as `egress` allowlists and `advisory_sources` would otherwise be silently dropped. The command exits non-zero and names the file:
+
+```console
+$ deputy list
+Failed to load config from .deputy.yaml: validation failed for logging.level: must be one of: debug, info, warn, error.
+
+Suggestion: Fix the file, or run 'deputy config validate .deputy.yaml' for details
+```
+
+The `deputy config` commands (`validate`, `show`, `path`) keep working in this state so you can diagnose the file.
+
 ## Starter Config
 
 See [`.deputy.yaml.example`](../../.deputy.yaml.example) for an annotated template. Copy to `.deputy.yaml` and customize.

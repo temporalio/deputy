@@ -29,8 +29,14 @@ import (
 // Run constructs the root command hierarchy and executes it with all
 // subcommands registered. It is the primary entry point used by main.
 func Run(ctx context.Context) error {
-	// Load configuration for runtime defaults (OTel, egress allowlists).
-	cfg := loadRuntimeConfig()
+	// Load configuration for runtime defaults (OTel, egress allowlists). A
+	// config file that exists but cannot be loaded is fatal, not ignorable:
+	// every control it configures would otherwise revert to its default with
+	// nothing said. The failure is carried into the root command instead of
+	// being returned here, because main only maps a Run error to an exit code;
+	// reporting it from PersistentPreRunE routes it through fang so the user
+	// sees the same diagnostic 'deputy config show' prints.
+	cfg, cfgErr := loadRuntimeConfig()
 
 	// Apply local egress allowlists before services are initialized.
 	applyLocalEgressConfig(cfg)
@@ -55,18 +61,31 @@ func Run(ctx context.Context) error {
 		}
 	}()
 
-	return fang.Execute(ctx, newRoot(), fang.WithErrorHandler(silentErrorHandler), fang.WithVersion(version.Value))
+	return fang.Execute(ctx, newRoot(cfgErr), fang.WithErrorHandler(silentErrorHandler), fang.WithVersion(version.Value))
 }
 
-// loadRuntimeConfig loads configuration from environment and config file.
-func loadRuntimeConfig() *config.Config {
+// loadRuntimeConfig loads configuration from the environment and the
+// auto-discovered config file. A non-nil error means a configuration source was
+// present but unusable (unreadable or malformed file, or a value that fails
+// validation), which callers must treat as fatal: continuing would silently run
+// with default egress allowlists, advisory sources, and OTel settings instead of
+// the configured ones. Finding no config file at all is not an error, it yields
+// the defaults with a nil error.
+func loadRuntimeConfig() (*config.Config, error) {
 	configPath := config.FindConfigFile()
-	loader := config.NewLoader(configPath)
-	cfg, err := loader.Load()
+	cfg, err := config.NewLoader(configPath).Load()
 	if err != nil {
-		return nil
+		if configPath != "" {
+			// Name the file: an offending config can be in the home directory,
+			// far from the directory the command was run in.
+			return nil, deputyerrors.Suggest(
+				fmt.Errorf("failed to load config from %s: %w", configPath, err),
+				fmt.Sprintf("Fix the file, or run 'deputy config validate %s' for details", configPath),
+			)
+		}
+		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
-	return cfg
+	return cfg, nil
 }
 
 // applyAdvisorySourceConfig hands the config file's advisory_sources entries to
@@ -154,8 +173,11 @@ func silentErrorHandler(w io.Writer, styles fang.Styles, err error) {
 	}
 }
 
-// newRoot returns the root command with all subcommands attached.
-func newRoot() *cobra.Command {
+// newRoot returns the root command with all subcommands attached. configErr
+// carries a configuration failure detected before command construction; when it
+// is non-nil every command except the config diagnostics refuses to run, so a
+// config file that cannot be honored never masquerades as an absent one.
+func newRoot(configErr error) *cobra.Command {
 	logLevel := defaultLogLevel()
 	logFormat := defaultLogFormat()
 	var serverAddr string
@@ -270,6 +292,16 @@ CONNECTION MODES:
 	cmd.RegisterCommands(rootCmd, deps)
 
 	rootCmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
+		// Refuse to run on a configuration that could not be loaded. This is
+		// checked first: a command that proceeds here would enforce default
+		// egress allowlists, query default advisory sources, and export no
+		// telemetry, none of which the user asked for. The config subtree is
+		// exempt because those commands exist to diagnose exactly this failure
+		// and report it themselves.
+		if configErr != nil && !inConfigCommandTree(c) {
+			return configErr
+		}
+
 		if err := configureLogging(logLevel, logFormat); err != nil {
 			return err
 		}
@@ -305,6 +337,21 @@ CONNECTION MODES:
 	}
 
 	return rootCmd
+}
+
+// inConfigCommandTree reports whether cmd is 'deputy config' or one of its
+// subcommands. Those commands read and report on configuration rather than
+// acting on it, so they stay available when the discovered config file is the
+// thing that is broken: refusing to run them would take away the tools that
+// explain the failure.
+func inConfigCommandTree(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		// The root command is "deputy", so this cannot match the whole CLI.
+		if c.Name() == "config" && c.Parent() != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // isInGitRepo checks if the current working directory is inside a git repository.
