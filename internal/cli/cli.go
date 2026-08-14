@@ -88,7 +88,7 @@ func loadRuntimeConfig() (*config.Config, error) {
 			"Point DEPUTY_CONFIG at a readable config file, or unset it to use auto-discovery",
 		)
 	}
-	cfg, err := config.NewLoader(configPath).Load()
+	cfg, err := config.NewLoader(configPath).LoadWithOverrides(loggingFlagOverrides(os.Args[1:]))
 	if err != nil {
 		if configPath != "" {
 			// Name the file: an offending config can be in the home directory,
@@ -107,6 +107,42 @@ func loadRuntimeConfig() (*config.Config, error) {
 		)
 	}
 	return cfg, nil
+}
+
+// loggingFlagOverrides scrapes the logging flags out of the raw arguments,
+// before cobra has parsed anything. Configuration has to be loaded this early
+// (egress allowlists and advisory sources must be applied before any client is
+// built), but flags outrank the environment, so validating the merged config
+// without them would reject a value the user already corrected on the command
+// line, contradicting the documented precedence.
+//
+// Only explicitly set flags are returned. Unknown flags are tolerated rather
+// than treated as errors, since the real parse happens later and reports them;
+// arguments after "--" are left alone, so a passthrough command such as
+// 'deputy proxy npm -- npm install --log-level=silly' cannot be mistaken for a
+// Deputy flag. A flag this pre-parse fails to spot simply leaves the
+// environment value standing, which fails closed.
+func loggingFlagOverrides(args []string) map[string]string {
+	fs := pflag.NewFlagSet("logging-precedence", pflag.ContinueOnError)
+	fs.ParseErrorsWhitelist.UnknownFlags = true
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+
+	var level, format string
+	fs.StringVar(&level, "log-level", "", "")
+	fs.StringVar(&format, "log-format", "", "")
+	// A parse failure here is not actionable: cobra parses these arguments
+	// again, properly, and reports anything wrong with them.
+	_ = fs.Parse(args)
+
+	overrides := make(map[string]string, 2)
+	if fs.Changed("log-level") {
+		overrides["log-level"] = level
+	}
+	if fs.Changed("log-format") {
+		overrides["log-format"] = format
+	}
+	return overrides
 }
 
 // applyAdvisorySourceConfig hands the config file's advisory_sources entries to

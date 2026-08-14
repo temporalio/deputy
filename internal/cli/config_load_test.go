@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -240,6 +241,122 @@ func TestLoadRuntimeConfigExplicitPath(t *testing.T) {
 			}
 			if len(cfg.AdvisorySources) != 1 || cfg.AdvisorySources[0].URL != pinnedSource {
 				t.Errorf("AdvisorySources = %+v, want the source pinned by the explicit file", cfg.AdvisorySources)
+			}
+		})
+	}
+}
+
+// TestLoggingFlagOverrides pins the early scrape of the logging flags. It has
+// to find a flag in every form cobra accepts, or configuration is validated
+// against an environment value the user already overrode; it has to ignore
+// everything after "--", or a passthrough command's own flags would be read as
+// Deputy's.
+func TestLoggingFlagOverrides(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want map[string]string
+	}{
+		{
+			name: "no logging flags",
+			args: []string{"list", "."},
+			want: map[string]string{},
+		},
+		{
+			name: "equals form",
+			args: []string{"list", ".", "--log-level=debug"},
+			want: map[string]string{"log-level": "debug"},
+		},
+		{
+			name: "space form",
+			args: []string{"list", ".", "--log-level", "debug"},
+			want: map[string]string{"log-level": "debug"},
+		},
+		{
+			name: "before the subcommand",
+			args: []string{"--log-level", "debug", "list", "."},
+			want: map[string]string{"log-level": "debug"},
+		},
+		{
+			name: "alongside an unknown flag that takes a value",
+			args: []string{"--server", "https://x.example.com", "--log-level", "debug", "list"},
+			want: map[string]string{"log-level": "debug"},
+		},
+		{
+			name: "both flags",
+			args: []string{"scan", "--log-level=warn", "--log-format=json"},
+			want: map[string]string{"log-level": "warn", "log-format": "json"},
+		},
+		{
+			// The inner flag belongs to npm, not to Deputy. Reading it would
+			// let an unrelated argument satisfy Deputy's config validation.
+			name: "not scraped from a passthrough after the terminator",
+			args: []string{"proxy", "npm", "--", "npm", "install", "--log-level=silly"},
+			want: map[string]string{},
+		},
+		{
+			name: "explicitly empty flag is recorded but means no choice",
+			args: []string{"list", "--log-level="},
+			want: map[string]string{"log-level": ""},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := loggingFlagOverrides(test.args)
+			if !maps.Equal(got, test.want) {
+				t.Errorf("loggingFlagOverrides(%v) = %v, want %v", test.args, got, test.want)
+			}
+		})
+	}
+}
+
+// TestLoadRuntimeConfigHonorsFlagPrecedence proves the scrape is actually wired
+// into the load, end to end: an invalid DEPUTY_LOG_LEVEL that the command line
+// overrides must not make the command fatal, because flags outrank the
+// environment. This regressed once already.
+func TestLoadRuntimeConfigHonorsFlagPrecedence(t *testing.T) {
+	tests := []struct {
+		name    string
+		argv    []string
+		wantErr bool
+	}{
+		{
+			name:    "flag overrides the invalid environment value",
+			argv:    []string{"deputy", "list", ".", "--log-level=debug"},
+			wantErr: false,
+		},
+		{
+			name:    "no override leaves the invalid value fatal",
+			argv:    []string{"deputy", "list", "."},
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			isolatedConfigDir(t)
+			t.Setenv("DEPUTY_LOG_LEVEL", "shouty")
+
+			// loadRuntimeConfig reads the real argv, since it runs before
+			// cobra parses anything.
+			original := os.Args
+			t.Cleanup(func() { os.Args = original })
+			os.Args = test.argv
+
+			cfg, err := loadRuntimeConfig()
+
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("loadRuntimeConfig() error = nil, want an error; cfg = %+v", cfg)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("loadRuntimeConfig() error = %v, want nil: the flag outranks DEPUTY_LOG_LEVEL", err)
+			}
+			if cfg.Logging.Level != "debug" {
+				t.Errorf("Logging.Level = %q, want %q", cfg.Logging.Level, "debug")
 			}
 		})
 	}
