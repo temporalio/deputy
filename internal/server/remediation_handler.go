@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	crypto_rand "crypto/rand"
 	"encoding/hex"
@@ -63,7 +64,38 @@ type RemediationHandler struct {
 type agentSession struct {
 	handler    agentv1connect.AgentPluginHandler
 	cancelFunc context.CancelFunc
-	approvals  chan *agentv1.ApproveRequest
+	approvals  chan *pendingApproval
+	// done is closed when the execution this session belongs to has returned.
+	// A decision submitted for an operation the agent never asks about would
+	// otherwise sit in the channel with nobody left to read it, and the caller
+	// waiting for the agent's answer would wait for the life of its own
+	// context; the session's end is the answer.
+	done chan struct{}
+}
+
+// pendingApproval carries one caller's decision to the execution loop and the
+// agent's answer back to the RPC that submitted it. Handing over the request
+// alone let ApproveStep answer from the fact of the handover, which is not the
+// same fact as the agent having taken the decision.
+type pendingApproval struct {
+	req *agentv1.ApproveRequest
+	// answer receives the agent's verdict exactly once. It is buffered so the
+	// execution loop never blocks on a caller that has already given up.
+	answer chan approvalAnswer
+}
+
+// approvalAnswer is what the agent said about a decision: whether it took it,
+// and what it said if it did not.
+type approvalAnswer struct {
+	accepted bool
+	message  string
+}
+
+// reply hands the agent's verdict to the waiting caller. It is called once per
+// pending approval, and the buffer of one is what keeps that send from blocking
+// when the caller has gone.
+func (p *pendingApproval) reply(answer approvalAnswer) {
+	p.answer <- answer
 }
 
 // Ensure RemediationHandler implements the RemediationServiceHandler interface.
@@ -1201,7 +1233,8 @@ func (h *RemediationHandler) ExecuteWithAgent(
 	session := &agentSession{
 		handler:    handler,
 		cancelFunc: cancel,
-		approvals:  make(chan *agentv1.ApproveRequest, 1),
+		approvals:  make(chan *pendingApproval, 1),
+		done:       make(chan struct{}),
 	}
 	h.sessionsMu.Lock()
 	h.sessions[sessionID] = session
@@ -1210,6 +1243,9 @@ func (h *RemediationHandler) ExecuteWithAgent(
 		h.sessionsMu.Lock()
 		delete(h.sessions, sessionID)
 		h.sessionsMu.Unlock()
+		// Deleting the session hides it from new callers; closing done releases
+		// the ones already waiting for an answer that is no longer coming.
+		close(session.done)
 	}()
 
 	// Send initial event
@@ -1252,16 +1288,9 @@ func (h *RemediationHandler) ExecuteWithAgent(
 
 		// Handle approval required events
 		if event.GetApprovalRequired() != nil {
-			// Wait for approval via ApproveStep RPC
-			select {
-			case approval := <-session.approvals:
-				if _, err := handler.Approve(execCtx, connect.NewRequest(approval)); err != nil {
-					// The agent keeps running; surface the undelivered
-					// approval instead of failing the stream.
-					logs.Warn(execCtx, "agent approval delivery failed", "error", err)
-				}
-			case <-execCtx.Done():
-				return execCtx.Err()
+			// Wait for a decision the agent actually takes, via ApproveStep.
+			if err := deliverApproval(execCtx, session); err != nil {
+				return err
 			}
 		}
 	}
@@ -1278,6 +1307,49 @@ func (h *RemediationHandler) ExecuteWithAgent(
 	logs.Info(ctx, "agent execution completed", "agent", agentName, "session_id", sessionID)
 
 	return nil
+}
+
+// deliverApproval waits for a caller's decision, hands it to the agent, and
+// keeps waiting until the agent takes one, answering every submitter with what
+// the agent said about theirs.
+//
+// A decision the agent refused is not a decision it was told: approval-capable
+// plugins refuse one that names an operation they have already finished or never
+// asked about, and a delivery that failed outright never arrived. Going on from
+// either would let the step proceed as though it had been approved, so the wait
+// resumes instead, and the caller is told its decision was not accepted so it
+// can send a corrected one. The agent is still running either way, which is why
+// an undelivered decision does not fail the stream.
+//
+// A decision the agent takes ends the wait whichever way it went. A delivered
+// denial is an answer, and what the agent does with a denial is the agent's to
+// decide; this loop is about whether the answer arrived.
+func deliverApproval(ctx context.Context, session *agentSession) error {
+	for {
+		select {
+		case pending := <-session.approvals:
+			resp, err := session.handler.Approve(ctx, connect.NewRequest(pending.req))
+			switch {
+			case err != nil:
+				logs.Warn(ctx, "agent approval delivery failed",
+					"operation_id", pending.req.GetOperationId(), "error", err)
+				pending.reply(approvalAnswer{
+					message: fmt.Sprintf("the agent could not take this decision: %v", err),
+				})
+			case !resp.Msg.GetAccepted():
+				logs.Warn(ctx, "agent refused an approval decision",
+					"operation_id", pending.req.GetOperationId(), "message", resp.Msg.GetMessage())
+				pending.reply(approvalAnswer{
+					message: cmp.Or(resp.Msg.GetMessage(), "the agent did not accept this decision"),
+				})
+			default:
+				pending.reply(approvalAnswer{accepted: true, message: resp.Msg.GetMessage()})
+				return nil
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // ResumeAgent resumes a previous agent execution session.
@@ -1460,21 +1532,18 @@ func (h *RemediationHandler) ApproveStep(
 	}
 
 	// Send approval to the session
-	approval := &agentv1.ApproveRequest{
-		SessionId:   sessionID,
-		OperationId: stepID,
-		Approved:    req.Msg.GetApproved(),
-		Feedback:    req.Msg.GetReason(),
+	pending := &pendingApproval{
+		req: &agentv1.ApproveRequest{
+			SessionId:   sessionID,
+			OperationId: stepID,
+			Approved:    req.Msg.GetApproved(),
+			Feedback:    req.Msg.GetReason(),
+		},
+		answer: make(chan approvalAnswer, 1),
 	}
 
 	select {
-	case session.approvals <- approval:
-		// CanProceed reports whether the step may continue: a delivered
-		// denial is still accepted, but the denied step must not proceed.
-		return connect.NewResponse(&remediationv1.ApproveStepResponse{
-			Accepted:   true,
-			CanProceed: req.Msg.GetApproved(),
-		}), nil
+	case session.approvals <- pending:
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
@@ -1482,6 +1551,39 @@ func (h *RemediationHandler) ApproveStep(
 			Accepted: false,
 			Message:  "No pending approval for this session",
 		}), nil
+	}
+
+	// Handing the decision over is not the same as the agent taking it, and only
+	// the second is something to report as accepted. An approval-capable plugin
+	// refuses a decision naming an operation it has already finished or never
+	// asked about, and a delivery can fail outright; answering from the handover
+	// told the caller its decision had been acted on when it had not, and the
+	// execution loop went on as though the step were approved.
+	//
+	// This is a different question from can_proceed on a delivered denial. There
+	// the agent took the decision and the answer was "no": accepted is true
+	// because the decision was acted on, can_proceed is false because the step
+	// must not continue. Here there is no answer yet, so there is nothing to
+	// call accepted.
+	select {
+	case answer := <-pending.answer:
+		return connect.NewResponse(&remediationv1.ApproveStepResponse{
+			Accepted: answer.accepted,
+			Message:  answer.message,
+			// A decision the agent did not take approves nothing, so it cannot
+			// let the step proceed either; one it took proceeds only when the
+			// caller approved.
+			CanProceed: answer.accepted && req.Msg.GetApproved(),
+		}), nil
+	case <-session.done:
+		// The execution returned before the agent read this decision, which is
+		// the case for a decision naming an operation it never asked about.
+		return connect.NewResponse(&remediationv1.ApproveStepResponse{
+			Accepted: false,
+			Message:  "The agent execution ended before this decision reached the agent",
+		}), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 

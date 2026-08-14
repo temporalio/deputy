@@ -1540,9 +1540,9 @@ func TestConvertAgentDoneEvent(t *testing.T) {
 	}
 }
 
-// TestApproveStepCanProceed pins the ApproveStepResponse contract: a
-// delivered approval reports can_proceed matching the decision, and a
-// session with no pending approval is refused without claiming progress.
+// TestApproveStepCanProceed pins the ApproveStepResponse contract: a decision
+// the agent takes reports can_proceed matching that decision, and a session
+// with no pending approval is refused without claiming progress.
 func TestApproveStepCanProceed(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -1559,10 +1559,20 @@ func TestApproveStepCanProceed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := NewRemediationHandler()
-			session := &agentSession{approvals: make(chan *agentv1.ApproveRequest, 1)}
+			session := &agentSession{
+				approvals: make(chan *pendingApproval, 1),
+				done:      make(chan struct{}),
+			}
 			handler.sessions["sess-1"] = session
 			if tt.fillChannel {
-				session.approvals <- &agentv1.ApproveRequest{}
+				session.approvals <- &pendingApproval{}
+			} else {
+				// Stand in for the execution loop, which is what answers a
+				// decision now: ApproveStep reports what the agent said about
+				// it rather than that it was handed over.
+				go func() {
+					(<-session.approvals).reply(approvalAnswer{accepted: true})
+				}()
 			}
 
 			resp, err := handler.ApproveStep(t.Context(), connect.NewRequest(&remediationv1.ApproveStepRequest{
@@ -1580,6 +1590,228 @@ func TestApproveStepCanProceed(t *testing.T) {
 				t.Errorf("can_proceed = %v, want %v", got, tt.wantCanProceed)
 			}
 		})
+	}
+}
+
+// approvalAgentHandler is a fake approval-capable agent. It asks for approval
+// once, records every decision handed to it, and answers each one as the test
+// dictates, standing in for a plugin that refuses a decision naming an
+// operation it has already finished or never asked about.
+//
+// After the wait for approval ends it emits a marker event, which is how a test
+// can tell the execution loop went on from the loop still waiting: the iterator
+// cannot reach its second event until the loop stops waiting for the first one.
+type approvalAgentHandler struct {
+	fakeAgentHandler
+	// answers is read once per Approve call. A nil entry stands for a delivery
+	// that failed outright rather than one the agent refused.
+	answers chan *agentv1.ApproveResponse
+	// delivered records the decisions the agent received, in order.
+	delivered chan *agentv1.ApproveRequest
+}
+
+// resumedMarker is the text the fake agent emits once its approval wait is over.
+const resumedMarker = "the agent went on past the approval"
+
+// Approve records the decision and answers it as the test queued.
+func (a *approvalAgentHandler) Approve(ctx context.Context, req *connect.Request[agentv1.ApproveRequest]) (*connect.Response[agentv1.ApproveResponse], error) {
+	a.delivered <- req.Msg
+	select {
+	case answer := <-a.answers:
+		if answer == nil {
+			return nil, errors.New("the agent is no longer listening for decisions")
+		}
+		return connect.NewResponse(answer), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// ExecuteIter asks for approval, then reports having gone on.
+func (a *approvalAgentHandler) ExecuteIter(context.Context, *agentv1.ExecuteRequest) iter.Seq2[*agentv1.ExecuteEvent, error] {
+	return func(yield func(*agentv1.ExecuteEvent, error) bool) {
+		if !yield(&agentv1.ExecuteEvent{
+			Phase: agentv1.ExecutionPhase_EXECUTION_PHASE_WAITING_APPROVAL,
+			Details: &agentv1.ExecuteEvent_ApprovalRequired{
+				ApprovalRequired: &agentv1.ApprovalRequiredEvent{
+					OperationId:   "op-1",
+					OperationType: agentv1.OperationType_OPERATION_TYPE_COMMAND,
+					Description:   "run the fix",
+				},
+			},
+		}, nil) {
+			return
+		}
+		yield(&agentv1.ExecuteEvent{
+			Phase: agentv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
+			Details: &agentv1.ExecuteEvent_Text{
+				Text: &agentv1.TextEvent{Text: resumedMarker},
+			},
+		}, nil)
+	}
+}
+
+// ResumeIter satisfies agent.Executor with an empty event stream.
+func (a *approvalAgentHandler) ResumeIter(context.Context, *agentv1.ResumeRequest) iter.Seq2[*agentv1.ExecuteEvent, error] {
+	return func(func(*agentv1.ExecuteEvent, error) bool) {}
+}
+
+// TestApproveStepWaitsForAgentAcceptance pins that ApproveStep reports what the
+// agent did with a decision rather than that the decision was queued, and that
+// a decision the agent did not take leaves the step where it was.
+//
+// An approval-capable plugin refuses a decision that names an operation it has
+// already finished or never asked about, and a delivery that fails never
+// arrives. Answering accepted=true and can_proceed=true because the request
+// entered a channel tells the caller its decision was acted on when it was not,
+// and lets the execution loop continue as though the step had been approved.
+// That is the defect this PR exists to fix, one layer in.
+//
+// The accepted decision at the end is the positive control: without it, a
+// handler that refused every decision would pass the refusal assertions.
+func TestApproveStepWaitsForAgentAcceptance(t *testing.T) {
+	tests := []struct {
+		name string
+		// answer is what the agent says about the first decision; nil stands
+		// for a delivery that failed.
+		answer *agentv1.ApproveResponse
+		// wantMessage is a substring the refusal must carry, so the caller
+		// learns why its decision did not take effect.
+		wantMessage string
+	}{
+		{
+			name:        "agent refuses the decision",
+			answer:      &agentv1.ApproveResponse{Message: "operation already completed"},
+			wantMessage: "operation already completed",
+		},
+		{
+			name:        "delivery to the agent fails",
+			answer:      nil,
+			wantMessage: "no longer listening",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &approvalAgentHandler{
+				fakeAgentHandler: fakeAgentHandler{
+					name: "fake",
+					caps: &agentv1.AgentCapabilities{Agentic: true, ApprovalWorkflows: true},
+				},
+				answers:   make(chan *agentv1.ApproveResponse, 2),
+				delivered: make(chan *agentv1.ApproveRequest, 2),
+			}
+			registry := agent.NewRegistry()
+			if err := registry.RegisterBuiltin("fake", fake); err != nil {
+				t.Fatalf("RegisterBuiltin failed: %v", err)
+			}
+			handler := NewRemediationHandler(WithRemediationLocalMode(), WithRemediationRegistry(registry))
+			client := newRemediationTestClient(t, handler)
+
+			stream, err := client.ExecuteWithAgent(t.Context(), connect.NewRequest(&remediationv1.ExecuteWithAgentRequest{
+				Agent:      "fake",
+				TargetPath: t.TempDir(),
+			}))
+			if err != nil {
+				t.Fatalf("ExecuteWithAgent failed to start: %v", err)
+			}
+			events := make(chan *remediationv1.AgentEvent, 16)
+			go func() {
+				defer close(events)
+				for stream.Receive() {
+					events <- stream.Msg()
+				}
+			}()
+
+			// The opening event carries the session the decisions belong to.
+			opening := receiveAgentEvent(t, events)
+			sessionID := opening.GetSessionId()
+			if sessionID == "" {
+				t.Fatalf("opening event carries no session id: %+v", opening)
+			}
+			// Then the agent's request for approval, which is what puts the
+			// execution loop into its wait.
+			awaiting := receiveAgentEvent(t, events)
+			if got := awaiting.GetPhase(); got != remediationv1.AgentPhase_AGENT_PHASE_AWAITING_APPROVAL {
+				t.Fatalf("second event phase = %v, want AWAITING_APPROVAL", got)
+			}
+
+			approve := func(t *testing.T) *remediationv1.ApproveStepResponse {
+				t.Helper()
+				resp, err := client.ApproveStep(t.Context(), connect.NewRequest(&remediationv1.ApproveStepRequest{
+					SessionId: sessionID,
+					StepId:    "op-1",
+					Approved:  true,
+				}))
+				if err != nil {
+					t.Fatalf("ApproveStep failed: %v", err)
+				}
+				return resp.Msg
+			}
+
+			fake.answers <- tt.answer
+			refused := approve(t)
+			if refused.GetAccepted() {
+				t.Errorf("accepted = true for a decision the agent did not take")
+			}
+			if refused.GetCanProceed() {
+				t.Errorf("can_proceed = true for a decision the agent did not take")
+			}
+			if msg := refused.GetMessage(); !strings.Contains(msg, tt.wantMessage) {
+				t.Errorf("message = %q, want it to contain %q", msg, tt.wantMessage)
+			}
+			// The decision did reach the agent; what it did not do is take it.
+			select {
+			case <-fake.delivered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("the decision never reached the agent")
+			}
+			// And the step stayed where it was: the agent cannot reach its next
+			// event until the execution loop stops waiting for approval.
+			select {
+			case event, ok := <-events:
+				if ok {
+					t.Fatalf("the step proceeded on a decision the agent did not take: %+v", event)
+				}
+				t.Fatal("the stream ended on a decision the agent did not take")
+			case <-time.After(250 * time.Millisecond):
+			}
+
+			// A decision the agent takes lets it go on.
+			fake.answers <- &agentv1.ApproveResponse{Accepted: true}
+			taken := approve(t)
+			if !taken.GetAccepted() {
+				t.Errorf("accepted = false for a decision the agent took: %q", taken.GetMessage())
+			}
+			if !taken.GetCanProceed() {
+				t.Errorf("can_proceed = false for an approval the agent took")
+			}
+			for {
+				event := receiveAgentEvent(t, events)
+				if event.GetText().GetText() == resumedMarker {
+					break
+				}
+				if event.GetPhase() == remediationv1.AgentPhase_AGENT_PHASE_COMPLETED {
+					t.Fatalf("the execution completed without the agent going on past the approval")
+				}
+			}
+		})
+	}
+}
+
+// receiveAgentEvent returns the next streamed agent event, failing the test if
+// the stream stalls or ends first.
+func receiveAgentEvent(t *testing.T, events <-chan *remediationv1.AgentEvent) *remediationv1.AgentEvent {
+	t.Helper()
+	select {
+	case event, ok := <-events:
+		if !ok {
+			t.Fatal("the agent stream ended before the expected event")
+		}
+		return event
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for an agent event")
+		return nil
 	}
 }
 
