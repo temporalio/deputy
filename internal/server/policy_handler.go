@@ -65,7 +65,7 @@ func (h *PolicyHandler) Evaluate(
 	// the local-mode refusal for path sources.
 	sources, policyErrors := h.loadPolicySources(msg.Policies)
 	if len(policyErrors) > 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, policySourceLoadError(policyErrors))
+		return nil, policyConnectError(ctx, connect.CodeInvalidArgument, policySourceLoadError(policyErrors))
 	}
 
 	// Build CEL activation based on context type
@@ -77,7 +77,7 @@ func (h *PolicyHandler) Evaluate(
 	// Create engine and evaluate
 	engine, err := policy.NewEngine(sources)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("compile policies: %w", err))
+		return nil, policyConnectError(ctx, connect.CodeInvalidArgument, fmt.Errorf("compile policies: %w", err))
 	}
 
 	// An evaluation failure leaves the decision unknown, and unknown is not
@@ -85,7 +85,7 @@ func (h *PolicyHandler) Evaluate(
 	// actions, so there is no partial result to hand back here either.
 	actions, err := engine.EvaluateAll(ctx, input, command, entrypoint)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal,
+		return nil, policyConnectError(ctx, connect.CodeInternal,
 			fmt.Errorf("evaluate policies for entrypoint %q: %w", entrypoint, err))
 	}
 
@@ -241,6 +241,28 @@ func (h *PolicyHandler) loadPolicySources(protoSources []*policyv1.PolicySource)
 	}
 
 	return sources, errors
+}
+
+// policyConnectError classifies a policy failure for the wire, giving context
+// cancellation and deadline expiry precedence over the supplied fallback code.
+//
+// Connect cannot do this for us once we have already wrapped: its
+// wrapIfContextError returns early when the error is a *connect.Error, so a
+// canceled request wrapped in CodeInternal reaches the caller as a server
+// failure it may retry rather than the cancellation it was. The precedence
+// here mirrors connect's own wrapIfContextDone: consult the error chain first,
+// then fall back to the context state, because a failure raised while the
+// context is done is caused by the context whether or not the underlying
+// library bothered to say so.
+func policyConnectError(ctx context.Context, fallback connect.Code, err error) *connect.Error {
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(ctx.Err(), context.Canceled):
+		return connect.NewError(connect.CodeCanceled, err)
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return connect.NewError(connect.CodeDeadlineExceeded, err)
+	default:
+		return connect.NewError(fallback, err)
+	}
 }
 
 // policySourceLoadError collapses source load failures into one error so

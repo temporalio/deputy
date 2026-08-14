@@ -1,9 +1,13 @@
 package server
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -14,6 +18,24 @@ import (
 // inlinePolicy wraps YAML policy text as an inline evaluation source.
 func inlinePolicy(body string) *policyv1.PolicySource {
 	return &policyv1.PolicySource{Source: &policyv1.PolicySource_Inline{Inline: body}}
+}
+
+// canceledContext returns a context that is already canceled, standing in for
+// a caller that hung up before the handler finished.
+func canceledContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	return ctx
+}
+
+// expiredContext returns a context whose deadline has already passed, standing
+// in for a caller whose RPC timeout fired.
+func expiredContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Minute))
+	t.Cleanup(cancel)
+	return ctx
 }
 
 // TestPolicyEvaluateFailsClosed pins the invariant from issue #267: a caller
@@ -65,6 +87,7 @@ func TestPolicyEvaluateFailsClosed(t *testing.T) {
 		name            string
 		localMode       bool
 		policies        []*policyv1.PolicySource
+		ctx             func(t *testing.T) context.Context
 		wantCode        connect.Code // zero means a decision is expected
 		wantErrContains []string
 		wantOutcome     policyv1.ActionType
@@ -126,6 +149,39 @@ func TestPolicyEvaluateFailsClosed(t *testing.T) {
 			wantErrContains: []string{"load policy sources", "URL policy sources"},
 		},
 		{
+			// The engine builds CEL programs without cel.InterruptCheckFrequency,
+			// so cancellation is never observed mid-evaluation and the error the
+			// engine returns is the policy's own. The context state still has to
+			// win, or a canceled request is reported as a server failure the
+			// caller may retry.
+			name:            "canceled context outranks an evaluation failure",
+			policies:        []*policyv1.PolicySource{inlinePolicy(divideByZero)},
+			ctx:             canceledContext,
+			wantCode:        connect.CodeCanceled,
+			wantErrContains: []string{"evaluate policies", "division by zero"},
+		},
+		{
+			name:            "expired deadline outranks an evaluation failure",
+			policies:        []*policyv1.PolicySource{inlinePolicy(divideByZero)},
+			ctx:             expiredContext,
+			wantCode:        connect.CodeDeadlineExceeded,
+			wantErrContains: []string{"evaluate policies", "division by zero"},
+		},
+		{
+			name:            "canceled context outranks a source load failure",
+			policies:        []*policyv1.PolicySource{inlinePolicy("policies: [[[")},
+			ctx:             canceledContext,
+			wantCode:        connect.CodeCanceled,
+			wantErrContains: []string{"load policy sources"},
+		},
+		{
+			name:            "expired deadline outranks a compile failure",
+			policies:        []*policyv1.PolicySource{inlinePolicy(uncompilable)},
+			ctx:             expiredContext,
+			wantCode:        connect.CodeDeadlineExceeded,
+			wantErrContains: []string{"compile policies"},
+		},
+		{
 			name:        "genuine allow still allows",
 			policies:    []*policyv1.PolicySource{inlinePolicy(allowQuiet)},
 			wantOutcome: policyv1.ActionType_ACTION_TYPE_ALLOW,
@@ -159,7 +215,12 @@ func TestPolicyEvaluateFailsClosed(t *testing.T) {
 			}
 			handler := NewPolicyHandler(opts...)
 
-			resp, err := handler.Evaluate(t.Context(), connect.NewRequest(&policyv1.EvaluateRequest{
+			ctx := t.Context()
+			if tt.ctx != nil {
+				ctx = tt.ctx(t)
+			}
+
+			resp, err := handler.Evaluate(ctx, connect.NewRequest(&policyv1.EvaluateRequest{
 				Policies: tt.policies,
 				Input: &policyv1.EvaluateRequest_ScanVulnerability{
 					ScanVulnerability: &policyv1.ScanVulnerabilityPolicyInput{},
@@ -286,6 +347,81 @@ func TestPolicyListEntrypointsAcceptsLegacyCategoryAliases(t *testing.T) {
 			}
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("entrypoints = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPolicyConnectError covers the classification itself, including the
+// error-chain branch that the handler cannot reach today: the engine builds
+// CEL programs without cel.InterruptCheckFrequency, so cel-go never raises an
+// InterruptError and never wraps context.Cause. If interrupt checking is ever
+// enabled, that error must already map to the right code rather than to
+// CodeInternal.
+func TestPolicyConnectError(t *testing.T) {
+	liveCtx := func(t *testing.T) context.Context { return t.Context() }
+
+	tests := []struct {
+		name     string
+		ctx      func(t *testing.T) context.Context
+		fallback connect.Code
+		err      error
+		wantCode connect.Code
+	}{
+		{
+			name:     "plain failure uses the fallback",
+			ctx:      liveCtx,
+			fallback: connect.CodeInternal,
+			err:      errors.New("division by zero"),
+			wantCode: connect.CodeInternal,
+		},
+		{
+			name:     "plain failure honors a different fallback",
+			ctx:      liveCtx,
+			fallback: connect.CodeInvalidArgument,
+			err:      errors.New("parse inline policy"),
+			wantCode: connect.CodeInvalidArgument,
+		},
+		{
+			name:     "wrapped cancellation wins over the fallback",
+			ctx:      liveCtx,
+			fallback: connect.CodeInternal,
+			err:      fmt.Errorf("evaluate policies: %w", context.Canceled),
+			wantCode: connect.CodeCanceled,
+		},
+		{
+			name:     "wrapped deadline wins over the fallback",
+			ctx:      liveCtx,
+			fallback: connect.CodeInternal,
+			err:      fmt.Errorf("evaluate policies: %w", context.DeadlineExceeded),
+			wantCode: connect.CodeDeadlineExceeded,
+		},
+		{
+			name:     "canceled context wins when the error is silent about it",
+			ctx:      canceledContext,
+			fallback: connect.CodeInternal,
+			err:      errors.New("division by zero"),
+			wantCode: connect.CodeCanceled,
+		},
+		{
+			name:     "expired context wins when the error is silent about it",
+			ctx:      expiredContext,
+			fallback: connect.CodeInvalidArgument,
+			err:      errors.New("parse inline policy"),
+			wantCode: connect.CodeDeadlineExceeded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := policyConnectError(tt.ctx(t), tt.fallback, tt.err)
+			if got.Code() != tt.wantCode {
+				t.Errorf("code = %v, want %v", got.Code(), tt.wantCode)
+			}
+			// The cause must survive classification or the failure is
+			// undebuggable from the wire.
+			if !errors.Is(got, tt.err) {
+				t.Errorf("error %v does not wrap the cause %v", got, tt.err)
 			}
 		})
 	}
