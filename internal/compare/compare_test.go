@@ -1,6 +1,7 @@
 package compare
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -380,7 +381,7 @@ func TestComparePackages_NonGo(t *testing.T) {
 	}
 }
 
-func TestNormalizePyPIName(t *testing.T) {
+func TestPyPIComparisonKey(t *testing.T) {
 	cases := []struct {
 		name, in, want string
 	}{
@@ -400,9 +401,9 @@ func TestNormalizePyPIName(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := normalizePyPIName(tc.in)
+			got := pypiComparisonKey(tc.in)
 			if got != tc.want {
-				t.Errorf("normalizePyPIName(%q) = %q, want %q", tc.in, got, tc.want)
+				t.Errorf("pypiComparisonKey(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}
@@ -494,7 +495,7 @@ func TestComparePackages_GoGopkgInNormalization(t *testing.T) {
 	}
 }
 
-func TestNormalizeCargoName(t *testing.T) {
+func TestCargoComparisonKey(t *testing.T) {
 	cases := []struct {
 		name, in, want string
 	}{
@@ -511,16 +512,20 @@ func TestNormalizeCargoName(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := normalizeCargoName(tc.in)
+			got := cargoComparisonKey(tc.in)
 			if got != tc.want {
-				t.Errorf("normalizeCargoName(%q) = %q, want %q", tc.in, got, tc.want)
+				t.Errorf("cargoComparisonKey(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}
 }
 
+// TestComparePackages_CargoNameNormalization checks the two halves of Cargo
+// name handling at once: two spellings of one crate are one package, so the
+// diff is an upgrade rather than a removal plus an addition, and the change
+// still reports the spellings the two trees published rather than the folded
+// key that matched them.
 func TestComparePackages_CargoNameNormalization(t *testing.T) {
-	// Test that Cargo packages with different name formats (hyphen vs underscore) are recognized as the same package
 	oldPkgs := []*extractor.Package{
 		{Name: "serde-json", Version: "1.0.0", PURLType: "cargo"},
 	}
@@ -537,6 +542,12 @@ func TestComparePackages_CargoNameNormalization(t *testing.T) {
 	}
 	if changes[0].BaseVersion != "1.0.0" || changes[0].TargetVersion != "1.1.0" {
 		t.Fatalf("unexpected versions: %+v", changes[0])
+	}
+	if got := changes[0].GetPackage().GetName(); got != "serde_json" {
+		t.Errorf("change names %q, want the spelling the target tree published", got)
+	}
+	if got := changes[0].GetOldName(); got != "serde-json" {
+		t.Errorf("change reports old name %q, want the spelling the base tree published", got)
 	}
 }
 
@@ -938,10 +949,13 @@ func TestCollectDirectDependenciesFromCommit(t *testing.T) {
 		t.Fatalf("init repo: %v", err)
 	}
 	files := map[string]string{
-		"go.mod":           "module example.com/app\n\nrequire github.com/commit/dependency v1.2.3\n",
-		"package.json":     `{"dependencies":{"lodash":"^4.17.21"},"devDependencies":{"jest":"^29.0.0"}}`,
-		"Cargo.toml":       "[package]\nname = \"app\"\n\n[dependencies]\ntokio = \"1.26\"\n",
-		"pyproject.toml":   "[project]\ndependencies = [\"requests>=2.31\"]\n",
+		"go.mod":       "module example.com/app\n\nrequire github.com/commit/dependency v1.2.3\n",
+		"package.json": `{"dependencies":{"lodash":"^4.17.21"},"devDependencies":{"jest":"^29.0.0"}}`,
+		"Cargo.toml":   "[package]\nname = \"app\"\n\n[dependencies]\ntokio = \"1.26\"\n",
+		"pyproject.toml": "[project]\ndependencies = [\"requests>=2.31\"]\n\n" +
+			"[project.optional-dependencies]\ntest = [\"pytest>=8.0\"]\n\n" +
+			"[dependency-groups]\nlint = [\"ruff\"]\n\n" +
+			"[tool.poetry.group.docs.dependencies]\nsphinx = \"^7.0\"\n",
 		"requirements.txt": "flask==2.3.0\n",
 		// Vendored manifests describe third-party packages, not ours.
 		"node_modules/left-pad/package.json": `{"dependencies":{"npm-vendored":"1.0.0"}}`,
@@ -986,6 +1000,10 @@ func TestCollectDirectDependenciesFromCommit(t *testing.T) {
 		{name: "npm dev dependency", key: "jest", want: true},
 		{name: "cargo dependency", key: "tokio", want: true},
 		{name: "pypi pyproject dependency", key: "requests", want: true},
+		{name: "pypi pyproject extra", key: "pytest", want: true},
+		{name: "pypi pep 735 dependency group", key: "ruff", want: true},
+		{name: "pypi poetry named group", key: "sphinx", want: true},
+		{name: "pypi distribution nothing declares", key: "urllib3", want: false},
 		{name: "pypi requirements dependency", key: "flask", want: true},
 		{name: "node_modules manifest excluded", key: "npm-vendored", want: false},
 		{name: "vendored cargo manifest excluded", key: "cargo-vendored", want: false},
@@ -994,6 +1012,115 @@ func TestCollectDirectDependenciesFromCommit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := direct[tt.key]; got != tt.want {
 				t.Errorf("direct[%q] = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestWorkspaceAndCommitWalksAgree pins the two collection paths to one answer.
+// A ref scan and a working-tree scan differ only in where the manifests are
+// read from, so a rule one of them applies and the other does not is a
+// classification that changes with how the scan was started. Cargo workspace
+// inheritance is the rule most able to drift, since it is the one that needs
+// two manifests read in one pass.
+func TestWorkspaceAndCommitWalksAgree(t *testing.T) {
+	tests := []struct {
+		name      string
+		manifests map[string]string
+	}{
+		{
+			name: "an inherited rename",
+			manifests: map[string]string{
+				"Cargo.toml":        "[workspace]\nmembers = [\"member\"]\n\n[workspace.dependencies]\nmy-serde = { package = \"serde\", version = \"1.0\" }\n",
+				"member/Cargo.toml": "[package]\nname = \"member\"\n\n[dependencies]\nmy-serde = { workspace = true }\n",
+			},
+		},
+		{
+			name: "a local dependency sharing an alias name",
+			manifests: map[string]string{
+				"Cargo.toml":        "[workspace]\nmembers = [\"member\"]\n\n[workspace.dependencies]\nmy-serde = { package = \"serde\", version = \"1.0\" }\n",
+				"member/Cargo.toml": "[package]\nname = \"member\"\n\n[dependencies]\nmy-serde = { path = \"../my-serde\" }\n",
+			},
+		},
+		{
+			name: "a rename nobody inherits",
+			manifests: map[string]string{
+				"Cargo.toml":        "[workspace]\nmembers = [\"member\"]\n\n[workspace.dependencies]\nmy-serde = { package = \"serde\", version = \"1.0\" }\n",
+				"member/Cargo.toml": "[package]\nname = \"member\"\n\n[dependencies]\ntokio = \"1.0\"\n",
+			},
+		},
+		{
+			// Two independent roots spelling one alias differently. Each walk
+			// keys a rename by the directory of the root that declared it, and a
+			// commit path and a workspace path have to agree on that key too.
+			name: "renames in two workspace roots",
+			manifests: map[string]string{
+				"crates/Cargo.toml":        "[workspace]\nmembers = [\"member\"]\n\n[workspace.dependencies]\nfast = { package = \"serde\", version = \"1.0\" }\n",
+				"crates/member/Cargo.toml": "[package]\nname = \"crates-member\"\n\n[dependencies]\nfast = { workspace = true }\n",
+				"tools/Cargo.toml":         "[workspace]\nmembers = [\"member\"]\n\n[workspace.dependencies]\nfast = { package = \"rand\", version = \"0.8\" }\n",
+				"tools/member/Cargo.toml":  "[package]\nname = \"tools-member\"\n\n[dependencies]\nfast = { workspace = true }\n",
+			},
+		},
+		{
+			name: "manifests from several ecosystems",
+			manifests: map[string]string{
+				"go.mod":           "module example.com/app\n\nrequire github.com/some/dependency v1.2.3\n",
+				"package.json":     `{"dependencies":{"lodash":"^4.17.21"}}`,
+				"Cargo.toml":       "[package]\nname = \"app\"\n\n[dependencies]\ntokio = \"1.26\"\n",
+				"requirements.txt": "flask==2.3.0\n",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ws, err := workspace.NewTempDir("cmp-agree")
+			if err != nil {
+				t.Fatalf("workspace: %v", err)
+			}
+			defer ws.Close()
+			root := t.TempDir()
+			repo, err := git.PlainInit(root, false)
+			if err != nil {
+				t.Fatalf("init repo: %v", err)
+			}
+			for name, contents := range tt.manifests {
+				if dir := filepath.Dir(name); dir != "." {
+					if err := ws.MkdirAll(dir, 0o755); err != nil {
+						t.Fatalf("mkdir %s: %v", dir, err)
+					}
+				}
+				if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+					t.Fatalf("write %s: %v", name, err)
+				}
+				full := filepath.Join(root, filepath.FromSlash(name))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatalf("mkdir for %s: %v", name, err)
+				}
+				if err := os.WriteFile(full, []byte(contents), 0o644); err != nil {
+					t.Fatalf("write %s: %v", name, err)
+				}
+			}
+			wt, err := repo.Worktree()
+			if err != nil {
+				t.Fatalf("worktree: %v", err)
+			}
+			if err := wt.AddWithOptions(&git.AddOptions{All: true}); err != nil {
+				t.Fatalf("add: %v", err)
+			}
+			hash, err := wt.Commit("add manifests", &git.CommitOptions{
+				Author: &object.Signature{Name: "Tester", Email: "tester@example.com", When: time.Now()},
+			})
+			if err != nil {
+				t.Fatalf("commit: %v", err)
+			}
+
+			fromWorkspace := CollectDirectDependenciesFromWorkspace(ws)
+			fromCommit, err := CollectDirectDependenciesFromCommit(repo, hash)
+			if err != nil {
+				t.Fatalf("CollectDirectDependenciesFromCommit: %v", err)
+			}
+			if !maps.Equal(fromWorkspace, fromCommit) {
+				t.Fatalf("walks disagree:\nworkspace: %v\n   commit: %v", fromWorkspace, fromCommit)
 			}
 		})
 	}

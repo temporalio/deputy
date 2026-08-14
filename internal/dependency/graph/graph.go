@@ -18,6 +18,7 @@ import (
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/purlx"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
@@ -53,16 +54,16 @@ const (
 	DepthDisconnected int32 = 999
 )
 
-// ecosystemFromPURLType returns an OSV ecosystem name for PURL types that
+// ecosystemFromPURLType returns the ecosystem display name for PURL types that
 // OSV-SCALIBR doesn't handle (returns empty string). This fills gaps for
 // ecosystems like GitHub Actions that Deputy supports but SCALIBR doesn't.
+// The name comes from the ecosystem registry so graph nodes carry the same
+// spelling as the rest of Deputy.
 func ecosystemFromPURLType(purlType string) string {
-	switch purlType {
-	case purlx.TypeGitHubActions:
-		return "GitHub Actions"
-	default:
-		return ""
+	if purlType == purlx.TypeGitHubActions {
+		return ecosystem.Display(ecosystem.GitHubActions)
 	}
+	return ""
 }
 
 // FileReader provides access to files for edge resolution.

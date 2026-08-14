@@ -375,18 +375,30 @@ func normalizeEcosystems(names []string) []string {
 	return slices.Compact(out)
 }
 
-// shouldIncludeGitHubActions reports whether the internal GitHub Actions plugin should run.
-// If names is nil (meaning all ecosystems), it returns true.
-// githubActionsAliases contains all recognized aliases for GitHub Actions ecosystem.
-var githubActionsAliases = collections.NewSet(
-	"github", "github-actions", "githubactions", "actions", "gha",
-)
-
-// isGitHubActionsEcosystem checks if a name is an alias for GitHub Actions.
-func isGitHubActionsEcosystem(name string) bool {
-	return githubActionsAliases.Has(name)
+// isEcosystemSpelling reports whether name is one of the spellings of eco,
+// resolved through the canonical registry: its token, its display name, and every
+// alias, in any casing and with spaces or underscores where the token has
+// hyphens. A name Deputy does not recognize is not a spelling of anything, so it
+// never routes to an internal plugin and stays available for exact SCALIBR plugin
+// names.
+//
+// Internal-plugin routing asks the registry rather than keeping its own alias
+// list. The list it kept answered five spellings of GitHub Actions and the
+// registry knows eight, so "GitHub Actions", the display form Deputy itself
+// renders, reached neither the plugin nor a SCALIBR group and failed the scan
+// with an unknown-plugin error.
+func isEcosystemSpelling(name string, eco ecosystem.Ecosystem) bool {
+	token, known := ecosystem.Canonical(name)
+	return known && ecosystem.Ecosystem(token) == eco
 }
 
+// isGitHubActionsEcosystem checks if a name is a spelling of GitHub Actions.
+func isGitHubActionsEcosystem(name string) bool {
+	return isEcosystemSpelling(name, ecosystem.GitHubActions)
+}
+
+// shouldIncludeGitHubActions reports whether the internal GitHub Actions plugin
+// should run. If names is nil (meaning all ecosystems), it returns true.
 func shouldIncludeGitHubActions(names []string) bool {
 	if names == nil {
 		return true
@@ -394,14 +406,12 @@ func shouldIncludeGitHubActions(names []string) bool {
 	return slices.ContainsFunc(names, isGitHubActionsEcosystem)
 }
 
-// dockerfileAliases contains all recognized aliases for Dockerfile ecosystem.
-var dockerfileAliases = collections.NewSet(
-	"docker", "dockerfile", "container", "containerfile", "oci",
-)
-
-// isDockerfileEcosystem checks if a name is an alias for Dockerfile scanning.
+// isDockerfileEcosystem checks if a name selects Dockerfile scanning. Both
+// container ecosystems do: docker names the base images a Dockerfile declares,
+// and oci names the artifact those images are pushed as, so a filter naming
+// either has always scanned Dockerfiles.
 func isDockerfileEcosystem(name string) bool {
-	return dockerfileAliases.Has(name)
+	return isEcosystemSpelling(name, ecosystem.Docker) || isEcosystemSpelling(name, ecosystem.OCI)
 }
 
 // shouldIncludeDockerfile reports whether the internal Dockerfile plugin should run.
@@ -413,14 +423,19 @@ func shouldIncludeDockerfile(names []string) bool {
 	return slices.ContainsFunc(names, isDockerfileEcosystem)
 }
 
-// gradleAliases contains all recognized aliases for Gradle/Maven ecosystem.
-var gradleAliases = collections.NewSet(
-	"java", "maven", "gradle", "jvm", "kotlin",
+// gradleBuildToolNames are the JVM build-tool and language spellings the
+// ecosystem registry does not claim as names for Maven. They are accepted here
+// because a Gradle build produces Maven coordinates, so filtering by the tool has
+// to reach the same extractors as filtering by the ecosystem. Moving them into the
+// registry would make them nameable in a policy's "ecosystems:" key too, which is
+// a vocabulary decision rather than a routing one.
+var gradleBuildToolNames = collections.NewSet(
+	"gradle", "jvm", "kotlin",
 )
 
-// isGradleEcosystem checks if a name is an alias for Gradle/Maven scanning.
+// isGradleEcosystem checks if a name selects Gradle/Maven scanning.
 func isGradleEcosystem(name string) bool {
-	return gradleAliases.Has(name)
+	return isEcosystemSpelling(name, ecosystem.Maven) || gradleBuildToolNames.Has(name)
 }
 
 // shouldIncludeGradle reports whether the internal Gradle plugins should run.
@@ -432,15 +447,10 @@ func shouldIncludeGradle(names []string) bool {
 	return slices.ContainsFunc(names, isGradleEcosystem)
 }
 
-// miseAliases contains all recognized aliases for the mise ecosystem
+// isMiseEcosystem checks if a name is a spelling of the mise ecosystem
 // (mise.toml family). The asdf .tool-versions format is a separate ecosystem.
-var miseAliases = collections.NewSet(
-	"mise", "mise-en-place", "rtx",
-)
-
-// isMiseEcosystem checks if a name is an alias for mise scanning.
 func isMiseEcosystem(name string) bool {
-	return miseAliases.Has(name)
+	return isEcosystemSpelling(name, ecosystem.Mise)
 }
 
 // shouldIncludeMise reports whether the internal mise plugin should run.
@@ -452,16 +462,18 @@ func shouldIncludeMise(names []string) bool {
 	return slices.ContainsFunc(names, isMiseEcosystem)
 }
 
-// asdfAliases contains all recognized aliases for the asdf ecosystem
-// (.tool-versions format), kept distinct from mise to mirror OSV-SCALIBR's
-// runtime/asdf vs runtime/mise split.
-var asdfAliases = collections.NewSet(
-	"asdf", "tool-versions", ".tool-versions",
+// asdfConfigFileNames are the spellings of asdf's config file that the ecosystem
+// registry does not claim: it knows the "tool-versions" alias, and a caller that
+// names the file writes the leading dot.
+var asdfConfigFileNames = collections.NewSet(
+	".tool-versions",
 )
 
-// isAsdfEcosystem checks if a name is an alias for asdf scanning.
+// isAsdfEcosystem checks if a name is a spelling of the asdf ecosystem
+// (.tool-versions format), kept distinct from mise to mirror OSV-SCALIBR's
+// runtime/asdf vs runtime/mise split.
 func isAsdfEcosystem(name string) bool {
-	return asdfAliases.Has(name)
+	return isEcosystemSpelling(name, ecosystem.Asdf) || asdfConfigFileNames.Has(name)
 }
 
 // shouldIncludeAsdf reports whether the internal asdf plugin should run.
@@ -496,18 +508,28 @@ func filterExternalEcosystems(names []string) []string {
 // plugin group names that upstream plugin resolution understands (cargo ->
 // rust, npm -> javascript, pypi -> python, maven -> java). Deputy's canonical
 // vocabulary is what every surface emits (purl types, finding ecosystems, CLI
-// help), so filters must accept it; a name the registry does not recognize
-// passes through verbatim so raw SCALIBR group names (haskell, r, cpp) and
-// exact plugin names keep working.
+// help), so filters must accept it; a name Deputy does not recognize at all
+// passes through verbatim so exact SCALIBR plugin names keep working.
+//
+// Resolution goes through [ecosystem.Canonical], not [ecosystem.Parse], because
+// a token outside the capability registry is still a Deputy ecosystem with a
+// SCALIBR group of its own: Parse does not know "hackage", so a caller that
+// canonicalized "haskell" first got its own token handed to SCALIBR, which has
+// no plugin by that name and failed the scan. A name Canonical does not
+// recognize is passed on exactly as it arrived, never in its normalized form,
+// so a plugin name Deputy has no opinion about is not reshaped on the way
+// through.
 func scalibrEcosystemNames(names []string) []string {
 	if names == nil {
 		return nil
 	}
 	out := make([]string, 0, len(names))
 	for _, name := range names {
-		if prefixes := ecosystem.Parse(name).ScalibrPrefixes(); len(prefixes) > 0 {
-			out = append(out, prefixes...)
-			continue
+		if token, known := ecosystem.Canonical(name); known {
+			if prefixes := ecosystem.Ecosystem(token).ScalibrPrefixes(); len(prefixes) > 0 {
+				out = append(out, prefixes...)
+				continue
+			}
 		}
 		out = append(out, name)
 	}

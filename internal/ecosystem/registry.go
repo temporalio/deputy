@@ -26,6 +26,25 @@ import (
 	"cmp"
 	"slices"
 	"sync"
+
+	// Both PURL packages appear here on purpose, and which one a registration's
+	// PURLType comes from is the statement that the type is registered upstream
+	// or is not.
+	//
+	// packageurl-go carries the types the package-url spec has adopted, and it
+	// validates against that set. purlx carries the ones it has not: mise, asdf,
+	// and GitHub Actions are emerging types that neither packageurl-go nor
+	// OSV-SCALIBR's allowlist recognizes yet, so Deputy defines them and parses
+	// them loosely (see [purlx] for the upstream issue).
+	//
+	// Re-exporting the upstream types through purlx would collapse the imports
+	// at the cost of that distinction: every PURLType below would read the same
+	// whether the spec blesses it or Deputy invented it, and purlx would own a
+	// hand-maintained mirror of an upstream list, which is the drift this
+	// package exists to avoid elsewhere. The two imports are the cheaper signal.
+	packageurl "github.com/package-url/packageurl-go"
+
+	"github.com/temporalio/deputy/internal/purlx"
 )
 
 // Capability represents a feature an ecosystem may support.
@@ -77,6 +96,56 @@ func AllCapabilities() []Capability {
 	return []Capability{CapInventory, CapGraph, CapProxy, CapLicense, CapFix, CapSBOM}
 }
 
+// Projection names a value the registry promises to carry for every
+// ecosystem. Every registration must supply each projection unless it declares
+// the projection absent, so a missing value is always a bug rather than an
+// ambiguous blank. See [Registration.Absent] and [Registration.Lacks].
+type Projection string
+
+const (
+	// ProjectionDisplayName is the human-readable name (see [Display]).
+	ProjectionDisplayName Projection = "display_name"
+
+	// ProjectionDescription is the one-line summary of the ecosystem.
+	ProjectionDescription Projection = "description"
+
+	// ProjectionCapabilities is the capability bitmask.
+	ProjectionCapabilities Projection = "capabilities"
+
+	// ProjectionScalibrPrefixes are the OSV-SCALIBR plugin name prefixes.
+	ProjectionScalibrPrefixes Projection = "scalibr_prefixes"
+
+	// ProjectionManifests are the manifest file patterns.
+	ProjectionManifests Projection = "manifests"
+
+	// ProjectionUpstreamURL is the primary registry URL.
+	ProjectionUpstreamURL Projection = "upstream_url"
+
+	// ProjectionOSVName is the ecosystem name OSV uses. Ecosystems OSV does not
+	// index (tool managers such as mise and asdf) declare it absent, which is
+	// also what makes [Ecosystem.OSVQueryable] false for them.
+	ProjectionOSVName Projection = "osv_name"
+
+	// ProjectionPURLType is the package-url type for the ecosystem (see
+	// [PURLType]).
+	ProjectionPURLType Projection = "purl_type"
+)
+
+// RequiredProjections returns every projection a registration must supply
+// unless it declares the projection absent.
+func RequiredProjections() []Projection {
+	return []Projection{
+		ProjectionDisplayName,
+		ProjectionDescription,
+		ProjectionCapabilities,
+		ProjectionScalibrPrefixes,
+		ProjectionManifests,
+		ProjectionUpstreamURL,
+		ProjectionOSVName,
+		ProjectionPURLType,
+	}
+}
+
 // Registration describes an ecosystem's capabilities and metadata.
 // This is the single source of truth for ecosystem information.
 type Registration struct {
@@ -113,6 +182,60 @@ type Registration struct {
 
 	// OSVName is the ecosystem name as used by the OSV database.
 	OSVName string
+
+	// PURLType is the package-url type that identifies this ecosystem in a
+	// PURL. It is frequently not the canonical token ("go" is pkg:golang,
+	// "rubygems" is pkg:gem, "conancenter" is pkg:conan), which is why every
+	// registration states it instead of letting callers guess from the token.
+	PURLType string
+
+	// Absent declares the projections this ecosystem intentionally does not
+	// have, so a blank value is a deliberate statement instead of an oversight.
+	// Declaring a projection absent while still supplying it is a bug, and the
+	// registry completeness test rejects both halves of that.
+	Absent []Projection
+}
+
+// Spellings returns every string that names this ecosystem: its canonical
+// token, its display name, and each alias. It is the one definition of that set,
+// used both by [Registry.Register] and by the alias index for the canonical
+// tokens that carry no registration, so the two answer the same spellings. The
+// strings are returned as declared; callers fold them.
+func (r Registration) Spellings() []string {
+	out := make([]string, 0, len(r.Aliases)+2)
+	out = append(out, string(r.Ecosystem), r.DisplayName)
+	return append(out, r.Aliases...)
+}
+
+// Lacks reports whether this registration declares the projection absent.
+func (r Registration) Lacks(p Projection) bool {
+	return slices.Contains(r.Absent, p)
+}
+
+// Projection returns the registration's value for p, and ok=false when p is not
+// a projection this type carries. Values are returned as the empty-checkable
+// any so callers (notably the completeness test) can treat them uniformly.
+func (r Registration) Projection(p Projection) (value any, ok bool) {
+	switch p {
+	case ProjectionDisplayName:
+		return r.DisplayName, true
+	case ProjectionDescription:
+		return r.Description, true
+	case ProjectionCapabilities:
+		return r.Capabilities, true
+	case ProjectionScalibrPrefixes:
+		return r.ScalibrPrefixes, true
+	case ProjectionManifests:
+		return r.Manifests, true
+	case ProjectionUpstreamURL:
+		return r.UpstreamURL, true
+	case ProjectionOSVName:
+		return r.OSVName, true
+	case ProjectionPURLType:
+		return r.PURLType, true
+	default:
+		return nil, false
+	}
 }
 
 // HasCapability returns true if the registration includes the given capability.
@@ -149,19 +272,37 @@ func NewRegistry() *Registry {
 	return r
 }
 
-// Register adds an ecosystem registration to the registry.
+// Register adds an ecosystem registration to the registry, indexing every
+// spelling that names it (see [Registration.Spellings]) under the fold
+// [normalizeToken] applies.
+//
+// The fold is what makes the index and the resolver agree. [Canonical]
+// normalizes before it asks, and a verbatim index answers only the one spelling
+// the registration happened to use, so a plugin that declared the alias
+// "Acme Registry" could not be resolved from it, from "acme-registry", or from
+// any other casing, while [Canonical] documents the opposite. Registration is
+// the half that folds because every reader then gets it without knowing to.
 func (r *Registry) Register(reg Registration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.byEcosystem[reg.Ecosystem] = &reg
-	for _, alias := range reg.Aliases {
-		r.byAlias[alias] = &reg
+	for _, spelling := range reg.Spellings() {
+		if key := normalizeToken(spelling); key != "" {
+			r.byAlias[key] = &reg
+		}
 	}
 }
 
-// Lookup returns the registration for an ecosystem (by name or alias).
-// Returns nil if not found.
+// Lookup returns the registration for an ecosystem named by any of its
+// spellings: its canonical token, its display name, or an alias, in any casing
+// and with spaces or underscores where the token has hyphens. Returns nil if no
+// registration claims the name.
+//
+// The name is folded with the same [normalizeToken] that built the index, so the
+// two cannot disagree about what a spelling is. [Parse] still sees the raw
+// string first, because some of its aliases carry separators of their own
+// ("cargo (crates.io)") that the fold does not produce.
 func (r *Registry) Lookup(name string) *Registration {
 	eco := Parse(name)
 
@@ -171,7 +312,7 @@ func (r *Registry) Lookup(name string) *Registration {
 	if reg, ok := r.byEcosystem[eco]; ok {
 		return reg
 	}
-	if reg, ok := r.byAlias[name]; ok {
+	if reg, ok := r.byAlias[normalizeToken(name)]; ok {
 		return reg
 	}
 	return nil
@@ -248,11 +389,24 @@ func (r *Registry) AllScalibrPrefixes() []string {
 		}
 	}
 
-	// Additional prefixes for ecosystems Deputy supports via other mechanisms:
-	// - github: GitHub Actions (Deputy's custom plugin)
-	// - haskell, r, cpp: Ecosystems supported by OSV-SCALIBR
+	// The canonical tokens with no capability registration declare their SCALIBR
+	// group the same way a registered ecosystem does, so Hackage, CRAN, and
+	// ConanCenter contribute haskell, r, and cpp from their own registration
+	// rather than from a copy of them kept here.
+	for _, reg := range extraCanonicalEcosystems {
+		for _, prefix := range reg.ScalibrPrefixes {
+			if _, ok := seen[prefix]; !ok {
+				seen[prefix] = struct{}{}
+				prefixes = append(prefixes, prefix)
+			}
+		}
+	}
+
+	// Prefixes that belong to no single ecosystem:
+	// - github: GitHub Actions (Deputy's custom plugin, whose group name is not
+	//   the ecosystem's purl type)
 	// - os: OS-level package managers for container image scanning
-	extras := []string{"github", "haskell", "r", "cpp", "os", "mise", "asdf"}
+	extras := []string{"github", "os"}
 	for _, extra := range extras {
 		if _, ok := seen[extra]; !ok {
 			seen[extra] = struct{}{}
@@ -275,6 +429,7 @@ func (r *Registry) registerDefaults() {
 		Manifests:       []string{"go.mod"},
 		UpstreamURL:     "https://proxy.golang.org",
 		OSVName:         "Go",
+		PURLType:        packageurl.TypeGolang,
 	})
 
 	r.Register(Registration{
@@ -285,9 +440,10 @@ func (r *Registry) registerDefaults() {
 		Aliases:         []string{"javascript", "node", "nodejs"},
 		ScalibrPrefixes: []string{"javascript"},
 		Manifests:       []string{"package.json"},
-		Lockfiles:       []string{"package-lock.json", "yarn.lock", "pnpm-lock.yaml"},
+		Lockfiles:       []string{"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"},
 		UpstreamURL:     "https://registry.npmjs.org",
 		OSVName:         "npm",
+		PURLType:        packageurl.TypeNPM,
 	})
 
 	r.Register(Registration{
@@ -301,6 +457,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"requirements.txt", "Pipfile.lock", "poetry.lock", "uv.lock"},
 		UpstreamURL:     "https://pypi.org",
 		OSVName:         "PyPI",
+		PURLType:        packageurl.TypePyPi,
 	})
 
 	r.Register(Registration{
@@ -314,6 +471,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"Gemfile.lock"},
 		UpstreamURL:     "https://rubygems.org",
 		OSVName:         "RubyGems",
+		PURLType:        packageurl.TypeGem,
 	})
 
 	r.Register(Registration{
@@ -327,6 +485,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"Cargo.lock"},
 		UpstreamURL:     "https://crates.io",
 		OSVName:         "crates.io",
+		PURLType:        packageurl.TypeCargo,
 	})
 
 	r.Register(Registration{
@@ -340,6 +499,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"gradle/verification-metadata.xml"},
 		UpstreamURL:     "https://repo1.maven.org/maven2",
 		OSVName:         "Maven",
+		PURLType:        packageurl.TypeMaven,
 	})
 
 	r.Register(Registration{
@@ -353,6 +513,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"packages.lock.json"},
 		UpstreamURL:     "https://api.nuget.org/v3/index.json",
 		OSVName:         "NuGet",
+		PURLType:        packageurl.TypeNuget,
 	})
 
 	r.Register(Registration{
@@ -366,6 +527,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"mix.lock"},
 		UpstreamURL:     "https://hex.pm",
 		OSVName:         "Hex",
+		PURLType:        packageurl.TypeHex,
 	})
 
 	r.Register(Registration{
@@ -379,6 +541,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"pubspec.lock"},
 		UpstreamURL:     "https://pub.dev",
 		OSVName:         "Pub",
+		PURLType:        packageurl.TypePub,
 	})
 
 	r.Register(Registration{
@@ -392,6 +555,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"Podfile.lock"},
 		UpstreamURL:     "https://cocoapods.org",
 		OSVName:         "CocoaPods",
+		PURLType:        packageurl.TypeCocoapods,
 	})
 
 	r.Register(Registration{
@@ -405,6 +569,7 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"composer.lock"},
 		UpstreamURL:     "https://packagist.org",
 		OSVName:         "Packagist",
+		PURLType:        packageurl.TypeComposer,
 	})
 
 	r.Register(Registration{
@@ -418,6 +583,8 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"mise.lock"},
 		UpstreamURL:     "https://mise.jdx.dev",
 		OSVName:         "",
+		Absent:          []Projection{ProjectionOSVName},
+		PURLType:        purlx.TypeMise,
 	})
 
 	r.Register(Registration{
@@ -431,6 +598,8 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       nil,
 		UpstreamURL:     "https://asdf-vm.com",
 		OSVName:         "",
+		Absent:          []Projection{ProjectionOSVName},
+		PURLType:        purlx.TypeAsdf,
 	})
 }
 
