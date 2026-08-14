@@ -15,7 +15,10 @@ package misex
 import (
 	"context"
 	"io"
+	"io/fs"
 	"log/slog"
+	"reflect"
+	"sync"
 
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/extractor/filesystem"
@@ -32,29 +35,69 @@ const (
 )
 
 // Extractor implements an OSV-SCALIBR filesystem extractor for mise.toml configs.
-type Extractor struct{}
+//
+// It carries the lockfile scope for the scan it is running in. Deciding which
+// declarations could own a lock entry means knowing every mise config in the
+// tree, so one scope answers that for every config a scan visits rather than
+// each config paying for its own walk.
+type Extractor struct {
+	mu    sync.Mutex
+	fsys  fs.FS
+	scope *mise.LockScope
+}
 
 // New returns a new mise extractor.
 func New() filesystem.Extractor { return &Extractor{} }
 
 // Name returns the plugin name as understood by Deputy.
-func (Extractor) Name() string { return Name }
+func (*Extractor) Name() string { return Name }
 
 // Version returns the plugin version; Deputy uses 0 for internal plugins.
-func (Extractor) Version() int { return 0 }
+func (*Extractor) Version() int { return 0 }
 
 // Requirements declares required capabilities; mise scanning is filesystem-only.
-func (Extractor) Requirements() *plugin.Capabilities { return &plugin.Capabilities{} }
+func (*Extractor) Requirements() *plugin.Capabilities { return &plugin.Capabilities{} }
 
 // FileRequired limits extraction to TOML-format mise configuration files.
-func (Extractor) FileRequired(api filesystem.FileAPI) bool {
+func (*Extractor) FileRequired(api filesystem.FileAPI) bool {
 	format, ok := mise.IsConfigPath(api.Path())
 	return ok && format == mise.FormatTOML
 }
 
+// lockScope returns the scope covering fsys, building one the first time this
+// filesystem is seen. A scan hands every Extract call the same filesystem, so
+// the scope built while reading the first config serves the rest of them. A
+// different filesystem gets a scope of its own: a scope caches the tree it was
+// built over, and answering from another tree's cache would count declarations
+// that are not there.
+func (e *Extractor) lockScope(fsys fs.FS) *mise.LockScope {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.scope == nil || !sameFS(e.fsys, fsys) {
+		e.fsys, e.scope = fsys, mise.NewLockScope(fsys)
+	}
+	return e.scope
+}
+
+// sameFS reports whether two values name the same filesystem. The comparison
+// goes through reflect because comparing interfaces that hold an uncomparable
+// dynamic type panics, and a filesystem implementation may well be a struct
+// holding a map or a slice. Such a value reads as different from everything,
+// which costs a fresh scope rather than a wrong answer.
+func sameFS(a, b fs.FS) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
+	if ta != tb || !ta.Comparable() {
+		return false
+	}
+	return a == b
+}
+
 // Extract parses a mise.toml file and returns its tool dependencies as pkg:mise
 // packages.
-func (Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (inventory.Inventory, error) {
+func (e *Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (inventory.Inventory, error) {
 	if input == nil || input.Reader == nil {
 		return inventory.Inventory{}, nil
 	}
@@ -77,6 +120,23 @@ func (Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (inve
 		slog.WarnContext(ctx, "mise lockfile load error", "path", mise.LockfilePath(input.Path), "error", err)
 	}
 
+	// Which names are claimed across every config sharing this lockfile, so
+	// lock lookup does not lend one declaration's entry to another whose short
+	// name collides. The scope is the lockfile's, not this file's: a mise
+	// directory's config.toml and its conf.d drop-ins all write to one
+	// mise.lock, and a name with a single claimant here may have another in a
+	// fragment beside it. Without the count nothing is provably this config's,
+	// so enrichment is dropped rather than guessed at. Only a loaded lockfile
+	// has entries to own, so the question is only asked when there is one.
+	var claims map[string]int
+	if lock != nil {
+		claims, err = e.lockScope(input.FS).Claims(input.Path)
+		if err != nil {
+			slog.WarnContext(ctx, "mise lock ownership unresolved, skipping lockfile enrichment", "path", input.Path, "error", err)
+			lock = nil
+		}
+	}
+
 	var pkgs []*extractor.Package
 	for _, tool := range cfg.Tools {
 		for _, version := range tool.Versions {
@@ -84,7 +144,7 @@ func (Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (inve
 				continue
 			}
 			md := mise.MetadataFor(tool, version, cfg.Format)
-			enrichFromLock(md, lock, tool, version)
+			enrichFromLock(md, lock, tool, version, claims)
 			pkgVersion := version
 			if md.LockedVersion != "" {
 				pkgVersion = md.LockedVersion
@@ -105,9 +165,11 @@ func (Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (inve
 }
 
 // enrichFromLock fills the locked version and per-platform checksums on md from
-// a sibling lockfile entry, when one matches.
-func enrichFromLock(md *mise.Metadata, lock *mise.Lockfile, tool mise.ToolSpec, version string) {
-	lt := lock.Lookup(tool, version)
+// a sibling lockfile entry, when one matches. claims carries how many of the
+// config's declarations could own each name, so an entry another declaration
+// might own is not borrowed for this one.
+func enrichFromLock(md *mise.Metadata, lock *mise.Lockfile, tool mise.ToolSpec, version string, claims map[string]int) {
+	lt := lock.Lookup(tool, version, claims)
 	if lt == nil {
 		return
 	}

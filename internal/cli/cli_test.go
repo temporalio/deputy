@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/spf13/cobra"
 )
 
 func TestParseLogLevel(t *testing.T) {
@@ -39,6 +38,11 @@ func TestParseLogLevel(t *testing.T) {
 	}
 }
 
+// TestNewRoot pins the complete set of first-class subcommands registered by
+// cmd.RegisterCommands. The expected set is exhaustive and compared with
+// slices.Equal, so a dropped (or newly added) Add*Command call in
+// internal/cli/cmd/register.go fails this test instead of silently shrinking
+// the CLI surface.
 func TestNewRoot(t *testing.T) {
 	cmd := newRoot()
 	if cmd.Use != "deputy" {
@@ -48,14 +52,23 @@ func TestNewRoot(t *testing.T) {
 		t.Error("expected subcommands to be registered")
 	}
 
-	// Check for specific subcommands
-	expectedCmds := []string{"scan", "fix", "triage", "policy", "proxy", "diff", "list", "sbom"}
-	for _, name := range expectedCmds {
-		if !slices.ContainsFunc(cmd.Commands(), func(c *cobra.Command) bool {
-			return c.Name() == name
-		}) {
-			t.Errorf("expected subcommand %q not found", name)
-		}
+	// The full registration list from cmd.RegisterCommands, sorted. Cobra's
+	// implicit commands (help, completion) are attached at Execute time and
+	// excluded here.
+	want := []string{
+		"cache", "config", "diff", "ecosystems", "exec", "explain", "fix",
+		"graph", "init", "list", "mcp", "pin", "policy", "proxy", "sbom",
+		"scan", "secrets", "server", "triage", "version",
+	}
+
+	got := make([]string, 0, len(cmd.Commands()))
+	for _, c := range cmd.Commands() {
+		got = append(got, c.Name())
+	}
+	slices.Sort(got)
+
+	if !slices.Equal(got, want) {
+		t.Errorf("registered subcommands drifted from cmd.RegisterCommands:\n got: %v\nwant: %v", got, want)
 	}
 }
 

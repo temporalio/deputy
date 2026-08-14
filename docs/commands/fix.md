@@ -184,6 +184,44 @@ field names:
 | npm | `npm install <package>@<version>` |
 | PyPI | `pip install <package>==<version>` |
 | RubyGems | `bundle update <gem>` |
+| mise | `deputy:mise:update <config> <tool> <version> [<current-version>...]` |
+| asdf | Manual guidance: `asdf install <tool> <version> && asdf local <tool> <version>` |
+
+The table is not exhaustive; `deputy fix` also emits commands for yarn, pnpm,
+pipenv, poetry, Cargo, Composer, Maven, Gradle, NuGet, Hex, Pub, and CocoaPods.
+
+### Deputy-Applied Edits
+
+Commands beginning with `deputy:` are not shell commands. They are edits
+Deputy performs itself when `--apply` is passed, used where no package manager
+offers a safe non-interactive verb for the change. They are inert without
+`--apply`: a plan that carries them can be reviewed, stored, and replayed like
+any other.
+
+| Command | Effect of `--apply` |
+| --- | --- |
+| `deputy:mise:update <config> <tool> <version> [<current-version>...]` | Rewrites the tool's version in the named mise config, then removes the matching entries from that config's sibling `mise.lock`. |
+| `deputy:action:update <workflow> <owner/repo> <version>` | Rewrites that action's reference in the workflow to `<version>`. |
+| `deputy:dockerfile:update <dockerfile> <image> <version>` | Rewrites that image's tag in the Dockerfile. |
+
+The mise edit touches the exact config file the scan detected, in place:
+comments, key quoting, value layout, and unrelated entries are preserved, and a
+tool declaring several versions has only the vulnerable ones replaced. Deputy
+edits the file rather than shelling out to `mise use`, which refuses untrusted
+configs, chooses its own write target, and collapses a multi-version array into
+a single scalar.
+
+The sibling lockfile entries are removed rather than rewritten, because their
+per-platform checksums describe the old artifact. Leaving them would keep the
+fix from taking effect: lock resolution substitutes the locked version for the
+declared one, so a rescan would still report the version the fix removed. Run
+`mise install` afterwards to re-resolve and re-lock the new version. The plan
+carries that as the command's hint.
+
+The optional `<current-version>` arguments name the versions the finding
+reported. Deputy refuses the edit when the config no longer declares any of
+them, so a stale plan cannot roll a toolchain someone has already updated back
+to an older release.
 
 ## Exit Codes
 

@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/spf13/cobra"
+	"github.com/temporalio/deputy/internal/ecosystem"
 )
 
 // AddInitCommand adds the init command to the root command.
@@ -199,13 +199,19 @@ const policyTemplate = `
 
 policies:
   # Block critical and high severity vulnerabilities
+  # Severity lives at vulnerability.advisory.severity.level and is compared
+  # against the severity.* constants (severity.critical, severity.high, ...).
+  # The optional guard (.?advisory) keeps the rule safe when no advisory
+  # details are attached to a finding.
   - name: block-critical-high
     description: Prevent critical and high severity vulnerabilities from shipping
     entrypoints:
       - scan_vulnerability
     rules:
       - action: deny
-        when: vulnerability.severity in ["CRITICAL", "HIGH"]
+        when: |
+          vulnerability.?advisory.severity.level.orValue(severity.unspecified)
+            in [severity.critical, severity.high]
         reason: "Critical/High severity vulnerability must be remediated"
         remediation: "Upgrade to a fixed version or apply a patch"
 
@@ -216,7 +222,9 @@ policies:
       - scan_vulnerability
     rules:
       - action: warn
-        when: vulnerability.severity == "MEDIUM"
+        when: |
+          vulnerability.?advisory.severity.level.orValue(severity.unspecified)
+            == severity.medium
         reason: "Medium severity vulnerability should be reviewed"
 
   # Block vulnerabilities in CISA KEV (Known Exploited Vulnerabilities)
@@ -227,7 +235,7 @@ policies:
       - scan_vulnerability
     rules:
       - action: deny
-        when: vulnerability.inKEV == true
+        when: vulnerability.?in_kev.orValue(false)
         reason: "Vulnerability is in CISA Known Exploited Vulnerabilities catalog"
         remediation: "This vulnerability is actively exploited - prioritize immediate remediation"
 

@@ -64,7 +64,10 @@ deputy pin check --ecosystems mise                # CI gate: no mise binary requ
 
 Pinning rewrites fuzzy versions (channels like `latest`/`lts`, partial versions
 like `20`, and scopes like `prefix:1.20` / `sub-0.1:latest`) to exact,
-reproducible versions. For `mise.toml`, plain `deputy pin` first prefers a
+reproducible versions. A partial version governs its own line and no other, the
+way mise resolves it: `node = "20.1"` installs `20.1.0`, `node = "20.11"`
+installs `20.11.1`, and `node = "20"` installs the newest `20.x`. For
+`mise.toml`, plain `deputy pin` first prefers a
 compatible exact version from the sibling `mise.lock` so it preserves the tool
 version already resolved by Mise. If the lock entry is absent, ambiguous, or
 stale relative to the source selector, Deputy resolves from native upstream
@@ -145,11 +148,73 @@ release metadata endpoint: <https://api.adoptium.net/v3/info/release_versions>.
 
 `deputy fix` proposes source-aware remediation:
 
-- A vulnerable backend tool → `mise use npm:lodash@<fixed>`.
+- A vulnerable backend tool → a Deputy-internal edit of the declaring config
+  (`deputy:mise:update mise.toml npm:lodash <fixed> <current>`), applied by
+  `deputy fix --apply`.
 - A Go stdlib/toolchain CVE is fixed at **each** declaring source: a `go.mod`
-  `go` directive gets `go get go@<fixed>`, while a `mise.toml` `go` entry gets a
-  distinct `mise use go@<fixed>`. If both declare the Go version, both fixes are
+  `go` directive gets `go get go@<fixed>`, while a `mise.toml` `go` entry gets
+  a distinct config edit. If both declare the Go version, both fixes are
   produced.
+- Deputy edits the detected config file directly instead of shelling out to
+  `mise use`, which fails on untrusted configs (fresh checkouts, CI), picks
+  its own write target rather than the detected file (a finding from
+  `mise.production.toml` would be "fixed" in `mise.toml` while the vulnerable
+  higher-precedence pin stays in effect), and collapses multi-version arrays
+  like `go = ["1.22.12", "1.23.8"]` to a scalar. The direct edit preserves
+  formatting and comments, targets the exact detected file (`mise.toml`,
+  `.mise.toml`, `mise.<env>.toml`, `.config/mise/config.toml`, `conf.d`
+  drop-ins), and replaces only the vulnerable array elements, single-line or
+  multiline, carrying every vulnerable version so one command can fix several
+  pins in one array; a declaration with no matching version fails with an
+  error instead of guessing. All declaration forms mise accepts are handled:
+  `[tools]` entries, `[tools.<name>]` tables (quoted spellings such as
+  `["tools".go]` included), `[[tools.<name>]]` array-of-table entries, dotted
+  keys (`tools.go = "..."`), inline tables (single-line or multiline, including
+  a quoted `"version"` key), arrays of inline tables, version arrays nested in
+  an inline table, the root `tools = { ... }` table, and option-bearing keys
+  such as `"ubi:cli/cli[exe=gh]"` (tool options survive throughout). Repeating
+  `[[tools.<name>]]` requests several versions of one tool, so a repeated
+  entry follows the same rule as `go = ["1.22.12", "1.23.8"]`: the entry naming
+  the vulnerable version is rewritten and the others survive, while `pin`,
+  which names no vulnerable version, leaves the declaration for a manual pin.
+- Applying a plan the config has outgrown fails closed. If the file now
+  declares an exact version the finding does not name (someone bumped
+  `1.22.12` to `1.25.1` after the plan was generated), Deputy errors rather
+  than rolling the newer pin backwards. A selector that could still resolve to
+  the vulnerable version is still rewritten, so `node = "20"`, `"20.11"`, and
+  `"lts"` are all updated for a finding against `20.11.0`.
+- The config's lockfile is kept honest: entries pinning the replaced versions
+  are removed (their checksums describe the old artifact, so updating them in
+  place would lie), which stops scans from re-reporting the old locked
+  version. Lock discovery follows mise's own naming rather than swapping the
+  manifest's suffix, so a leading dot is dropped (`.mise.toml` locks as
+  `mise.lock`, not `.mise.lock`), a config inside a `mise` or `.mise`
+  directory is named for the directory while keeping any environment segment
+  (`.config/mise/config.toml` locks as `.config/mise/mise.lock`, and
+  `.config/mise/config.production.toml` as
+  `.config/mise/mise.production.lock`), and `conf.d` drop-ins share the
+  enclosing `mise` directory's lockfile. Pruning follows the edited tool's own
+  lock key plus its backend-stripped short name, but only when no other
+  declaration could own that name: a config that declares both `"npm:node"`
+  and `node` keeps the untouched declaration's integrity metadata, and a
+  legacy entry keyed by a bare short name that more than one declaration could
+  own (`"npm:foo"` and `"ubi:foo"` with a `[[tools.foo]]` entry) is left
+  alone, which is also the entry inventory refuses to read. Claimants are
+  counted across every config sharing the lockfile, not just the one being
+  edited, since a `mise` directory's `config.toml` and all of its `conf.d`
+  drop-ins write to one `mise.lock`; a sharing config Deputy cannot read or
+  parse counts as a claimant. Sharing is decided on the file a config's
+  lockfile path resolves to, so directories whose `mise.lock` symlinks point at
+  one shared file all count as claimants of its entries, matching where the fix
+  publishes its edit. It reads the same from either end of a link: a config
+  whose `mise.lock` is an ordinary file shares it with every directory that
+  links into it. An uncontested
+  legacy entry is pruned even when the exact key is locked too, because lock
+  resolution would otherwise fall back to it and hand the fixed tool its old
+  version back. After applying, run `mise install` to install the
+  updated tool and re-lock it.
+- Applying is idempotent, so a run interrupted between the config edit and the
+  lockfile prune can simply be re-run to finish.
 
 ## Hardening
 

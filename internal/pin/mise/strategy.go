@@ -219,6 +219,10 @@ func stringOptions(opts map[string]any) map[string]string {
 func (s *Strategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]pin.Ref, error) {
 	var refs []pin.Ref
 	seen := map[string]bool{}
+	// One scope for the whole walk: it enumerates the filesystem's configs once
+	// and memoizes the claimant counts per lockfile, so a directory of conf.d
+	// drop-ins is listed and parsed once rather than once per drop-in.
+	scope := mise.NewLockScope(fsys)
 
 	err := fs.WalkDir(fsys, ".", func(relPath string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -254,6 +258,22 @@ func (s *Strategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]pin.Ref, 
 		if err != nil {
 			slog.DebugContext(ctx, "toolchain pin: skipping unusable lockfile", "path", mise.LockfilePath(relPath), "error", err)
 		}
+		// Which names are claimed across every config sharing this lockfile,
+		// so a locked version is not lent to a declaration that may not own
+		// the entry it came from. The scope is the lockfile's, not this
+		// file's: a mise directory's conf.d drop-ins all write to one
+		// mise.lock. With ownership unresolved nothing is provably this
+		// config's, so the lockfile is set aside and the tools resolve
+		// upstream instead of pinning to an entry that might be another
+		// declaration's.
+		var claims map[string]int
+		if lock != nil {
+			claims, err = scope.Claims(relPath)
+			if err != nil {
+				slog.DebugContext(ctx, "toolchain pin: lock ownership unresolved, ignoring lockfile", "path", relPath, "error", err)
+				lock = nil
+			}
+		}
 		for _, tool := range cfg.Tools {
 			version := versionForRef(tool.Versions)
 			if version == "" {
@@ -267,7 +287,7 @@ func (s *Strategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]pin.Ref, 
 				Raw:       tool.Key + " " + version,
 				Options:   stringOptions(tool.Options),
 			}
-			ref.LockedVersion = lockedVersionForRef(lock, tool, version)
+			ref.LockedVersion = lockedVersionForRef(lock, tool, version, claims)
 			key := pin.DedupeKey(ref)
 			if !seen[key] {
 				seen[key] = true
@@ -298,35 +318,39 @@ func versionForRef(versions []string) string {
 // lockedVersionForRef returns a compatible exact version from a sibling
 // mise.lock entry. It rejects ambiguous or stale-looking fuzzy matches so pin
 // can preserve an existing lock without blindly trusting unrelated lock data.
-func lockedVersionForRef(lock *mise.Lockfile, tool mise.ToolSpec, request string) string {
+//
+// claims carries how many declarations across the configs sharing the lockfile
+// could own each name, and the gates it feeds are the ones inventory applies
+// in [mise.Lockfile.Lookup]. Without them a legacy [[tools.foo]] entry is
+// accepted for a declaration of "npm:foo" and for one of "ubi:foo" alike, and
+// pin writes one backend's locked version into the other's declaration.
+func lockedVersionForRef(lock *mise.Lockfile, tool mise.ToolSpec, request string, claims map[string]int) string {
 	if lock == nil || strings.Contains(request, arraySentinel) {
 		return ""
 	}
-	for _, name := range lockedToolNames(tool) {
+	names := mise.LockCandidateNames(tool)
+	for _, name := range names {
+		if !mise.MayMatchLockName(tool, name, claims) {
+			continue
+		}
 		if lt := lock.Locked(name, request); lt != nil && mise.IsConcreteVersion(lt.Version) {
 			return lt.Version
 		}
 	}
-	for _, name := range lockedToolNames(tool) {
-		if lt := lock.Sole(name); lt != nil && lockedVersionSatisfiesRequest(lt.Version, request) {
+	for _, name := range names {
+		if !mise.MayBorrowSoleLockEntry(name, claims) {
+			continue
+		}
+		if lt := lock.Sole(name); lt != nil && lockedVersionSatisfiesRequest(tool.Key, lt.Version, request) {
 			return lt.Version
 		}
 	}
 	return ""
 }
 
-// lockedToolNames returns the possible mise.lock keys for a tool, with the
-// short tool name first because real lockfiles usually key entries that way.
-func lockedToolNames(tool mise.ToolSpec) []string {
-	if tool.Name == tool.Key || tool.Key == "" {
-		return []string{tool.Name}
-	}
-	return []string{tool.Name, tool.Key}
-}
-
 // lockedVersionSatisfiesRequest reports whether a sole lockfile entry is
 // compatible with a declared selector without consulting upstream metadata.
-func lockedVersionSatisfiesRequest(locked, request string) bool {
+func lockedVersionSatisfiesRequest(toolKey, locked, request string) bool {
 	if !mise.IsConcreteVersion(locked) {
 		return false
 	}
@@ -335,7 +359,7 @@ func lockedVersionSatisfiesRequest(locked, request string) bool {
 		return false
 	}
 	if prefix, ok := strings.CutPrefix(request, "prefix:"); ok {
-		return versionHasPrefix(locked, prefix)
+		return versionHasPrefix(toolKey, locked, prefix)
 	}
 	if strings.HasPrefix(request, "sub-") {
 		return true
@@ -352,24 +376,23 @@ func lockedVersionSatisfiesRequest(locked, request string) bool {
 	if strings.ContainsAny(request, "^~*<>= ") || strings.Contains(request, "..") {
 		return false
 	}
-	return versionHasPrefix(locked, request)
+	return versionHasPrefix(toolKey, locked, request)
 }
 
-// versionHasPrefix checks dotted version-prefix compatibility with a segment
-// boundary so "1.9" matches "1.9.8" but not "1.90.0".
-func versionHasPrefix(version, prefix string) bool {
-	version = normalizedVersionPrefix(version)
-	prefix = normalizedVersionPrefix(prefix)
-	return version == prefix || strings.HasPrefix(version, prefix+".")
-}
-
-// normalizedVersionPrefix strips common runtime version prefixes used in mise
-// selectors before prefix comparison.
-func normalizedVersionPrefix(v string) string {
-	v = strings.TrimSpace(v)
-	v = strings.TrimPrefix(v, "v")
-	v = strings.TrimPrefix(v, "go")
-	return v
+// versionHasPrefix reports whether a fuzzy request selects a concrete version,
+// deferring to [mise.SelectorMatches] so this answers the question the same way
+// the remediation staleness gate and the release filter do. The rule was
+// spelled out here as well, and a second copy of a rule is a second answer
+// waiting to disagree with the first; they happened to agree, and now they
+// cannot do otherwise.
+//
+// The Go toolchain's "go" prefix, which mise selectors carry and mise's own
+// locked versions do not, was stripped here too. [mise.SelectorMatches] now
+// normalizes it, so discovery and remediation cannot disagree about whether
+// "go1.24" selects 1.24.9: they did, and a fix Deputy planned from a discovered
+// version came back as "could not rewrite".
+func versionHasPrefix(toolKey, version, prefix string) bool {
+	return mise.SelectorMatches(toolKey, prefix, version)
 }
 
 // Resolve implements pin.Strategy. It resolves a fuzzy version to an exact one.

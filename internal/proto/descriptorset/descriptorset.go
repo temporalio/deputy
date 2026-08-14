@@ -57,6 +57,39 @@ func Comment(name protoreflect.FullName) string {
 	return idx[name]
 }
 
+// Summary returns the first sentence of the proto element's leading comment,
+// for surfaces that need a one-line description (doc tables, completion hints)
+// rather than the full authored paragraph. The trailing period is kept, since
+// it is part of the sentence the proto author wrote.
+func Summary(name protoreflect.FullName) string {
+	return firstSentence(Comment(name))
+}
+
+// firstSentence trims a comment to its first sentence. A period only ends the
+// sentence when an uppercase letter follows, so abbreviations, URLs, and
+// version strings mid-sentence do not truncate it.
+func firstSentence(comment string) string {
+	comment = strings.TrimSpace(comment)
+	if comment == "" {
+		return ""
+	}
+	line := strings.ReplaceAll(comment, "\n", " ")
+	for idx := 0; ; {
+		next := strings.Index(line[idx:], ". ")
+		if next == -1 {
+			return line
+		}
+		idx += next
+		rest := strings.TrimLeft(line[idx+1:], " ")
+		if rest != "" {
+			if r := rune(rest[0]); r >= 'A' && r <= 'Z' {
+				return line[:idx+1]
+			}
+		}
+		idx += 2
+	}
+}
+
 // indexFile walks a file's source-code-info locations and records leading
 // comments for messages (path [4 m]), fields ([4 m 2 f]), enums ([5 e]), and
 // enum values ([5 e 2 v]), including nested messages.

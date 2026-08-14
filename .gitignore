@@ -11,6 +11,15 @@
 # Test binary, built with `go test -c`
 *.test
 
+# Deputy binaries. AGENTS.md and docs/development/contributing.md build `deputy`
+# at the repo root, so those two patterns are anchored there. The plugin and
+# sandbox READMEs build inside their own package directories, so those two are
+# not anchored. Neither prefix matches the tracked deputy-init shell script.
+/deputy
+/deputy-*
+deputy-extractor-*
+deputy-sandbox-*
+
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
@@ -23,5 +32,11 @@ go.work.sum
 
 # env file
 .env
-# Claude Code runtime state. Written while a session runs, per machine.
+
+# Local agent tooling. Shared config under .claude/ stays tracked; these three
+# are per-machine. Worktrees in particular hold full checkouts and reach
+# hundreds of megabytes, and the lock file is runtime state written while a
+# session runs.
+.claude/worktrees/
+.claude/settings.local.json
 .claude/scheduled_tasks.lock

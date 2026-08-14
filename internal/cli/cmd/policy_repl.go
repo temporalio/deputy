@@ -81,10 +81,18 @@ func runPolicyREPL(ctx context.Context, in io.Reader, out io.Writer) error {
 	legacyOutput := ui.NewREPLOutput(out)
 
 	request := map[string]string{}
-	entrypoint := "proxy"
+	// Default to a real proxy entrypoint: "proxy" is a command, not an
+	// entrypoint, and would fail the same IsValid gate :entrypoint enforces.
+	// npm_artifact_request is the proxy entrypoint that matches what the REPL
+	// starts with: a request-shaped payload (buildREPLPayload always binds
+	// "request"), in the ecosystem the sample data uses, down to
+	// request["ecosystem"] = "npm" in the lodash example below. :entrypoint
+	// switches it.
+	entrypoint := string(policy.EntrypointNpmArtifactRequest)
 
 	for {
-		// Build prompt string: "proxy ›" - simple and clean
+		// The prompt names the active entrypoint, so it reads
+		// "npm_artifact_request ›" until :entrypoint changes it.
 		t := engine.Config().Theme
 		prompt := t.Context.Render(entrypoint) + " " + t.Prompt.Render(t.PromptSymbol) + " "
 
@@ -170,7 +178,7 @@ func handleREPLCommandV2(line string, request map[string]string, entrypoint *str
 		})
 		r.Blank()
 		r.Section("Examples")
-		r.CELExample(`vulnerability.severity == severity.HIGH`)
+		r.CELExample(`finding.advisory.severity.level == severity.high`)
 		r.CELExample(`vulnerability.isDirect && size(vulnerability.fixedVersions) > 0`)
 		r.CELExample(`request.package == "lodash" && request.version == "4.17.20"`)
 		r.CELExample(`severityAtLeast(vulnerability, "HIGH")`)
@@ -213,7 +221,7 @@ func handleREPLCommandV2(line string, request map[string]string, entrypoint *str
 		r.FormatContext("request", toAnyMap(request))
 		r.Blank()
 		r.Section("Available Constants")
-		r.KeyValue("severity", "CRITICAL, HIGH, MEDIUM, LOW, UNSPECIFIED")
+		r.KeyValue("severity", strings.Join(policy.SeverityConstantNames(), ", "))
 		r.KeyValue("scope", "RUNTIME, DEV, TEST, BUILD, OPTIONAL, UNSPECIFIED")
 		return "", nil
 
@@ -234,7 +242,7 @@ func handleREPLCommandV2(line string, request map[string]string, entrypoint *str
 		request["fixed_version"] = "4.17.21"
 		request["license"] = "MIT"
 		request["isDirect"] = "true"
-		*entrypoint = "scan_vulnerability"
+		*entrypoint = string(policy.EntrypointScanVulnerability)
 		return "loaded example: lodash@4.17.20 (CVE-2021-23337 command injection, CVSS 7.2)", nil
 
 	case ":vuln":
@@ -246,7 +254,7 @@ func handleREPLCommandV2(line string, request map[string]string, entrypoint *str
 		request["ecosystem"] = "maven"
 		request["package"] = "org.apache.logging.log4j:log4j-core"
 		request["version"] = "2.14.1"
-		*entrypoint = "scan_vulnerability"
+		*entrypoint = string(policy.EntrypointScanVulnerability)
 		return "loaded vulnerability: CVE-2021-44228 (Log4Shell)", nil
 
 	case ":graph":
@@ -256,23 +264,22 @@ func handleREPLCommandV2(line string, request map[string]string, entrypoint *str
 		request["node_count"] = "150"
 		request["direct_count"] = "12"
 		request["max_depth"] = "6"
-		*entrypoint = "graph_report"
+		*entrypoint = string(policy.EntrypointGraphReport)
 		return "loaded graph context with 150 nodes", nil
 
 	case ":entrypoint":
+		// Listed from policy.AllEntrypoints rather than a local slice: the
+		// hardcoded list had drifted to 12 of 37 and offered "proxy", which is
+		// a command, not an entrypoint.
 		if len(parts) < 2 {
 			r.Section("Available Entrypoints")
-			entrypoints := []string{
-				"proxy", "scan_report", "scan_vulnerability",
-				"graph_report", "graph_node", "graph_edge",
-				"dockerfile_report", "dockerfile_stage",
-				"oci_artifact_request", "go_artifact_request",
-				"npm_artifact_request", "pypi_artifact_request",
-			}
-			for _, ep := range entrypoints {
-				r.Info("  " + ep)
+			for _, ep := range policy.AllEntrypoints {
+				r.Info("  " + string(ep))
 			}
 			return "", nil
+		}
+		if ep := policy.Entrypoint(parts[1]); !ep.IsValid() {
+			return "", fmt.Errorf("unknown entrypoint %q (use :entrypoint with no argument to list them)", parts[1])
 		}
 		*entrypoint = parts[1]
 		return fmt.Sprintf("entrypoint set to %s", *entrypoint), nil
@@ -296,13 +303,12 @@ func handleREPLCommandV2(line string, request map[string]string, entrypoint *str
 
 	case ":severity":
 		r.Section("Severity Constants")
-		r.Table([]ui.TableRow{
-			{Label: "severity.CRITICAL", Value: "\"CRITICAL\""},
-			{Label: "severity.HIGH", Value: "\"HIGH\""},
-			{Label: "severity.MEDIUM", Value: "\"MEDIUM\""},
-			{Label: "severity.LOW", Value: "\"LOW\""},
-			{Label: "severity.UNSPECIFIED", Value: "\"UNSPECIFIED\""},
-		})
+		consts := policy.SeverityConstants()
+		rows := make([]ui.TableRow, 0, len(consts))
+		for _, name := range policy.SeverityConstantNames() {
+			rows = append(rows, ui.TableRow{Label: "severity." + name, Value: fmt.Sprint(consts[name])})
+		}
+		r.Table(rows)
 		r.Blank()
 		r.Section("Severity Functions")
 		r.CommandHelp("severityAtLeast(vuln, level)", "Check if severity >= level")
@@ -553,7 +559,7 @@ func suggestFix(expr, errMsg string) string {
 	switch {
 	case strings.Contains(errMsg, "undeclared reference"):
 		if strings.Contains(expr, "severity.") && !strings.Contains(errMsg, "severity") {
-			return "severity constants are available: severity.CRITICAL, severity.HIGH, etc."
+			return "severity constants are available: severity.critical, severity.high, etc."
 		}
 		if strings.Contains(expr, ".") {
 			parts := strings.Split(expr, ".")

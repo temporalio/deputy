@@ -23,7 +23,7 @@ func newTestRoot(out, errW *bytes.Buffer) *cobra.Command {
 	}
 	root.SetOut(out)
 	root.SetErr(errW)
-	RegisterCommands(root, Dependencies{})
+	RegisterCommands(root, &Dependencies{})
 	return root
 }
 

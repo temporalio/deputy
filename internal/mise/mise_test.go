@@ -51,12 +51,48 @@ func TestIsConfigPath(t *testing.T) {
 	}
 }
 
+// TestLockfilePath pins the mapping against mise's real behavior, captured
+// with `mise lock --dry-run` (which prints the lockfile it targets) on mise
+// 2026.7.3 for each layout below.
 func TestLockfilePath(t *testing.T) {
 	tests := map[string]string{
-		"mise.toml":                "mise.lock",
-		"a/b/mise.toml":            "a/b/mise.lock",
-		".config/mise/config.toml": ".config/mise/config.lock",
-		".tool-versions":           "",
+		// Flat configs: the lock is named for the config, minus a leading dot.
+		"mise.toml":             "mise.lock",
+		".mise.toml":            "mise.lock",
+		"a/b/mise.toml":         "a/b/mise.lock",
+		"a/b/.mise.toml":        "a/b/mise.lock",
+		"mise.production.toml":  "mise.production.lock",
+		".mise.production.toml": "mise.production.lock",
+		"mise.local.toml":       "mise.local.lock",
+		".mise.local.toml":      "mise.local.lock",
+		"sub/proj/.mise.toml":   "sub/proj/mise.lock",
+		".config/mise.toml":     ".config/mise.lock",
+		"./mise.toml":           "mise.lock",
+		"/abs/path/.mise.toml":  "/abs/path/mise.lock",
+		"a\\b\\.mise.toml":      "a/b/mise.lock",
+		// A config.toml inside a mise directory is named for the directory,
+		// carrying over any env/local segments from the config's basename.
+		".config/mise/config.toml":                  ".config/mise/mise.lock",
+		"mise/config.toml":                          "mise/mise.lock",
+		"a/.config/mise/config.toml":                "a/.config/mise/mise.lock",
+		".mise/config.toml":                         ".mise/mise.lock",
+		"a/.mise/config.toml":                       "a/.mise/mise.lock",
+		".config/mise/config.production.toml":       ".config/mise/mise.production.lock",
+		".mise/config.production.toml":              ".mise/mise.production.lock",
+		"mise/config.production.toml":               "mise/mise.production.lock",
+		".config/mise/config.local.toml":            ".config/mise/mise.local.lock",
+		".mise/config.local.toml":                   ".mise/mise.local.lock",
+		".config/mise/config.production.local.toml": ".config/mise/mise.production.local.lock",
+		// A basename that merely starts with "config" is not the directory's
+		// config file, so it keeps its own name.
+		".config/mise/configuration.toml": ".config/mise/configuration.lock",
+		// conf.d drop-ins share the enclosing mise directory's lockfile.
+		".config/mise/conf.d/tools.toml": ".config/mise/mise.lock",
+		"mise/conf.d/10-tools.toml":      "mise/mise.lock",
+		// Non-TOML configs are never locked.
+		".tool-versions": "",
+		"mise.json":      "",
+		".toml":          "",
 	}
 	for in, want := range tests {
 		if got := LockfilePath(in); got != want {
@@ -132,7 +168,11 @@ func TestIsConcreteVersion(t *testing.T) {
 	// Concrete: a real resolved version (>= major.minor), including partial-but-
 	// final forms like protobuf "33.1" that IsExactVersion rejects.
 	concrete := []string{"22.5.0", "33.1", "3.12.13", "v1.2", "temurin-21.0.5+11.0.LTS", "2025.1.1"}
-	notConcrete := []string{"", "20", "latest", "lts", "system", "^1.2.3", ">=1.0", "ref:abc", "prefix:20", "node"}
+	notConcrete := []string{
+		"", "20", "latest", "lts", "system", "^1.2.3", ">=1.0", "ref:abc", "prefix:20", "node",
+		// A checkout is not a release, however version-shaped its path.
+		"path:/opt/go-1.24.3", "file:../go-1.24.3",
+	}
 	for _, v := range concrete {
 		if !IsConcreteVersion(v) {
 			t.Errorf("IsConcreteVersion(%q) = false, want true", v)
@@ -237,7 +277,7 @@ func TestLockfileLookup(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lt := lf.Lookup(tt.spec, tt.version)
+			lt := lf.Lookup(tt.spec, tt.version, nil)
 			switch {
 			case tt.wantVersion == "":
 				if lt != nil {
@@ -250,8 +290,125 @@ func TestLockfileLookup(t *testing.T) {
 	}
 
 	var nilLF *Lockfile
-	if nilLF.Lookup(ToolSpec{Name: "node"}, "20.11.0") != nil {
+	if nilLF.Lookup(ToolSpec{Name: "node"}, "20.11.0", nil) != nil {
 		t.Error("nil lockfile Lookup should return nil")
+	}
+}
+
+// TestLockfileLookupClaimedKeys pins that a lock entry keyed by a tool's short
+// name is not borrowed when the config declares that name as a separate tool.
+// Sharing it lets a backend-qualified tool inherit the other tool's version,
+// which after a fix reports the freshly updated tool at the old version.
+func TestNameClaims(t *testing.T) {
+	tests := []struct {
+		name  string
+		tools []ToolSpec
+		want  map[string]int
+	}{
+		{
+			name:  "a bare declaration claims one name",
+			tools: []ToolSpec{{Key: "node", Name: "node"}},
+			want:  map[string]int{"node": 1},
+		},
+		{
+			name:  "a qualified declaration claims its key and its short name",
+			tools: []ToolSpec{{Key: "npm:node", Name: "node"}},
+			want:  map[string]int{"npm:node": 1, "node": 1},
+		},
+		{
+			name:  "a bare and a qualified declaration contest the short name",
+			tools: []ToolSpec{{Key: "npm:node", Name: "node"}, {Key: "node", Name: "node"}},
+			want:  map[string]int{"npm:node": 1, "node": 2},
+		},
+		{
+			name:  "two qualified declarations contest the short name",
+			tools: []ToolSpec{{Key: "npm:foo", Name: "foo"}, {Key: "ubi:foo", Name: "foo"}},
+			want:  map[string]int{"npm:foo": 1, "ubi:foo": 1, "foo": 2},
+		},
+		{
+			name:  "options do not create a second claimant",
+			tools: []ToolSpec{{Key: "ubi:cli/cli[exe=gh]", Name: "cli/cli"}},
+			want:  map[string]int{"ubi:cli/cli[exe=gh]": 1, "cli/cli": 1},
+		},
+		{
+			name:  "no declarations claim nothing",
+			tools: nil,
+			want:  map[string]int{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NameClaims(tt.tools); !maps.Equal(got, tt.want) {
+				t.Errorf("NameClaims = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLockfileLookupClaimedKeys(t *testing.T) {
+	const lock = `[[tools.node]]
+version = "20.11.0"
+backend = "core:node"
+`
+	lf, err := ParseLock("mise.lock", []byte(lock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	qualified := ToolSpec{Name: "node", Key: "npm:node"}
+	sole := NameClaims([]ToolSpec{qualified})
+	bare := ToolSpec{Name: "node", Key: "node"}
+	contestedByBare := NameClaims([]ToolSpec{qualified, bare})
+	contestedByQualified := NameClaims([]ToolSpec{qualified, {Name: "node", Key: "ubi:node"}})
+
+	tests := []struct {
+		name        string
+		spec        ToolSpec
+		version     string
+		claims      map[string]int
+		wantVersion string // "" => expect no match
+	}{
+		{
+			name: "short name free to match", spec: qualified, version: "20.12.0",
+			claims: sole, wantVersion: "20.11.0",
+		},
+		{
+			name: "short name claimed by a bare declaration", spec: qualified, version: "20.12.0",
+			claims: contestedByBare, wantVersion: "",
+		},
+		{
+			name: "short name claimed by another qualified declaration", spec: qualified, version: "20.12.0",
+			claims: contestedByQualified, wantVersion: "",
+		},
+		{
+			name: "the other qualified declaration is refused too",
+			spec: ToolSpec{Name: "node", Key: "ubi:node"}, version: "20.12.0",
+			claims: contestedByQualified, wantVersion: "",
+		},
+		{
+			name: "exact version match also refused when claimed", spec: qualified, version: "20.11.0",
+			claims: contestedByBare, wantVersion: "",
+		},
+		{
+			name: "a tool always matches its own key", spec: bare, version: "20.11.0",
+			claims: contestedByBare, wantVersion: "20.11.0",
+		},
+		{
+			name: "no config context keeps the fallback", spec: qualified, version: "20.12.0",
+			claims: nil, wantVersion: "20.11.0",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lt := lf.Lookup(tt.spec, tt.version, tt.claims)
+			switch {
+			case tt.wantVersion == "":
+				if lt != nil {
+					t.Errorf("Lookup = %+v, want nil", lt)
+				}
+			case lt == nil || lt.Version != tt.wantVersion:
+				t.Errorf("Lookup = %+v, want version %q", lt, tt.wantVersion)
+			}
+		})
 	}
 }
 
@@ -324,6 +481,72 @@ cosign = true
 	}
 }
 
+// TestParseToolsArrayOfTables pins the array-of-tables form of a tool
+// declaration, `[[tools.<name>]]` with the fields below it. It is ordinary
+// TOML for the value shapes the [tools] table already accepts, and mise reads
+// it: with a mise.toml holding `[[tools.go]]` and `version = "1.22.12"`, mise
+// 2026.7.3 reports
+//
+//	go  1.22.12 (missing)  /private/tmp/misearr/mise.toml  1.22.12
+//
+// and repeating the header reports both entries. A parser that skips the form
+// inventories the tool with no versions at all, so the toolchain mise resolves
+// is a toolchain Deputy never scans.
+func TestParseToolsArrayOfTables(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    map[string][]string
+	}{
+		{
+			name:    "single entry",
+			content: "[[tools.go]]\nversion = \"1.22.12\"\n",
+			want:    map[string][]string{"go": {"1.22.12"}},
+		},
+		{
+			name:    "repeated entries request both versions",
+			content: "[[tools.go]]\nversion = \"1.21.13\"\n\n[[tools.go]]\nversion = \"1.22.12\"\n",
+			want:    map[string][]string{"go": {"1.21.13", "1.22.12"}},
+		},
+		{
+			name:    "an entry with options",
+			content: "[[tools.\"npm:prettier\"]]\nversion = \"3.3.3\"\npostinstall = \"echo hi\"\n",
+			want:    map[string][]string{"npm:prettier": {"3.3.3"}},
+		},
+		{
+			name:    "an entry whose version is an array",
+			content: "[[tools.java]]\nversion = [\"21.0.5\", \"17.0.13\"]\n",
+			want:    map[string][]string{"java": {"21.0.5", "17.0.13"}},
+		},
+		{
+			name:    "an entry beside a plain table declaration",
+			content: "[tools]\nnode = \"20.11.0\"\n\n[[tools.go]]\nversion = \"1.22.12\"\n",
+			want:    map[string][]string{"node": {"20.11.0"}, "go": {"1.22.12"}},
+		},
+		{
+			name:    "an entry with no version requests nothing",
+			content: "[[tools.go]]\nbackend = \"core:go\"\n",
+			want:    map[string][]string{"go": nil},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Parse("mise.toml", []byte(tt.content))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			got := make(map[string][]string, len(cfg.Tools))
+			for _, spec := range cfg.Tools {
+				got[spec.Key] = spec.Versions
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("tools = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseToolVersions(t *testing.T) {
 	data := []byte("node 22.5.0\npython 3.11 3.12  # comment\n# full comment\nnpm:prettier latest\n")
 	cfg, err := Parse(".tool-versions", data)
@@ -345,5 +568,210 @@ func TestParseToolVersions(t *testing.T) {
 	}
 	if byKey["npm:prettier"].Backend != "npm" {
 		t.Errorf("npm:prettier backend = %q", byKey["npm:prettier"].Backend)
+	}
+}
+
+// TestDeclaredVersion pins the reading of mise's request grammar that decides
+// whether a declaration's text rules out a given release. Requests mise
+// resolves at install time carry no version; everything else does, including
+// the vendor-prefixed exact releases mise publishes for Java, which begin with
+// a letter and are still exact.
+func TestDeclaredVersion(t *testing.T) {
+	tests := []struct {
+		request string
+		want    string
+		wantOK  bool
+	}{
+		{"1.24.3", "1.24.3", true},
+		{"20", "20", true},
+		{"20.11", "20.11", true},
+		{"v1.24.3", "v1.24.3", true},
+		{"temurin-21.0.6+7", "temurin-21.0.6+7", true},
+		{"temurin-21", "temurin-21", true},
+		{"  1.24.3  ", "1.24.3", true},
+		{"prefix:20", "20", true},
+		// A sub- request resolves below the line it names, so the version it
+		// constrains is the subtracted one, not the base. Each row below is
+		// what mise 2026.7.3 installs for the request, read from
+		// `mise ls --current` over a real config:
+		//   sub-1:20        -> 19.9.0    (the 19 line)
+		//   sub-1:20.11     -> 19.9.0    (the 19 line)
+		//   sub-1:20.11.1   -> 19.9.0    (the 19 line)
+		//   sub-0.1:20.11   -> 20.10.0   (the 20.10 line)
+		//   sub-0.1:20.11.1 -> 20.10.0   (the 20.10 line)
+		//   sub-2:24        -> 22.23.2   (the 22 line)
+		// The subtrahend is applied component-wise to the base as written and
+		// truncated to its own length, which is why sub-1:20.11 governs 19 and
+		// not 19.11.
+		{"sub-1:20", "19", true},
+		{"sub-1:20.11", "19", true},
+		{"sub-1:20.11.1", "19", true},
+		{"sub-0.1:20.11", "20.10", true},
+		{"sub-0.1:20.11.1", "20.10", true},
+		{"sub-2:24", "22", true},
+		// A subtrahend longer than the base is truncated to the base's
+		// components, so it constrains exactly what the base does:
+		//   sub-0.1:20   -> 20.20.2  (the 20 line, same as "20")
+		//   sub-0.0.1:20 -> 20.20.2
+		{"sub-0.1:20", "20", true},
+		{"sub-0.0.1:20", "20", true},
+		// Subtracting past zero floors there rather than wrapping:
+		//   sub-30:20 -> 0.12.18 (the 0 line)
+		{"sub-30:20", "0", true},
+		{"latest", "", false},
+		{"lts", "", false},
+		{"stable", "", false},
+		{"system", "", false},
+		{"", "", false},
+		// The subtracted line is only computable when the base names one.
+		// Over a channel or a vendor-prefixed release there is nothing to
+		// subtract from without resolving it first, so the request rules
+		// nothing out and stays rewritable.
+		{"sub-2:lts", "", false},
+		{"sub-1:temurin-21", "", false},
+		{"sub-:20", "", false},
+		{"sub-x:20", "", false},
+		{"prefix:latest", "", false},
+		{"ref:main", "", false},
+		{"ref:v1.2.3", "", false},
+		{"path:/opt/go-1.24.3", "", false},
+		{"file:../toolchains/go", "", false},
+		{"gallium", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.request, func(t *testing.T) {
+			got, ok := DeclaredVersion(tt.request)
+			if got != tt.want || ok != tt.wantOK {
+				t.Errorf("DeclaredVersion(%q) = (%q, %v), want (%q, %v)", tt.request, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+// TestSameVersion pins the equality used to decide whether a declared or
+// locked version is one the finding names. The two sides come from different
+// vocabularies: Deputy reports the Go runtime with the module convention
+// ("v1.22.12") while a mise config and its lockfile write the release
+// ("1.22.12"). Comparing them byte-for-byte makes a fix Deputy just emitted
+// unapplicable, so the leading "v" is ignored on both sides, exactly as
+// SelectorMatches already ignores it.
+func TestSameVersion(t *testing.T) {
+	tests := []struct {
+		// tool is the [tools] key whose versions are compared; empty means an
+		// ordinary tool, whose versions are opaque release tags.
+		tool string
+		a, b string
+		want bool
+	}{
+		{a: "1.22.12", b: "1.22.12", want: true},
+		{a: "v1.22.12", b: "1.22.12", want: true},
+		{a: "1.22.12", b: "v1.22.12", want: true},
+		{a: "V1.22.12", b: "v1.22.12", want: true},
+		{a: "  v1.22.12 ", b: "1.22.12", want: true},
+		{a: "temurin-21.0.6+7", b: "temurin-21.0.6+7", want: true},
+		// Not equal: a partial selector is not the release beneath it, which
+		// is SelectorMatches's job and not this one.
+		{a: "20", b: "20.11.0", want: false},
+		{a: "1.22.12", b: "1.25.1", want: false},
+		{a: "v1.22.12", b: "1.22.13", want: false},
+		// A leading "v" that is not a version prefix stays part of the name.
+		{a: "vault", b: "ault", want: false},
+		{a: "", b: "", want: true},
+		// The Go toolchain's own prefix, which mise accepts in a declaration
+		// and go.dev publishes releases under, while mise locks the bare
+		// number. Both spellings name one release, for that tool.
+		{tool: "go", a: "go1.24.9", b: "1.24.9", want: true},
+		{tool: "go", a: "1.24.9", b: "go1.24.9", want: true},
+		{tool: "golang", a: "go1.24.9", b: "1.24.9", want: true},
+		{tool: "core:go", a: "go1.24.9", b: "1.24.9", want: true},
+		{tool: "go", a: "go1.24.9", b: "v1.24.9", want: true},
+		{tool: "go", a: "go1.24.9", b: "1.24.8", want: false},
+		// For every other tool a version is an opaque release tag, and a
+		// project may publish both spellings as different artifacts. Calling
+		// them equal let a fix that asked for one report success against the
+		// other without writing anything.
+		{tool: "ubi:owner/repo", a: "go1.3.0", b: "1.3.0", want: false},
+		{tool: "ubi:owner/repo", a: "1.3.0", b: "go1.3.0", want: false},
+		{tool: "npm:go-stuff", a: "go1.3.0", b: "1.3.0", want: false},
+		// The go backend installs a Go module, whose versions are module
+		// versions, so it is not the toolchain either.
+		{tool: "go:github.com/owner/repo", a: "go1.3.0", b: "1.3.0", want: false},
+		// A "v" is a tag convention every tool shares, the go backend included.
+		{tool: "go:github.com/owner/repo", a: "v1.3.0", b: "1.3.0", want: true},
+		{tool: "ubi:owner/repo", a: "v1.3.0", b: "1.3.0", want: true},
+		// A "go" that is not a version prefix stays part of the name.
+		{tool: "go", a: "golang", b: "lang", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tool+" "+tt.a+"/"+tt.b, func(t *testing.T) {
+			if got := SameVersion(tt.tool, tt.a, tt.b); got != tt.want {
+				t.Errorf("SameVersion(%q, %q, %q) = %v, want %v", tt.tool, tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSelectorMatches pins mise's matching rule against what a declaration
+// actually resolves to. Every row cites `mise ls --current` over a real config
+// on mise 2026.7.3, not `mise ls-remote`: ls-remote is a loose listing filter
+// that prints 25 releases for node@20.1, while a config declaring 20.1
+// installs 20.1.0. Resolution is what remediation is reasoning about, so
+// resolution is what this table records.
+func TestSelectorMatches(t *testing.T) {
+	tests := []struct {
+		name string
+		// tool is the [tools] key the versions belong to; empty means an
+		// ordinary tool, whose versions are opaque release tags.
+		tool    string
+		request string
+		version string
+		want    bool
+	}{
+		// node = "20.1" -> ls --current 20.1.0; lock --dry-run node@20.1.0.
+		{name: "partial governs its own line", request: "20.1", version: "20.1.0", want: true},
+		{name: "partial does not reach a longer neighbour", request: "20.1", version: "20.19.6", want: false},
+		// node = "20.11" -> ls --current 20.11.1.
+		{name: "minor selector", request: "20.11", version: "20.11.1", want: true},
+		{name: "minor selector stops at its line", request: "20.11", version: "20.19.6", want: false},
+		// node = "20" -> ls --current 20.20.2.
+		{name: "major selector", request: "20", version: "20.20.2", want: true},
+		// node = "2" -> ls --current reports "2", unresolved and missing.
+		{name: "a selector that resolves to nothing", request: "2", version: "26.7.0", want: false},
+
+		{name: "exact", request: "20.11.0", version: "20.11.0", want: true},
+		{name: "vendor-prefixed exact", request: "temurin-21.0.6+7", version: "temurin-21.0.6+7", want: true},
+		{name: "vendor-prefixed partial", request: "temurin-21", version: "temurin-21.0.6+7", want: true},
+		{name: "v-prefixed request", request: "v20", version: "20.11.0", want: true},
+		{name: "v-prefixed version", request: "20", version: "v20.11.0", want: true},
+		{name: "surrounding space", request: " 20 ", version: "20.11.0", want: true},
+
+		{name: "different line", request: "22", version: "20.11.0", want: false},
+		{name: "stale exact version", request: "1.25.1", version: "1.22.12", want: false},
+		{name: "request longer than the version", request: "20.11.0", version: "20.11", want: false},
+		{name: "another vendor", request: "zulu-21.0.6+7", version: "temurin-21.0.6+7", want: false},
+		{name: "vendor-prefixed on another line", request: "temurin-22", version: "temurin-21.0.6+7", want: false},
+		{name: "a v that is not a version prefix", request: "vault", version: "1.0.0", want: false},
+		// mise accepts `go = "go1.24"` and locks it as 1.24.9, so the selector
+		// has to govern the release it resolves to. Reading the prefix as part
+		// of the version made remediation refuse the fix it had just planned
+		// from that locked version.
+		{name: "go-prefixed request", tool: "go", request: "go1.24", version: "1.24.9", want: true},
+		{name: "go-prefixed request and version", tool: "go", request: "go1.24", version: "go1.24.9", want: true},
+		{name: "go-prefixed version", tool: "go", request: "1.24", version: "go1.24.9", want: true},
+		{name: "go-prefixed request off the line", tool: "go", request: "go1.23", version: "1.24.9", want: false},
+		{name: "a go that is not a version prefix", tool: "go", request: "golang", version: "1.24.9", want: false},
+		// Another tool's tags are opaque, so the prefix is part of the version.
+		{name: "go-prefixed tag of an ordinary tool", tool: "ubi:owner/repo", request: "go1.24", version: "1.24.9", want: false},
+		{name: "go-prefixed tag selecting its own line", tool: "ubi:owner/repo", request: "go1.24", version: "go1.24.9", want: true},
+		// An empty request is not a licence to match; callers that mean
+		// "no version named" go through DeclaredVersion first.
+		{name: "empty request", request: "", version: "20.11.0", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SelectorMatches(tt.tool, tt.request, tt.version); got != tt.want {
+				t.Errorf("SelectorMatches(%q, %q, %q) = %v, want %v", tt.tool, tt.request, tt.version, got, tt.want)
+			}
+		})
 	}
 }

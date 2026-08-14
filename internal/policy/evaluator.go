@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -78,6 +79,15 @@ var (
 		"ancestors",   // Ancestor nodes for current node
 		"descendants", // Descendant nodes for current node
 		// Constants for policy authoring
+		// Sandbox execution variables, bound by Manager.evaluateExecutionPolicy.
+		// Only the sandbox_execution entrypoint has an evaluation site today, so
+		// only what it actually binds is declared here; see bindings_test.go for
+		// the rest of the sandbox surface, which has no caller to bind it.
+		"command",
+		"workspace_dir",
+		"requested_config",
+		"context",
+
 		"severity", // Severity constants: severity.critical, severity.high, etc.
 		"scope",    // Dependency scope constants: scope.RUNTIME, scope.DEV, etc.
 	}
@@ -118,6 +128,33 @@ func DefaultVariableNames() []string {
 // This allows external packages to use the same constants (severity.critical, etc.)
 func SeverityConstants() map[string]any {
 	return severityConstants
+}
+
+// SeverityConstantNames returns the member names of the severity constants map
+// (critical, high, medium, low, unspecified), ordered from most to least
+// severe. Tooling (REPL, LSP completions) must derive severity member lists
+// from this function so the names they teach can never drift from what the
+// runtime actually binds.
+func SeverityConstantNames() []string {
+	names := make([]string, 0, len(severityConstants))
+	for name := range severityConstants {
+		names = append(names, name)
+	}
+	slices.SortFunc(names, func(a, b string) int {
+		// Descending severity: critical first, unspecified last.
+		return cmp.Compare(severityLevelNumber(b), severityLevelNumber(a))
+	})
+	return names
+}
+
+// severityLevelNumber returns the proto enum number backing a severity
+// constant, used to order constant names by severity rank.
+func severityLevelNumber(name string) int32 {
+	level, ok := severityConstants[name].(vulnerabilityv1.SeverityLevel)
+	if !ok {
+		return -1
+	}
+	return int32(level)
 }
 
 // NewFilterEnv creates a CEL environment suitable for filter expressions.

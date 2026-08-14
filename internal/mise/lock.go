@@ -4,7 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 )
@@ -80,10 +84,20 @@ func ParseLock(path string, data []byte) (*Lockfile, error) {
 // LoadSiblingLock reads and parses the mise.lock next to a TOML config. It
 // returns nil when the config format has no sibling lockfile path or when the
 // lockfile is absent.
+//
+// The path is held to readableInTree first: a scan reads through a filesystem
+// that follows a symlink wherever it points, so a checkout naming a host file as
+// its mise.lock would have that file read and parsed here.
 func LoadSiblingLock(fsys fs.FS, configPath string) (*Lockfile, error) {
 	lockPath := LockfilePath(configPath)
 	if lockPath == "" || fsys == nil {
 		return nil, nil
+	}
+	if err := readableInTree(fsys, lockPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("mise: reading lockfile %s: %w", lockPath, err)
 	}
 	data, err := fs.ReadFile(fsys, lockPath)
 	if err != nil {
@@ -183,26 +197,476 @@ func (lf *Lockfile) Sole(name string) *LockedTool {
 	return &lf.Tools[name][0]
 }
 
+// NameClaims counts, for every name a lockfile entry could be keyed by, how
+// many of a config's declarations could own an entry under it. Each
+// declaration claims its literal key and, when a backend prefix makes them
+// differ, its backend-stripped name: a legacy `[[tools.foo]]` entry is as
+// plausibly "npm:foo"'s as it is "ubi:foo"'s or a bare foo's.
+//
+// A count above one means no single declaration owns the name. That is the one
+// definition of ownership shared by both readers of a lockfile: [Lockfile.Lookup]
+// refuses to enrich from a contested entry, and remediation refuses to prune
+// one. Deriving both from this count keeps them from drifting, which they did
+// when enrichment tracked literal keys while pruning tracked stripped names,
+// leaving an entry that pruning preserved as ambiguous free to be borrowed by
+// enrichment on the next scan.
+func NameClaims(tools []ToolSpec) map[string]int {
+	claims := make(map[string]int, len(tools)*2)
+	for _, tool := range tools {
+		claims[tool.Key]++
+		if tool.Name != "" && tool.Name != tool.Key {
+			claims[tool.Name]++
+		}
+	}
+	return claims
+}
+
+// LockScope answers the lockfile-ownership questions over one filesystem,
+// enumerating that filesystem's mise configs at most once. The enumeration is
+// what [ConfigsSharingLock] needs and the only expensive part of it: a lockfile
+// link can come from any directory, so the tree is walked, and a walk per
+// config would pay for the same listing once per config rather than once per
+// scan. A directory of conf.d drop-ins locks into one file and therefore has
+// one set of claimant counts, so those are memoized per resolved lockfile too.
+//
+// A scope is a cache, so it is as current as the filesystem was when it was
+// created. Build one per scan, per pin walk, or per fix, and do not hold it
+// across an edit to the tree it describes. It is safe for concurrent use.
+type LockScope struct {
+	fsys fs.FS
+
+	mu          sync.Mutex
+	configPaths []string
+	configErr   error
+	walked      bool
+	claims      map[string]claimCounts
+}
+
+// claimCounts is a memoized [LockScope.Claims] answer, error included: a
+// filesystem that could not be listed cannot be listed differently on a second
+// ask, and a caller reading the error as "ownership unknown" must get the same
+// reading every time.
+type claimCounts struct {
+	counts map[string]int
+	err    error
+}
+
+// NewLockScope returns a scope over fsys. A nil filesystem is allowed and
+// every question asked of it fails, which is the reading a caller with no
+// filesystem should get rather than a silent "nobody else claims this".
+func NewLockScope(fsys fs.FS) *LockScope {
+	return &LockScope{fsys: fsys}
+}
+
+// configs returns every mise config in the scope's filesystem, walking for them
+// on the first call and returning the same answer, error included, thereafter.
+func (s *LockScope) configs() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.walked {
+		s.configPaths, s.configErr = allConfigPaths(s.fsys)
+		s.walked = true
+	}
+	return s.configPaths, s.configErr
+}
+
+// ConfigsSharingLock returns every mise config that locks into the same
+// lockfile as configPath, configPath included, in lexical order. A mise
+// directory's config.toml and all of its conf.d drop-ins write to one
+// mise.lock: verified against mise 2026.7.3, which reports
+// ".config/mise/mise.lock" as the lock target for a tool declared only in
+// ".config/mise/conf.d/b.toml".
+//
+// The set is derived from [LockfilePath] rather than listed here, so a change
+// to mise's lockfile naming moves the sharing rule with it. Membership is
+// decided on the file a config's lockfile path resolves to, not on the path
+// itself, because a lockfile may be a symlink and mise reads through it: with
+// "a/mise.lock" and "b/mise.lock" both linked to one "shared.lock", mise
+// 2026.7.3 resolves each directory's declarations against that one file. A fix
+// publishes its edit to the link target too, so counting only the declarations
+// beside the link would delete integrity metadata another directory still
+// needs.
+//
+// The candidates are every config in the tree, because a link into a lockfile
+// can come from anywhere and sharing has to read the same from either end of
+// it. Listing only the lockfile's directory and the conf.d beside it, the two
+// places a lexical lock path can come from, answers correctly when the starting
+// config is the one holding the link and wrongly when it is the one linked
+// into: the linking directory's declarations go uncounted, its share of the
+// lockfile reads as uncontested, and a fix to the host prunes an entry the
+// guest still needs. A lexical shortcut cannot tell those two apart, since
+// nothing in a regular file names the links pointing at it, so both sides pay
+// for the enumeration. [LockScope] spends it once per filesystem.
+//
+// An empty result means configPath has no lockfile at all (a .tool-versions
+// file, say). A read error is returned, because a config that cannot be listed
+// is a config whose declarations cannot be counted. A candidate whose own lock
+// path leaves the tree ([ErrLinkLeavesTree]) is skipped instead: it locks
+// somewhere Deputy does not scan, so it cannot be locking into the file being
+// asked about, and one such link would otherwise erase ownership for every
+// config in the repository. configPath's own lock path is still resolved
+// strictly, since a lockfile outside the tree has no in-tree claimants to
+// count.
+func ConfigsSharingLock(fsys fs.FS, configPath string) ([]string, error) {
+	return NewLockScope(fsys).ConfigsSharingLock(configPath)
+}
+
+// ConfigsSharingLock is [ConfigsSharingLock] over a scope, so the enumeration
+// of the filesystem's configs is shared with every other question asked of it.
+func (s *LockScope) ConfigsSharingLock(configPath string) ([]string, error) {
+	lockPath := LockfilePath(configPath)
+	if lockPath == "" {
+		return nil, nil
+	}
+	if s.fsys == nil {
+		return nil, fmt.Errorf("mise: no filesystem to resolve the configs sharing %s", lockPath)
+	}
+	fsys := s.fsys
+	target, _, err := ResolveLinkedPath(fsys, lockPath)
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := s.configs()
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]struct{})
+	var shared []string
+	for _, candidate := range candidates {
+		if _, ok := IsConfigPath(candidate); !ok {
+			continue
+		}
+		candidateLock := LockfilePath(candidate)
+		if candidateLock == "" {
+			continue
+		}
+		candidateTarget, _, err := ResolveLinkedPath(fsys, candidateLock)
+		if err != nil {
+			if errors.Is(err, ErrLinkLeavesTree) {
+				// This candidate locks somewhere Deputy does not scan, so it
+				// cannot be locking into the in-tree file whose claimants are
+				// being counted: skipping it is a statement about that
+				// candidate, not a guess about an unknown. Aborting instead
+				// would let one config's bad link erase ownership for every
+				// config in the repository, and both readers of a lockfile
+				// answer unresolved ownership by dropping the lockfile
+				// entirely, so a single link would cost every scan its exact
+				// locked versions and checksums.
+				continue
+			}
+			// Anything else is "this candidate could not be read", which is not
+			// the same statement: the declarations it hides are exactly the ones
+			// that would have contested a name, so ownership stays unresolved.
+			return nil, fmt.Errorf("resolving the lockfile of %s: %w", candidate, err)
+		}
+		if candidateTarget != target {
+			continue
+		}
+		if _, dup := seen[candidate]; dup {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		shared = append(shared, candidate)
+	}
+	// configPath itself belongs in the set even when the walk above missed it,
+	// so a caller never decides ownership without the config it is editing.
+	if clean := path.Clean(configPath); len(shared) > 0 {
+		if _, ok := seen[clean]; !ok {
+			shared = append(shared, clean)
+		}
+	}
+	slices.Sort(shared)
+	return shared, nil
+}
+
+// allConfigPaths walks fsys for every mise config in it. A directory that
+// cannot be read is an error rather than an omission: a config it hides is one
+// whose declarations would have contested a lock entry, and the caller reads
+// the error as "ownership unknown" and leaves the entry alone.
+func allConfigPaths(fsys fs.FS) ([]string, error) {
+	var out []string
+	err := fs.WalkDir(fsys, ".", func(p string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if _, ok := IsConfigPath(p); ok {
+			out = append(out, p)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing the configs that could share a lockfile: %w", err)
+	}
+	return out, nil
+}
+
+// ErrLinkLeavesTree marks a resolution that stopped because the chain pointed
+// out of the tree being scanned, by an absolute path or by climbing above the
+// root. It is a refusal, not a failure: the path is knowably outside Deputy's
+// containment, and every part of Deputy treats such a path as out of scope,
+// from the os.Root that will not open it to the writer that will not publish
+// an edit through it.
+//
+// Callers separate it from an I/O failure because the two say different things.
+// "This link leaves the tree" rules a candidate out of sharing an in-tree file;
+// "I could not read this link" rules nothing out and has to stay fail-closed.
+// A chain that exceeds [maxLinkHops] is deliberately not this error: Deputy
+// stopped walking before learning where it ends, and it could still have ended
+// on the file in question.
+var ErrLinkLeavesTree = errors.New("link leaves the tree being scanned")
+
+// maxLinkHops bounds symlink resolution so a cyclic or absurdly deep chain
+// ends in an error instead of looping. The limit is generous next to any real
+// repository layout; the operating system's own limit is typically far lower.
+const maxLinkHops = 32
+
+// ResolveLinkedPath returns the path relPath ultimately names in fsys,
+// following an in-repository symlink chain, and reports whether any link was
+// followed. It is the one answer to "which file is this really", shared by the
+// reader that decides who owns a lockfile and the writer that publishes an
+// edit to one, so the file a claim is counted against is the file the edit
+// lands on.
+//
+// Each hop is read through fsys, and a target that is absolute or climbs out
+// of the tree is refused rather than followed, so resolution cannot be talked
+// into naming a file outside it. A path that does not exist resolves to
+// itself: there is no link to follow, and a caller may be about to create it.
+// A filesystem that cannot report links resolves every path to itself, which
+// is the reading it would have had before links were considered at all.
+func ResolveLinkedPath(fsys fs.FS, relPath string) (target string, linked bool, err error) {
+	reader, ok := fsys.(fs.ReadLinkFS)
+	if !ok {
+		return relPath, false, nil
+	}
+	for range maxLinkHops {
+		info, err := reader.Lstat(relPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			return relPath, linked, nil
+		}
+		if err != nil {
+			return "", false, fmt.Errorf("stat %s: %w", relPath, err)
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			return relPath, linked, nil
+		}
+		text, err := reader.ReadLink(relPath)
+		if err != nil {
+			return "", false, fmt.Errorf("reading link %s: %w", relPath, err)
+		}
+		if filepath.IsAbs(text) {
+			return "", false, fmt.Errorf("refusing to follow %s: it links to the absolute path %s: %w", relPath, text, ErrLinkLeavesTree)
+		}
+		next := path.Join(path.Dir(relPath), filepath.ToSlash(text))
+		if next == ".." || strings.HasPrefix(next, "../") {
+			return "", false, fmt.Errorf("refusing to follow %s: it links outside the repository via %s: %w", relPath, text, ErrLinkLeavesTree)
+		}
+		relPath, linked = next, true
+	}
+	return "", false, fmt.Errorf("resolving %s: more than %d symbolic links", relPath, maxLinkHops)
+}
+
+// readableInTree reports why relPath may not be read as a file of the tree
+// being scanned, or nil when it may. It is the guard every read of a discovered
+// path goes through, because the filesystem a scan reads through does not
+// enforce containment: an [os.DirFS] open follows a symlink wherever it points,
+// absolute targets included, and it is a scanned repository that chooses where
+// its config and lockfile paths point. Without this, listing a tree and reading
+// what looks like a config in it is enough to read a host file on an untrusted
+// repository's behalf. Only [os.Root] refuses that in the kernel, and a scan has
+// no root to work through, so containment here is resolution plus a refusal.
+//
+// Two shapes are refused. A path whose symlink chain leaves the tree is out of
+// scope by the same rule the rest of the package applies, from the lockfile
+// candidate that stops being a claimant to the writer that will not publish
+// through such a link. A path that does not resolve to a regular file is refused
+// because reading one is not bounded work: a fifo blocks the scan until someone
+// writes to it, and a character device such as /dev/zero has no end, so
+// [fs.ReadFile] grows its buffer until the process dies. Neither is a config or
+// a lockfile mise could use either.
+//
+// The refusal is deliberately an error rather than a silent skip. Both readers of
+// a lockfile answer "ownership could not be established" by setting the whole
+// lockfile aside, and a config Deputy may not read hides exactly the
+// declarations that would have contested a name, so counting the rest would
+// leave a name looking uncontested and its entry free to be lent or pruned.
+//
+// Containment is provable only on a filesystem that reports links, which the
+// filesystem of a real scan is. One that cannot resolves every path to itself,
+// as [ResolveLinkedPath] documents, and there the regular-file check is all that
+// is left; such a filesystem is virtual (a container layer, a test map) and its
+// paths do not reach the scanning host.
+func readableInTree(fsys fs.FS, relPath string) error {
+	target, _, err := ResolveLinkedPath(fsys, relPath)
+	if err != nil {
+		return fmt.Errorf("resolving %s: %w", relPath, err)
+	}
+	info, err := fs.Stat(fsys, target)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("refusing to read %s: %s is not a regular file (%s)", relPath, target, info.Mode().Type())
+	}
+	return nil
+}
+
+// LockClaims counts, over every config that shares configPath's lockfile, how
+// many declarations could own a lock entry keyed by a given name. It is
+// [NameClaims] widened to the scope the lockfile actually has.
+//
+// Counting one fragment is not enough. With ".config/mise/conf.d/a.toml"
+// declaring "npm:foo", "b.toml" beside it declaring "ubi:foo", and a legacy
+// [[tools.foo]] entry in the mise.lock they share, a.toml alone shows a single
+// claimant for foo. Enrichment then lends that entry to npm:foo and to ubi:foo
+// both, and remediation prunes it while fixing either one, discarding
+// integrity metadata for a declaration nobody edited.
+//
+// An error means ownership could not be established, and a caller must then
+// treat every name as contested: prune nothing beyond the exact key, enrich
+// from nothing. An unparsable sharing config is such an error, because its
+// declarations are exactly the ones that would have contested a name.
+//
+// A caller asking this of more than one config should hold a [LockScope] and
+// ask it instead, so the configs of the filesystem are enumerated once.
+func LockClaims(fsys fs.FS, configPath string) (map[string]int, error) {
+	return NewLockScope(fsys).Claims(configPath)
+}
+
+// Claims is [LockClaims] over a scope. Answers are memoized per resolved
+// lockfile, the unit they are a property of: every drop-in of a mise directory
+// locks into one file and so has one set of counts.
+//
+// The returned map is the scope's own and is read by every caller that asks for
+// the same lockfile, so it must not be modified.
+func (s *LockScope) Claims(configPath string) (map[string]int, error) {
+	shared, err := s.ConfigsSharingLock(configPath)
+	if err != nil {
+		return nil, err
+	}
+	// Configs that lock nowhere have no claims to count and no key to memoize
+	// them under, so they are answered without consulting the memo.
+	if len(shared) == 0 {
+		return nil, nil
+	}
+	key := strings.Join(shared, "\x00")
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cached, ok := s.claims[key]; ok {
+		return cached.counts, cached.err
+	}
+	counts, err := countClaims(s.fsys, shared)
+	if s.claims == nil {
+		s.claims = make(map[string]claimCounts)
+	}
+	s.claims[key] = claimCounts{counts: counts, err: err}
+	return counts, err
+}
+
+// countClaims sums [NameClaims] over the configs sharing one lockfile. A config
+// that cannot be read or parsed is an error rather than a zero contribution,
+// because the declarations it hides are exactly the ones that would have
+// contested a name.
+//
+// Every path is held to readableInTree before it is opened. The paths come from
+// walking the scanned tree, which lists a symlink without following it, and the
+// filesystem underneath follows one on open: a config path that names a host file
+// would otherwise be read here and its declarations counted.
+func countClaims(fsys fs.FS, shared []string) (map[string]int, error) {
+	claims := make(map[string]int)
+	for _, cfgPath := range shared {
+		if err := readableInTree(fsys, cfgPath); err != nil {
+			return nil, fmt.Errorf("reading %s: %w", cfgPath, err)
+		}
+		data, err := fs.ReadFile(fsys, cfgPath)
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", cfgPath, err)
+		}
+		cfg, err := Parse(cfgPath, data)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", cfgPath, err)
+		}
+		for name, n := range NameClaims(cfg.Tools) {
+			claims[name] += n
+		}
+	}
+	return claims, nil
+}
+
 // Lookup finds the locked entry that best matches a parsed tool spec at a
 // requested version. It prefers an exact version match (by the tool's short name
 // then its raw key), and otherwise falls back to the sole locked entry under
-// either name — which covers a fuzzy declared version that won't equal any
+// either name, which covers a fuzzy declared version that won't equal any
 // locked version string. Returns nil when nothing matches.
-func (lf *Lockfile) Lookup(spec ToolSpec, version string) *LockedTool {
+//
+// claims comes from [LockClaims] over every config sharing the lockfile, so a
+// lock entry is not borrowed when another declaration could own the name it is
+// keyed by. A config can declare both "npm:node" and node, or both "npm:foo"
+// and "ubi:foo", as independent tools with independent lock entries; without
+// this, a backend-qualified spec matches on its stripped name and is enriched
+// with another tool's version, which after a fix reports the freshly updated
+// tool at the old vulnerable version. Pass nil when no config context is
+// available.
+func (lf *Lockfile) Lookup(spec ToolSpec, version string, claims map[string]int) *LockedTool {
 	if lf == nil {
 		return nil
 	}
-	for _, name := range [...]string{spec.Name, spec.Key} {
-		if lt := lf.Locked(name, version); lt != nil {
-			return lt
+	names := LockCandidateNames(spec)
+	for _, name := range names {
+		if MayMatchLockName(spec, name, claims) {
+			if lt := lf.Locked(name, version); lt != nil {
+				return lt
+			}
 		}
 	}
-	for _, name := range [...]string{spec.Name, spec.Key} {
-		if lt := lf.Sole(name); lt != nil {
-			return lt
+	for _, name := range names {
+		if MayBorrowSoleLockEntry(name, claims) {
+			if lt := lf.Sole(name); lt != nil {
+				return lt
+			}
 		}
 	}
 	return nil
+}
+
+// LockCandidateNames returns the mise.lock table keys a declaration could be
+// recorded under, short name first because real lockfiles usually key entries
+// that way. Both readers of a lockfile, inventory enrichment and pin
+// discovery, walk this list, so neither can grow a candidate the other does
+// not know to gate.
+func LockCandidateNames(spec ToolSpec) []string {
+	if spec.Key == "" || spec.Name == spec.Key {
+		return []string{spec.Name}
+	}
+	return []string{spec.Name, spec.Key}
+}
+
+// MayMatchLockName reports whether spec may take a lock entry keyed by name
+// whose version is exactly the one spec requests. A spec always owns its
+// literal key here: an entry keyed by exactly what the declaration spells, at
+// exactly the version it spells, is that declaration's however many others
+// share the name. Any other name is only this spec's when no second
+// declaration claims it, since the spec itself accounts for one claim.
+//
+// claims comes from [LockClaims]. A nil map records no claims and gates
+// nothing, which is what a caller with no config context gets.
+func MayMatchLockName(spec ToolSpec, name string, claims map[string]int) bool {
+	return name == spec.Key || claims[name] <= 1
+}
+
+// MayBorrowSoleLockEntry reports whether the sole entry keyed by name may be
+// handed to a declaration that matched no version. This fallback is a guess,
+// so it needs an uncontested claim even for a declaration's literal key: two
+// configs sharing a lockfile can spell the same key, and the count in claims
+// spans all of them. Lending one of them the other's entry reports a version
+// the declaration does not ask for, which is how a fix applied to one fragment
+// reads as the vulnerable version coming back.
+func MayBorrowSoleLockEntry(name string, claims map[string]int) bool {
+	return claims[name] <= 1
 }
 
 // Checksums returns the per-platform checksums for a locked tool, keyed by the

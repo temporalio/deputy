@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/plugin"
+	"github.com/temporalio/deputy/internal/ecosystem"
 )
 
 // TestScalibrEcosystemNames pins the filter vocabulary contract: Deputy's
@@ -39,14 +40,22 @@ func TestScalibrEcosystemNames(t *testing.T) {
 }
 
 // TestResolvePluginsAcceptsCanonicalEcosystemNames pins the end-to-end filter
-// contract: the names Deputy advertises in CLI help and emits in results
-// (cargo, npm, pypi) must resolve to plugins instead of erroring with
-// scalibr's unknown-plugin failure.
+// contract: every canonical ecosystem name Deputy advertises in CLI help and
+// emits in results (ecosystem.All()) must resolve to plugins instead of
+// erroring with scalibr's unknown-plugin failure. Ranging over the registry
+// keeps newly added ecosystems covered automatically.
 func TestResolvePluginsAcceptsCanonicalEcosystemNames(t *testing.T) {
+	all := ecosystem.All()
+	// Sanity floor: 13 canonical ecosystems today; an empty or shrunken
+	// registry would silently hollow out this test.
+	if len(all) < 13 {
+		t.Fatalf("ecosystem.All() returned %d ecosystems, want at least 13", len(all))
+	}
+
 	cap := &plugin.Capabilities{OS: plugin.OSLinux}
-	for _, eco := range []string{"cargo", "npm", "pypi", "maven", "rubygems", "nuget", "hex", "pub", "cocoapods", "packagist"} {
-		t.Run(eco, func(t *testing.T) {
-			plugins, err := resolvePlugins(ScanOptions{Ecosystems: []string{eco}}, cap)
+	for _, eco := range all {
+		t.Run(string(eco), func(t *testing.T) {
+			plugins, err := resolvePlugins(ScanOptions{Ecosystems: []string{string(eco)}}, cap)
 			if err != nil {
 				t.Fatalf("resolvePlugins(%q): %v", eco, err)
 			}

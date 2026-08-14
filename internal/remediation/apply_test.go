@@ -3,12 +3,23 @@ package remediation
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
+	"testing/fstest"
 	"time"
+
+	"github.com/google/osv-scalibr/extractor/filesystem"
+	scalibrfs "github.com/google/osv-scalibr/fs"
+
+	"github.com/temporalio/deputy/internal/inventory/plugins/mise/misex"
+	"github.com/temporalio/deputy/internal/mise"
 )
 
 func TestIsDeputyInternalCommand(t *testing.T) {
@@ -590,6 +601,1117 @@ COPY app /app
 	}
 }
 
+// TestApplyMiseUpdatePrunesLockForLayouts pins lock discovery across the
+// manifest layouts mise supports. The lockfile is not simply the manifest with
+// a .lock suffix: mise reads mise.lock for a .mise.toml config and
+// <dir>/mise.lock for a .config/mise/config.toml, so deriving the name from
+// the basename pruned a file mise ignores and left the real lock pinning the
+// vulnerable version. Each case asserts the stale entry is gone and that the
+// extractor, which substitutes the locked version, now reports the fixed one.
+func TestApplyMiseUpdatePrunesLockForLayouts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		configPath string
+		lockPath   string
+	}{
+		{name: "flat manifest", configPath: "mise.toml", lockPath: "mise.lock"},
+		{name: "hidden manifest", configPath: ".mise.toml", lockPath: "mise.lock"},
+		{name: "environment manifest", configPath: "mise.production.toml", lockPath: "mise.production.lock"},
+		{name: "nested config", configPath: ".config/mise/config.toml", lockPath: ".config/mise/mise.lock"},
+		{name: "dotted nested config", configPath: ".mise/config.toml", lockPath: ".mise/mise.lock"},
+		{name: "nested environment config", configPath: ".config/mise/config.production.toml", lockPath: ".config/mise/mise.production.lock"},
+		{name: "dotted nested environment config", configPath: ".mise/config.staging.toml", lockPath: ".mise/mise.staging.lock"},
+		{name: "conf.d drop-in", configPath: ".config/mise/conf.d/tools.toml", lockPath: ".config/mise/mise.lock"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			write := func(rel, content string) {
+				t.Helper()
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write(tt.configPath, "[tools]\ngo = \"1.22.12\"\n")
+			write(tt.lockPath, "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n")
+
+			cmd := "deputy:mise:update " + tt.configPath + " go 1.24.3 1.22.12"
+			if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			lock, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(tt.lockPath)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(lock), "1.22.12") {
+				t.Errorf("stale entry survived in %s:\n%s", tt.lockPath, lock)
+			}
+
+			// The extractor prefers the locked version, so it is the honest
+			// check that the fix actually took effect.
+			fsys := fstest.MapFS{}
+			for _, rel := range []string{tt.configPath, tt.lockPath} {
+				data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				fsys[rel] = &fstest.MapFile{Data: data}
+			}
+			f, err := fsys.Open(tt.configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv, err := misex.New().Extract(t.Context(), &filesystem.ScanInput{
+				Path:   tt.configPath,
+				Reader: f,
+				FS:     fsys,
+			})
+			if err != nil {
+				t.Fatalf("Extract: %v", err)
+			}
+			var got string
+			for _, pkg := range inv.Packages {
+				if pkg.Name == "go" {
+					got = pkg.Version
+				}
+			}
+			if got != "1.24.3" {
+				t.Errorf("extractor reports go %q after fix, want 1.24.3", got)
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdateSymlinkedManifest pins which manifest path decides the
+// lockfile. A detected manifest that is an in-repository symlink has its own
+// sibling lockfile, and that is the one mise (and Deputy's own inventory)
+// reads, so following the link to the target's directory would edit the config
+// while leaving the lock that is actually in effect still pinning the
+// vulnerable version. The symlink itself must survive the edit, and a link
+// that leaves the repository must still be refused.
+func TestApplyMiseUpdateSymlinkedManifest(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// link is the detected manifest; target is where it points, relative
+		// to the repository unless escapes is set.
+		link      string
+		target    string
+		lockPath  string
+		staleLock string
+		escapes   bool
+	}{
+		{
+			name: "root symlink to a nested config",
+			link: "mise.toml", target: "configs/shared.toml",
+			lockPath: "mise.lock", staleLock: "configs/shared.lock",
+		},
+		{
+			name: "nested symlink to a root config",
+			link: "envs/mise.toml", target: "shared.toml",
+			lockPath: "envs/mise.lock", staleLock: "mise.lock",
+		},
+		{
+			name: "symlink escaping the repository is refused",
+			link: "mise.toml", escapes: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			write := func(base, rel, content string) string {
+				t.Helper()
+				full := filepath.Join(base, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return full
+			}
+			const config = "[tools]\ngo = \"1.22.12\"\n"
+			const lock = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
+
+			linkFull := filepath.Join(dir, filepath.FromSlash(tt.link))
+			if err := os.MkdirAll(filepath.Dir(linkFull), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			if tt.escapes {
+				outside := write(t.TempDir(), "victim.toml", config)
+				if err := os.Symlink(outside, linkFull); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update "+tt.link+" go 1.24.3 1.22.12")
+				if err == nil {
+					t.Fatal("expected an error for a manifest symlinked outside the repository")
+				}
+				got, readErr := os.ReadFile(outside)
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if string(got) != config {
+					t.Errorf("wrote outside the repository: %q", got)
+				}
+				return
+			}
+
+			targetFull := write(dir, tt.target, config)
+			write(dir, tt.lockPath, lock)
+			write(dir, tt.staleLock, lock)
+			linkTo, err := filepath.Rel(filepath.Dir(linkFull), targetFull)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(linkTo, linkFull); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+
+			if err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update "+tt.link+" go 1.24.3 1.22.12"); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			if got, err := os.ReadFile(targetFull); err != nil {
+				t.Fatal(err)
+			} else if !strings.Contains(string(got), "1.24.3") {
+				t.Errorf("config not updated through the symlink:\n%s", got)
+			}
+			fi, err := os.Lstat(linkFull)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fi.Mode()&os.ModeSymlink == 0 {
+				t.Errorf("%s is no longer a symlink after the edit", tt.link)
+			}
+			sibling, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(tt.lockPath)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(sibling), "1.22.12") {
+				t.Errorf("stale entry survived in the detected manifest's lock %s:\n%s", tt.lockPath, sibling)
+			}
+			other, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(tt.staleLock)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(other), "1.22.12") {
+				t.Errorf("pruned the link target's lock %s, which is not in effect:\n%s", tt.staleLock, other)
+			}
+		})
+	}
+}
+
+// TestResolveLinkTarget covers the resolution rules directly, including the
+// refusals an end-to-end apply reaches only after some earlier read has
+// already failed on the same link.
+func TestResolveLinkTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// links map a repository-relative path to the target text stored in it.
+		links map[string]string
+		// outsideLink, when set, is a link to a path outside the repository.
+		outsideLink string
+		in          string
+		want        string
+		wantErr     bool
+	}{
+		{name: "a regular file resolves to itself", in: "mise.lock", want: "mise.lock"},
+		{name: "a missing path resolves to itself", in: "absent.lock", want: "absent.lock"},
+		{
+			name:  "a link resolves to its target",
+			links: map[string]string{"link.lock": "shared/mise.lock"},
+			in:    "link.lock", want: "shared/mise.lock",
+		},
+		{
+			name: "a chain resolves to its final target",
+			links: map[string]string{
+				"link.lock":     "hop/next.lock",
+				"hop/next.lock": "../shared/mise.lock",
+			},
+			in: "link.lock", want: "shared/mise.lock",
+		},
+		{
+			name:  "a link out of the repository is refused",
+			links: map[string]string{"link.lock": "../escape.lock"},
+			in:    "link.lock", wantErr: true,
+		},
+		{
+			name:  "a nested link climbing past the root is refused",
+			links: map[string]string{"hop/next.lock": "../../outside/mise.lock"},
+			in:    "hop/next.lock", wantErr: true,
+		},
+		{
+			name: "an absolute link is refused", outsideLink: "link.lock",
+			in: "link.lock", wantErr: true,
+		},
+		{
+			name: "a cycle is refused",
+			links: map[string]string{
+				"a.lock": "b.lock",
+				"b.lock": "a.lock",
+			},
+			in: "a.lock", wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dir, "shared"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, rel := range []string{"mise.lock", "shared/mise.lock"} {
+				if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(rel)), []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for from, to := range tt.links {
+				full := filepath.Join(dir, filepath.FromSlash(from))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(to), full); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+			if tt.outsideLink != "" {
+				outside := filepath.Join(t.TempDir(), "mise.lock")
+				if err := os.Symlink(outside, filepath.Join(dir, filepath.FromSlash(tt.outsideLink))); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			got, err := resolveLinkTarget(root, tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("resolveLinkTarget(%q) = %q, want an error", tt.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveLinkTarget(%q): %v", tt.in, err)
+			}
+			if got != tt.want {
+				t.Errorf("resolveLinkTarget(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdateSymlinkedLock pins that pruning a lockfile which is
+// itself an in-repository symlink updates what the link points at instead of
+// replacing the link with a regular file. Severing the link would leave the
+// shared target stale, so every other config pointing at it keeps resolving
+// the vulnerable version, and the repository quietly loses a deliberate layout
+// choice. A link that leaves the repository must still be refused.
+func TestApplyMiseUpdateSymlinkedLock(t *testing.T) {
+	t.Parallel()
+
+	const config = "[tools]\ngo = \"1.22.12\"\n"
+	const lock = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
+
+	tests := []struct {
+		name string
+		// links are symlinks to create, each as a repository-relative path and
+		// the target text to store in it. target is the regular lockfile the
+		// chain ends at, which is the file that must end up pruned; it is
+		// empty when the chain is not expected to resolve.
+		links   map[string]string
+		target  string
+		wantErr bool
+		escapes bool
+	}{
+		{
+			name:   "lock symlinked to a shared target",
+			links:  map[string]string{"mise.lock": "shared/mise.lock"},
+			target: "shared/mise.lock",
+		},
+		{
+			name: "lock symlinked through a chain",
+			links: map[string]string{
+				"mise.lock":      "link/mise.lock",
+				"link/mise.lock": "../shared/mise.lock",
+			},
+			target: "shared/mise.lock",
+		},
+		{
+			name: "a cycle of lock symlinks is refused",
+			links: map[string]string{
+				"mise.lock":  "other.lock",
+				"other.lock": "mise.lock",
+			},
+			wantErr: true,
+		},
+		{name: "lock symlinked outside the repository is refused", escapes: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			write := func(base, rel, content string) string {
+				t.Helper()
+				full := filepath.Join(base, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return full
+			}
+			link := func(from, to string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(from), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(to), from); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+			write(dir, "mise.toml", config)
+			lockFull := filepath.Join(dir, "mise.lock")
+
+			if tt.escapes {
+				outside := write(t.TempDir(), "shared.lock", lock)
+				link(lockFull, outside)
+				if err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update mise.toml go 1.24.3 1.22.12"); err == nil {
+					t.Fatal("expected an error for a lockfile symlinked outside the repository")
+				}
+				got, err := os.ReadFile(outside)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(got) != lock {
+					t.Errorf("wrote outside the repository: %q", got)
+				}
+				return
+			}
+
+			var targetFull string
+			if tt.target != "" {
+				targetFull = write(dir, tt.target, lock)
+			}
+			for from, to := range tt.links {
+				link(filepath.Join(dir, filepath.FromSlash(from)), to)
+			}
+
+			err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update mise.toml go 1.24.3 1.22.12")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error for a lockfile symlink that does not resolve")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			fi, lstatErr := os.Lstat(lockFull)
+			if lstatErr != nil {
+				t.Fatal(lstatErr)
+			}
+			if fi.Mode()&os.ModeSymlink == 0 {
+				t.Errorf("mise.lock is no longer a symlink after the fix")
+			}
+			got, err := os.ReadFile(targetFull)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(got), "1.22.12") {
+				t.Errorf("stale entry survived in the link target %s:\n%s", tt.target, got)
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdatePrunesStaleLock pins the lockfile half of the mise fix:
+// after the config edit, a sibling mise.lock entry still pinning the old
+// version must be removed, otherwise the extractor substitutes the locked
+// version (falling back to the sole stale entry) and the applied fix keeps
+// scanning as vulnerable. Unrelated lock entries survive untouched.
+func TestApplyMiseUpdatePrunesStaleLock(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	writeFile := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(tmpDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("mise.toml", `[tools]
+go = "1.22.12"
+node = "20.11.0"
+`)
+	writeFile("mise.lock", `[[tools.go]]
+version = "1.22.12"
+backend = "core:go"
+
+[tools.go.platforms.linux-x64]
+checksum = "sha256:oldgo"
+size = 123
+
+[[tools.node]]
+version = "20.11.0"
+backend = "core:node"
+
+[tools.node.platforms.linux-x64]
+checksum = "sha256:node"
+`)
+
+	if err := ApplyDeputyCommand(t.Context(), tmpDir, "deputy:mise:update mise.toml go 1.24.3 1.22.12"); err != nil {
+		t.Fatalf("ApplyDeputyCommand: %v", err)
+	}
+
+	lock, err := os.ReadFile(filepath.Join(tmpDir, "mise.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(lock), "1.22.12") || strings.Contains(string(lock), "sha256:oldgo") {
+		t.Errorf("stale go lock entry survived:\n%s", lock)
+	}
+	if !strings.Contains(string(lock), "20.11.0") || !strings.Contains(string(lock), "sha256:node") {
+		t.Errorf("unrelated node lock entry was damaged:\n%s", lock)
+	}
+
+	// The real proof: the extractor must no longer report the old version.
+	fsys := fstest.MapFS{}
+	for _, name := range []string{"mise.toml", "mise.lock"} {
+		data, err := os.ReadFile(filepath.Join(tmpDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fsys[name] = &fstest.MapFile{Data: data}
+	}
+	f, err := fsys.Open("mise.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, err := misex.New().Extract(t.Context(), &filesystem.ScanInput{
+		Path:   "mise.toml",
+		Reader: f,
+		FS:     fsys,
+	})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	var goVersion string
+	for _, pkg := range inv.Packages {
+		if pkg.Name == "go" {
+			goVersion = pkg.Version
+		}
+	}
+	if goVersion != "1.24.3" {
+		t.Errorf("extractor reports go %q after fix, want 1.24.3", goVersion)
+	}
+}
+
+// TestApplyMiseUpdateLockKeyPrecision pins which lock entries a fix may
+// touch. A config can declare a backend-qualified tool and its short name as
+// separate tools with independent lock entries, so fixing one must not prune
+// the other's integrity metadata. The backend-stripped name is pruned too when
+// no other declaration in the config could own it, whether or not the exact
+// configured key is also locked.
+//
+// Every case additionally checks the outcome the pruning exists for: the
+// edited tool must not resolve back to a locked entry at the version the fix
+// removed. That is what a following scan does, and a fix that leaves such an
+// entry behind reports success while the vulnerability stands.
+func TestApplyMiseUpdateLockKeyPrecision(t *testing.T) {
+	t.Parallel()
+
+	const npmNodeEntry = `[[tools."npm:node"]]
+version = "20.11.0"
+backend = "npm:node"
+
+[tools."npm:node"."platforms.linux-x64"]
+checksum = "sha256:npmnode"
+`
+	const coreNodeEntry = `[[tools.node]]
+version = "20.11.0"
+backend = "core:node"
+
+[tools.node.platforms.linux-x64]
+checksum = "sha256:corenode"
+`
+
+	tests := []struct {
+		name     string
+		config   string
+		lock     string
+		cmd      string
+		tool     string
+		fixed    string
+		stale    string
+		wantGone []string
+		wantKept []string
+	}{
+		{
+			// Both spellings declared and locked: only the edited one is pruned.
+			name: "separate declarations keep their own lock entries",
+			config: `[tools]
+"npm:node" = "20.11.0"
+node = "20.11.0"
+`,
+			lock: npmNodeEntry + "\n" + coreNodeEntry,
+			cmd:  `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			tool: "npm:node", fixed: "20.12.0", stale: "20.11.0",
+			wantGone: []string{"sha256:npmnode"},
+			wantKept: []string{"sha256:corenode"},
+		},
+		{
+			// Only the qualified tool is declared and the lock keys it by the
+			// short name: the short name is uncontested, so the stale entry is
+			// pruned.
+			name: "short name pruned when exact key absent",
+			config: `[tools]
+"npm:node" = "20.11.0"
+`,
+			lock: coreNodeEntry,
+			cmd:  `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			tool: "npm:node", fixed: "20.12.0", stale: "20.11.0",
+			wantGone: []string{"sha256:corenode"},
+		},
+		{
+			// Both spellings locked but only one declared: an entry under the
+			// exact key does not make the legacy short-name entry someone
+			// else's. Nothing else claims the short name, so lock resolution
+			// would fall back to it once the exact entry is gone and hand the
+			// fixed tool its old version back; both spellings go.
+			name: "uncontested short name pruned even when the exact key is locked",
+			config: `[tools]
+"npm:node" = "20.11.0"
+`,
+			lock: npmNodeEntry + "\n" + coreNodeEntry,
+			cmd:  `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			tool: "npm:node", fixed: "20.12.0", stale: "20.11.0",
+			wantGone: []string{"sha256:npmnode", "sha256:corenode"},
+		},
+		{
+			// Two qualified declarations strip to the same short name, so no
+			// bare key appears in the config, yet the legacy short-name lock
+			// entry could belong to either. Claimants must be matched on the
+			// stripped name, not on a literal bare key, or fixing one tool
+			// discards the other's checksums.
+			name: "short name contested by another qualified declaration",
+			config: `[tools]
+"npm:node" = "20.11.0"
+"ubi:node" = "20.11.0"
+`,
+			lock: coreNodeEntry,
+			cmd:  `deputy:mise:update mise.toml "npm:node" 20.12.0 20.11.0`,
+			tool: "npm:node", fixed: "20.12.0", stale: "20.11.0",
+			wantKept: []string{"sha256:corenode"},
+		},
+		{
+			// Tool options do not create a distinct claimant name, and the
+			// edited declaration must not count as contesting itself.
+			name: "option-bearing key still gets the fallback",
+			config: `[tools]
+"npm:node[exe=node]" = "20.11.0"
+`,
+			lock: coreNodeEntry,
+			cmd:  `deputy:mise:update mise.toml "npm:node[exe=node]" 20.12.0 20.11.0`,
+			tool: "npm:node[exe=node]", fixed: "20.12.0", stale: "20.11.0",
+			wantGone: []string{"sha256:corenode"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for name, content := range map[string]string{"mise.toml": tt.config, "mise.lock": tt.lock} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := ApplyDeputyCommand(t.Context(), dir, tt.cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+			lock, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, marker := range tt.wantGone {
+				if strings.Contains(string(lock), marker) {
+					t.Errorf("expected %q to be pruned:\n%s", marker, lock)
+				}
+			}
+			for _, marker := range tt.wantKept {
+				if !strings.Contains(string(lock), marker) {
+					t.Errorf("expected %q to survive:\n%s", marker, lock)
+				}
+			}
+			if got := lockedVersionAfterFix(t, dir, tt.tool, tt.fixed); got == tt.stale {
+				t.Errorf("edited tool %q resolves back to the pruned version %s:\n%s", tt.tool, tt.stale, lock)
+			}
+		})
+	}
+}
+
+// lockedVersionAfterFix resolves the edited tool against the pruned lockfile
+// the way a following scan does, returning the version lock resolution would
+// substitute for the declaration ("" when it substitutes nothing). It reads
+// both files back from disk and goes through mise.Lockfile.Lookup rather than
+// re-deriving the answer, so the test measures what inventory will actually
+// see rather than what pruning intended.
+func lockedVersionAfterFix(t *testing.T, dir, tool, version string) string {
+	t.Helper()
+	return lockedVersionForConfig(t, dir, "mise.toml", tool, version)
+}
+
+// lockedVersionForConfig is [lockedVersionAfterFix] for a config at any path in
+// the repository, so a test can ask the question of a config that only shares
+// the lockfile with the one that was edited. The lockfile is derived with
+// mise.LockfilePath and read through the repository's filesystem, so a shared
+// or symlinked lock is resolved exactly as inventory resolves it.
+func lockedVersionForConfig(t *testing.T, dir, configRel, tool, version string) string {
+	t.Helper()
+
+	fsys := os.DirFS(dir)
+	cfgData, err := fs.ReadFile(fsys, configRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockRel := mise.LockfilePath(configRel)
+	lockData, err := fs.ReadFile(fsys, lockRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := mise.Parse(configRel, cfgData)
+	if err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	lf, err := mise.ParseLock(lockRel, lockData)
+	if err != nil {
+		t.Fatalf("parse lock: %v", err)
+	}
+	// The same claim count inventory uses, over every config sharing the
+	// lockfile, so the helper cannot pass a fix that the real extractor would
+	// still see as vulnerable.
+	claims, err := mise.LockClaims(fsys, configRel)
+	if err != nil {
+		t.Fatalf("lock claims: %v", err)
+	}
+	for _, spec := range cfg.Tools {
+		if spec.Key != tool {
+			continue
+		}
+		if locked := lf.Lookup(spec, version, claims); locked != nil {
+			return locked.Version
+		}
+		return ""
+	}
+	t.Fatalf("tool %q not declared in %s after the fix:\n%s", tool, configRel, cfgData)
+	return ""
+}
+
+// TestApplyMiseUpdateKeepsLockEntryAnotherConfigClaims pins the pruning of a
+// lock entry keyed by exactly the tool that was fixed. That key is not the
+// edited config's to prune on its own: several configs write into one
+// mise.lock, and when a second one declares the same key at the same version,
+// the entry the fix would delete is the metadata that config still installs
+// from. Deleting it discards the checksums of a toolchain nobody edited, and
+// it buys nothing, because a contested name is one lock resolution refuses to
+// lend to the edited declaration anyway.
+func TestApplyMiseUpdateKeepsLockEntryAnotherConfigClaims(t *testing.T) {
+	t.Parallel()
+
+	const declaration = "[tools]\ngo = \"1.22.12\"\n"
+	const lock = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n\n" +
+		"[tools.go.platforms.linux-x64]\nchecksum = \"sha256:oldgo\"\n"
+
+	tests := []struct {
+		name string
+		// files are the regular files to write, keyed by slash-separated path.
+		files map[string]string
+		// links map a symlink path to its target, relative to the link's
+		// directory.
+		links map[string]string
+		// edited is the config the fix is applied to; sharing is the other
+		// config writing into the same lockfile, "" when there is none.
+		edited  string
+		sharing string
+		// lockPath is the lockfile both configs resolve to.
+		lockPath string
+		// wantKept says whether the stale entry must survive the fix.
+		wantKept bool
+	}{
+		{
+			// Two conf.d drop-ins of one mise directory: mise merges them and
+			// locks them into a single mise.lock.
+			name: "drop-ins of one mise directory declare the same tool",
+			files: map[string]string{
+				".config/mise/conf.d/a.toml": declaration,
+				".config/mise/conf.d/b.toml": declaration,
+				".config/mise/mise.lock":     lock,
+			},
+			edited:   ".config/mise/conf.d/a.toml",
+			sharing:  ".config/mise/conf.d/b.toml",
+			lockPath: ".config/mise/mise.lock",
+			wantKept: true,
+		},
+		{
+			// Two directories whose lockfiles are one file: mise reads through
+			// the link, so the fix publishes its pruning to b's lock too.
+			name: "configs sharing a symlinked lockfile declare the same tool",
+			files: map[string]string{
+				"a/mise.toml": declaration,
+				"b/mise.toml": declaration,
+				"a/mise.lock": lock,
+			},
+			links:    map[string]string{"b/mise.lock": "../a/mise.lock"},
+			edited:   "a/mise.toml",
+			sharing:  "b/mise.toml",
+			lockPath: "a/mise.lock",
+			wantKept: true,
+		},
+		{
+			// Nobody else claims the key, so the entry is the edited config's
+			// and has to go: lock resolution would otherwise hand it back.
+			name: "sole claimant still prunes its stale entry",
+			files: map[string]string{
+				"a/mise.toml": declaration,
+				"b/mise.toml": "[tools]\nnode = \"20.11.0\"\n",
+				"a/mise.lock": lock,
+			},
+			links:    map[string]string{"b/mise.lock": "../a/mise.lock"},
+			edited:   "a/mise.toml",
+			lockPath: "a/mise.lock",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for rel, content := range tt.files {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, target := range tt.links {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(target), full); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+
+			if err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update "+tt.edited+" go 1.24.3 1.22.12"); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			lockAfter, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(tt.lockPath)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(lockAfter), "sha256:oldgo"); got != tt.wantKept {
+				t.Errorf("stale entry present = %v, want %v:\n%s", got, tt.wantKept, lockAfter)
+			}
+			// Whatever the entry's fate, the fix has to take: the edited config
+			// must not resolve back to the version it just replaced.
+			if got := lockedVersionForConfig(t, dir, tt.edited, "go", "1.24.3"); got == "1.22.12" {
+				t.Errorf("edited config resolves back to 1.22.12:\n%s", lockAfter)
+			}
+			if tt.sharing == "" {
+				return
+			}
+			// The config nobody edited still declares 1.22.12, and its
+			// integrity metadata has to still be there to install from.
+			if got := lockedVersionForConfig(t, dir, tt.sharing, "go", "1.22.12"); got != "1.22.12" {
+				t.Errorf("%s resolves go to %q, want the 1.22.12 entry it declares:\n%s", tt.sharing, got, lockAfter)
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdateMatchesVPrefixedCurrentVersion pins the apply against the
+// vocabulary the plan is actually written in. Deputy reports the Go runtime
+// with the module convention, so the emitted command carries the current
+// version as "v1.22.12", while the mise config and its lockfile write
+// "1.22.12". Comparing those byte-for-byte breaks the command Deputy itself
+// emitted: an array declaration is refused outright with "could not rewrite",
+// and a scalar one is rewritten while the stale lock entry survives, which is
+// the worse half. Lock resolution substitutes the locked version for the
+// declared one, so that apply reports success and the very next scan still
+// reports the version the fix was supposed to remove.
+func TestApplyMiseUpdateMatchesVPrefixedCurrentVersion(t *testing.T) {
+	t.Parallel()
+
+	const lockBody = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
+
+	tests := []struct {
+		name       string
+		config     string
+		cmd        string
+		wantConfig string
+	}{
+		{
+			name:       "scalar declaration",
+			config:     "[tools]\ngo = \"1.22.12\"\n",
+			cmd:        "deputy:mise:update mise.toml go 1.25.12 v1.22.12",
+			wantConfig: "[tools]\ngo = \"1.25.12\"\n",
+		},
+		{
+			name:       "array declaration",
+			config:     "[tools]\ngo = [\"1.22.12\", \"1.21.0\"]\n",
+			cmd:        "deputy:mise:update mise.toml go 1.25.12 v1.22.12",
+			wantConfig: "[tools]\ngo = [\"1.25.12\", \"1.21.0\"]\n",
+		},
+		{
+			// The mirror image: a config that spells the version with the
+			// leading "v" and a plan that does not.
+			name:       "v-prefixed declaration and a bare current version",
+			config:     "[tools]\ngo = \"v1.22.12\"\n",
+			cmd:        "deputy:mise:update mise.toml go 1.25.12 1.22.12",
+			wantConfig: "[tools]\ngo = \"1.25.12\"\n",
+		},
+		{
+			// The config already declares the target, spelled the other way.
+			// The declaration is correctly left alone, but the apply still has
+			// the stale lock entry to prune: treating the config as unedited
+			// aborts before that and the next scan reports the vulnerable
+			// version the lockfile is still serving.
+			name:       "v-prefixed declaration already at the target version",
+			config:     "[tools]\ngo = \"v1.24.3\"\n",
+			cmd:        "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			wantConfig: "[tools]\ngo = \"v1.24.3\"\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "mise.toml")
+			lockPath := filepath.Join(dir, "mise.lock")
+			if err := os.WriteFile(configPath, []byte(tt.config), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(lockPath, []byte(lockBody), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := ApplyDeputyCommand(t.Context(), dir, tt.cmd); err != nil {
+				t.Fatalf("apply: %v", err)
+			}
+
+			config, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(config) != tt.wantConfig {
+				t.Errorf("config mismatch:\n--- got ---\n%s\n--- want ---\n%s", config, tt.wantConfig)
+			}
+			// The stale lock entry has to go, or the fix does not take: the
+			// extractor substitutes the locked version for the declared one.
+			lock, err := os.ReadFile(lockPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(lock), "1.22.12") {
+				t.Errorf("stale lock entry survived the apply:\n%s", lock)
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdateRetryAfterLockFailure pins recovery from a partial
+// apply. The config is written before the lockfile is pruned, so a lockfile
+// failure can leave the config edited and the lock stale; re-running the same
+// command must recognize the config edit as already applied and finish the
+// pruning rather than failing with "could not rewrite".
+//
+// What blocks the lockfile is a parameter, not the point. The first fault is
+// deterministic and holds for any user, so the recovery path keeps its
+// coverage where the suite runs as root; the second is the read-only directory
+// an operator is likeliest to actually hit, which only blocks anyone whose
+// privileges do not bypass mode bits. How far the blocked apply got is a
+// parameter too: both files are now published by replacing them, so a directory
+// nothing can be created in stops the config edit as well, and the retry starts
+// from an untouched repository rather than a half-applied one.
+func TestApplyMiseUpdateRetryAfterLockFailure(t *testing.T) {
+	t.Parallel()
+
+	const lockBody = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
+
+	tests := []struct {
+		name string
+		// block makes the lockfile replacement fail; repair undoes it, as an
+		// operator would before retrying.
+		block  func(t *testing.T, dir, lockPath string)
+		repair func(t *testing.T, dir, lockPath string)
+		// wantConfigEdited says whether the blocked apply still got as far as
+		// publishing the config edit.
+		wantConfigEdited bool
+	}{
+		{
+			// The lockfile resolves out of the repository, which os.Root
+			// refuses to follow. Reads through the repository root fail while
+			// the config, an ordinary file in a writable directory, is still
+			// rewritten.
+			name: "lockfile escaping the repository",
+			block: func(t *testing.T, dir, lockPath string) {
+				t.Helper()
+				outside := filepath.Join(t.TempDir(), "shared.lock")
+				if err := os.WriteFile(outside, []byte(lockBody), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Remove(lockPath); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, lockPath); err != nil {
+					t.Fatal(err)
+				}
+			},
+			repair: func(t *testing.T, dir, lockPath string) {
+				t.Helper()
+				if err := os.Remove(lockPath); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(lockPath, []byte(lockBody), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantConfigEdited: true,
+		},
+		{
+			// A read-only directory blocks both replacements, since neither can
+			// create its temporary sibling there. Nothing is published, which is
+			// the point of publishing by rename: the config the operator wrote
+			// is still theirs after a failed fix.
+			name: "read-only directory",
+			block: func(t *testing.T, dir, lockPath string) {
+				t.Helper()
+				makeDirUnwritable(t, dir)
+			},
+			repair: func(t *testing.T, dir, lockPath string) {
+				t.Helper()
+				if err := os.Chmod(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "mise.toml")
+			lockPath := filepath.Join(dir, "mise.lock")
+			if err := os.WriteFile(configPath, []byte("[tools]\ngo = \"1.22.12\"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(lockPath, []byte(lockBody), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			tt.block(t, dir, lockPath)
+
+			const cmd = "deputy:mise:update mise.toml go 1.24.3 1.22.12"
+			if err := ApplyDeputyCommand(t.Context(), dir, cmd); err == nil {
+				t.Fatal("expected the blocked lockfile to fail the apply")
+			}
+			config, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(config), "1.24.3"); got != tt.wantConfigEdited {
+				t.Fatalf("config carries the fix = %v, want %v:\n%s", got, tt.wantConfigEdited, config)
+			}
+			// The failure must leave the lockfile exactly as it was, never
+			// truncated.
+			if got, err := os.ReadFile(lockPath); err != nil {
+				t.Fatal(err)
+			} else if string(got) != lockBody {
+				t.Errorf("failed apply damaged the lockfile:\n--- got ---\n%s\n--- want ---\n%s", got, lockBody)
+			}
+
+			// The operator fixes whatever blocked the lockfile write and
+			// retries.
+			tt.repair(t, dir, lockPath)
+			if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
+				t.Fatalf("retry after partial failure: %v", err)
+			}
+			lock, err := os.ReadFile(lockPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(lock), "1.22.12") {
+				t.Errorf("retry did not prune the stale lock entry:\n%s", lock)
+			}
+		})
+	}
+}
+
+// makeDirUnwritable strips the write bit from dir for the rest of the test,
+// restoring it afterwards, and skips the test when the caller can create files
+// there anyway.
+//
+// Mode bits do not bind a process holding CAP_DAC_OVERRIDE, which is every
+// process in the root-by-default containers that CI and isolated agents run
+// in. A test that chmods a directory to 0555 and then asserts a write failed
+// is asserting something untrue there, and fails for a reason that has nothing
+// to do with the code under test. The probe measures whether the bits bind on
+// this host instead of guessing from the UID, so a capability set that grants
+// the bypass some other way is caught too.
+func makeDirUnwritable(t *testing.T, dir string) {
+	t.Helper()
+
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	probe := filepath.Join(dir, ".deputy-writability-probe")
+	f, err := os.OpenFile(probe, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return // the bits bind: the directory really is unwritable
+	}
+	_ = f.Close()
+	_ = os.Remove(probe)
+	t.Skip("this process writes to a 0555 directory, so mode bits cannot block the write under test")
+}
+
 func TestApplyDeputyCommand(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -637,6 +1759,205 @@ COPY . /usr/share/nginx/html
 `,
 			},
 			wantErr: false,
+		},
+		{
+			name: "mise update scalar preserves comments and layout",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = "1.22.12" # pinned toolchain
+node = "20.11.1"
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = "1.24.3" # pinned toolchain
+node = "20.11.1"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			// Pins the array contract: only the vulnerable element is replaced
+			// and the other pinned versions survive. `mise use` would collapse
+			// the whole array to a scalar, which is why remediation must not
+			// shell out to it.
+			name: "mise update replaces only the vulnerable array element",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.24.3", "1.23.8"]
+`,
+			},
+			wantErr: false,
+		},
+		{
+			// Fail closed: a multi-version array with no known current version
+			// must not be rewritten at all.
+			name: "mise update multi-version array without current version fails",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.22.12", "1.23.8"]
+`,
+			},
+			wantErr: true,
+		},
+		{
+			name: "mise update backend-prefixed tool in hidden manifest",
+			cmd:  "deputy:mise:update .mise.toml npm:lodash 4.17.21 4.17.20",
+			setup: map[string]string{
+				".mise.toml": `[tools]
+"npm:lodash" = "4.17.20"
+`,
+			},
+			want: map[string]string{
+				".mise.toml": `[tools]
+"npm:lodash" = "4.17.21"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			name: "mise update targets nested config path",
+			cmd:  "deputy:mise:update .config/mise/config.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				".config/mise/config.toml": `[tools]
+go = "1.22.12"
+`,
+			},
+			want: map[string]string{
+				".config/mise/config.toml": `[tools]
+go = "1.24.3"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			name: "mise update quoted path with spaces",
+			cmd:  `deputy:mise:update "tool config/mise.toml" go 1.24.3 1.22.12`,
+			setup: map[string]string{
+				"tool config/mise.toml": `[tools]
+go = "1.22.12"
+`,
+			},
+			want: map[string]string{
+				"tool config/mise.toml": `[tools]
+go = "1.24.3"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			// Multiline arrays are a first-class layout for multi-version
+			// pins; the vulnerable element is replaced in place.
+			name: "mise update multiline array element",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = [
+  "1.22.12",
+  "1.23.8",
+]
+node = "20.11.1"
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = [
+  "1.24.3",
+  "1.23.8",
+]
+node = "20.11.1"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			// The corruption regression: an unmatched multiline array must
+			// fail closed with the file byte-identical, never a half-replaced
+			// bracket.
+			name: "mise update multiline array unmatched fails byte-identical",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.21.0",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = [
+  "1.22.12",
+  "1.23.8",
+]
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = [
+  "1.22.12",
+  "1.23.8",
+]
+`,
+			},
+			wantErr: true,
+		},
+		{
+			// Several vulnerable versions in one array: the command carries
+			// every current and each matching element is replaced.
+			name: "mise update replaces every vulnerable array element",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12 1.23.8",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.22.12", "1.23.8", "1.24.0"]
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+go = ["1.24.3", "1.24.3", "1.24.0"]
+`,
+			},
+			wantErr: false,
+		},
+		{
+			// mise's parser accepts root-level dotted keys; the rewriter must
+			// handle what inventory can emit a fix for.
+			name: "mise update root dotted key",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				"mise.toml": `tools.go = "1.22.12"
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `tools.go = "1.24.3"
+`,
+			},
+			wantErr: false,
+		},
+		{
+			name: "mise update tool not declared fails",
+			cmd:  "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			setup: map[string]string{
+				"mise.toml": `[tools]
+node = "20.11.1"
+`,
+			},
+			want: map[string]string{
+				"mise.toml": `[tools]
+node = "20.11.1"
+`,
+			},
+			wantErr: true,
+		},
+		{
+			name:    "invalid mise command (missing args)",
+			cmd:     "deputy:mise:update mise.toml go",
+			wantErr: true,
 		},
 		{
 			name:    "unknown command",
@@ -1014,6 +2335,108 @@ func TestApplyDeputyCommandHonorsContext(t *testing.T) {
 	}
 }
 
+// TestApplyMiseUpdateHonorsContextBeforeEditing pins the deadline for the one
+// opcode that cannot be checked twice. A mise fix is two writes, the config and
+// its sibling lockfile, that only make sense together, and mise's rewriter takes
+// no context, so the check sits ahead of both: an expired deadline costs no
+// filesystem work, and a deadline that expires mid-edit lets the edit finish
+// rather than leaving a config declaring the new version beside a lock entry
+// that still installs the old one.
+//
+// The opcode is therefore absent from TestApplyDeputyCommandHonorsContext, whose
+// table requires a second check before the write. This is the part of that
+// contract mise can keep, and the live control is what keeps the refusals from
+// passing vacuously.
+func TestApplyMiseUpdateHonorsContextBeforeEditing(t *testing.T) {
+	const (
+		config = "[tools]\ngo = \"1.22.12\"\n"
+		lock   = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
+		cmd    = "deputy:mise:update mise.toml go 1.24.3 1.22.12"
+	)
+
+	// workspace lays down a config and its lockfile in a fresh directory.
+	workspace := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		for name, content := range map[string]string{"mise.toml": config, "mise.lock": lock} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+
+	// requireUntouched fails when either half of the fix was published.
+	requireUntouched := func(t *testing.T, dir string) {
+		t.Helper()
+		for name, want := range map[string]string{"mise.toml": config, "mise.lock": lock} {
+			got, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != want {
+				t.Errorf("%s was modified despite a dead context:\n%s", name, got)
+			}
+		}
+	}
+
+	tests := []struct {
+		name string
+		ctx  func(t *testing.T) context.Context
+		want error
+	}{
+		{
+			name: "cancelled context modifies nothing",
+			ctx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				return ctx
+			},
+			want: context.Canceled,
+		},
+		{
+			name: "expired deadline modifies nothing",
+			ctx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithTimeout(t.Context(), -time.Second)
+				t.Cleanup(cancel)
+				return ctx
+			},
+			want: context.DeadlineExceeded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := workspace(t)
+			if err := ApplyDeputyCommand(tt.ctx(t), dir, cmd); !errors.Is(err, tt.want) {
+				t.Fatalf("ApplyDeputyCommand() error = %v, want %v", err, tt.want)
+			}
+			requireUntouched(t, dir)
+		})
+	}
+
+	t.Run("live context applies both halves", func(t *testing.T) {
+		dir := workspace(t)
+		if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
+			t.Fatalf("ApplyDeputyCommand() failed: %v", err)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), "1.24.3") {
+			t.Fatalf("config not rewritten, the refusals above are vacuous:\n%s", got)
+		}
+		locked, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(locked), "1.22.12") {
+			t.Fatalf("the stale lock entry survived, so only half the fix ran:\n%s", locked)
+		}
+	})
+}
+
 // TestDeputyCommandRefusesIrregularTarget pins that a deputy-internal command
 // refuses a target that is not a regular file, and that preflight refuses it on
 // the same terms so a dry run cannot preview a step execution would reject.
@@ -1377,5 +2800,1286 @@ func TestDeputyCommandRefusesInvalidArguments(t *testing.T) {
 				t.Errorf("refused command still rewrote %s to %q", workflow, string(after))
 			}
 		})
+	}
+}
+
+// TestReplaceFileAtomically pins the durability contract for lockfile writes:
+// the file is either its old content or its new content, a failure leaves the
+// original intact rather than a truncated remnant, no temporary file is left
+// behind, and an existing temporary beside the target neither blocks the write
+// nor gets destroyed, since it may be a concurrent apply's in-flight file.
+func TestReplaceFileAtomically(t *testing.T) {
+	t.Parallel()
+
+	const original = "[[tools.go]]\nversion = \"1.22.12\"\n"
+	const replacement = "[[tools.node]]\nversion = \"20.11.0\"\n"
+	// Deliberately the fixed name an earlier implementation cleared before
+	// writing, so reintroducing clear-by-known-name goes red here.
+	const inFlight = ".mise.lock.deputy-tmp"
+
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, dir string)
+		wantErr   bool
+		wantAfter string
+		// wantIntact names a sibling file that must still hold its original
+		// bytes after the call.
+		wantIntact string
+	}{
+		{
+			name:      "replaces content",
+			wantAfter: replacement,
+		},
+		{
+			name: "another apply's temporary is neither reused nor removed",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, inFlight), []byte("in flight"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantAfter:  replacement,
+			wantIntact: inFlight,
+		},
+		{
+			name: "unwritable directory leaves the original intact",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				makeDirUnwritable(t, dir)
+			},
+			wantErr:   true,
+			wantAfter: original,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "mise.lock"), []byte(original), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tt.setup != nil {
+				tt.setup(t, dir)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			err = replaceFileAtomically(root, "mise.lock", []byte(replacement), 0o644)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected an error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("replaceFileAtomically: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tt.wantAfter {
+				t.Errorf("content = %q, want %q", got, tt.wantAfter)
+			}
+			if tt.wantIntact != "" {
+				kept, err := os.ReadFile(filepath.Join(dir, tt.wantIntact))
+				if err != nil {
+					t.Fatalf("%s was removed: %v", tt.wantIntact, err)
+				}
+				if string(kept) != "in flight" {
+					t.Errorf("%s was overwritten: %q", tt.wantIntact, kept)
+				}
+			}
+			// Any temporary this call created must be gone, whatever it was
+			// named; only a pre-existing one may remain.
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				name := entry.Name()
+				if strings.HasPrefix(name, ".mise.lock.deputy-") && name != tt.wantIntact {
+					t.Errorf("temporary file left behind: %s", name)
+				}
+			}
+		})
+	}
+}
+
+// TestReplaceFileAtomicallyPreservesMode pins that publishing a replacement
+// keeps the target's permissions. The temporary is created with the umask
+// applied, so a group-writable lockfile in a shared workspace would come back
+// read-only for the group and the next `mise lock` there would fail. The mode
+// has to be set on the temporary rather than merely requested at creation.
+func TestReplaceFileAtomicallyPreservesMode(t *testing.T) {
+	t.Parallel()
+
+	for _, perm := range []os.FileMode{0o600, 0o644, 0o664, 0o666} {
+		t.Run(perm.String(), func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			lock := filepath.Join(dir, "mise.lock")
+			if err := os.WriteFile(lock, []byte("[[tools.go]]\nversion = \"1.22.12\"\n"), perm); err != nil {
+				t.Fatal(err)
+			}
+			// os.WriteFile is subject to the umask, which is the very thing
+			// under test, so chmod the fixture to the exact mode and confirm
+			// it took before asserting on what replacement does to it.
+			if err := os.Chmod(lock, perm); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.Stat(lock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before.Mode().Perm() != perm {
+				t.Skipf("umask reduced the fixture to %v, cannot test %v", before.Mode().Perm(), perm)
+			}
+
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			if err := replaceFileAtomically(root, "mise.lock", []byte("[[tools.go]]\n"), perm); err != nil {
+				t.Fatalf("replaceFileAtomically: %v", err)
+			}
+			after, err := os.Stat(lock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := after.Mode().Perm(); got != perm {
+				t.Errorf("mode after replacement = %v, want %v", got, perm)
+			}
+		})
+	}
+}
+
+// TestReplaceFileAtomicallyConcurrent pins that two applies pruning the same
+// lockfile cannot corrupt each other. With a shared temporary name one call
+// unlinks the other's open file, refills the name, and has the refill renamed
+// into place mid-write; every call must therefore end with the target holding
+// exactly one caller's complete content and no temporary left over.
+func TestReplaceFileAtomicallyConcurrent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "mise.lock"), []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+
+	const writers = 8
+	contents := make([]string, writers)
+	for i := range contents {
+		contents[i] = strings.Repeat(fmt.Sprintf("writer-%d\n", i), 4096)
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, writers)
+	for i := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = replaceFileAtomically(root, "mise.lock", []byte(contents[i]), 0o644)
+		}()
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("writer %d: %v", i, err)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(contents, string(got)) {
+		t.Errorf("lockfile holds no writer's complete content (%d bytes)", len(got))
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".mise.lock.deputy-") {
+			t.Errorf("temporary file left behind: %s", entry.Name())
+		}
+	}
+}
+
+// TestApplyMiseUpdateSharedConfdLock pins ownership of a lock entry shared by
+// several config fragments. A mise directory's conf.d drop-ins all write to
+// one mise.lock (mise 2026.7.3 names ".config/mise/mise.lock" as the lock
+// target for a tool declared only in a drop-in), so a legacy short-name entry
+// in it may belong to a fragment this fix never opened. Counting claimants in
+// the edited fragment alone reads such an entry as unowned and deletes another
+// declaration's integrity metadata.
+//
+// Pruning and enrichment are checked together, because they have to give the
+// same answer: an entry left in place as contested must also be refused by the
+// extractor, or the fixed tool comes back reporting its old version.
+func TestApplyMiseUpdateSharedConfdLock(t *testing.T) {
+	t.Parallel()
+
+	const legacyLock = `[[tools.foo]]
+version = "1.0.0"
+backend = "ubi:foo"
+
+[tools.foo.platforms.linux-x64]
+checksum = "sha256:legacyfoo"
+`
+	tests := []struct {
+		name     string
+		files    map[string]string
+		wantGone []string
+		wantKept []string
+	}{
+		{
+			// b.toml shares the lockfile and strips to the same short name, so
+			// the legacy entry may be its own.
+			name: "a sibling drop-in contests the short name",
+			files: map[string]string{
+				".config/mise/conf.d/a.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				".config/mise/conf.d/b.toml": "[tools]\n\"ubi:foo\" = \"1.0.0\"\n",
+			},
+			wantKept: []string{"sha256:legacyfoo"},
+		},
+		{
+			// The directory's own config.toml shares the lockfile too.
+			name: "the directory config contests the short name",
+			files: map[string]string{
+				".config/mise/conf.d/a.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				".config/mise/config.toml":   "[tools]\nfoo = \"1.0.0\"\n",
+			},
+			wantKept: []string{"sha256:legacyfoo"},
+		},
+		{
+			// Nothing else claims foo, so the stale entry is the edited tool's
+			// and has to go, or lock resolution hands it its old version back.
+			name: "a lone drop-in owns the short name",
+			files: map[string]string{
+				".config/mise/conf.d/a.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+			},
+			wantGone: []string{"sha256:legacyfoo"},
+		},
+		{
+			// A fragment sharing the lockfile that will not parse is exactly
+			// the one that might have claimed the name.
+			name: "an unparsable sibling is contested, not absent",
+			files: map[string]string{
+				".config/mise/conf.d/a.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				".config/mise/conf.d/b.toml": "[tools\nbroken\n",
+			},
+			wantKept: []string{"sha256:legacyfoo"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			write := func(rel, content string) {
+				t.Helper()
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, content := range tt.files {
+				write(rel, content)
+			}
+			write(".config/mise/mise.lock", legacyLock)
+
+			const configRel = ".config/mise/conf.d/a.toml"
+			cmd := `deputy:mise:update ` + configRel + ` "npm:foo" 1.0.1 1.0.0`
+			if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			lock, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(".config/mise/mise.lock")))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, marker := range tt.wantGone {
+				if strings.Contains(string(lock), marker) {
+					t.Errorf("expected %q to be pruned:\n%s", marker, lock)
+				}
+			}
+			for _, marker := range tt.wantKept {
+				if !strings.Contains(string(lock), marker) {
+					t.Errorf("expected %q to survive:\n%s", marker, lock)
+				}
+			}
+
+			// What the next scan sees. A surviving entry that enrichment still
+			// borrows would report the fixed tool at its old version, which is
+			// the failure pruning was widened to avoid in the first place.
+			fsys := fstest.MapFS{}
+			for rel := range tt.files {
+				data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				fsys[rel] = &fstest.MapFile{Data: data}
+			}
+			fsys[".config/mise/mise.lock"] = &fstest.MapFile{Data: lock}
+			f, err := fsys.Open(configRel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv, err := misex.New().Extract(t.Context(), &filesystem.ScanInput{
+				Path:   configRel,
+				Reader: f,
+				FS:     fsys,
+			})
+			if err != nil {
+				t.Fatalf("Extract: %v", err)
+			}
+			var got string
+			for _, pkg := range inv.Packages {
+				if pkg.Name == "npm:foo" {
+					got = pkg.Version
+				}
+			}
+			if got != "1.0.1" {
+				t.Errorf("extractor reports npm:foo %q after fix, want 1.0.1\nlock:\n%s", got, lock)
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdateSymlinkedSharedLock pins ownership of a lock entry that
+// several config directories share through symlinks. mise resolves a config's
+// lockfile through the link: with a/mise.toml declaring node = "20", b/mise.toml
+// declaring go = "1.22", and both a/mise.lock and b/mise.lock symlinked to one
+// ../shared.lock recording 20.11.0 and 1.22.12, mise 2026.7.3 reports
+//
+//	node  20.11.0 (missing)  /private/tmp/miselink/a/mise.toml  20
+//	go    1.22.12 (missing)  /private/tmp/miselink/b/mise.toml  1.22
+//
+// so the entries in that file belong to two directories at once. Counting
+// claimants by listing the directory beside the link therefore counts the
+// wrong set: the fix publishes its edit through the link to the shared target,
+// where the other config's declaration is the one that loses its integrity
+// metadata.
+func TestApplyMiseUpdateSymlinkedSharedLock(t *testing.T) {
+	t.Parallel()
+
+	const legacyLock = `[[tools.foo]]
+version = "1.0.0"
+backend = "ubi:foo"
+
+[tools.foo.platforms.linux-x64]
+checksum = "sha256:legacyfoo"
+`
+	tests := []struct {
+		name string
+		// files are configs to write, by repository-relative path.
+		files map[string]string
+		// links map a repository-relative lockfile path to the link text it
+		// holds; the shared target is written at sharedLock.
+		links map[string]string
+		// wantKept says the legacy short-name entry must survive because
+		// another config sharing the target could own it.
+		wantKept bool
+	}{
+		{
+			// b/mise.toml resolves to the same lockfile and strips to the same
+			// short name, so the legacy entry may be its own.
+			name: "a config sharing the link target contests the short name",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				"b/mise.toml": "[tools]\n\"ubi:foo\" = \"1.0.0\"\n",
+			},
+			links:    map[string]string{"a/mise.lock": "../shared.lock", "b/mise.lock": "../shared.lock"},
+			wantKept: true,
+		},
+		{
+			// A config beside the target itself claims the name too.
+			name: "the target's own directory contests the short name",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				"mise.toml":   "[tools]\nfoo = \"1.0.0\"\n",
+			},
+			links:    map[string]string{"a/mise.lock": "../mise.lock"},
+			wantKept: true,
+		},
+		{
+			// Nothing else resolves to the target, so the stale entry is the
+			// edited tool's and has to go.
+			name: "a lone config owns the short name",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				"b/mise.toml": "[tools]\n\"ubi:bar\" = \"2.0.0\"\n",
+			},
+			links: map[string]string{"a/mise.lock": "../shared.lock", "b/mise.lock": "../shared.lock"},
+		},
+		{
+			// A config resolving to a different lockfile claims nothing here.
+			name: "a config with its own lockfile does not contest",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				"b/mise.toml": "[tools]\n\"ubi:foo\" = \"1.0.0\"\n",
+			},
+			links: map[string]string{"a/mise.lock": "../shared.lock"},
+		},
+		{
+			// A config sharing the target that will not parse is exactly the
+			// one that might have claimed the name.
+			name: "an unparsable sharing config is contested, not absent",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\n\"npm:foo\" = \"1.0.0\"\n",
+				"b/mise.toml": "[tools\nbroken\n",
+			},
+			links:    map[string]string{"a/mise.lock": "../shared.lock", "b/mise.lock": "../shared.lock"},
+			wantKept: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			write := func(rel, content string) {
+				t.Helper()
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, content := range tt.files {
+				write(rel, content)
+			}
+			// The shared target is named mise.lock so a config beside it
+			// resolves there lexically, which is what makes that directory a
+			// claimant in its own right.
+			target := "shared.lock"
+			if _, ok := tt.files["mise.toml"]; ok {
+				target = "mise.lock"
+			}
+			write(target, legacyLock)
+			for rel, to := range tt.links {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(to), full); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+
+			cmd := `deputy:mise:update a/mise.toml "npm:foo" 1.0.1 1.0.0`
+			if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			lock, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(target)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kept := strings.Contains(string(lock), "sha256:legacyfoo"); kept != tt.wantKept {
+				t.Errorf("legacy entry kept = %v, want %v:\n%s", kept, tt.wantKept, lock)
+			}
+
+			// What the next scan sees. Pruning and enrichment answer "who owns
+			// this name" with the same count, so an entry kept here as
+			// contested must also be one the extractor refuses to borrow;
+			// otherwise the fixed tool comes back reporting its old version.
+			fsys := fstest.MapFS{target: &fstest.MapFile{Data: lock}}
+			for rel := range tt.files {
+				data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				fsys[rel] = &fstest.MapFile{Data: data}
+			}
+			for rel, to := range tt.links {
+				fsys[rel] = &fstest.MapFile{Mode: os.ModeSymlink, Data: []byte(to)}
+			}
+			const configRel = "a/mise.toml"
+			f, err := fsys.Open(configRel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv, err := misex.New().Extract(t.Context(), &filesystem.ScanInput{
+				Path:   configRel,
+				Reader: f,
+				FS:     fsys,
+			})
+			if err != nil {
+				t.Fatalf("Extract: %v", err)
+			}
+			var got string
+			for _, pkg := range inv.Packages {
+				if pkg.Name == "npm:foo" {
+					got = pkg.Version
+				}
+			}
+			if got != "1.0.1" {
+				t.Errorf("extractor reports npm:foo %q after fix, want 1.0.1\nlock:\n%s", got, lock)
+			}
+		})
+	}
+}
+
+// TestApplyDeputyCommandConcurrentEditsBothLand pins that two edits applied at
+// the same time do not overwrite each other. Every deputy: command is a
+// read-modify-write, so without ordering both read the same original bytes,
+// compute independent results, and publish them one over the other: the loser's
+// edit is gone while both applications report success. For a lockfile prune that
+// means a stale entry survives, lock resolution serves it back, and the fix
+// reads as ineffective at the version it just removed.
+//
+// The versions are the ones mise 2026.7.3 resolves for these lines, so the
+// fixtures are edits Deputy could really generate.
+func TestApplyDeputyCommandConcurrentEditsBothLand(t *testing.T) {
+	const sharedLock = `[[tools.node]]
+version = "20.11.0"
+backend = "core:node"
+
+[[tools.go]]
+version = "1.22.12"
+backend = "core:go"
+`
+	tests := []struct {
+		name  string
+		files map[string]string
+		// links maps a link path to its target, relative to the link.
+		links    map[string]string
+		commands []string
+		// present and absent are substrings a file must and must not hold once
+		// both edits have been applied.
+		present map[string][]string
+		absent  map[string][]string
+	}{
+		{
+			name: "two configs sharing one lockfile",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\nnode = \"20.11.0\"\n",
+				"b/mise.toml": "[tools]\ngo = \"1.22.12\"\n",
+				"shared.lock": sharedLock,
+			},
+			links: map[string]string{
+				"a/mise.lock": "../shared.lock",
+				"b/mise.lock": "../shared.lock",
+			},
+			commands: []string{
+				"deputy:mise:update a/mise.toml node 20.19.6 20.11.0",
+				"deputy:mise:update b/mise.toml go 1.24.3 1.22.12",
+			},
+			present: map[string][]string{
+				"a/mise.toml": {"20.19.6"},
+				"b/mise.toml": {"1.24.3"},
+			},
+			absent: map[string][]string{"shared.lock": {"20.11.0", "1.22.12"}},
+		},
+		{
+			name: "two tools in one config",
+			files: map[string]string{
+				"mise.toml": "[tools]\nnode = \"20.11.0\"\ngo = \"1.22.12\"\n",
+				"mise.lock": sharedLock,
+			},
+			commands: []string{
+				"deputy:mise:update mise.toml node 20.19.6 20.11.0",
+				"deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			},
+			present: map[string][]string{"mise.toml": {"20.19.6", "1.24.3"}},
+			absent:  map[string][]string{"mise.lock": {"20.11.0", "1.22.12"}},
+		},
+	}
+
+	// A lost update needs the two applies to overlap, so the case is repeated:
+	// one pass could schedule them apart and pass on a build with no ordering
+	// at all.
+	const rounds = 20
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for range rounds {
+				dir := t.TempDir()
+				for rel, content := range tt.files {
+					full := filepath.Join(dir, filepath.FromSlash(rel))
+					if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for rel, target := range tt.links {
+					full := filepath.Join(dir, filepath.FromSlash(rel))
+					if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Symlink(filepath.FromSlash(target), full); err != nil {
+						t.Skipf("symlinks unavailable: %v", err)
+					}
+				}
+
+				ctx := t.Context()
+				var wg sync.WaitGroup
+				errs := make([]error, len(tt.commands))
+				for i, cmd := range tt.commands {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						errs[i] = ApplyDeputyCommand(ctx, dir, cmd)
+					}()
+				}
+				wg.Wait()
+				for i, err := range errs {
+					if err != nil {
+						t.Fatalf("%s: %v", tt.commands[i], err)
+					}
+				}
+
+				read := func(rel string) string {
+					t.Helper()
+					data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+					if err != nil {
+						t.Fatal(err)
+					}
+					return string(data)
+				}
+				for rel, wants := range tt.present {
+					got := read(rel)
+					for _, want := range wants {
+						if !strings.Contains(got, want) {
+							t.Fatalf("%s lost the edit that writes %q:\n%s", rel, want, got)
+						}
+					}
+				}
+				for rel, unwanted := range tt.absent {
+					got := read(rel)
+					for _, gone := range unwanted {
+						if strings.Contains(got, gone) {
+							t.Fatalf("%s kept %q, so one prune was overwritten:\n%s", rel, gone, got)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdateMatchesGoPrefixedSpellings pins the apply against the Go
+// toolchain's own version vocabulary. mise accepts `go = "go1.24"` and locks
+// the release as 1.24.9, which is the version inventory then reports and the
+// plan is written in, so a matcher that reads "go" as part of the version
+// disagrees with Deputy's own finding: the declaration is refused as some other
+// version ("could not rewrite"), nothing is edited, and the stale lock entry
+// stays to be served back. The mirror case, a lockfile that spells the prefix,
+// leaves an entry the pruner does not recognize as the one it just replaced.
+//
+// Each case asserts the whole fix landed: the config edited, the stale entry
+// gone, and the tool no longer resolving to the version that was replaced.
+func TestApplyMiseUpdateMatchesGoPrefixedSpellings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		config     string
+		lock       string
+		cmd        string
+		wantConfig string
+		// staleMarker must be gone from the lockfile after the apply.
+		staleMarker string
+	}{
+		{
+			// The real combination: mise resolves the go-prefixed selector and
+			// locks the bare release, which is what the plan carries.
+			name:        "go-prefixed selector against a locked release",
+			config:      "[tools]\ngo = \"go1.24\"\n",
+			lock:        "[[tools.go]]\nversion = \"1.24.9\"\nbackend = \"core:go\"\n",
+			cmd:         "deputy:mise:update mise.toml go 1.24.10 1.24.9",
+			wantConfig:  "[tools]\ngo = \"1.24.10\"\n",
+			staleMarker: "1.24.9",
+		},
+		{
+			name:        "go-prefixed exact declaration",
+			config:      "[tools]\ngo = \"go1.24.9\"\n",
+			lock:        "[[tools.go]]\nversion = \"1.24.9\"\nbackend = \"core:go\"\n",
+			cmd:         "deputy:mise:update mise.toml go 1.24.10 1.24.9",
+			wantConfig:  "[tools]\ngo = \"1.24.10\"\n",
+			staleMarker: "1.24.9",
+		},
+		{
+			// The lockfile spells the prefix and the plan does not, so the
+			// pruner has to recognize its own replaced version. Left behind, it
+			// becomes the sole entry and lock resolution hands it straight back.
+			name:        "go-prefixed lock entry",
+			config:      "[tools]\ngo = \"1.24.9\"\n",
+			lock:        "[[tools.go]]\nversion = \"go1.24.9\"\nbackend = \"core:go\"\n",
+			cmd:         "deputy:mise:update mise.toml go 1.24.10 1.24.9",
+			wantConfig:  "[tools]\ngo = \"1.24.10\"\n",
+			staleMarker: "go1.24.9",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for name, content := range map[string]string{"mise.toml": tt.config, "mise.lock": tt.lock} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := ApplyDeputyCommand(t.Context(), dir, tt.cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			config, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(config) != tt.wantConfig {
+				t.Errorf("config mismatch:\n--- got ---\n%s\n--- want ---\n%s", config, tt.wantConfig)
+			}
+			lock, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(lock), tt.staleMarker) {
+				t.Errorf("stale entry %q survived the apply:\n%s", tt.staleMarker, lock)
+			}
+			if got := lockedVersionAfterFix(t, dir, "go", "1.24.10"); got != "" {
+				t.Errorf("fixed tool still resolves to a locked %q:\n%s", got, lock)
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdatePrunesObsoleteLockEntries pins which of a tool's lock
+// entries a fix leaves behind. A lockfile can record versions no finding ever
+// named, and the plan only carries the ones it did, so pruning by the plan alone
+// leaves the rest: for a config that now declares a single version, the last
+// obsolete entry standing is a sole entry, and lock resolution hands a sole
+// entry to a declaration that matched nothing. The fix then reports success
+// while the next scan reads the tool at a version older than the one that was
+// flagged.
+//
+// A declaration that is still multi-version keeps the entries it still asks for,
+// and a key another config claims is still not this fix's to prune.
+func TestApplyMiseUpdatePrunesObsoleteLockEntries(t *testing.T) {
+	t.Parallel()
+
+	entry := func(version, checksum string) string {
+		return "[[tools.go]]\nversion = \"" + version + "\"\nbackend = \"core:go\"\n\n" +
+			"[tools.go.platforms.linux-x64]\nchecksum = \"" + checksum + "\"\n"
+	}
+	const flagged, obsolete = "1.22.12", "1.21.9"
+	lock := entry(flagged, "sha256:flagged") + "\n" + entry(obsolete, "sha256:obsolete")
+
+	tests := []struct {
+		name string
+		// files are written into the repository before the apply.
+		files map[string]string
+		cmd   string
+		// wantGone and wantKept are checksum markers, so a case cannot pass by
+		// deleting an entry and its metadata separately.
+		wantGone []string
+		wantKept []string
+		// links map a symlink path to its target, relative to the link's
+		// directory, for a lockfile two configs write through.
+		links map[string]string
+		// wantResolved is the version lock resolution serves the edited
+		// declaration afterwards; "" means it substitutes nothing.
+		wantResolved string
+	}{
+		{
+			// The reported case: only the flagged version is in the plan, and
+			// the obsolete entry left beside it becomes the sole entry.
+			name: "scalar declaration drops every entry it no longer declares",
+			files: map[string]string{
+				"mise.toml": "[tools]\ngo = \"" + flagged + "\"\n",
+				"mise.lock": lock,
+			},
+			cmd:      "deputy:mise:update mise.toml go 1.24.3 " + flagged,
+			wantGone: []string{"sha256:flagged", "sha256:obsolete"},
+		},
+		{
+			// Still multi-version: the surviving declaration's entry is not
+			// obsolete, and the plan decides on its own.
+			name: "multi-version declaration keeps what it still declares",
+			files: map[string]string{
+				"mise.toml": "[tools]\ngo = [\"" + flagged + "\", \"" + obsolete + "\"]\n",
+				"mise.lock": lock,
+			},
+			cmd:      "deputy:mise:update mise.toml go 1.24.3 " + flagged,
+			wantGone: []string{"sha256:flagged"},
+			wantKept: []string{"sha256:obsolete"},
+			// Not what the fixed declaration should resolve to, and not
+			// pruning's doing: the entry that survives is the one the other
+			// declared version asks for, and mise.Lockfile.Lookup lends a sole
+			// entry to a declaration that matched no version. Recorded so the
+			// day that fallback learns about sibling declarations, this row is
+			// where it shows up.
+			wantResolved: obsolete,
+		},
+		{
+			// Several vulnerable versions replaced by one target leave that
+			// target declared twice, which is still a declaration that needs a
+			// single lock entry. Reading it as "still multi-version" left the
+			// historical entry standing as the only one, and lock resolution
+			// lends a sole entry to a declaration that matched nothing, so the
+			// scan read the fixed tool at a version older than the flagged one.
+			name: "converging array elements are one declared version",
+			files: map[string]string{
+				"mise.toml": "[tools]\ngo = [\"" + flagged + "\", \"1.22.11\"]\n",
+				"mise.lock": lock + "\n" + entry("1.22.11", "sha256:second"),
+			},
+			cmd:      "deputy:mise:update mise.toml go 1.24.3 " + flagged + " 1.22.11",
+			wantGone: []string{"sha256:flagged", "sha256:second", "sha256:obsolete"},
+		},
+		{
+			// Ownership still comes first: a second config declaring the same
+			// key means neither entry is this fix's to remove, and the wider
+			// rule must not talk its way past that.
+			name: "a key another config claims is still left alone",
+			files: map[string]string{
+				"a/mise.toml": "[tools]\ngo = \"" + flagged + "\"\n",
+				"b/mise.toml": "[tools]\ngo = \"" + flagged + "\"\n",
+				"a/mise.lock": lock,
+			},
+			links:    map[string]string{"b/mise.lock": "../a/mise.lock"},
+			cmd:      "deputy:mise:update a/mise.toml go 1.24.3 " + flagged,
+			wantKept: []string{"sha256:flagged", "sha256:obsolete"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			configRel, lockRel := "mise.toml", "mise.lock"
+			for rel, content := range tt.files {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, target := range tt.links {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(target), full); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+			if _, ok := tt.files["a/mise.toml"]; ok {
+				configRel, lockRel = "a/mise.toml", "a/mise.lock"
+			}
+
+			if err := ApplyDeputyCommand(t.Context(), dir, tt.cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+			after, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(lockRel)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, marker := range tt.wantGone {
+				if strings.Contains(string(after), marker) {
+					t.Errorf("expected %q to be pruned:\n%s", marker, after)
+				}
+			}
+			for _, marker := range tt.wantKept {
+				if !strings.Contains(string(after), marker) {
+					t.Errorf("expected %q to survive:\n%s", marker, after)
+				}
+			}
+			if got := lockedVersionForConfig(t, dir, configRel, "go", "1.24.3"); got != tt.wantResolved {
+				t.Errorf("lock resolution serves the fixed tool %q, want %q:\n%s", got, tt.wantResolved, after)
+			}
+		})
+	}
+}
+
+// TestEditGuardsOrderOverlappingTreesOnly pins the granularity of the edit
+// guard. Two edits that could touch one file have to take turns, or one reads
+// the bytes the other is replacing and the loser's change is silently gone; two
+// edits in unrelated working trees have nothing to order, and making them wait
+// is a bottleneck a shared deployment feels, since the server runs a plan's
+// steps through the same function one at a time.
+//
+// Overlap is not just equality of the path as written. A relative spelling, an
+// absolute one, and a symlink into a tree all name that tree, and a nested work
+// directory shares files with the tree above it.
+func TestEditGuardsOrderOverlappingTreesOnly(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "sub")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	other := t.TempDir()
+	linked := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(root, linked); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	relative, err := filepath.Rel(mustGetwd(t), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		// held is taken first; want says whether an edit in second must wait
+		// for it.
+		held, second string
+		wantOrdered  bool
+	}{
+		{name: "the same tree", held: root, second: root, wantOrdered: true},
+		{name: "the same tree spelled with a dot segment", held: root, second: filepath.Join(root, "."), wantOrdered: true},
+		{name: "the same tree through a symlink", held: root, second: linked, wantOrdered: true},
+		{name: "the same tree relative to the working directory", held: root, second: relative, wantOrdered: true},
+		{name: "a directory nested in the held tree", held: root, second: nested, wantOrdered: true},
+		{name: "a tree containing the held one", held: nested, second: root, wantOrdered: true},
+		{name: "an unrelated tree", held: root, second: other},
+		{name: "a tree that does not exist", held: root, second: filepath.Join(other, "missing"), wantOrdered: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			guards := newEditGuards()
+			release := guards.guard(tt.held)
+
+			taken := make(chan func(), 1)
+			go func() { taken <- guards.guard(tt.second) }()
+
+			select {
+			case secondRelease := <-taken:
+				if tt.wantOrdered {
+					t.Fatalf("%s ran while %s was held", tt.second, tt.held)
+				}
+				secondRelease()
+				release()
+			case <-time.After(100 * time.Millisecond):
+				if !tt.wantOrdered {
+					release()
+					t.Fatalf("%s waited for the unrelated %s", tt.second, tt.held)
+				}
+				// Releasing the first must let the waiter through.
+				release()
+				select {
+				case secondRelease := <-taken:
+					secondRelease()
+				case <-time.After(5 * time.Second):
+					t.Fatal("the waiter was never released")
+				}
+			}
+			// Nothing may outlive the edits that needed it.
+			guards.mu.Lock()
+			defer guards.mu.Unlock()
+			if len(guards.held) != 0 {
+				t.Errorf("guards still holding %v", guards.held)
+			}
+		})
+	}
+}
+
+// mustGetwd returns the process's working directory or fails the test.
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
+}
+
+// TestApplyDeputyCommandRunsUnrelatedTreesConcurrently pins the guard's effect
+// on the command itself: an apply to one working tree must not be held up by an
+// edit in flight against an unrelated one, which is what a daemon serving
+// several tenants does all day.
+func TestApplyDeputyCommandRunsUnrelatedTreesConcurrently(t *testing.T) {
+	tree := func() string {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "mise.toml"), []byte("[tools]\ngo = \"1.22.12\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	busy, independent := tree(), tree()
+
+	// Stand in for a slow apply in the first tree: hold its guard for the
+	// duration, as an in-flight edit does.
+	release := fileEdits.guard(busy)
+	defer release()
+
+	ctx := t.Context()
+	done := make(chan error, 1)
+	go func() {
+		done <- ApplyDeputyCommand(ctx, independent, "deputy:mise:update mise.toml go 1.24.3 1.22.12")
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("apply to the independent tree: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("an apply to an independent tree waited for an edit in another tree")
+	}
+	got, err := os.ReadFile(filepath.Join(independent, "mise.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "1.24.3") {
+		t.Errorf("independent tree was not edited:\n%s", got)
+	}
+}
+
+// TestApplyMiseUpdateWithUnknownOwnership pins the direction the lockfile half
+// of a fix fails in when ownership cannot be established. Nothing is pruned:
+// both readers of a lockfile answer an unresolved claimant count by setting the
+// whole lockfile aside, so an entry left standing cannot be served back to the
+// declaration that was just fixed, while an entry deleted on the guess takes
+// with it the checksums a config nobody edited still installs from.
+//
+// The config edit still lands, and the scan still reports the fixed version,
+// which is the evidence that withholding the prune costs the fix nothing here.
+func TestApplyMiseUpdateWithUnknownOwnership(t *testing.T) {
+	t.Parallel()
+
+	const declaration = "[tools]\ngo = \"1.22.12\"\n"
+	const lock = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n\n" +
+		"[tools.go.platforms.linux-x64]\nchecksum = \"sha256:shared\"\n"
+
+	tests := []struct {
+		name  string
+		files map[string]string
+		links map[string]string
+	}{
+		{
+			// A config sharing the lockfile cannot be parsed, so its
+			// declarations, which may well include this tool, cannot be counted.
+			name: "a config sharing the lockfile cannot be parsed",
+			files: map[string]string{
+				"a/mise.toml": declaration,
+				"a/mise.lock": lock,
+				"b/mise.toml": declaration,
+				"c/mise.toml": "[tools\nbroken\n",
+			},
+			links: map[string]string{
+				"b/mise.lock": "../a/mise.lock",
+				"c/mise.lock": "../a/mise.lock",
+			},
+		},
+		{
+			// A candidate's lock link loops, so resolution stops before learning
+			// where it lands, which may be this very file.
+			name: "a candidate's lock links loop",
+			files: map[string]string{
+				"a/mise.toml": declaration,
+				"a/mise.lock": lock,
+				"b/mise.toml": declaration,
+			},
+			links: map[string]string{
+				"b/mise.lock":  "other.lock",
+				"b/other.lock": "mise.lock",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for rel, content := range tt.files {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, target := range tt.links {
+				full := filepath.Join(dir, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.FromSlash(target), full); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+			// The premise: ownership really is unresolvable here.
+			if _, err := mise.LockClaims(os.DirFS(dir), "a/mise.toml"); err == nil {
+				t.Fatal("expected ownership to be unresolvable in this layout")
+			}
+
+			if err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update a/mise.toml go 1.24.3 1.22.12"); err != nil {
+				t.Fatalf("ApplyDeputyCommand: %v", err)
+			}
+
+			config, err := os.ReadFile(filepath.Join(dir, "a", "mise.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(config), "1.24.3") {
+				t.Errorf("the config edit did not land:\n%s", config)
+			}
+			after, err := os.ReadFile(filepath.Join(dir, "a", "mise.lock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(after), "sha256:shared") {
+				t.Errorf("pruned a lock entry on unresolved ownership:\n%q", after)
+			}
+			// And the fix is not ineffective for it: with ownership unresolved
+			// the lockfile is set aside, so the scan reports the declaration.
+			if got := scannedVersion(t, dir, "a/mise.toml", "go"); got != "1.24.3" {
+				t.Errorf("the extractor reports go %q after the fix, want 1.24.3", got)
+			}
+		})
+	}
+}
+
+// scannedVersion reports the version the mise extractor reads for a tool,
+// against the repository as it now stands. It is what the next scan sees, so a
+// test can tell "the entry survived" from "the entry came back as a finding".
+func scannedVersion(t *testing.T, dir, configRel, tool string) string {
+	t.Helper()
+
+	fsys, ok := os.DirFS(dir).(scalibrfs.FS)
+	if !ok {
+		t.Fatal("os.DirFS does not satisfy the scan filesystem")
+	}
+	f, err := fsys.Open(configRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, err := misex.New().Extract(t.Context(), &filesystem.ScanInput{Path: configRel, Reader: f, FS: fsys})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	for _, pkg := range inv.Packages {
+		if pkg.Name == tool {
+			return pkg.Version
+		}
+	}
+	t.Fatalf("the extractor reported no package for %q", tool)
+	return ""
+}
+
+// TestSafeJoinPathBoundary pins containment on the path component rather than on
+// the text. Two dots begin a legitimate directory name: Kubernetes projects a
+// secret or configmap into "..data", so a repository scanned from such a mount
+// declares "..data/mise.toml", and a prefix test made Deputy refuse the fix
+// command it had itself generated for a config it had itself scanned.
+//
+// The other direction has to keep holding, so every genuine escape is here too:
+// containment is the reason this function exists.
+func TestSafeJoinPathBoundary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		rel  string
+		// wantRel is the path, relative to the base, that the call must return;
+		// empty means the call must be refused.
+		wantRel string
+	}{
+		{name: "an ordinary file", rel: "mise.toml", wantRel: "mise.toml"},
+		{name: "a nested file", rel: "sub/mise.toml", wantRel: "sub/mise.toml"},
+		{name: "a projected mount directory", rel: "..data/mise.toml", wantRel: "..data/mise.toml"},
+		{name: "a directory named with two dots", rel: "..config/tools/mise.toml", wantRel: "..config/tools/mise.toml"},
+		{name: "a file named with two dots", rel: "..mise.toml", wantRel: "..mise.toml"},
+		{name: "a dot segment that stays inside", rel: "sub/../mise.toml", wantRel: "mise.toml"},
+		{name: "a projected mount reached through a dot segment", rel: "sub/../..data/mise.toml", wantRel: "..data/mise.toml"},
+
+		{name: "the parent directory", rel: ".."},
+		{name: "a parent-relative file", rel: "../escape.toml"},
+		{name: "a deeper escape", rel: "../../escape.toml"},
+		{name: "an escape through an interior dot segment", rel: "sub/../../escape.toml"},
+		{name: "an escape into a two-dot directory outside", rel: "../..data/mise.toml"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			base := t.TempDir()
+			got, err := safeJoinPath(base, tt.rel)
+			if tt.wantRel == "" {
+				if err == nil {
+					t.Fatalf("safeJoinPath(%q) = %q, want a refusal", tt.rel, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("safeJoinPath(%q): %v", tt.rel, err)
+			}
+			// The base is compared after symlink resolution, since a temporary
+			// directory may itself be reached through one.
+			realBase, err := filepath.EvalSymlinks(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := filepath.Join(realBase, filepath.FromSlash(tt.wantRel)); got != want {
+				t.Errorf("safeJoinPath(%q) = %q, want %q", tt.rel, got, want)
+			}
+		})
+	}
+}
+
+// TestApplyMiseUpdateInProjectedMount pins the end of that story: a config in a
+// "..data" mount is one Deputy scans, so the fix it generates for it has to
+// apply. The command names the config exactly as the scan reported it.
+func TestApplyMiseUpdateInProjectedMount(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	mount := filepath.Join(dir, "..data")
+	if err := os.MkdirAll(mount, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mount, "mise.toml"), []byte("[tools]\ngo = \"1.22.12\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mount, "mise.lock"), []byte("[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update ..data/mise.toml go 1.24.3 1.22.12"); err != nil {
+		t.Fatalf("ApplyDeputyCommand: %v", err)
+	}
+	config, err := os.ReadFile(filepath.Join(mount, "mise.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(config), "1.24.3") {
+		t.Errorf("the config in the projected mount was not updated:\n%s", config)
+	}
+	// The lockfile half of the fix has to reach the mount too.
+	lock, err := os.ReadFile(filepath.Join(mount, "mise.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(lock), "1.22.12") {
+		t.Errorf("the stale lock entry survived in the projected mount:\n%s", lock)
 	}
 }

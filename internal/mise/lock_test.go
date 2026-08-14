@@ -1,6 +1,15 @@
 package mise
 
-import "testing"
+import (
+	"errors"
+	"io/fs"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"testing"
+	"testing/fstest"
+)
 
 const sampleLock = `
 [[tools.node]]
@@ -139,13 +148,761 @@ version = "3.12.3"
 		t.Fatalf("ParseLock: %v", err)
 	}
 
-	if got := lf.Lookup(ToolSpec{Name: "python", Key: "python"}, "3.11.9"); got == nil || got.Version != "3.11.9" {
+	if got := lf.Lookup(ToolSpec{Name: "python", Key: "python"}, "3.11.9", nil); got == nil || got.Version != "3.11.9" {
 		t.Fatalf("exact lookup = %+v, want 3.11.9", got)
 	}
-	if got := lf.Lookup(ToolSpec{Name: "python", Key: "python"}, "3"); got != nil {
+	if got := lf.Lookup(ToolSpec{Name: "python", Key: "python"}, "3", nil); got != nil {
 		t.Fatalf("ambiguous fuzzy lookup = %+v, want nil", got)
 	}
 	if got := lf.Sole("python"); got != nil {
 		t.Fatalf("Sole(python) = %+v, want nil for multiple entries", got)
+	}
+}
+
+// TestLockfileLookupContestedName pins that the sole-entry fallback needs an
+// uncontested claim, the literal key included. The fallback is a guess: it
+// hands a declaration an entry whose version it never asked for, which is only
+// defensible when no other declaration could have put that entry there. Two
+// conf.d fragments sharing a lockfile can declare the same key, and lending one
+// fragment the other's entry reports a version that fragment does not declare,
+// which after a fix reads as the vulnerable version coming back.
+//
+// An exact version match stays available for the literal key: an entry keyed by
+// exactly what a declaration spells, at exactly the version it spells, is that
+// declaration's however many others share the name.
+func TestLockfileLookupContestedName(t *testing.T) {
+	const data = `
+[[tools.go]]
+version = "1.23.4"
+
+[[tools."npm:foo"]]
+version = "1.0.0"
+`
+	lf, err := ParseLock("mise.lock", []byte(data))
+	if err != nil {
+		t.Fatalf("ParseLock: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		spec    ToolSpec
+		request string
+		claims  map[string]int
+		want    string // "" means no entry may be borrowed
+	}{
+		{
+			name:    "sole entry serves an uncontested literal key",
+			spec:    ToolSpec{Name: "go", Key: "go"},
+			request: "1.22",
+			claims:  map[string]int{"go": 1},
+			want:    "1.23.4",
+		},
+		{
+			name:    "sole entry is refused for a contested literal key",
+			spec:    ToolSpec{Name: "go", Key: "go"},
+			request: "1.22",
+			claims:  map[string]int{"go": 2},
+			want:    "",
+		},
+		{
+			name:    "exact match survives a contested literal key",
+			spec:    ToolSpec{Name: "go", Key: "go"},
+			request: "1.23.4",
+			claims:  map[string]int{"go": 2},
+			want:    "1.23.4",
+		},
+		{
+			name:    "sole entry is refused for a contested short name",
+			spec:    ToolSpec{Name: "foo", Key: "ubi:foo"},
+			request: "1",
+			claims:  map[string]int{"foo": 2, "npm:foo": 1, "ubi:foo": 1},
+			want:    "",
+		},
+		{
+			name:    "no claims recorded leaves the fallback open",
+			spec:    ToolSpec{Name: "go", Key: "go"},
+			request: "1.22",
+			claims:  nil,
+			want:    "1.23.4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lf.Lookup(tt.spec, tt.request, tt.claims)
+			switch {
+			case tt.want == "":
+				if got != nil {
+					t.Fatalf("Lookup = %q, want no entry", got.Version)
+				}
+			case got == nil:
+				t.Fatalf("Lookup = nil, want %q", tt.want)
+			case got.Version != tt.want:
+				t.Fatalf("Lookup = %q, want %q", got.Version, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfigsSharingLock pins which configs mise merges into one lockfile.
+// mise 2026.7.3 reports ".config/mise/mise.lock" as the lock target for a tool
+// declared only in ".config/mise/conf.d/b.toml", so a mise directory's
+// config.toml and every drop-in beside it share one file, while an
+// environment-specific config next to them locks somewhere else.
+func TestConfigsSharingLock(t *testing.T) {
+	const decl = "[tools]\ngo = \"1.22.12\"\n"
+	files := fstest.MapFS{
+		".config/mise/config.toml":            {Data: []byte(decl)},
+		".config/mise/config.production.toml": {Data: []byte(decl)},
+		".config/mise/conf.d/a.toml":          {Data: []byte(decl)},
+		".config/mise/conf.d/b.toml":          {Data: []byte(decl)},
+		".config/mise/notes.md":               {Data: []byte("not a config")},
+		"repo/mise.toml":                      {Data: []byte(decl)},
+		"repo/.mise.toml":                     {Data: []byte(decl)},
+		"repo/mise.staging.toml":              {Data: []byte(decl)},
+		"repo/pyproject.toml":                 {Data: []byte("[project]\n")},
+		"repo/.tool-versions":                 {Data: []byte("golang 1.22.12\n")},
+	}
+	tests := []struct {
+		name       string
+		configPath string
+		want       []string
+	}{
+		{
+			name:       "a drop-in shares with its siblings and the directory config",
+			configPath: ".config/mise/conf.d/a.toml",
+			want: []string{
+				".config/mise/conf.d/a.toml",
+				".config/mise/conf.d/b.toml",
+				".config/mise/config.toml",
+			},
+		},
+		{
+			name:       "the directory config shares with its drop-ins",
+			configPath: ".config/mise/config.toml",
+			want: []string{
+				".config/mise/conf.d/a.toml",
+				".config/mise/conf.d/b.toml",
+				".config/mise/config.toml",
+			},
+		},
+		{
+			// config.production.toml locks to mise.production.lock, so the
+			// drop-ins are not its business.
+			name:       "an environment config keeps its own lockfile",
+			configPath: ".config/mise/config.production.toml",
+			want:       []string{".config/mise/config.production.toml"},
+		},
+		{
+			// Both spellings of the flat config name the same mise.lock.
+			name:       "the dotted and undotted flat configs share",
+			configPath: "repo/mise.toml",
+			want:       []string{"repo/.mise.toml", "repo/mise.toml"},
+		},
+		{
+			name:       "a non-TOML config has no lockfile",
+			configPath: "repo/.tool-versions",
+			want:       nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ConfigsSharingLock(files, tt.configPath)
+			if err != nil {
+				t.Fatalf("ConfigsSharingLock: %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("ConfigsSharingLock(%q) = %q, want %q", tt.configPath, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfigsSharingLockFollowsLinks pins that a lockfile's identity, not its
+// path, decides who shares it. mise reads a config's lockfile through a
+// symlink: with "a/mise.toml" declaring node = "20", "b/mise.toml" declaring
+// go = "1.22", and both "a/mise.lock" and "b/mise.lock" linked to one
+// "shared.lock" recording 20.11.0 and 1.22.12, mise 2026.7.3 reports
+//
+//	node  20.11.0 (missing)  /private/tmp/miselink/a/mise.toml  20
+//	go    1.22.12 (missing)  /private/tmp/miselink/b/mise.toml  1.22
+//
+// so both directories' declarations claim entries in that one file, and a fix
+// to either publishes through the link to it.
+func TestConfigsSharingLockFollowsLinks(t *testing.T) {
+	const decl = "[tools]\ngo = \"1.22.12\"\n"
+	link := func(to string) *fstest.MapFile {
+		return &fstest.MapFile{Mode: fs.ModeSymlink, Data: []byte(to)}
+	}
+	files := fstest.MapFS{
+		"shared.lock":     {Data: []byte("")},
+		"a/mise.toml":     {Data: []byte(decl)},
+		"a/mise.lock":     link("../shared.lock"),
+		"b/mise.toml":     {Data: []byte(decl)},
+		"b/mise.lock":     link("../shared.lock"),
+		"c/mise.toml":     {Data: []byte(decl)},
+		"c/mise.lock":     link("../b/mise.lock"),
+		"own/mise.toml":   {Data: []byte(decl)},
+		"own/mise.lock":   {Data: []byte("")},
+		"plain/mise.toml": {Data: []byte(decl)},
+		// host holds a regular lockfile that guest links into, so sharing has
+		// to be visible from the host side too.
+		"host/mise.toml":  {Data: []byte(decl)},
+		"host/mise.lock":  {Data: []byte("")},
+		"guest/mise.toml": {Data: []byte(decl)},
+		"guest/mise.lock": link("../host/mise.lock"),
+	}
+	tests := []struct {
+		name       string
+		configPath string
+		want       []string
+	}{
+		{
+			// Every config whose lockfile resolves to shared.lock, including
+			// the one that gets there through a second link.
+			name:       "configs linked to one target share it",
+			configPath: "a/mise.toml",
+			want:       []string{"a/mise.toml", "b/mise.toml", "c/mise.toml"},
+		},
+		{
+			name:       "a chained link lands on the same target",
+			configPath: "c/mise.toml",
+			want:       []string{"a/mise.toml", "b/mise.toml", "c/mise.toml"},
+		},
+		{
+			// A regular lockfile at its own path is nobody else's.
+			name:       "a config with its own lockfile shares with nobody",
+			configPath: "own/mise.toml",
+			want:       []string{"own/mise.toml"},
+		},
+		{
+			// A lockfile that does not exist yet still resolves to its own
+			// path, so the config is alone rather than an error.
+			name:       "a config with no lockfile yet shares with nobody",
+			configPath: "plain/mise.toml",
+			want:       []string{"plain/mise.toml"},
+		},
+		{
+			// Sharing is a property of the file, so it reads the same from
+			// either end of the link. Starting at the host, whose lockfile is
+			// an ordinary file, the guest linking into it is still a claimant:
+			// a fix to the host publishes to the file the guest reads.
+			name:       "a regular lockfile is shared with whoever links into it",
+			configPath: "host/mise.toml",
+			want:       []string{"guest/mise.toml", "host/mise.toml"},
+		},
+		{
+			name:       "the linking config sees the same set",
+			configPath: "guest/mise.toml",
+			want:       []string{"guest/mise.toml", "host/mise.toml"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ConfigsSharingLock(files, tt.configPath)
+			if err != nil {
+				t.Fatalf("ConfigsSharingLock: %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("ConfigsSharingLock(%q) = %q, want %q", tt.configPath, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestResolveLinkedPath pins the resolution both the lockfile reader and the
+// lockfile writer share. A link that leaves the tree, or one that never lands,
+// is refused rather than followed, so neither side can be talked into reading
+// or publishing outside the repository being scanned.
+func TestResolveLinkedPath(t *testing.T) {
+	link := func(to string) *fstest.MapFile {
+		return &fstest.MapFile{Mode: fs.ModeSymlink, Data: []byte(to)}
+	}
+	files := fstest.MapFS{
+		"shared.lock":  {Data: []byte("")},
+		"a/mise.lock":  link("../shared.lock"),
+		"b/mise.lock":  link("../a/mise.lock"),
+		"abs.lock":     link("/etc/passwd"),
+		"escape.lock":  link("../../outside.lock"),
+		"cycle.lock":   link("cycle2.lock"),
+		"cycle2.lock":  link("cycle.lock"),
+		"regular.lock": {Data: []byte("")},
+	}
+	tests := []struct {
+		name       string
+		path       string
+		want       string
+		wantLinked bool
+		wantErr    bool
+	}{
+		{name: "a regular file is itself", path: "regular.lock", want: "regular.lock"},
+		{name: "a missing file is itself", path: "absent.lock", want: "absent.lock"},
+		{name: "one hop", path: "a/mise.lock", want: "shared.lock", wantLinked: true},
+		{name: "a chain", path: "b/mise.lock", want: "shared.lock", wantLinked: true},
+		{name: "an absolute target is refused", path: "abs.lock", wantErr: true},
+		{name: "a target outside the tree is refused", path: "escape.lock", wantErr: true},
+		{name: "a cycle is refused", path: "cycle.lock", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, linked, err := ResolveLinkedPath(files, tt.path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ResolveLinkedPath(%q) = %q, want an error", tt.path, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveLinkedPath(%q): %v", tt.path, err)
+			}
+			if got != tt.want || linked != tt.wantLinked {
+				t.Errorf("ResolveLinkedPath(%q) = (%q, %v), want (%q, %v)", tt.path, got, linked, tt.want, tt.wantLinked)
+			}
+		})
+	}
+}
+
+// TestLockClaims pins that ownership of a shared lock entry is counted over
+// every config sharing the lockfile. Counting only the fragment being read
+// makes a name look uncontested when a fragment beside it claims it too, and
+// the entry then gets lent to one declaration and pruned while fixing another.
+func TestLockClaims(t *testing.T) {
+	tests := []struct {
+		name    string
+		files   fstest.MapFS
+		config  string
+		want    map[string]int
+		wantErr bool
+	}{
+		{
+			name: "claims from a sibling drop-in contest the short name",
+			files: fstest.MapFS{
+				".config/mise/conf.d/a.toml": {Data: []byte("[tools]\n\"npm:foo\" = \"1.0.0\"\n")},
+				".config/mise/conf.d/b.toml": {Data: []byte("[tools]\n\"ubi:foo\" = \"2.0.0\"\n")},
+			},
+			config: ".config/mise/conf.d/a.toml",
+			want:   map[string]int{"npm:foo": 1, "ubi:foo": 1, "foo": 2},
+		},
+		{
+			name: "claims from the directory config contest the short name",
+			files: fstest.MapFS{
+				".config/mise/config.toml":   {Data: []byte("[tools]\nfoo = \"2.0.0\"\n")},
+				".config/mise/conf.d/a.toml": {Data: []byte("[tools]\n\"npm:foo\" = \"1.0.0\"\n")},
+			},
+			config: ".config/mise/conf.d/a.toml",
+			want:   map[string]int{"npm:foo": 1, "foo": 2},
+		},
+		{
+			name: "a lone drop-in owns its short name",
+			files: fstest.MapFS{
+				".config/mise/conf.d/a.toml": {Data: []byte("[tools]\n\"npm:foo\" = \"1.0.0\"\n")},
+			},
+			config: ".config/mise/conf.d/a.toml",
+			want:   map[string]int{"npm:foo": 1, "foo": 1},
+		},
+		{
+			// A config that will not parse is exactly the one whose
+			// declarations might have contested the name, so its absence from
+			// the count is not a reason to treat the name as owned.
+			name: "an unparsable sharing config is an error",
+			files: fstest.MapFS{
+				".config/mise/conf.d/a.toml": {Data: []byte("[tools]\n\"npm:foo\" = \"1.0.0\"\n")},
+				".config/mise/conf.d/b.toml": {Data: []byte("[tools\nbroken\n")},
+			},
+			config:  ".config/mise/conf.d/a.toml",
+			wantErr: true,
+		},
+		{
+			name:    "no filesystem is an error, not an empty count",
+			files:   nil,
+			config:  ".config/mise/conf.d/a.toml",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fsys fs.FS
+			if tt.files != nil {
+				fsys = tt.files
+			}
+			got, err := LockClaims(fsys, tt.config)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("LockClaims(%q) = %v, want an error", tt.config, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LockClaims: %v", err)
+			}
+			if !maps.Equal(got, tt.want) {
+				t.Errorf("LockClaims(%q) = %v, want %v", tt.config, got, tt.want)
+			}
+		})
+	}
+}
+
+// countingFS reports how many directory listings a caller made, so a test can
+// tell one walk of the tree from one walk per config.
+type countingFS struct {
+	fstest.MapFS
+	reads *int
+}
+
+// ReadDir counts the listing and forwards it.
+func (c countingFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	*c.reads++
+	return c.MapFS.ReadDir(name)
+}
+
+// TestLockScopeEnumeratesOnce pins that a scope pays for the enumeration of a
+// filesystem's configs once however many configs are asked about. Deciding who
+// shares a lockfile requires knowing every config in the tree, since a lockfile
+// link can come from any directory, and a walk per config would make a scan of
+// N configs walk the tree N times.
+func TestLockScopeEnumeratesOnce(t *testing.T) {
+	const decl = "[tools]\ngo = \"1.22.12\"\n"
+	files := fstest.MapFS{
+		"a/mise.toml": {Data: []byte(decl)},
+		"a/mise.lock": {Data: []byte("")},
+		"b/mise.toml": {Data: []byte(decl)},
+		"b/mise.lock": {Data: []byte("")},
+		"c/mise.toml": {Data: []byte(decl)},
+		"c/mise.lock": {Data: []byte("")},
+	}
+	configs := []string{"a/mise.toml", "b/mise.toml", "c/mise.toml"}
+
+	// One scope, every config: the tree is listed once and each config's own
+	// counts are memoized under the lockfile they belong to.
+	scopeReads := 0
+	scope := NewLockScope(countingFS{MapFS: files, reads: &scopeReads})
+	for _, cfgPath := range configs {
+		if _, err := scope.Claims(cfgPath); err != nil {
+			t.Fatalf("Claims(%q): %v", cfgPath, err)
+		}
+	}
+	if scopeReads == 0 {
+		t.Fatal("the scope never listed the tree, so it cannot have enumerated the configs")
+	}
+	// Asking again costs nothing.
+	before := scopeReads
+	if _, err := scope.Claims(configs[0]); err != nil {
+		t.Fatalf("Claims(%q): %v", configs[0], err)
+	}
+	if scopeReads != before {
+		t.Errorf("a repeated question relisted the tree: %d listings, want %d", scopeReads, before)
+	}
+
+	// The one-shot function builds a scope per call, so it pays per config.
+	// That is the cost the scope exists to collapse.
+	oneShotReads := 0
+	oneShot := countingFS{MapFS: files, reads: &oneShotReads}
+	for _, cfgPath := range configs {
+		if _, err := LockClaims(oneShot, cfgPath); err != nil {
+			t.Fatalf("LockClaims(%q): %v", cfgPath, err)
+		}
+	}
+	if oneShotReads != scopeReads*len(configs) {
+		t.Errorf("one-shot listings = %d, want %d (%d per config)", oneShotReads, scopeReads*len(configs), scopeReads)
+	}
+}
+
+// TestLockScopeClaimsAreSharedPerLockfile pins that the configs locking into one
+// file get one set of counts. A mise directory's drop-ins all write to one
+// mise.lock, so the answer is a property of the lockfile, and parsing them once
+// per drop-in would read the same declarations over again.
+func TestLockScopeClaimsAreSharedPerLockfile(t *testing.T) {
+	files := fstest.MapFS{
+		".config/mise/config.toml":   {Data: []byte("[tools]\n\"npm:foo\" = \"1.0.0\"\n")},
+		".config/mise/mise.lock":     {Data: []byte("")},
+		".config/mise/conf.d/a.toml": {Data: []byte("[tools]\n\"ubi:foo\" = \"1.0.0\"\n")},
+	}
+	scope := NewLockScope(files)
+	first, err := scope.Claims(".config/mise/config.toml")
+	if err != nil {
+		t.Fatalf("Claims: %v", err)
+	}
+	second, err := scope.Claims(".config/mise/conf.d/a.toml")
+	if err != nil {
+		t.Fatalf("Claims: %v", err)
+	}
+	if first["foo"] != 2 {
+		t.Errorf("claims[foo] = %d, want 2: both fragments claim the legacy name", first["foo"])
+	}
+	if !maps.Equal(first, second) {
+		t.Errorf("the drop-in got different counts: %v vs %v", second, first)
+	}
+}
+
+// TestLockClaimsSeparatesRefusalFromFailure pins which unresolvable candidate
+// stops ownership discovery and which one is simply not a claimant. A candidate
+// whose lock path leaves the tree locks somewhere Deputy does not scan, so it
+// cannot be locking into the file being asked about; treating that refusal as a
+// failure let one config's link erase ownership for the whole repository, and
+// both readers of a lockfile answer unresolved ownership by setting the lockfile
+// aside, so every scan lost its exact locked versions and checksums.
+//
+// A candidate Deputy could not read is the opposite statement and stays
+// fail-closed, a chain too long to walk included: resolution stopped before
+// learning where it ends, and it could still have ended on this very file.
+func TestLockClaimsSeparatesRefusalFromFailure(t *testing.T) {
+	const goDecl = "[tools]\ngo = \"1.24\"\n"
+	const nodeDecl = "[tools]\nnode = \"20\"\n"
+	link := func(to string) *fstest.MapFile {
+		return &fstest.MapFile{Mode: fs.ModeSymlink, Data: []byte(to)}
+	}
+
+	tests := []struct {
+		name    string
+		files   fstest.MapFS
+		config  string
+		want    map[string]int
+		wantErr bool
+	}{
+		{
+			name: "a candidate linking to an absolute path is not a claimant",
+			files: fstest.MapFS{
+				"a/mise.toml": {Data: []byte(goDecl)},
+				"a/mise.lock": {Data: []byte("")},
+				"b/mise.toml": {Data: []byte(nodeDecl)},
+				"b/mise.lock": link("/etc/mise.lock"),
+			},
+			config: "a/mise.toml",
+			want:   map[string]int{"go": 1},
+		},
+		{
+			name: "a candidate linking above the root is not a claimant",
+			files: fstest.MapFS{
+				"a/mise.toml": {Data: []byte(goDecl)},
+				"a/mise.lock": {Data: []byte("")},
+				"b/mise.toml": {Data: []byte(nodeDecl)},
+				"b/mise.lock": link("../../outside.lock"),
+			},
+			config: "a/mise.toml",
+			want:   map[string]int{"go": 1},
+		},
+		{
+			// The skip is about where a candidate locks, not about ignoring
+			// links: one that lands on this config's lockfile still claims it.
+			name: "a candidate linking to this lockfile is a claimant",
+			files: fstest.MapFS{
+				"a/mise.toml": {Data: []byte(goDecl)},
+				"a/mise.lock": {Data: []byte("")},
+				"b/mise.toml": {Data: []byte(goDecl)},
+				"b/mise.lock": link("../a/mise.lock"),
+			},
+			config: "a/mise.toml",
+			want:   map[string]int{"go": 2},
+		},
+		{
+			// Resolution stopped before it learned where this chain ends, so
+			// nothing about it rules out this lockfile.
+			name: "a candidate whose links loop is an error",
+			files: fstest.MapFS{
+				"a/mise.toml":  {Data: []byte(goDecl)},
+				"a/mise.lock":  {Data: []byte("")},
+				"b/mise.toml":  {Data: []byte(nodeDecl)},
+				"b/mise.lock":  link("other.lock"),
+				"b/other.lock": link("mise.lock"),
+			},
+			config:  "a/mise.toml",
+			wantErr: true,
+		},
+		{
+			// The config being asked about is held to the strict rule: a
+			// lockfile outside the tree has no in-tree claimants to count.
+			name: "the examined config's own escaping link is an error",
+			files: fstest.MapFS{
+				"a/mise.toml": {Data: []byte(goDecl)},
+				"a/mise.lock": link("/etc/mise.lock"),
+				"b/mise.toml": {Data: []byte(nodeDecl)},
+				"b/mise.lock": {Data: []byte("")},
+			},
+			config:  "a/mise.toml",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LockClaims(tt.files, tt.config)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("LockClaims(%q) = %v, want an error", tt.config, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LockClaims(%q): %v", tt.config, err)
+			}
+			if !maps.Equal(got, tt.want) {
+				t.Errorf("LockClaims(%q) = %v, want %v", tt.config, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestLockOwnershipRefusesToReadOutsideTheTree pins the containment of every
+// read that answers "who owns this lock entry". The enumeration lists a
+// symlinked config without following it, and the scan filesystem is an
+// os.DirFS, which is not a containment boundary: an open through it follows a
+// symlink wherever it points, absolute paths included. A checkout can therefore
+// name a host file from a config path that shares the queried lockfile, and
+// counting claimants would read it, parse it as TOML, and count its
+// declarations. That is a host file read on behalf of an untrusted repository,
+// which the scanning invariants forbid whatever the file turns out to contain.
+//
+// Refusing is also the fail-closed answer for ownership: a config Deputy may
+// not read hides declarations that would have contested a name, so the lockfile
+// is set aside rather than read permissively.
+//
+// The escaping config is named ".mise.toml" because [LockfilePath] drops a
+// leading dot, which is what makes it share "mise.lock" with the config being
+// scanned.
+func TestLockOwnershipRefusesToReadOutsideTheTree(t *testing.T) {
+	t.Parallel()
+
+	// The sentinel is a tool name only the out-of-tree file declares, so a
+	// claim counted under it proves the read happened.
+	const outsideDecl = "[tools]\nleaked = \"1.0.0\"\n"
+
+	tests := []struct {
+		name string
+		// files are written inside the tree. links are created inside it with
+		// the target written verbatim, and "OUTSIDE" in a target stands for the
+		// out-of-tree file's absolute path.
+		files  map[string]string
+		links  map[string]string
+		config string
+	}{
+		{
+			name:   "a config link to an absolute path outside the tree",
+			files:  map[string]string{"mise.toml": "[tools]\ngo = \"1.24.3\"\n", "mise.lock": ""},
+			links:  map[string]string{".mise.toml": "OUTSIDE"},
+			config: "mise.toml",
+		},
+		{
+			name:   "a config link climbing out of the tree",
+			files:  map[string]string{"mise.toml": "[tools]\ngo = \"1.24.3\"\n", "mise.lock": ""},
+			links:  map[string]string{".mise.toml": "../outside/host.toml"},
+			config: "mise.toml",
+		},
+		{
+			// The escape is one hop further along a chain that starts in tree.
+			name:   "a config link that leaves the tree on its second hop",
+			files:  map[string]string{"mise.toml": "[tools]\ngo = \"1.24.3\"\n", "mise.lock": ""},
+			links:  map[string]string{".mise.toml": "hop.toml", "hop.toml": "../outside/host.toml"},
+			config: "mise.toml",
+		},
+		{
+			// The config being scanned is held to the same rule: it is read
+			// again to count its own declarations.
+			name:   "the scanned config is itself a link out of the tree",
+			files:  map[string]string{"mise.lock": ""},
+			links:  map[string]string{"mise.toml": "OUTSIDE"},
+			config: "mise.toml",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// One parent holding the tree and a sibling directory outside it,
+			// so a relative escape has somewhere real to land.
+			parent := t.TempDir()
+			tree := filepath.Join(parent, "tree")
+			outsideDir := filepath.Join(parent, "outside")
+			for _, dir := range []string{tree, outsideDir} {
+				if err := os.Mkdir(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			outside := filepath.Join(outsideDir, "host.toml")
+			if err := os.WriteFile(outside, []byte(outsideDecl), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for rel, content := range tt.files {
+				if err := os.WriteFile(filepath.Join(tree, rel), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, target := range tt.links {
+				if target == "OUTSIDE" {
+					target = outside
+				}
+				if err := os.Symlink(target, filepath.Join(tree, rel)); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+
+			got, err := LockClaims(os.DirFS(tree), tt.config)
+			if _, leaked := got["leaked"]; leaked {
+				t.Errorf("claims counted the out-of-tree config: %v", got)
+			}
+			if err == nil {
+				t.Fatalf("LockClaims(%q) = %v, want an error refusing the config outside the tree", tt.config, got)
+			}
+			if !errors.Is(err, ErrLinkLeavesTree) {
+				t.Errorf("LockClaims(%q) error = %v, want one wrapping ErrLinkLeavesTree", tt.config, err)
+			}
+		})
+	}
+}
+
+// TestLockOwnershipStillCountsInTreeLinks pins the other half: containment is
+// about where a path lands, not about ignoring links. A config reached through
+// an in-tree link is one mise reads, so its declarations still contest a name,
+// and dropping it would leave a name looking uncontested and its entry free to
+// be lent or pruned.
+func TestLockOwnershipStillCountsInTreeLinks(t *testing.T) {
+	t.Parallel()
+
+	files := fstest.MapFS{
+		"mise.toml":       {Data: []byte("[tools]\ngo = \"1.24.3\"\n")},
+		"mise.lock":       {Data: []byte("")},
+		"real/other.toml": {Data: []byte("[tools]\ngo = \"1.23.0\"\n")},
+		".mise.toml":      {Mode: fs.ModeSymlink, Data: []byte("real/other.toml")},
+	}
+
+	got, err := LockClaims(files, "mise.toml")
+	if err != nil {
+		t.Fatalf("LockClaims: %v", err)
+	}
+	if want := map[string]int{"go": 2}; !maps.Equal(got, want) {
+		t.Errorf("LockClaims = %v, want %v", got, want)
+	}
+}
+
+// TestLoadSiblingLockRefusesALockOutsideTheTree pins the same containment for
+// the other read of a scan: the lockfile itself. A checkout that names a host
+// file as its mise.lock had that file read and parsed as TOML, so a scan of an
+// untrusted repository could be used to read outside the tree without any
+// config trickery at all.
+func TestLoadSiblingLockRefusesALockOutsideTheTree(t *testing.T) {
+	t.Parallel()
+
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "host.lock")
+	if err := os.WriteFile(outside, []byte("[[tools.leaked]]\nversion = \"9.9.9\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tree, "mise.toml"), []byte("[tools]\nleaked = \"9\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(tree, "mise.lock")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	lock, err := LoadSiblingLock(os.DirFS(tree), "mise.toml")
+	if lock != nil {
+		t.Errorf("LoadSiblingLock returned the out-of-tree lockfile: %+v", lock.Tools)
+	}
+	if err == nil {
+		t.Fatal("LoadSiblingLock = nil error, want one refusing the lockfile outside the tree")
+	}
+	if !errors.Is(err, ErrLinkLeavesTree) {
+		t.Errorf("LoadSiblingLock error = %v, want one wrapping ErrLinkLeavesTree", err)
 	}
 }

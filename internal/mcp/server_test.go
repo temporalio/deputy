@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -582,32 +583,89 @@ func TestNewServer_WithOptions(t *testing.T) {
 	}
 }
 
+// TestServerInstructionsReferenceRealTools pins the instructions text to the
+// registered tool set in both directions. Backticked snake_case tokens in the
+// instructions are tool references (field names are camelCase there), so every
+// such token must name a registered tool, and every registered tool must be
+// mentioned: the instructions are the session-level tool catalog an agent
+// navigates by.
 func TestServerInstructionsReferenceRealTools(t *testing.T) {
 	if strings.TrimSpace(serverInstructions) == "" {
 		t.Fatal("serverInstructions is empty")
 	}
+	toolNames := NewServer().toolNames
+	// Sanity floor: 15 registered tools today.
+	if len(toolNames) < 15 {
+		t.Fatalf("registered %d tools, want at least 15: %v", len(toolNames), toolNames)
+	}
 	registered := make(map[string]bool)
-	for _, name := range NewServer().toolNames {
+	for _, name := range toolNames {
 		registered[name] = true
 	}
-	// Tools named in the instructions must exist, so guidance can't reference a
-	// renamed or removed tool.
-	for _, name := range []string{
-		"scan_directory", "triage_vulnerabilities", "graph_why", "graph_needs",
-		"get_remediation", "diff_refs", "scan_container", "scan_package",
-		"list_policy_entrypoints",
-	} {
-		if !strings.Contains(serverInstructions, name) {
-			t.Errorf("serverInstructions does not mention %q", name)
+
+	// Every tool-shaped token in the instructions must be a registered tool,
+	// so guidance can't reference a renamed or removed tool.
+	toolToken := regexp.MustCompile("`([a-z0-9]+(?:_[a-z0-9]+)+)`")
+	mentioned := 0
+	for _, m := range toolToken.FindAllStringSubmatch(serverInstructions, -1) {
+		if !registered[m[1]] {
+			t.Errorf("serverInstructions references %q which is not a registered tool", m[1])
+			continue
 		}
-		if !registered[name] {
-			t.Errorf("serverInstructions references %q which is not a registered tool", name)
+		mentioned++
+	}
+	if mentioned == 0 {
+		t.Error("serverInstructions mentions no registered tools; the token pattern may have gone stale")
+	}
+
+	// Every registered tool must be mentioned, so a newly added tool cannot
+	// stay invisible to agents reading the instructions.
+	for _, name := range toolNames {
+		if !strings.Contains(serverInstructions, "`"+name+"`") {
+			t.Errorf("serverInstructions does not mention registered tool %q", name)
 		}
 	}
+
 	// Key output conventions agents rely on must stay documented.
 	for _, phrase := range []string{"unknown", "Truncated", "clean: true", "found: false", "PURL"} {
 		if !strings.Contains(serverInstructions, phrase) {
 			t.Errorf("serverInstructions should describe %q", phrase)
+		}
+	}
+}
+
+// TestToolSchemasFreeOfClientRejectedKeywords guards the constraint that broke
+// tool loading in production for every registered tool, not a sample: no
+// schema the server advertises may contain $ref or oneOf/anyOf/allOf at any
+// level (checked via the marshaled JSON, which serializes all nesting). The
+// corpus is Server.registeredTools, so tools added later are covered
+// automatically.
+func TestToolSchemasFreeOfClientRejectedKeywords(t *testing.T) {
+	s := NewServer()
+	// Sanity floor: 15 registered tools today.
+	if len(s.registeredTools) < 15 {
+		t.Fatalf("registered %d tools, want at least 15", len(s.registeredTools))
+	}
+
+	for _, tool := range s.registeredTools {
+		for direction, schema := range map[string]any{
+			"input":  tool.InputSchema,
+			"output": tool.OutputSchema,
+		} {
+			raw, err := json.Marshal(schema)
+			if err != nil {
+				t.Errorf("marshal %s %s schema: %v", tool.Name, direction, err)
+				continue
+			}
+			if string(raw) == "null" {
+				t.Errorf("tool %s has no %s schema", tool.Name, direction)
+				continue
+			}
+			for _, banned := range []string{`"$ref"`, `"oneOf"`, `"anyOf"`, `"allOf"`} {
+				if strings.Contains(string(raw), banned) {
+					t.Errorf("tool %s %s schema contains %s, which MCP clients reject", tool.Name, direction, banned)
+				}
+			}
 		}
 	}
 }
@@ -795,6 +853,9 @@ func TestMCPToolInputSchemasAvoidTopLevelComposition(t *testing.T) {
 	tools, err := clientSession.ListTools(ctx, nil)
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
+	}
+	if len(tools.Tools) == 0 {
+		t.Fatal("expected registered tools, got none; schema checks below would be vacuous")
 	}
 
 	for _, tool := range tools.Tools {
@@ -1653,6 +1714,10 @@ func TestToolAnnotationsExposeReadOnlySafetyHints(t *testing.T) {
 		t.Fatalf("ListTools failed: %v", err)
 	}
 
+	if len(tools.Tools) == 0 {
+		t.Fatal("expected registered tools, got none; annotation checks below would be vacuous")
+	}
+
 	closedWorldTools := map[string]bool{
 		"get_server_info":         true,
 		"list_dependencies":       true,
@@ -2075,6 +2140,21 @@ func TestExplainVulnerability(t *testing.T) {
 					},
 				},
 			},
+			"MAL-2024-1234": {
+				ID:      "MAL-2024-1234",
+				Summary: "Malicious code in evil-package (npm)",
+				Details: "The package contained a credential-stealing install script.",
+				Aliases: []string{"GHSA-aaaa-bbbb-cccc"},
+				Affected: []osvschema.Affected{
+					{
+						Package: osvschema.Package{Name: "evil-package", Ecosystem: "npm"},
+						Ranges: []osvschema.Range{{
+							Type:   osvschema.RangeSemVer,
+							Events: []osvschema.Event{{Introduced: "0"}},
+						}},
+					},
+				},
+			},
 		},
 	}
 
@@ -2116,6 +2196,15 @@ func TestExplainVulnerability(t *testing.T) {
 		if result.Severity != "CRITICAL" {
 			t.Errorf("expected severity CRITICAL, got %q", result.Severity)
 		}
+		if result.SeverityType != "CVSS_V3" {
+			t.Errorf("severityType = %q, want CVSS_V3", result.SeverityType)
+		}
+		if result.Kind != "vulnerability" {
+			t.Errorf("kind = %q, want vulnerability", result.Kind)
+		}
+		if !slices.Equal(result.Sources, []string{"osv"}) {
+			t.Errorf("sources = %v, want [osv]", result.Sources)
+		}
 		if result.Published != "2021-12-10T10:15:30Z" {
 			t.Errorf("published = %q, want RFC3339 timestamp", result.Published)
 		}
@@ -2136,6 +2225,23 @@ func TestExplainVulnerability(t *testing.T) {
 		}
 		if !slices.Equal(result.PackageFixes[0].FixedVersions, []string{"2.17.0"}) {
 			t.Errorf("expected package fix versions [2.17.0], got %v", result.PackageFixes[0].FixedVersions)
+		}
+	})
+
+	t.Run("malicious package advisory", func(t *testing.T) {
+		result, err := callProtoTool(t, ctx, s.explainVulnerability,
+			&mcpv1.ExplainVulnerabilityRequest{Id: "MAL-2024-1234"}, &mcpv1.VulnExplanation{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Id != "MAL-2024-1234" {
+			t.Errorf("expected ID MAL-2024-1234, got %s", result.Id)
+		}
+		if result.Kind != "malware" {
+			t.Errorf("kind = %q, want malware", result.Kind)
+		}
+		if !slices.Equal(result.Sources, []string{"osv"}) {
+			t.Errorf("sources = %v, want [osv]", result.Sources)
 		}
 	})
 
@@ -3588,10 +3694,20 @@ func TestTriageVulnerabilitiesDoesNotRecommendDirectUpdateForTransitiveFix(t *te
 	if result.UnfixableCount != 1 {
 		t.Errorf("unfixable count = %d, want 1", result.UnfixableCount)
 	}
+	// Prove recommendations were produced at all before asserting what they
+	// must not contain: the transitive fixable vulnerability must yield the
+	// transitive review recommendation.
+	foundTransitiveReview := false
 	for _, recommendation := range result.Recommendations {
 		if strings.Contains(recommendation, "Update or migrate direct dependencies") {
 			t.Fatalf("unexpected direct dependency recommendation: %q", recommendation)
 		}
+		if strings.Contains(recommendation, "transitive dependency vulnerability") {
+			foundTransitiveReview = true
+		}
+	}
+	if !foundTransitiveReview {
+		t.Fatalf("expected transitive review recommendation, got %+v", result.Recommendations)
 	}
 }
 

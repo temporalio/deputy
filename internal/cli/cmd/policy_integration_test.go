@@ -40,10 +40,10 @@ func TestPolicyIntegration_ComposedBundleSbomComponent_AllowsPermissive(t *testi
 	if err != nil {
 		t.Fatalf("evaluatePoliciesForCommand: %v", err)
 	}
-	for _, a := range actions {
-		if a.Type == "deny" {
-			t.Fatalf("did not expect deny: %+v", a)
-		}
+	// The bundle only has deny (forbidden license) and warn (missing licenses)
+	// rules; a permissive license must produce no actions at all.
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions for permissive license, got %+v", actions)
 	}
 }
 
@@ -61,10 +61,10 @@ func TestPolicyIntegration_ComposedBundleScanReport_NoDeny(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluatePoliciesForCommand: %v", err)
 	}
-	for _, a := range actions {
-		if a.Type == "deny" {
-			t.Fatalf("did not expect deny for scan payload: %+v", a)
-		}
+	// scan is outside the bundle's in_scope commands, so even the empty-license
+	// warn rule must not fire: the guard leaves zero actions.
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions for out-of-scope scan command, got %+v", actions)
 	}
 }
 
@@ -121,12 +121,10 @@ func TestPolicyIntegration_PypiPrefixAllowlist(t *testing.T) {
 	}
 	if actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, allowPayload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{}); err != nil {
 		t.Fatalf("unexpected error for approved pypi package: %v", err)
-	} else {
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for approved prefix: %+v", actions)
-			}
-		}
+	} else if len(actions) != 0 {
+		// The policy's only rule is the prefix deny; an approved prefix must
+		// produce zero actions.
+		t.Fatalf("expected no actions for approved prefix, got %+v", actions)
 	}
 }
 
@@ -347,12 +345,10 @@ func TestPolicyIntegration_TyposquatLevenshteinGuard(t *testing.T) {
 	}
 	if actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, allowPayload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err != nil {
 		t.Fatalf("did not expect error for safe package: %v", err)
-	} else {
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for safe package: %+v", actions)
-			}
-		}
+	} else if len(actions) != 0 {
+		// The policy's only rule is the typosquat deny; a distant name must
+		// produce zero actions.
+		t.Fatalf("expected no actions for safe package, got %+v", actions)
 	}
 }
 
@@ -406,10 +402,10 @@ policies:
 	if err != nil {
 		t.Fatalf("unexpected error for safe CWEs: %v", err)
 	}
-	for _, a := range actions {
-		if a.Type == "deny" {
-			t.Fatalf("did not expect deny for vulnerability without injection CWE: %+v", actions)
-		}
+	// The policy's only rule is the injection-CWE deny; safe CWEs must
+	// produce zero actions.
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions for vulnerability without injection CWE, got %+v", actions)
 	}
 
 	payloadNoCWE := map[string]any{
@@ -426,10 +422,8 @@ policies:
 	if err != nil {
 		t.Fatalf("unexpected error for vulnerability without CWEs: %v", err)
 	}
-	for _, a := range actions {
-		if a.Type == "deny" {
-			t.Fatalf("did not expect deny for vulnerability without CWEs: %+v", actions)
-		}
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions for vulnerability without CWEs, got %+v", actions)
 	}
 }
 
@@ -484,10 +478,10 @@ policies:
 	if err != nil {
 		t.Fatalf("unexpected error for vulnerability not in KEV: %v", err)
 	}
-	for _, a := range actions {
-		if a.Type == "deny" {
-			t.Fatalf("did not expect deny for vulnerability not in KEV: %+v", actions)
-		}
+	// The policy's only rule is the KEV deny; a non-KEV vulnerability must
+	// produce zero actions.
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions for vulnerability not in KEV, got %+v", actions)
 	}
 
 	payloadNoKEV := map[string]any{
@@ -505,10 +499,8 @@ policies:
 	if err != nil {
 		t.Fatalf("unexpected error for vulnerability without KEV status: %v", err)
 	}
-	for _, a := range actions {
-		if a.Type == "deny" {
-			t.Fatalf("did not expect deny for vulnerability without KEV status: %+v", actions)
-		}
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions for vulnerability without KEV status, got %+v", actions)
 	}
 }
 
@@ -592,10 +584,10 @@ policies:
 	if err != nil {
 		t.Fatalf("unexpected error for vulnerability with low EPSS: %v", err)
 	}
-	for _, a := range actions {
-		if a.Type == "deny" || a.Type == "warn" {
-			t.Fatalf("did not expect deny/warn for vulnerability with low EPSS: %+v", actions)
-		}
+	// Both rules (deny and warn) require EPSS above the warn threshold; a low
+	// EPSS must produce zero actions.
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions for vulnerability with low EPSS, got %+v", actions)
 	}
 
 	payloadNoEPSS := map[string]any{
@@ -613,10 +605,8 @@ policies:
 	if err != nil {
 		t.Fatalf("unexpected error for vulnerability without EPSS: %v", err)
 	}
-	for _, a := range actions {
-		if a.Type == "deny" || a.Type == "warn" {
-			t.Fatalf("did not expect deny/warn for vulnerability without EPSS: %+v", actions)
-		}
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions for vulnerability without EPSS, got %+v", actions)
 	}
 }
 
@@ -700,9 +690,9 @@ policies:
 	if err != nil {
 		t.Fatalf("unexpected error for Medium + high EPSS: %v", err)
 	}
-	for _, a := range actions {
-		if a.Type == "deny" {
-			t.Fatalf("did not expect deny for Medium severity + high EPSS: %+v", actions)
-		}
+	// Both composite rules require HIGH/CRITICAL severity; a medium-severity
+	// vulnerability must produce zero actions even with high EPSS.
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions for Medium severity + high EPSS, got %+v", actions)
 	}
 }

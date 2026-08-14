@@ -1,9 +1,12 @@
 package docsgen
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 // TestPolicyInputsDocIsGenerated pins the committed policy entrypoint
@@ -33,10 +36,21 @@ func TestPolicyEntrypointsMarkdownCoversEveryEntrypoint(t *testing.T) {
 			t.Fatalf("missing %q heading", heading)
 		}
 	}
-	// A representative registry entrypoint and a proto-comment-derived cell.
-	if !strings.Contains(out, "#### `scan_vulnerability`") {
-		t.Fatal("missing scan_vulnerability entrypoint")
+
+	// Every registered entrypoint must render its own heading. Deriving from
+	// policy.AllEntrypoints means a new entrypoint the renderer skips fails
+	// here instead of silently missing from the reference.
+	// Sanity floor: 37 canonical entrypoints today.
+	if len(policy.AllEntrypoints) < 37 {
+		t.Fatalf("policy.AllEntrypoints has %d entrypoints, want at least 37", len(policy.AllEntrypoints))
 	}
+	for _, ep := range policy.AllEntrypoints {
+		if heading := fmt.Sprintf("#### `%s`", ep); !strings.Contains(out, heading) {
+			t.Errorf("missing %s entrypoint heading", ep)
+		}
+	}
+
+	// A proto-comment-derived cell.
 	if !strings.Contains(out, "### `vulnerabilityv1.Finding`") {
 		t.Fatal("missing vulnerabilityv1.Finding variable type table")
 	}
