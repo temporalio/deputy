@@ -207,6 +207,11 @@ type manifestScan struct {
 type npmResolution struct {
 	versionKeys map[string]bool
 	resolved    map[string]bool
+	// members are the workspace globs the lockfile's root declares, which is what
+	// says whose declarations this lockfile is allowed to answer for. A lockfile
+	// in an ancestor directory governs a manifest below it only if it claims that
+	// directory as a member.
+	members []string
 }
 
 // newManifestScan starts a scan from the direct dependencies already collected
@@ -279,11 +284,14 @@ func (s *manifestScan) governingNpmLocks() map[string]npmResolution {
 			governing[scope.dir] = npmResolution{
 				versionKeys: maps.Clone(resolution.versionKeys),
 				resolved:    maps.Clone(resolution.resolved),
+				members:     slices.Clone(resolution.members),
 			}
 			continue
 		}
 		maps.Copy(existing.versionKeys, resolution.versionKeys)
 		maps.Copy(existing.resolved, resolution.resolved)
+		existing.members = append(existing.members, resolution.members...)
+		governing[scope.dir] = existing
 	}
 	return governing
 }
@@ -301,17 +309,50 @@ func (s *manifestScan) governingNpmLocks() map[string]npmResolution {
 // Directories are spelled as [path.Dir] gives them, so the tree root is "." and
 // the walk ends when it stops changing. Normalizing the root to "" instead left a
 // workspace member searching for a key the root lockfile never wrote.
+// A lockfile in an ancestor directory answers only for the members its root
+// claims, by the same globs [npmDeclarationSites] reads. The upward search exists
+// because a workspace member keeps its declarations in its own package.json while
+// the lockfile sits at the root, and it must not reach any further than that: a
+// standalone project nested below another one, a tools/ directory with its own
+// package.json and a Yarn lockfile, is not a member, and letting the root's
+// resolutions answer for it suppressed a declaration the root never resolved and
+// reported it transitive.
 func governingNpmResolutions(governing map[string]npmResolution, dir string) map[string]bool {
-	for {
-		if resolution, ok := governing[dir]; ok {
-			return resolution.resolved
-		}
-		parent := path.Dir(dir)
-		if parent == dir {
+	for probe := dir; ; {
+		if resolution, ok := governing[probe]; ok {
+			if probe == dir || npmLockClaims(resolution, probe, dir) {
+				return resolution.resolved
+			}
+			// The nearest lockfile does not claim this directory, and a further
+			// one cannot: npm workspaces have a single root, and reaching past
+			// the nearest would be attributing this project's declarations to a
+			// lockfile that knows even less about them.
 			return nil
 		}
-		dir = parent
+		parent := path.Dir(probe)
+		if parent == probe {
+			return nil
+		}
+		probe = parent
 	}
+}
+
+// npmLockClaims reports whether the lockfile at lockDir claims dir as one of its
+// workspace members. The globs a root declares are relative to the root, so the
+// directory is made relative before it is matched.
+func npmLockClaims(resolution npmResolution, lockDir, dir string) bool {
+	if len(resolution.members) == 0 {
+		return false
+	}
+	relative := dir
+	if lockDir != "." {
+		trimmed, under := strings.CutPrefix(dir, lockDir+"/")
+		if !under {
+			return false
+		}
+		relative = trimmed
+	}
+	return isNpmWorkspaceMember(relative, resolution.members)
 }
 
 // recordWorkspaceRoot notes that the manifest at a scope declares a workspace,
@@ -794,6 +835,7 @@ func npmLockResolution(data []byte) npmResolution {
 	if !ok {
 		return resolution
 	}
+	resolution.members = root.Workspaces
 
 	for _, site := range npmDeclarationSites(lock, root) {
 		for _, table := range lock.Packages[site].declarationTables() {
