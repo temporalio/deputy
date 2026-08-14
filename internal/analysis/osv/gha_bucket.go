@@ -22,6 +22,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
+	"github.com/ossf/osv-schema/bindings/go/osvconstants"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/cache"
@@ -32,6 +33,7 @@ import (
 	"github.com/temporalio/deputy/internal/vulnerability"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/singleflight"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 var (
@@ -87,7 +89,7 @@ var ghaHTTPClient = httputil.NewSafeRetryableClient(ghaHTTPTimeout)
 var ghaGitHubTokenEnvVar = "GITHUB_TOKEN"
 
 type ghaVulnIndex struct {
-	byPkg map[string][]osvschema.Vulnerability
+	byPkg map[string][]*osvschema.Vulnerability
 }
 
 var (
@@ -148,7 +150,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client Client, pkgs []PkgInput)
 			base.Affected = true
 			var extras []Vulnerability
 			skip := false
-			for _, alias := range v.Aliases {
+			for _, alias := range v.GetAliases() {
 				if client == nil {
 					continue
 				}
@@ -162,17 +164,17 @@ func queryOSVGHABucketBatch(ctx context.Context, client Client, pkgs []PkgInput)
 					}
 					aliasCache.Store(alias, aliasV)
 				}
-				if !slices.ContainsFunc(aliasV.Affected, func(a osvschema.Affected) bool {
-					return matchesPackage(a.Package, effective)
+				if !slices.ContainsFunc(aliasV.GetAffected(), func(a *osvschema.Affected) bool {
+					return matchesPackage(a.GetPackage(), effective)
 				}) {
 					continue
 				}
-				if !versionAffectedByGHARanges(*aliasV, effective, effectiveVersion) {
+				if !versionAffectedByGHARanges(aliasV, effective, effectiveVersion) {
 					skip = true
 					break
 				}
 				{
-					pv := ProcessOSVVulnerability(*aliasV, effective)
+					pv := ProcessOSVVulnerability(aliasV, effective)
 					extras = append(extras, pv)
 				}
 			}
@@ -514,7 +516,7 @@ func listRemoteRefsWithHashes(ctx context.Context, remoteURL string) ([]ghaRemot
 //   - Name and Version are derived from GitHub Actions PURLs when present.
 func normalizeGitHubActionsInput(in PkgInput) PkgInput {
 	out := in
-	out.Ecosystem = string(osvschema.EcosystemGitHubActions)
+	out.Ecosystem = string(osvconstants.EcosystemGitHubActions)
 	name := strings.TrimSpace(out.Name)
 	if name == "" && out.PURL != "" {
 		if pu, err := purlx.ParseLoose(out.PURL); err == nil && purlx.IsGitHubActionsType(pu.Type) {
@@ -538,7 +540,7 @@ func normalizeGitHubActionsInput(in PkgInput) PkgInput {
 // not publish ranges, or open-ended ranges introduced at "0" with no fix. A
 // bounded range requires a comparable version so an unresolved SHA or moving tag
 // is not reported as vulnerable by default.
-func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput, version string) bool {
+func versionAffectedByGHARanges(v *osvschema.Vulnerability, pkg PkgInput, version string) bool {
 	if strings.TrimSpace(version) == "" {
 		version = pkg.Version
 	}
@@ -571,14 +573,14 @@ func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput, version
 		}
 		foundComparableRange := false
 		for _, r := range a.Ranges {
-			rt := strings.ToUpper(string(r.Type))
+			rt := r.GetType().String()
 			if rt != "SEMVER" && rt != "ECOSYSTEM" {
 				continue
 			}
 			foundComparableRange = true
 			introduced := "v0.0.0"
 			introducedSet := false // Track whether an "introduced" event was encountered
-			for _, e := range r.Events {
+			for _, e := range r.GetEvents() {
 				if e.Introduced != "" {
 					introducedSet = true
 					// "0" means "all versions from the beginning"
@@ -624,13 +626,13 @@ func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput, version
 // ghaRangeAppliesToUnresolvedRef reports whether an advisory range applies to
 // a ref that Deputy could not resolve to a comparable semver. Only open-ended
 // ranges introduced at "0" qualify; bounded ranges need a resolved version.
-func ghaRangeAppliesToUnresolvedRef(r osvschema.Range) bool {
-	rt := strings.ToUpper(string(r.Type))
+func ghaRangeAppliesToUnresolvedRef(r *osvschema.Range) bool {
+	rt := r.GetType().String()
 	if rt != "SEMVER" && rt != "ECOSYSTEM" {
 		return false
 	}
 	introducedAtZero := false
-	for _, e := range r.Events {
+	for _, e := range r.GetEvents() {
 		if e.Fixed != "" || e.LastAffected != "" || e.Limit != "" {
 			return false
 		}
@@ -723,7 +725,7 @@ func buildGHAVulnIndex(ctx context.Context) (*ghaVulnIndex, error) {
 			jsonCount++
 		}
 	}
-	idx := &ghaVulnIndex{byPkg: make(map[string][]osvschema.Vulnerability, jsonCount)}
+	idx := &ghaVulnIndex{byPkg: make(map[string][]*osvschema.Vulnerability, jsonCount)}
 	for _, f := range reader.File {
 		if f == nil || !strings.HasSuffix(strings.ToLower(f.Name), ".json") {
 			continue
@@ -737,18 +739,20 @@ func buildGHAVulnIndex(ctx context.Context) (*ghaVulnIndex, error) {
 		if err != nil {
 			continue
 		}
-		var vuln osvschema.Vulnerability
-		if err := json.Unmarshal(b, &vuln); err != nil {
+		vuln := &osvschema.Vulnerability{}
+		// The bucket ships OSV JSON, which only protojson decodes faithfully:
+		// encoding/json cannot read the schema's timestamps or enum names.
+		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(b, vuln); err != nil {
 			continue
 		}
-		for _, a := range vuln.Affected {
-			if a.Package.Name == "" {
+		for _, a := range vuln.GetAffected() {
+			if a.GetPackage().GetName() == "" {
 				continue
 			}
-			if !strings.EqualFold(a.Package.Ecosystem, string(osvschema.EcosystemGitHubActions)) {
+			if !strings.EqualFold(a.GetPackage().GetEcosystem(), string(osvconstants.EcosystemGitHubActions)) {
 				continue
 			}
-			key := strings.ToLower(strings.TrimSpace(a.Package.Name))
+			key := strings.ToLower(strings.TrimSpace(a.GetPackage().GetName()))
 			if key == "" {
 				continue
 			}

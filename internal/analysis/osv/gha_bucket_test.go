@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,9 +15,11 @@ import (
 	"time"
 
 	"github.com/google/osv-scalibr/purl"
+	"github.com/ossf/osv-schema/bindings/go/osvconstants"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/temporalio/deputy/internal/cache/disk"
 	"golang.org/x/sync/singleflight"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func TestNormalizeSemverVersion_Table(t *testing.T) {
@@ -69,15 +70,15 @@ func TestNormalizeGitHubActionsInput_Table(t *testing.T) {
 }
 
 func TestVersionAffectedByGHARanges_Table(t *testing.T) {
-	vuln := osvschema.Vulnerability{
-		ID: "GHSA-test",
-		Affected: []osvschema.Affected{
+	vuln := &osvschema.Vulnerability{
+		Id: "GHSA-test",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
+				Package: &osvschema.Package{Name: "owner/repo", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "0"},
 							{Fixed: "1.0.6"},
 						},
@@ -110,14 +111,14 @@ func TestVersionAffectedByGHARanges_Table(t *testing.T) {
 func TestVersionAffectedByGHARanges_LastAffected(t *testing.T) {
 	// Advisory bounded with last_affected rather than fixed: versions above the
 	// bound must not be reported as affected via the open-ended fallback.
-	vuln := osvschema.Vulnerability{
-		ID: "GHSA-lastaffected",
-		Affected: []osvschema.Affected{
+	vuln := &osvschema.Vulnerability{
+		Id: "GHSA-lastaffected",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{{
-					Type:   osvschema.RangeEcosystem,
-					Events: []osvschema.Event{{Introduced: "0"}, {LastAffected: "1.0.6"}},
+				Package: &osvschema.Package{Name: "owner/repo", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{{
+					Type:   osvschema.Range_ECOSYSTEM,
+					Events: []*osvschema.Event{{Introduced: "0"}, {LastAffected: "1.0.6"}},
 				}},
 			},
 		},
@@ -144,14 +145,14 @@ func TestVersionAffectedByGHARanges_LastAffected(t *testing.T) {
 func TestVersionAffectedByGHARanges_UnresolvedRefMatchesOnlyPackageLevelOrOpenEndedAdvisories(t *testing.T) {
 	pkg := PkgInput{QueryKey: QueryKey{Name: "owner/repo", Version: "abcdef1", Ecosystem: "GitHub Actions"}}
 
-	ranged := osvschema.Vulnerability{
-		ID: "GHSA-ranged",
-		Affected: []osvschema.Affected{
+	ranged := &osvschema.Vulnerability{
+		Id: "GHSA-ranged",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{{
-					Type:   osvschema.RangeEcosystem,
-					Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "1.0.74"}},
+				Package: &osvschema.Package{Name: "owner/repo", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{{
+					Type:   osvschema.Range_ECOSYSTEM,
+					Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "1.0.74"}},
 				}},
 			},
 		},
@@ -160,24 +161,24 @@ func TestVersionAffectedByGHARanges_UnresolvedRefMatchesOnlyPackageLevelOrOpenEn
 		t.Fatal("unresolved SHA ref matched a semver range; want unknown rather than affected")
 	}
 
-	unranged := osvschema.Vulnerability{
-		ID: "GHSA-unranged",
-		Affected: []osvschema.Affected{
-			{Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+	unranged := &osvschema.Vulnerability{
+		Id: "GHSA-unranged",
+		Affected: []*osvschema.Affected{
+			{Package: &osvschema.Package{Name: "owner/repo", Ecosystem: string(osvconstants.EcosystemGitHubActions)}},
 		},
 	}
 	if !versionAffectedByGHARanges(unranged, pkg, pkg.Version) {
 		t.Fatal("unresolved SHA ref did not match unranged advisory; want package-level advisory to apply")
 	}
 
-	openEnded := osvschema.Vulnerability{
-		ID: "GHSA-open-ended",
-		Affected: []osvschema.Affected{
+	openEnded := &osvschema.Vulnerability{
+		Id: "GHSA-open-ended",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{{
-					Type:   osvschema.RangeEcosystem,
-					Events: []osvschema.Event{{Introduced: "0"}},
+				Package: &osvschema.Package{Name: "owner/repo", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{{
+					Type:   osvschema.Range_ECOSYSTEM,
+					Events: []*osvschema.Event{{Introduced: "0"}},
 				}},
 			},
 		},
@@ -353,15 +354,15 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionAvoidsFalsePositive(t *testing
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	vuln := osvschema.Vulnerability{
-		ID: "GHSA-major-tag",
-		Affected: []osvschema.Affected{
+	vuln := &osvschema.Vulnerability{
+		Id: "GHSA-major-tag",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
+				Package: &osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "0"},
 							{Fixed: "4.1.3"},
 						},
@@ -371,7 +372,7 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionAvoidsFalsePositive(t *testing
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-major-tag.json": vuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -414,15 +415,15 @@ func TestQueryOSVGHABucketBatch_UnresolvedFloatingTagDoesNotDefaultToAffected(t 
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	vuln := osvschema.Vulnerability{
-		ID: "GHSA-floating-tag",
-		Affected: []osvschema.Affected{
+	vuln := &osvschema.Vulnerability{
+		Id: "GHSA-floating-tag",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
+				Package: &osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "0"},
 							{Fixed: "4.2.0"},
 						},
@@ -432,7 +433,7 @@ func TestQueryOSVGHABucketBatch_UnresolvedFloatingTagDoesNotDefaultToAffected(t 
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-floating-tag.json": vuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -471,15 +472,15 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionReportsEffectiveVersion(t *tes
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	vuln := osvschema.Vulnerability{
-		ID: "GHSA-major-tag-vuln",
-		Affected: []osvschema.Affected{
+	vuln := &osvschema.Vulnerability{
+		Id: "GHSA-major-tag-vuln",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
+				Package: &osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "0"},
 							{Fixed: "4.2.0"},
 						},
@@ -489,7 +490,7 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionReportsEffectiveVersion(t *tes
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-major-tag-vuln.json": vuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -532,16 +533,16 @@ func TestQueryOSVGHABucketBatch_SHAResolutionAvoidsFalsePositive(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	vuln := osvschema.Vulnerability{
-		ID:      "GHSA-8q5r-mmjf-575q",
+	vuln := &osvschema.Vulnerability{
+		Id:      "GHSA-8q5r-mmjf-575q",
 		Aliases: []string{"CVE-2026-47751"},
-		Affected: []osvschema.Affected{
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "anthropics/claude-code-action", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
+				Package: &osvschema.Package{Name: "anthropics/claude-code-action", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "0"},
 							{Fixed: "1.0.74"},
 						},
@@ -551,7 +552,7 @@ func TestQueryOSVGHABucketBatch_SHAResolutionAvoidsFalsePositive(t *testing.T) {
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-8q5r-mmjf-575q.json": vuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -594,15 +595,15 @@ func TestQueryRaw_GitHubActionsPURLOnlySHAResolutionAvoidsFalsePositive(t *testi
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	vuln := osvschema.Vulnerability{
-		ID: "GHSA-8q5r-mmjf-575q",
-		Affected: []osvschema.Affected{
+	vuln := &osvschema.Vulnerability{
+		Id: "GHSA-8q5r-mmjf-575q",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "anthropics/claude-code-action", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
+				Package: &osvschema.Package{Name: "anthropics/claude-code-action", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "0"},
 							{Fixed: "1.0.74"},
 						},
@@ -612,7 +613,7 @@ func TestQueryRaw_GitHubActionsPURLOnlySHAResolutionAvoidsFalsePositive(t *testi
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-8q5r-mmjf-575q.json": vuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -652,15 +653,15 @@ func TestQueryOSVGHABucketBatch_SHAResolutionReportsEffectiveVersion(t *testing.
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	vuln := osvschema.Vulnerability{
-		ID: "GHSA-sha-vuln",
-		Affected: []osvschema.Affected{
+	vuln := &osvschema.Vulnerability{
+		Id: "GHSA-sha-vuln",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
+				Package: &osvschema.Package{Name: "owner/repo", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "0"},
 							{Fixed: "1.0.74"},
 						},
@@ -669,7 +670,7 @@ func TestQueryOSVGHABucketBatch_SHAResolutionReportsEffectiveVersion(t *testing.
 			},
 		},
 	}
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-sha-vuln.json": vuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -712,15 +713,15 @@ func TestQueryOSVGHABucketBatch_UnresolvedSHADoesNotDefaultToAffected(t *testing
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	vuln := osvschema.Vulnerability{
-		ID: "GHSA-unresolved-sha",
-		Affected: []osvschema.Affected{
+	vuln := &osvschema.Vulnerability{
+		Id: "GHSA-unresolved-sha",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
+				Package: &osvschema.Package{Name: "owner/repo", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "0"},
 							{Fixed: "1.0.74"},
 						},
@@ -729,7 +730,7 @@ func TestQueryOSVGHABucketBatch_UnresolvedSHADoesNotDefaultToAffected(t *testing
 			},
 		},
 	}
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-unresolved-sha.json": vuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -768,20 +769,20 @@ func TestBuildGHAVulnIndex_UsesCacheZip(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	v1 := osvschema.Vulnerability{
-		ID: "GHSA-one",
-		Affected: []osvschema.Affected{
-			{Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+	v1 := &osvschema.Vulnerability{
+		Id: "GHSA-one",
+		Affected: []*osvschema.Affected{
+			{Package: &osvschema.Package{Name: "owner/repo", Ecosystem: string(osvconstants.EcosystemGitHubActions)}},
 		},
 	}
-	v2 := osvschema.Vulnerability{
-		ID: "GHSA-two",
-		Affected: []osvschema.Affected{
-			{Package: osvschema.Package{Name: "other/ecos", Ecosystem: "npm"}},
+	v2 := &osvschema.Vulnerability{
+		Id: "GHSA-two",
+		Affected: []*osvschema.Affected{
+			{Package: &osvschema.Package{Name: "other/ecos", Ecosystem: "npm"}},
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-one.json": v1,
 		"GHSA-two.json": v2,
 	}); err != nil {
@@ -798,7 +799,7 @@ func TestBuildGHAVulnIndex_UsesCacheZip(t *testing.T) {
 	if idx == nil || len(idx.byPkg) != 1 {
 		t.Fatalf("expected 1 indexed package, got %v", idx.byPkg)
 	}
-	if got := idx.byPkg["owner/repo"]; len(got) != 1 || got[0].ID != "GHSA-one" {
+	if got := idx.byPkg["owner/repo"]; len(got) != 1 || got[0].GetId() != "GHSA-one" {
 		t.Fatalf("owner/repo index = %#v", got)
 	}
 
@@ -821,11 +822,11 @@ func TestEnsureGHACacheZip_UsesETagConditionalRequest(t *testing.T) {
 		lastIfNone   string
 		zipBodyBytes []byte
 	)
-	zipBodyBytes = mustGHATestZipBytes(t, map[string]osvschema.Vulnerability{
+	zipBodyBytes = mustGHATestZipBytes(t, map[string]*osvschema.Vulnerability{
 		"GHSA-one.json": {
-			ID: "GHSA-one",
-			Affected: []osvschema.Affected{
-				{Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+			Id: "GHSA-one",
+			Affected: []*osvschema.Affected{
+				{Package: &osvschema.Package{Name: "owner/repo", Ecosystem: string(osvconstants.EcosystemGitHubActions)}},
 			},
 		},
 	})
@@ -887,11 +888,11 @@ func TestEnsureGHACacheZip_UsesETagConditionalRequest(t *testing.T) {
 // body of exactly ghaDownloadLimit bytes is a complete download and must
 // succeed; only a body that exceeds the cap is truncated and must fail.
 func TestEnsureGHACacheZipDownloadCapBoundary(t *testing.T) {
-	body := mustGHATestZipBytes(t, map[string]osvschema.Vulnerability{
+	body := mustGHATestZipBytes(t, map[string]*osvschema.Vulnerability{
 		"GHSA-cap.json": {
-			ID: "GHSA-cap",
-			Affected: []osvschema.Affected{
-				{Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+			Id: "GHSA-cap",
+			Affected: []*osvschema.Affected{
+				{Package: &osvschema.Package{Name: "owner/repo", Ecosystem: string(osvconstants.EcosystemGitHubActions)}},
 			},
 		},
 	})
@@ -943,19 +944,19 @@ func TestLoadGHAVulnIndex_RefreshesAfterTTL(t *testing.T) {
 	restore := disk.SetBaseDirForTest(tmp)
 	t.Cleanup(restore)
 
-	zipV1 := mustGHATestZipBytes(t, map[string]osvschema.Vulnerability{
+	zipV1 := mustGHATestZipBytes(t, map[string]*osvschema.Vulnerability{
 		"GHSA-one.json": {
-			ID: "GHSA-one",
-			Affected: []osvschema.Affected{
-				{Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+			Id: "GHSA-one",
+			Affected: []*osvschema.Affected{
+				{Package: &osvschema.Package{Name: "owner/repo", Ecosystem: string(osvconstants.EcosystemGitHubActions)}},
 			},
 		},
 	})
-	zipV2 := mustGHATestZipBytes(t, map[string]osvschema.Vulnerability{
+	zipV2 := mustGHATestZipBytes(t, map[string]*osvschema.Vulnerability{
 		"GHSA-two.json": {
-			ID: "GHSA-two",
-			Affected: []osvschema.Affected{
-				{Package: osvschema.Package{Name: "owner/repo2", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+			Id: "GHSA-two",
+			Affected: []*osvschema.Affected{
+				{Package: &osvschema.Package{Name: "owner/repo2", Ecosystem: string(osvconstants.EcosystemGitHubActions)}},
 			},
 		},
 	})
@@ -1028,7 +1029,9 @@ func TestLoadGHAVulnIndex_RefreshesAfterTTL(t *testing.T) {
 	}
 }
 
-func mustGHATestZipBytes(t *testing.T, files map[string]osvschema.Vulnerability) []byte {
+// mustGHATestZipBytes is [writeGHATestZip] in memory, and encodes records with
+// protojson for the same reason.
+func mustGHATestZipBytes(t *testing.T, files map[string]*osvschema.Vulnerability) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
@@ -1037,9 +1040,9 @@ func mustGHATestZipBytes(t *testing.T, files map[string]osvschema.Vulnerability)
 		if err != nil {
 			t.Fatalf("zip create: %v", err)
 		}
-		b, err := json.Marshal(vuln)
+		b, err := protojson.Marshal(vuln)
 		if err != nil {
-			t.Fatalf("json marshal: %v", err)
+			t.Fatalf("protojson marshal: %v", err)
 		}
 		if _, err := w.Write(b); err != nil {
 			t.Fatalf("zip write: %v", err)
@@ -1063,7 +1066,11 @@ func resetGHATestState() {
 	ghaIndexTTL = ghaDownloadTTL
 }
 
-func writeGHATestZip(path string, files map[string]osvschema.Vulnerability) error {
+// writeGHATestZip writes an all.zip fixture. Records are encoded with
+// protojson so the bytes match the OSV JSON the bucket actually serves:
+// encoding/json would emit numeric enums and struct-shaped timestamps that the
+// production decoder rejects.
+func writeGHATestZip(path string, files map[string]*osvschema.Vulnerability) error {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for name, vuln := range files {
@@ -1072,7 +1079,7 @@ func writeGHATestZip(path string, files map[string]osvschema.Vulnerability) erro
 			_ = zw.Close()
 			return err
 		}
-		b, err := json.Marshal(vuln)
+		b, err := protojson.Marshal(vuln)
 		if err != nil {
 			_ = zw.Close()
 			return err

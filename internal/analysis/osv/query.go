@@ -15,7 +15,7 @@ import (
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
-	"osv.dev/bindings/go/osvdev"
+	"osv.dev/bindings/go/api"
 
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
@@ -34,7 +34,7 @@ import (
 // batch querying and vulnerability expansion. It is satisfied by
 // osvdev.DefaultClient enabling dependency injection in tests.
 type Client interface {
-	QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error)
+	QueryBatch(ctx context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error)
 	GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error)
 }
 
@@ -84,7 +84,7 @@ func NewPkgInput(key QueryKey, ctx PackageContext) PkgInput {
 // requests. Successful responses are cached for future lookups.
 func getCachedVuln(ctx context.Context, client Client, id string) (*osvschema.Vulnerability, error) {
 	var v osvschema.Vulnerability
-	if disk.Read("osv", id, osvCacheTTL, &v) {
+	if disk.ReadProto("osv", id, osvCacheTTL, &v) {
 		otel.RecordOSVCacheAccess(ctx, true)
 		return &v, nil
 	}
@@ -93,7 +93,7 @@ func getCachedVuln(ctx context.Context, client Client, id string) (*osvschema.Vu
 	if err != nil {
 		return nil, err
 	}
-	disk.Write("osv", id, res)
+	disk.WriteProto("osv", id, res)
 	return res, nil
 }
 
@@ -441,7 +441,7 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 		return nil, nil
 	}
 	startTime := time.Now()
-	queries := make([]*osvdev.Query, 0, len(pkgs))
+	queries := make([]*api.Query, 0, len(pkgs))
 	meta := make([]PkgInput, 0, len(pkgs))
 	var droppedNoVersion, droppedNoIdentifier int
 	for _, p := range pkgs {
@@ -455,7 +455,7 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 			normalized.Version = normalizeGoVersion(normalized.Version)
 		}
 		pkgQuery, queryVersion := osvQueryPackage(normalized)
-		if pkgQuery.Name == "" && pkgQuery.PURL == "" {
+		if pkgQuery.GetName() == "" && pkgQuery.GetPurl() == "" {
 			droppedNoIdentifier++
 			continue
 		}
@@ -466,9 +466,9 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 			queryVersion = normalizeGoVersion(queryVersion)
 		}
 
-		queries = append(queries, &osvdev.Query{
+		queries = append(queries, &api.Query{
 			Package: pkgQuery,
-			Version: queryVersion,
+			Param:   &api.Query_Version{Version: queryVersion},
 		})
 		meta = append(meta, normalized)
 	}
@@ -504,32 +504,32 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 	var aliasGroup singleflight.Group
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(osvConcurrencyLimit)
-	for i, res := range resp.Results {
+	for i, res := range resp.GetResults() {
 		if i >= len(queries) || i >= len(meta) {
 			break
 		}
 		g.Go(func() error {
 			pkgMeta := meta[i]
-			ver := queries[i].Version
+			ver := queries[i].GetVersion()
 			displayVersion := pkgMeta.Version
 			if ver != "" {
 				displayVersion = ver
 			}
 			var local []Vulnerability
-			for _, mv := range res.Vulns {
-				full, err := getCachedVuln(ctx, client, mv.ID)
+			for _, mv := range res.GetVulns() {
+				full, err := getCachedVuln(ctx, client, mv.GetId())
 				if err != nil {
-					return fmt.Errorf("expand vulnerability %s: %w", mv.ID, err)
+					return fmt.Errorf("expand vulnerability %s: %w", mv.GetId(), err)
 				}
-				if !isVersionAffected(*full, pkgMeta) {
+				if !isVersionAffected(full, pkgMeta) {
 					continue
 				}
 				pkgMeta.Version = displayVersion
-				base := ProcessOSVVulnerability(*full, pkgMeta)
+				base := ProcessOSVVulnerability(full, pkgMeta)
 				base.Affected = true
 				var extras []Vulnerability
 				skip := false
-				for _, alias := range full.Aliases {
+				for _, alias := range full.GetAliases() {
 					// Use singleflight to deduplicate concurrent requests for the same alias
 					result, err, _ := aliasGroup.Do(alias, func() (any, error) {
 						return getCachedVuln(ctx, client, alias)
@@ -541,17 +541,17 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 					if aliasV == nil {
 						continue
 					}
-					if !slices.ContainsFunc(aliasV.Affected, func(a osvschema.Affected) bool {
-						return matchesPackage(a.Package, pkgMeta)
+					if !slices.ContainsFunc(aliasV.GetAffected(), func(a *osvschema.Affected) bool {
+						return matchesPackage(a.GetPackage(), pkgMeta)
 					}) {
 						continue
 					}
-					if !isVersionAffected(*aliasV, pkgMeta) {
+					if !isVersionAffected(aliasV, pkgMeta) {
 						skip = true
 						break
 					}
 					pkgMeta.Version = displayVersion
-					pv := ProcessOSVVulnerability(*aliasV, pkgMeta)
+					pv := ProcessOSVVulnerability(aliasV, pkgMeta)
 					extras = append(extras, pv)
 				}
 				if skip {
@@ -644,24 +644,24 @@ func normalizeQueryInput(p PkgInput) PkgInput {
 	return normalized
 }
 
-func osvQueryPackage(p PkgInput) (osvdev.Package, string) {
+func osvQueryPackage(p PkgInput) (*osvschema.Package, string) {
 	version := p.Version
 	if p.Name != "" && p.Ecosystem != "" {
-		return osvdev.Package{
+		return &osvschema.Package{
 			Name:      p.Name,
 			Ecosystem: normalizeOSVEcosystem(p.Ecosystem),
 		}, version
 	}
 
-	pkgQuery := osvdev.Package{}
+	pkgQuery := &osvschema.Package{}
 	if p.PURL != "" {
-		pkgQuery.PURL = p.PURL
+		pkgQuery.Purl = p.PURL
 		if pu, err := purl.FromString(p.PURL); err == nil {
 			if version == "" {
 				version = pu.Version
 			}
 			pu.Version = ""
-			pkgQuery.PURL = pu.String()
+			pkgQuery.Purl = pu.String()
 		}
 	}
 	return pkgQuery, version
@@ -704,17 +704,17 @@ func normalizeGoVersion(v string) string {
 }
 
 // matchesPackage checks if an OSV package definition matches the target package input.
-func matchesPackage(pkg osvschema.Package, target PkgInput) bool {
-	if pkg.Purl != "" && target.PURL != "" {
-		return equivalentPURL(pkg.Purl, target.PURL)
+func matchesPackage(pkg *osvschema.Package, target PkgInput) bool {
+	if pkg.GetPurl() != "" && target.PURL != "" {
+		return equivalentPURL(pkg.GetPurl(), target.PURL)
 	}
-	if pkg.Name != "" && target.Name != "" && !strings.EqualFold(pkg.Name, target.Name) {
+	if pkg.GetName() != "" && target.Name != "" && !strings.EqualFold(pkg.GetName(), target.Name) {
 		return false
 	}
-	if pkg.Ecosystem != "" && target.Ecosystem != "" && !strings.EqualFold(pkg.Ecosystem, target.Ecosystem) {
+	if pkg.GetEcosystem() != "" && target.Ecosystem != "" && !strings.EqualFold(pkg.GetEcosystem(), target.Ecosystem) {
 		return false
 	}
-	if pkg.Purl == "" && pkg.Name == "" {
+	if pkg.GetPurl() == "" && pkg.GetName() == "" {
 		return false
 	}
 	return true
@@ -728,25 +728,25 @@ func equivalentPURL(a, b string) bool {
 // isVersionAffected reports whether the package metadata and version fall within
 // any affected range of the provided vulnerability. It uses ecosystem-specific
 // version comparison (Debian, Alpine, npm, etc.) via OSV-SCALIBR's semantic package.
-func isVersionAffected(v osvschema.Vulnerability, pkg PkgInput) bool {
+func isVersionAffected(v *osvschema.Vulnerability, pkg PkgInput) bool {
 	version := strings.TrimSpace(pkg.Version)
 	if version == "" {
 		return false
 	}
 
-	for _, a := range v.Affected {
-		if !matchesPackage(a.Package, pkg) {
+	for _, a := range v.GetAffected() {
+		if !matchesPackage(a.GetPackage(), pkg) {
 			continue
 		}
 
 		// If no ranges are specified, the package is unconditionally affected
-		if len(a.Ranges) == 0 {
+		if len(a.GetRanges()) == 0 {
 			return true
 		}
 
 		// Check each range
-		for _, r := range a.Ranges {
-			if versionInRange(version, pkg.Ecosystem, a.Package.Ecosystem, r) {
+		for _, r := range a.GetRanges() {
+			if versionInRange(version, pkg.Ecosystem, a.GetPackage().GetEcosystem(), r) {
 				return true
 			}
 		}
@@ -756,8 +756,8 @@ func isVersionAffected(v osvschema.Vulnerability, pkg PkgInput) bool {
 
 // versionInRange checks if a version falls within an OSV affected range.
 // It handles SEMVER, ECOSYSTEM, and GIT range types with ecosystem-specific comparison.
-func versionInRange(version, pkgEcosystem, osvEcosystem string, r osvschema.Range) bool {
-	rangeType := strings.ToUpper(string(r.Type))
+func versionInRange(version, pkgEcosystem, osvEcosystem string, r *osvschema.Range) bool {
+	rangeType := r.GetType().String()
 
 	// GIT ranges require commit hash matching, which we don't support
 	if rangeType == "GIT" {
@@ -777,7 +777,7 @@ func versionInRange(version, pkgEcosystem, osvEcosystem string, r osvschema.Rang
 }
 
 // versionInGoSemverRange checks if a Go version falls within a SEMVER range.
-func versionInGoSemverRange(version string, r osvschema.Range) bool {
+func versionInGoSemverRange(version string, r *osvschema.Range) bool {
 	cur := normalizeGoVersion(version)
 	if cur == "" || !semver.IsValid(cur) {
 		return true // Can't compare, assume affected for safety
@@ -786,7 +786,7 @@ func versionInGoSemverRange(version string, r osvschema.Range) bool {
 	var introduced string
 	introducedSet := false
 	introducedFromZero := false
-	for _, e := range r.Events {
+	for _, e := range r.GetEvents() {
 		if e.Introduced != "" {
 			introducedSet = true
 			introducedFromZero = strings.TrimSpace(e.Introduced) == "0"
@@ -842,7 +842,7 @@ func normalizeGoRangeVersion(v string) string {
 
 // versionInEcosystemRange checks if a version falls within an ECOSYSTEM or SEMVER range
 // using OSV-SCALIBR's semantic version comparison for the appropriate ecosystem.
-func versionInEcosystemRange(version, ecosystem string, r osvschema.Range) bool {
+func versionInEcosystemRange(version, ecosystem string, r *osvschema.Range) bool {
 	// Map ecosystem to OSV-SCALIBR semantic package ecosystem name
 	semanticEco := mapToSemanticEcosystem(ecosystem)
 	if semanticEco == "" {
@@ -861,7 +861,7 @@ func versionInEcosystemRange(version, ecosystem string, r osvschema.Range) bool 
 	var introducedVersion semantic.Version
 	introducedSet := false
 
-	for _, e := range r.Events {
+	for _, e := range r.GetEvents() {
 		if e.Introduced != "" {
 			if e.Introduced == "0" {
 				// "0" means all versions are affected from the beginning

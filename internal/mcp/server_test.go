@@ -39,7 +39,8 @@ import (
 	"github.com/temporalio/deputy/internal/vulnerability"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"osv.dev/bindings/go/osvdev"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"osv.dev/bindings/go/api"
 )
 
 // callProtoTool invokes a proto-contract tool handler with a protojson-encoded
@@ -79,8 +80,8 @@ func (m *mockOSVClient) GetVulnByID(ctx context.Context, id string) (*osvschema.
 	return nil, nil
 }
 
-func (m *mockOSVClient) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
-	return &osvdev.BatchedResponse{}, nil
+func (m *mockOSVClient) QueryBatch(ctx context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
+	return &api.BatchVulnerabilityList{}, nil
 }
 
 // mockScanHandler is a mock scan service handler for testing.
@@ -963,12 +964,12 @@ func TestExplainVulnerabilitiesOmitsEmptyCollections(t *testing.T) {
 	mockOSV := &mockOSVClient{
 		vulns: map[string]*osvschema.Vulnerability{
 			"CVE-2021-44228": {
-				ID:      "CVE-2021-44228",
+				Id:      "CVE-2021-44228",
 				Summary: "Log4Shell",
-				References: []osvschema.Reference{
-					{URL: "https://example.com/one"},
-					{URL: "https://example.com/two"},
-					{URL: "https://example.com/three"},
+				References: []*osvschema.Reference{
+					{Url: "https://example.com/one"},
+					{Url: "https://example.com/two"},
+					{Url: "https://example.com/three"},
 				},
 			},
 		},
@@ -2102,55 +2103,55 @@ func TestExplainVulnerability(t *testing.T) {
 	mockOSV := &mockOSVClient{
 		vulns: map[string]*osvschema.Vulnerability{
 			"CVE-2021-44228": {
-				ID:        "CVE-2021-44228",
-				Modified:  time.Date(2026, 5, 13, 15, 33, 43, 0, time.UTC),
-				Published: time.Date(2021, 12, 10, 10, 15, 30, 0, time.UTC),
+				Id:        "CVE-2021-44228",
+				Modified:  timestamppb.New(time.Date(2026, 5, 13, 15, 33, 43, 0, time.UTC)),
+				Published: timestamppb.New(time.Date(2021, 12, 10, 10, 15, 30, 0, time.UTC)),
 				Summary:   "Log4Shell vulnerability",
 				Details:   "Remote code execution in Log4j",
 				Aliases:   []string{"GHSA-jfh8-c2jp-5v3q"},
-				Severity: []osvschema.Severity{
-					{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"},
+				Severity: []*osvschema.Severity{
+					{Type: osvschema.Severity_CVSS_V3, Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"},
 				},
-				References: []osvschema.Reference{
-					{URL: "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"},
-					{URL: "https://example.com/advisory"},
-					{URL: "https://example.com/patch"},
+				References: []*osvschema.Reference{
+					{Url: "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"},
+					{Url: "https://example.com/advisory"},
+					{Url: "https://example.com/patch"},
 				},
-				Affected: []osvschema.Affected{
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{Name: "org.apache.logging.log4j:log4j-core", Ecosystem: "Maven"},
-						Ranges: []osvschema.Range{{
-							Type:   osvschema.RangeEcosystem,
-							Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "2.17.0"}},
+						Package: &osvschema.Package{Name: "org.apache.logging.log4j:log4j-core", Ecosystem: "Maven"},
+						Ranges: []*osvschema.Range{{
+							Type:   osvschema.Range_ECOSYSTEM,
+							Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "2.17.0"}},
 						}},
 					},
 					{
-						Package: osvschema.Package{Name: "apache/logging-log4j2", Ecosystem: "Git"},
-						Ranges: []osvschema.Range{{
-							Type:   osvschema.RangeGit,
-							Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "38513a7d57343881f7bf58f37e67d6a87e0a47c5"}},
+						Package: &osvschema.Package{Name: "apache/logging-log4j2", Ecosystem: "Git"},
+						Ranges: []*osvschema.Range{{
+							Type:   osvschema.Range_GIT,
+							Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "38513a7d57343881f7bf58f37e67d6a87e0a47c5"}},
 						}},
 					},
 					{
-						Package: osvschema.Package{Name: "apache/logging-log4j2", Ecosystem: "Git"},
-						Ranges: []osvschema.Range{{
-							Type:   osvschema.RangeEcosystem,
-							Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "f2e7063ee409ff40a60b14370c58dceee1a2efd4"}},
+						Package: &osvschema.Package{Name: "apache/logging-log4j2", Ecosystem: "Git"},
+						Ranges: []*osvschema.Range{{
+							Type:   osvschema.Range_ECOSYSTEM,
+							Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "f2e7063ee409ff40a60b14370c58dceee1a2efd4"}},
 						}},
 					},
 				},
 			},
 			"MAL-2024-1234": {
-				ID:      "MAL-2024-1234",
+				Id:      "MAL-2024-1234",
 				Summary: "Malicious code in evil-package (npm)",
 				Details: "The package contained a credential-stealing install script.",
 				Aliases: []string{"GHSA-aaaa-bbbb-cccc"},
-				Affected: []osvschema.Affected{
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{Name: "evil-package", Ecosystem: "npm"},
-						Ranges: []osvschema.Range{{
-							Type:   osvschema.RangeSemVer,
-							Events: []osvschema.Event{{Introduced: "0"}},
+						Package: &osvschema.Package{Name: "evil-package", Ecosystem: "npm"},
+						Ranges: []*osvschema.Range{{
+							Type:   osvschema.Range_SEMVER,
+							Events: []*osvschema.Event{{Introduced: "0"}},
 						}},
 					},
 				},
@@ -2315,16 +2316,16 @@ func TestExplainVulnerabilities(t *testing.T) {
 	mockOSV := &mockOSVClient{
 		vulns: map[string]*osvschema.Vulnerability{
 			"CVE-2021-44228": {
-				ID:      "CVE-2021-44228",
+				Id:      "CVE-2021-44228",
 				Summary: "Log4Shell",
-				References: []osvschema.Reference{
-					{URL: "https://example.com/one"},
-					{URL: "https://example.com/two"},
-					{URL: "https://example.com/three"},
+				References: []*osvschema.Reference{
+					{Url: "https://example.com/one"},
+					{Url: "https://example.com/two"},
+					{Url: "https://example.com/three"},
 				},
 			},
 			"CVE-2022-22965": {
-				ID:      "CVE-2022-22965",
+				Id:      "CVE-2022-22965",
 				Summary: "Spring4Shell",
 			},
 		},
@@ -2392,7 +2393,7 @@ func TestExplainVulnerabilities(t *testing.T) {
 		mockOSV := &mockOSVClient{
 			vulns: map[string]*osvschema.Vulnerability{
 				"CVE-2021-44228": {
-					ID:      "CVE-2021-44228",
+					Id:      "CVE-2021-44228",
 					Summary: "Log4Shell",
 				},
 			},

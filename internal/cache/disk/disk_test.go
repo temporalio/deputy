@@ -5,6 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestCachePath(t *testing.T) {
@@ -256,5 +260,55 @@ func TestDefaultTTL(t *testing.T) {
 
 	if DefaultTTL != 24*time.Hour {
 		t.Errorf("DefaultTTL = %v, want 24h", DefaultTTL)
+	}
+}
+
+// TestReadWriteProto covers the protobuf round trip the OSV cache depends on.
+// encoding/json cannot represent an osv-schema record (timestamps become
+// structs, enums become numbers), so entries are written with protojson and a
+// mismatched codec would silently produce an empty record on read.
+func TestReadWriteProto(t *testing.T) {
+	restore := SetBaseDirForTest(t.TempDir())
+	defer restore()
+
+	want := timestamppb.New(time.Date(2021, 12, 10, 9, 8, 7, 0, time.UTC))
+	WriteProto("osv", "GHSA-proto", want)
+
+	var got timestamppb.Timestamp
+	if !ReadProto("osv", "GHSA-proto", time.Hour, &got) {
+		t.Fatal("ReadProto() = false, want a cache hit")
+	}
+	if !proto.Equal(want, &got) {
+		t.Errorf("ReadProto() = %s, want %s", got.AsTime(), want.AsTime())
+	}
+
+	// A Timestamp is RFC 3339 in protojson and a {"seconds":...} object in
+	// encoding/json, so the stored bytes prove which codec ran.
+	b, err := os.ReadFile(Path("osv", "GHSA-proto"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(b) != `"2021-12-10T09:08:07Z"` {
+		t.Errorf("cache entry = %s, want the protojson timestamp form", b)
+	}
+}
+
+// TestReadProto_TolerantOfUnknownFields pins DiscardUnknown: an entry written by
+// a build with a newer schema must still load rather than being dropped, which
+// would turn a cache hit into a silent network fetch on every run.
+func TestReadProto_TolerantOfUnknownFields(t *testing.T) {
+	restore := SetBaseDirForTest(t.TempDir())
+	defer restore()
+
+	p := Path("osv", "GHSA-future")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(p, []byte(`{"newFieldFromLater": true}`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if !ReadProto("osv", "GHSA-future", time.Hour, &emptypb.Empty{}) {
+		t.Fatal("ReadProto() = false, want unknown fields to be discarded")
 	}
 }

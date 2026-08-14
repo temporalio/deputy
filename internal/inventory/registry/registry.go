@@ -165,8 +165,12 @@ func (r *Registry) ListAll() []*inventoryv1.ExtractorInfo {
 
 // listScalibrExtractors returns info for all SCALIBR extractors.
 func listScalibrExtractors() []*inventoryv1.ExtractorInfo {
-	// Get all SCALIBR plugins
-	plugins := pl.FromCapabilities(nil)
+	// Get all SCALIBR plugins. An enumeration failure means we can only report
+	// Deputy's own registered extractors, which is what the caller merges with.
+	plugins, err := pl.FromCapabilities(nil, nil)
+	if err != nil {
+		return nil
+	}
 
 	var infos []*inventoryv1.ExtractorInfo
 	allowedPrefixes := ecosystem.AllScalibrPrefixes()

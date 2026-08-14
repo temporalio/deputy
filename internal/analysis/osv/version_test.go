@@ -12,7 +12,7 @@ func TestIsVersionAffected_Debian(t *testing.T) {
 		pkgName      string
 		pkgVersion   string
 		pkgEcosystem string
-		vuln         osvschema.Vulnerability
+		vuln         *osvschema.Vulnerability
 		want         bool
 	}{
 		{
@@ -20,18 +20,18 @@ func TestIsVersionAffected_Debian(t *testing.T) {
 			pkgName:      "curl",
 			pkgVersion:   "7.88.1-10+deb12u5",
 			pkgEcosystem: "Debian:12",
-			vuln: osvschema.Vulnerability{
-				ID: "DEBIAN-CVE-2023-38545",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "DEBIAN-CVE-2023-38545",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "curl",
 							Ecosystem: "Debian:12",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type: osvschema.RangeEcosystem,
-								Events: []osvschema.Event{
+								Type: osvschema.Range_ECOSYSTEM,
+								Events: []*osvschema.Event{
 									{Introduced: "0"},
 									{Fixed: "7.88.1-10+deb12u4"},
 								},
@@ -47,18 +47,18 @@ func TestIsVersionAffected_Debian(t *testing.T) {
 			pkgName:      "curl",
 			pkgVersion:   "7.88.1-10+deb12u3",
 			pkgEcosystem: "Debian:12",
-			vuln: osvschema.Vulnerability{
-				ID: "DEBIAN-CVE-2023-38545",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "DEBIAN-CVE-2023-38545",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "curl",
 							Ecosystem: "Debian:12",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type: osvschema.RangeEcosystem,
-								Events: []osvschema.Event{
+								Type: osvschema.Range_ECOSYSTEM,
+								Events: []*osvschema.Event{
 									{Introduced: "0"},
 									{Fixed: "7.88.1-10+deb12u4"},
 								},
@@ -74,18 +74,18 @@ func TestIsVersionAffected_Debian(t *testing.T) {
 			pkgName:      "other-package",
 			pkgVersion:   "1.0.0",
 			pkgEcosystem: "Debian:12",
-			vuln: osvschema.Vulnerability{
-				ID: "DEBIAN-CVE-2023-38545",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "DEBIAN-CVE-2023-38545",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "curl",
 							Ecosystem: "Debian:12",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type: osvschema.RangeEcosystem,
-								Events: []osvschema.Event{
+								Type: osvschema.Range_ECOSYSTEM,
+								Events: []*osvschema.Event{
 									{Introduced: "0"},
 									{Fixed: "7.88.1-10+deb12u4"},
 								},
@@ -101,18 +101,18 @@ func TestIsVersionAffected_Debian(t *testing.T) {
 			pkgName:      "vulnerable-pkg",
 			pkgVersion:   "1.0.0-1",
 			pkgEcosystem: "Debian:12",
-			vuln: osvschema.Vulnerability{
-				ID: "DEBIAN-CVE-2024-XXXX",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "DEBIAN-CVE-2024-XXXX",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "vulnerable-pkg",
 							Ecosystem: "Debian:12",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type: osvschema.RangeEcosystem,
-								Events: []osvschema.Event{
+								Type: osvschema.Range_ECOSYSTEM,
+								Events: []*osvschema.Event{
 									{Introduced: "0"},
 								},
 							},
@@ -145,7 +145,7 @@ func TestIsVersionAffected_Alpine(t *testing.T) {
 		pkgName      string
 		pkgVersion   string
 		pkgEcosystem string
-		vuln         osvschema.Vulnerability
+		vuln         *osvschema.Vulnerability
 		want         bool
 	}{
 		{
@@ -153,18 +153,18 @@ func TestIsVersionAffected_Alpine(t *testing.T) {
 			pkgName:      "busybox",
 			pkgVersion:   "1.36.1-r5",
 			pkgEcosystem: "Alpine:3.18",
-			vuln: osvschema.Vulnerability{
-				ID: "CVE-2023-XXXXX",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "CVE-2023-XXXXX",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "busybox",
 							Ecosystem: "Alpine:3.18",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type: osvschema.RangeEcosystem,
-								Events: []osvschema.Event{
+								Type: osvschema.Range_ECOSYSTEM,
+								Events: []*osvschema.Event{
 									{Introduced: "0"},
 									{Fixed: "1.36.1-r4"},
 								},
@@ -180,18 +180,18 @@ func TestIsVersionAffected_Alpine(t *testing.T) {
 			pkgName:      "busybox",
 			pkgVersion:   "1.36.1-r3",
 			pkgEcosystem: "Alpine:3.18",
-			vuln: osvschema.Vulnerability{
-				ID: "CVE-2023-XXXXX",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "CVE-2023-XXXXX",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "busybox",
 							Ecosystem: "Alpine:3.18",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type: osvschema.RangeEcosystem,
-								Events: []osvschema.Event{
+								Type: osvschema.Range_ECOSYSTEM,
+								Events: []*osvschema.Event{
 									{Introduced: "0"},
 									{Fixed: "1.36.1-r4"},
 								},
@@ -225,7 +225,7 @@ func TestIsVersionAffected_Go(t *testing.T) {
 		pkgName      string
 		pkgVersion   string
 		pkgEcosystem string
-		vuln         osvschema.Vulnerability
+		vuln         *osvschema.Vulnerability
 		want         bool
 	}{
 		{
@@ -233,18 +233,18 @@ func TestIsVersionAffected_Go(t *testing.T) {
 			pkgName:      "github.com/foo/bar",
 			pkgVersion:   "v1.2.3",
 			pkgEcosystem: "Go",
-			vuln: osvschema.Vulnerability{
-				ID: "GO-2023-XXXX",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "GO-2023-XXXX",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "github.com/foo/bar",
 							Ecosystem: "Go",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type: osvschema.RangeSemVer,
-								Events: []osvschema.Event{
+								Type: osvschema.Range_SEMVER,
+								Events: []*osvschema.Event{
 									{Introduced: "1.0.0"},
 									{Fixed: "1.3.0"},
 								},
@@ -260,18 +260,18 @@ func TestIsVersionAffected_Go(t *testing.T) {
 			pkgName:      "github.com/foo/bar",
 			pkgVersion:   "v1.4.0",
 			pkgEcosystem: "Go",
-			vuln: osvschema.Vulnerability{
-				ID: "GO-2023-XXXX",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "GO-2023-XXXX",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "github.com/foo/bar",
 							Ecosystem: "Go",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type: osvschema.RangeSemVer,
-								Events: []osvschema.Event{
+								Type: osvschema.Range_SEMVER,
+								Events: []*osvschema.Event{
 									{Introduced: "1.0.0"},
 									{Fixed: "1.3.0"},
 								},
@@ -287,19 +287,19 @@ func TestIsVersionAffected_Go(t *testing.T) {
 			pkgName:      "golang.org/x/crypto",
 			pkgVersion:   "v0.0.0-20200622213623-75b288015ac9",
 			pkgEcosystem: "Go",
-			vuln: osvschema.Vulnerability{
-				ID: "GO-2021-0227",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "GO-2021-0227",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "golang.org/x/crypto",
 							Ecosystem: "Go",
 							Purl:      "pkg:golang/golang.org/x/crypto",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type: osvschema.RangeSemVer,
-								Events: []osvschema.Event{
+								Type: osvschema.Range_SEMVER,
+								Events: []*osvschema.Event{
 									{Introduced: "0"},
 									{Fixed: "0.0.0-20201216223049-8b5274cf687f"},
 								},
@@ -315,18 +315,18 @@ func TestIsVersionAffected_Go(t *testing.T) {
 			pkgName:      "golang.org/x/crypto",
 			pkgVersion:   "v0.1.0",
 			pkgEcosystem: "Go",
-			vuln: osvschema.Vulnerability{
-				ID: "GO-open",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "GO-open",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "golang.org/x/crypto",
 							Ecosystem: "Go",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type:   osvschema.RangeSemVer,
-								Events: []osvschema.Event{{Introduced: "0"}},
+								Type:   osvschema.Range_SEMVER,
+								Events: []*osvschema.Event{{Introduced: "0"}},
 							},
 						},
 					},
@@ -339,18 +339,18 @@ func TestIsVersionAffected_Go(t *testing.T) {
 			pkgName:      "github.com/docker/docker",
 			pkgVersion:   "v28.5.2+incompatible",
 			pkgEcosystem: "Go",
-			vuln: osvschema.Vulnerability{
-				ID: "GHSA-last-affected",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "GHSA-last-affected",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "github.com/docker/docker",
 							Ecosystem: "Go",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type: osvschema.RangeSemVer,
-								Events: []osvschema.Event{
+								Type: osvschema.Range_SEMVER,
+								Events: []*osvschema.Event{
 									{Introduced: "0"},
 									{LastAffected: "28.5.2"},
 								},
@@ -366,18 +366,18 @@ func TestIsVersionAffected_Go(t *testing.T) {
 			pkgName:      "github.com/docker/docker",
 			pkgVersion:   "v28.5.3+incompatible",
 			pkgEcosystem: "Go",
-			vuln: osvschema.Vulnerability{
-				ID: "GHSA-last-affected",
-				Affected: []osvschema.Affected{
+			vuln: &osvschema.Vulnerability{
+				Id: "GHSA-last-affected",
+				Affected: []*osvschema.Affected{
 					{
-						Package: osvschema.Package{
+						Package: &osvschema.Package{
 							Name:      "github.com/docker/docker",
 							Ecosystem: "Go",
 						},
-						Ranges: []osvschema.Range{
+						Ranges: []*osvschema.Range{
 							{
-								Type: osvschema.RangeSemVer,
-								Events: []osvschema.Event{
+								Type: osvschema.Range_SEMVER,
+								Events: []*osvschema.Event{
 									{Introduced: "0"},
 									{LastAffected: "28.5.2"},
 								},

@@ -5,6 +5,7 @@ import (
 
 	"github.com/protobom/protobom/pkg/sbom"
 
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/purlx"
 )
@@ -41,7 +42,7 @@ func TestSBOMDocToPackagesPreservesMiseLockedVersion(t *testing.T) {
 	if md.LockedVersion != "1.20.1" {
 		t.Errorf("LockedVersion = %q, want 1.20.1", md.LockedVersion)
 	}
-	if len(pkgs[0].Locations) != 1 || pkgs[0].Locations[0] != "mise.toml" {
-		t.Errorf("Locations = %v, want [mise.toml]", pkgs[0].Locations)
+	if len(dependency.PackagePaths(pkgs[0])) != 1 || dependency.PackagePaths(pkgs[0])[0] != "mise.toml" {
+		t.Errorf("Locations = %v, want [mise.toml]", dependency.PackagePaths(pkgs[0]))
 	}
 }

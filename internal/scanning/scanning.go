@@ -655,12 +655,11 @@ func packagesToProto(pkgs []*extractor.Package, direct map[string]bool) []*depen
 			}
 		}
 
-		locs := make([]string, len(pkg.Locations))
-		copy(locs, pkg.Locations)
+		locs := dependency.PackagePaths(pkg)
 
 		// Build manifest references from locations
 		var manifestRefs []*dependencyv1.ManifestRef
-		for _, loc := range pkg.Locations {
+		for _, loc := range locs {
 			manager, manifestPath, ok := manifests.DetectManager(loc, pkg.PURLType)
 			if !ok {
 				continue
@@ -676,15 +675,17 @@ func packagesToProto(pkgs []*extractor.Package, direct map[string]bool) []*depen
 		}
 
 		// Convert layer details from SCALIBR for container image scans.
-		// Note: SCALIBR uses DiffID/ChainID (Go naming), we use DiffId/ChainId (proto naming).
+		// Note: SCALIBR uses DiffID/ChainID (Go naming), we use DiffId/ChainId
+		// (proto naming), and reports base image membership as an index into the
+		// image's base image matches, where 0 means "no match".
 		var layerDetails *containerv1.LayerDetails
-		if pkg.LayerDetails != nil {
+		if pkg.LayerMetadata != nil {
 			layerDetails = &containerv1.LayerDetails{
-				Index:       int32(pkg.LayerDetails.Index),
-				DiffId:      pkg.LayerDetails.DiffID,
-				ChainId:     pkg.LayerDetails.ChainID,
-				Command:     pkg.LayerDetails.Command,
-				InBaseImage: pkg.LayerDetails.InBaseImage,
+				Index:       int32(pkg.LayerMetadata.Index),
+				DiffId:      pkg.LayerMetadata.DiffID.String(),
+				ChainId:     pkg.LayerMetadata.ChainID.String(),
+				Command:     pkg.LayerMetadata.Command,
+				InBaseImage: pkg.LayerMetadata.BaseImageIndex > 0,
 			}
 		}
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/temporalio/deputy/internal/dependency"
 )
 
 func TestDeduplicatePackages(t *testing.T) {
@@ -27,16 +28,16 @@ func TestDeduplicatePackages(t *testing.T) {
 		{
 			name: "no duplicates",
 			input: []*extractor.Package{
-				{Name: "foo", Version: "1.0.0", PURLType: "golang", Locations: []string{"go.mod"}},
-				{Name: "bar", Version: "2.0.0", PURLType: "golang", Locations: []string{"go.mod"}},
+				{Name: "foo", Version: "1.0.0", PURLType: "golang", Location: extractor.LocationFromPath("go.mod")},
+				{Name: "bar", Version: "2.0.0", PURLType: "golang", Location: extractor.LocationFromPath("go.mod")},
 			},
 			wantCount: 2,
 		},
 		{
 			name: "duplicate packages merged",
 			input: []*extractor.Package{
-				{Name: "foo", Version: "1.0.0", PURLType: "golang", Locations: []string{"go.mod"}},
-				{Name: "foo", Version: "1.0.0", PURLType: "golang", Locations: []string{"go.sum"}},
+				{Name: "foo", Version: "1.0.0", PURLType: "golang", Location: extractor.LocationFromPath("go.mod")},
+				{Name: "foo", Version: "1.0.0", PURLType: "golang", Location: extractor.LocationFromPath("go.sum")},
 			},
 			wantCount: 1,
 			wantLocs: map[string][]string{
@@ -46,34 +47,34 @@ func TestDeduplicatePackages(t *testing.T) {
 		{
 			name: "same name different version not merged",
 			input: []*extractor.Package{
-				{Name: "foo", Version: "1.0.0", PURLType: "golang", Locations: []string{"go.mod"}},
-				{Name: "foo", Version: "2.0.0", PURLType: "golang", Locations: []string{"go.mod"}},
+				{Name: "foo", Version: "1.0.0", PURLType: "golang", Location: extractor.LocationFromPath("go.mod")},
+				{Name: "foo", Version: "2.0.0", PURLType: "golang", Location: extractor.LocationFromPath("go.mod")},
 			},
 			wantCount: 2,
 		},
 		{
 			name: "merges licenses from duplicate",
 			input: []*extractor.Package{
-				{Name: "foo", Version: "1.0.0", PURLType: "golang", Locations: []string{"go.mod"}, Licenses: nil},
-				{Name: "foo", Version: "1.0.0", PURLType: "golang", Locations: []string{"go.sum"}, Licenses: []string{"MIT"}},
+				{Name: "foo", Version: "1.0.0", PURLType: "golang", Location: extractor.LocationFromPath("go.mod"), Licenses: nil},
+				{Name: "foo", Version: "1.0.0", PURLType: "golang", Location: extractor.LocationFromPath("go.sum"), Licenses: []string{"MIT"}},
 			},
 			wantCount: 1,
 		},
 		{
 			name: "skips nil packages",
 			input: []*extractor.Package{
-				{Name: "foo", Version: "1.0.0", PURLType: "golang", Locations: []string{"go.mod"}},
+				{Name: "foo", Version: "1.0.0", PURLType: "golang", Location: extractor.LocationFromPath("go.mod")},
 				nil,
-				{Name: "bar", Version: "1.0.0", PURLType: "golang", Locations: []string{"go.mod"}},
+				{Name: "bar", Version: "1.0.0", PURLType: "golang", Location: extractor.LocationFromPath("go.mod")},
 			},
 			wantCount: 2,
 		},
 		{
 			name: "multiple duplicates",
 			input: []*extractor.Package{
-				{Name: "foo", Version: "1.0.0", PURLType: "golang", Locations: []string{"a/go.mod"}},
-				{Name: "foo", Version: "1.0.0", PURLType: "golang", Locations: []string{"b/go.mod"}},
-				{Name: "foo", Version: "1.0.0", PURLType: "golang", Locations: []string{"c/go.mod"}},
+				{Name: "foo", Version: "1.0.0", PURLType: "golang", Location: extractor.LocationFromPath("a/go.mod")},
+				{Name: "foo", Version: "1.0.0", PURLType: "golang", Location: extractor.LocationFromPath("b/go.mod")},
+				{Name: "foo", Version: "1.0.0", PURLType: "golang", Location: extractor.LocationFromPath("c/go.mod")},
 			},
 			wantCount: 1,
 			wantLocs: map[string][]string{
@@ -99,13 +100,13 @@ func TestDeduplicatePackages(t *testing.T) {
 					}
 					key := purl.String()
 					if expectedLocs, ok := tt.wantLocs[key]; ok {
-						if len(pkg.Locations) != len(expectedLocs) {
+						if len(dependency.PackagePaths(pkg)) != len(expectedLocs) {
 							t.Errorf("package %s has %d locations, want %d: got %v, want %v",
-								key, len(pkg.Locations), len(expectedLocs), pkg.Locations, expectedLocs)
+								key, len(dependency.PackagePaths(pkg)), len(expectedLocs), dependency.PackagePaths(pkg), expectedLocs)
 						}
 						// Check all expected locations are present
 						locSet := make(map[string]bool)
-						for _, loc := range pkg.Locations {
+						for _, loc := range dependency.PackagePaths(pkg) {
 							locSet[loc] = true
 						}
 						for _, expectedLoc := range expectedLocs {

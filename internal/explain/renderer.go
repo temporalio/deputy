@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/temporalio/deputy/internal/vulnerability"
 	"github.com/temporalio/deputy/internal/vulnerability/intel"
 	"github.com/temporalio/deputy/internal/vulnerability/severity/cvss"
 	"github.com/temporalio/deputy/internal/vulnerability/weakness/cwe"
@@ -97,8 +98,8 @@ func (r *Renderer) buildVulnData(ctx context.Context, vuln *osvschema.Vulnerabil
 
 	// Build temporal info
 	data.Temporal = TemporalInfo{
-		Published: vuln.Published,
-		Modified:  vuln.Modified,
+		Published: vulnerability.OSVTime(vuln.GetPublished()),
+		Modified:  vulnerability.OSVTime(vuln.GetModified()),
 	}
 
 	// Enrich with threat intelligence
@@ -150,10 +151,10 @@ func (r *Renderer) renderText(out io.Writer, data *VulnData) error {
 	// ══════════════════════════════════════════════════════════════════════════
 	// SUMMARY: The most important one-liner
 	// ══════════════════════════════════════════════════════════════════════════
-	summary := vuln.Summary
-	if summary == "" && vuln.Details != "" {
+	summary := vuln.GetSummary()
+	if summary == "" && vuln.GetDetails() != "" {
 		// Use first sentence of details as summary if no summary provided
-		summary = extractFirstSentence(vuln.Details, 120)
+		summary = extractFirstSentence(vuln.GetDetails(), 120)
 	}
 	if summary != "" {
 		fmt.Fprintln(out)
@@ -184,11 +185,11 @@ func (r *Renderer) renderText(out io.Writer, data *VulnData) error {
 	// ══════════════════════════════════════════════════════════════════════════
 	// DETAILS: Full description
 	// ══════════════════════════════════════════════════════════════════════════
-	if vuln.Details != "" && vuln.Details != vuln.Summary {
+	if vuln.GetDetails() != "" && vuln.GetDetails() != vuln.GetSummary() {
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, styleSection.Render("Description"))
 		// Indent description content by 2 spaces to match other sections
-		for line := range strings.SplitSeq(wrapText(vuln.Details, 76), "\n") {
+		for line := range strings.SplitSeq(wrapText(vuln.GetDetails(), 76), "\n") {
 			if line == "" {
 				fmt.Fprintln(out)
 			} else {
@@ -225,7 +226,7 @@ func (r *Renderer) renderHeader(out io.Writer, data *VulnData) {
 	vuln := data.Vuln
 
 	// ID [SEVERITY] CVSS X.X
-	parts := []string{styleID.Render(vuln.ID)}
+	parts := []string{styleID.Render(vuln.GetId())}
 
 	// Severity badge
 	sevStyle := severityStyle(data.Severity)
@@ -244,9 +245,9 @@ func (r *Renderer) renderHeader(out io.Writer, data *VulnData) {
 	fmt.Fprintln(out, strings.Join(parts, " "))
 
 	// Aliases on their own indented line
-	if len(vuln.Aliases) > 0 {
-		aliases := make([]string, 0, len(vuln.Aliases))
-		for _, a := range vuln.Aliases {
+	if len(vuln.GetAliases()) > 0 {
+		aliases := make([]string, 0, len(vuln.GetAliases()))
+		for _, a := range vuln.GetAliases() {
 			aliases = append(aliases, styleAlias.Render(a))
 		}
 		fmt.Fprintf(out, "  %s\n", strings.Join(aliases, styleDim.Render(", ")))
@@ -425,9 +426,9 @@ func (r *Renderer) renderAffected(out io.Writer, data *VulnData) {
 	vuln := data.Vuln
 
 	// Filter to packages with actual names
-	var validAffected []osvschema.Affected
-	for _, a := range vuln.Affected {
-		if a.Package.Name != "" {
+	var validAffected []*osvschema.Affected
+	for _, a := range vuln.GetAffected() {
+		if a.GetPackage().GetName() != "" {
 			validAffected = append(validAffected, a)
 		}
 	}
@@ -441,11 +442,11 @@ func (r *Renderer) renderAffected(out io.Writer, data *VulnData) {
 	fmt.Fprintln(out, styleSection.Render("Affected"))
 
 	// Group by ecosystem
-	byEcosystem := make(map[string][]osvschema.Affected)
+	byEcosystem := make(map[string][]*osvschema.Affected)
 	var ecosystems []string
 
 	for _, a := range validAffected {
-		eco := string(a.Package.Ecosystem)
+		eco := a.GetPackage().GetEcosystem()
 		if eco == "" {
 			eco = "Other"
 		}
@@ -462,7 +463,7 @@ func (r *Renderer) renderAffected(out io.Writer, data *VulnData) {
 
 		for _, a := range byEcosystem[eco] {
 			// Package name
-			fmt.Fprintf(out, "    %s\n", stylePackage.Render(a.Package.Name))
+			fmt.Fprintf(out, "    %s\n", stylePackage.Render(a.GetPackage().GetName()))
 
 			// Version info
 			r.renderVersionRanges(out, a)
@@ -471,17 +472,17 @@ func (r *Renderer) renderAffected(out io.Writer, data *VulnData) {
 }
 
 // renderVersionRanges renders version range information for a package.
-func (r *Renderer) renderVersionRanges(out io.Writer, a osvschema.Affected) {
+func (r *Renderer) renderVersionRanges(out io.Writer, a *osvschema.Affected) {
 	var ranges []string
 
-	for _, rang := range a.Ranges {
+	for _, rang := range a.GetRanges() {
 		var introduced, fixed string
-		for _, event := range rang.Events {
-			if event.Introduced != "" {
-				introduced = event.Introduced
+		for _, event := range rang.GetEvents() {
+			if event.GetIntroduced() != "" {
+				introduced = event.GetIntroduced()
 			}
-			if event.Fixed != "" {
-				fixed = event.Fixed
+			if event.GetFixed() != "" {
+				fixed = event.GetFixed()
 			}
 		}
 
@@ -522,22 +523,22 @@ func (r *Renderer) renderReferences(out io.Writer, data *VulnData) {
 	fmt.Fprintln(out, styleSection.Render("References"))
 
 	// Group by type
-	byType := make(map[osvschema.ReferenceType][]osvschema.Reference)
-	typeOrder := []osvschema.ReferenceType{
-		osvschema.ReferenceAdvisory,
-		osvschema.ReferenceFix,
-		osvschema.ReferenceReport,
-		osvschema.ReferenceArticle,
-		osvschema.ReferencePackage,
-		osvschema.ReferenceWeb,
-		osvschema.ReferenceEvidence,
-		osvschema.ReferenceDetection,
+	byType := make(map[osvschema.Reference_Type][]*osvschema.Reference)
+	typeOrder := []osvschema.Reference_Type{
+		osvschema.Reference_ADVISORY,
+		osvschema.Reference_FIX,
+		osvschema.Reference_REPORT,
+		osvschema.Reference_ARTICLE,
+		osvschema.Reference_PACKAGE,
+		osvschema.Reference_WEB,
+		osvschema.Reference_EVIDENCE,
+		osvschema.Reference_DETECTION,
 	}
 
-	for _, ref := range vuln.References {
-		refType := ref.Type
-		if refType == "" {
-			refType = osvschema.ReferenceWeb
+	for _, ref := range vuln.GetReferences() {
+		refType := ref.GetType()
+		if refType == osvschema.Reference_NONE {
+			refType = osvschema.Reference_WEB
 		}
 		byType[refType] = append(byType[refType], ref)
 	}
@@ -560,7 +561,7 @@ func (r *Renderer) renderReferences(out io.Writer, data *VulnData) {
 				fmt.Fprintf(out, "    %s\n", styleDim.Render(fmt.Sprintf("+%d more", len(refs)-shown)))
 				break
 			}
-			fmt.Fprintf(out, "    %s\n", styleLink.Render(ref.URL))
+			fmt.Fprintf(out, "    %s\n", styleLink.Render(ref.GetUrl()))
 			shown++
 			totalShown++
 		}
@@ -575,24 +576,24 @@ func (r *Renderer) renderQuickLinks(out io.Writer, data *VulnData) {
 	var links []string
 
 	// OSV link (always available)
-	links = append(links, "https://osv.dev/vulnerability/"+vuln.ID)
+	links = append(links, "https://osv.dev/vulnerability/"+vuln.GetId())
 
 	// NVD link for CVEs
 	cveID := findCVEID(vuln)
-	if cveID != "" && cveID != vuln.ID {
+	if cveID != "" && cveID != vuln.GetId() {
 		links = append(links, "https://nvd.nist.gov/vuln/detail/"+cveID)
-	} else if strings.HasPrefix(vuln.ID, "CVE-") {
-		links = append(links, "https://nvd.nist.gov/vuln/detail/"+vuln.ID)
+	} else if strings.HasPrefix(vuln.GetId(), "CVE-") {
+		links = append(links, "https://nvd.nist.gov/vuln/detail/"+vuln.GetId())
 	}
 
 	// GitHub Advisory link for GHSA
-	if strings.HasPrefix(vuln.ID, "GHSA-") {
-		links = append(links, "https://github.com/advisories/"+vuln.ID)
+	if strings.HasPrefix(vuln.GetId(), "GHSA-") {
+		links = append(links, "https://github.com/advisories/"+vuln.GetId())
 	}
 
 	// Go vulnerability database link
-	if strings.HasPrefix(vuln.ID, "GO-") {
-		links = append(links, "https://pkg.go.dev/vuln/"+vuln.ID)
+	if strings.HasPrefix(vuln.GetId(), "GO-") {
+		links = append(links, "https://pkg.go.dev/vuln/"+vuln.GetId())
 	}
 
 	if len(links) > 0 {
@@ -611,12 +612,12 @@ func (r *Renderer) renderJSON(out io.Writer, data *VulnData) error {
 	vuln := data.Vuln
 
 	result := map[string]any{
-		"id":      vuln.ID,
-		"summary": vuln.Summary,
+		"id":      vuln.GetId(),
+		"summary": vuln.GetSummary(),
 	}
 
-	if len(vuln.Aliases) > 0 {
-		result["aliases"] = vuln.Aliases
+	if len(vuln.GetAliases()) > 0 {
+		result["aliases"] = vuln.GetAliases()
 	}
 
 	// Severity with human-readable risk assessment
@@ -743,29 +744,29 @@ func (r *Renderer) renderJSON(out io.Writer, data *VulnData) error {
 
 	// Affected packages with remediation info
 	var affected []map[string]any
-	for _, a := range vuln.Affected {
-		if a.Package.Name == "" {
+	for _, a := range vuln.GetAffected() {
+		if a.GetPackage().GetName() == "" {
 			continue
 		}
 		pkg := map[string]any{
-			"name":      a.Package.Name,
-			"ecosystem": string(a.Package.Ecosystem),
+			"name":      a.GetPackage().GetName(),
+			"ecosystem": a.GetPackage().GetEcosystem(),
 		}
-		if a.Package.Purl != "" {
-			pkg["purl"] = a.Package.Purl
+		if a.GetPackage().GetPurl() != "" {
+			pkg["purl"] = a.GetPackage().GetPurl()
 		}
 
 		var ranges []map[string]string
 		var fixedVersions []string
-		for _, rang := range a.Ranges {
-			for _, event := range rang.Events {
-				if event.Introduced != "" && !looksLikeGitHash(event.Introduced) {
-					ranges = append(ranges, map[string]string{"introduced": event.Introduced})
+		for _, rang := range a.GetRanges() {
+			for _, event := range rang.GetEvents() {
+				if event.GetIntroduced() != "" && !looksLikeGitHash(event.GetIntroduced()) {
+					ranges = append(ranges, map[string]string{"introduced": event.GetIntroduced()})
 				}
-				if event.Fixed != "" {
-					if !looksLikeGitHash(event.Fixed) {
-						ranges = append(ranges, map[string]string{"fixed": event.Fixed})
-						fixedVersions = append(fixedVersions, event.Fixed)
+				if event.GetFixed() != "" {
+					if !looksLikeGitHash(event.GetFixed()) {
+						ranges = append(ranges, map[string]string{"fixed": event.GetFixed()})
+						fixedVersions = append(fixedVersions, event.GetFixed())
 					}
 				}
 			}
@@ -786,12 +787,12 @@ func (r *Renderer) renderJSON(out io.Writer, data *VulnData) error {
 	}
 
 	// References grouped by type for easier consumption
-	if len(vuln.References) > 0 {
-		refs := make([]map[string]string, 0, len(vuln.References))
-		for _, ref := range vuln.References {
-			r := map[string]string{"url": ref.URL}
-			if ref.Type != "" {
-				r["type"] = string(ref.Type)
+	if len(vuln.GetReferences()) > 0 {
+		refs := make([]map[string]string, 0, len(vuln.GetReferences()))
+		for _, ref := range vuln.GetReferences() {
+			r := map[string]string{"url": ref.GetUrl()}
+			if ref.GetType() != osvschema.Reference_NONE {
+				r["type"] = ref.GetType().String()
 			}
 			refs = append(refs, r)
 		}
@@ -805,21 +806,21 @@ func (r *Renderer) renderJSON(out io.Writer, data *VulnData) error {
 		links["nvd"] = "https://nvd.nist.gov/vuln/detail/" + cveID
 		links["osv"] = "https://osv.dev/vulnerability/" + cveID
 	}
-	if strings.HasPrefix(vuln.ID, "GHSA-") {
-		links["github_advisory"] = "https://github.com/advisories/" + vuln.ID
-		links["osv"] = "https://osv.dev/vulnerability/" + vuln.ID
+	if strings.HasPrefix(vuln.GetId(), "GHSA-") {
+		links["github_advisory"] = "https://github.com/advisories/" + vuln.GetId()
+		links["osv"] = "https://osv.dev/vulnerability/" + vuln.GetId()
 	}
-	if strings.HasPrefix(vuln.ID, "GO-") {
-		links["osv"] = "https://osv.dev/vulnerability/" + vuln.ID
-		links["go_vuln"] = "https://pkg.go.dev/vuln/" + vuln.ID
+	if strings.HasPrefix(vuln.GetId(), "GO-") {
+		links["osv"] = "https://osv.dev/vulnerability/" + vuln.GetId()
+		links["go_vuln"] = "https://pkg.go.dev/vuln/" + vuln.GetId()
 	}
 	if len(links) > 0 {
 		result["links"] = links
 	}
 
 	// Details - full description
-	if vuln.Details != "" {
-		result["details"] = vuln.Details
+	if vuln.GetDetails() != "" {
+		result["details"] = vuln.GetDetails()
 	}
 
 	enc := json.NewEncoder(out)
@@ -835,16 +836,16 @@ func extractCVSSInfo(vuln *osvschema.Vulnerability) (vector string, score float6
 	}
 
 	// Prefer CVSS v3.x/v4
-	for _, sev := range vuln.Severity {
-		if sev.Type == osvschema.SeverityCVSSV3 || sev.Type == osvschema.SeverityCVSSV4 {
-			return sev.Score, cvss.ParseScore(sev.Score)
+	for _, sev := range vuln.GetSeverity() {
+		if sev.GetType() == osvschema.Severity_CVSS_V3 || sev.GetType() == osvschema.Severity_CVSS_V4 {
+			return sev.GetScore(), cvss.ParseScore(sev.GetScore())
 		}
 	}
 
 	// Fallback to v2
-	for _, sev := range vuln.Severity {
-		if sev.Type == osvschema.SeverityCVSSV2 {
-			return sev.Score, cvss.ParseScore(sev.Score)
+	for _, sev := range vuln.GetSeverity() {
+		if sev.GetType() == osvschema.Severity_CVSS_V2 {
+			return sev.GetScore(), cvss.ParseScore(sev.GetScore())
 		}
 	}
 
@@ -866,23 +867,19 @@ func deriveSeverity(cvssScore float64, vuln *osvschema.Vulnerability) string {
 	}
 
 	// Check database_specific for GHSA severity
-	if vuln != nil && vuln.DatabaseSpecific != nil {
-		if sevRaw, ok := vuln.DatabaseSpecific["severity"]; ok {
-			if sevStr, ok := sevRaw.(string); ok {
-				return strings.ToUpper(sevStr)
-			}
-		}
+	if sevStr := vuln.GetDatabaseSpecific().GetFields()["severity"].GetStringValue(); sevStr != "" {
+		return strings.ToUpper(sevStr)
 	}
 
 	return "UNKNOWN"
 }
 
 func extractCWEs(vuln *osvschema.Vulnerability) []CWEInfo {
-	if vuln == nil || vuln.DatabaseSpecific == nil {
+	if vuln == nil {
 		return nil
 	}
 
-	cweIDs := cwe.ExtractFromDatabaseSpecific(vuln.DatabaseSpecific)
+	cweIDs := cwe.ExtractFromDatabaseSpecific(vuln.GetDatabaseSpecific().AsMap())
 	if len(cweIDs) == 0 {
 		return nil
 	}
@@ -898,10 +895,10 @@ func findCVEID(vuln *osvschema.Vulnerability) string {
 	if vuln == nil {
 		return ""
 	}
-	if strings.HasPrefix(vuln.ID, "CVE-") {
-		return vuln.ID
+	if strings.HasPrefix(vuln.GetId(), "CVE-") {
+		return vuln.GetId()
 	}
-	for _, alias := range vuln.Aliases {
+	for _, alias := range vuln.GetAliases() {
 		if strings.HasPrefix(alias, "CVE-") {
 			return alias
 		}
@@ -924,16 +921,16 @@ func severityStyle(severity string) lipgloss.Style {
 	}
 }
 
-func refTypeLabel(t osvschema.ReferenceType) string {
-	labels := map[osvschema.ReferenceType]string{
-		osvschema.ReferenceAdvisory:  "Advisory",
-		osvschema.ReferenceFix:       "Fix",
-		osvschema.ReferenceArticle:   "Article",
-		osvschema.ReferenceReport:    "Report",
-		osvschema.ReferenceWeb:       "Web",
-		osvschema.ReferencePackage:   "Package",
-		osvschema.ReferenceEvidence:  "Evidence",
-		osvschema.ReferenceDetection: "Detection",
+func refTypeLabel(t osvschema.Reference_Type) string {
+	labels := map[osvschema.Reference_Type]string{
+		osvschema.Reference_ADVISORY:  "Advisory",
+		osvschema.Reference_FIX:       "Fix",
+		osvschema.Reference_ARTICLE:   "Article",
+		osvschema.Reference_REPORT:    "Report",
+		osvschema.Reference_WEB:       "Web",
+		osvschema.Reference_PACKAGE:   "Package",
+		osvschema.Reference_EVIDENCE:  "Evidence",
+		osvschema.Reference_DETECTION: "Detection",
 	}
 	if label, ok := labels[t]; ok {
 		return label

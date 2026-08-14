@@ -434,8 +434,8 @@ func packageToRef(pkg *extractor.Package, relPath string) *pin.Ref {
 	}
 
 	filePath := relPath
-	if len(pkg.Locations) > 0 && strings.TrimSpace(pkg.Locations[0]) != "" {
-		filePath = pkg.Locations[0]
+	if descriptor := pkg.Location.PathOrEmpty(); strings.TrimSpace(descriptor) != "" {
+		filePath = descriptor
 	}
 
 	return &pin.Ref{

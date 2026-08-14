@@ -81,17 +81,20 @@ func Convert(pkgs []*extractor.Package, opts Options) []osv.PkgInput {
 			}
 			seen[key] = entry
 		}
-		entry.Locations = appendUnique(entry.Locations, pkg.Locations...)
+		paths := dependency.PackagePaths(pkg)
+		entry.Locations = appendUnique(entry.Locations, paths...)
 
 		// Preserve layer details from SCALIBR for container image scans.
 		// Note: SCALIBR uses DiffID/ChainID (Go naming), we use DiffId/ChainId (proto naming).
-		if entry.LayerDetails == nil && pkg.LayerDetails != nil {
+		// SCALIBR reports base image membership as an index into the image's base
+		// image matches, where 0 means "no match", so any positive index is a hit.
+		if entry.LayerDetails == nil && pkg.LayerMetadata != nil {
 			entry.LayerDetails = &containerv1.LayerDetails{
-				Index:       int32(pkg.LayerDetails.Index),
-				DiffId:      pkg.LayerDetails.DiffID,
-				ChainId:     pkg.LayerDetails.ChainID,
-				Command:     pkg.LayerDetails.Command,
-				InBaseImage: pkg.LayerDetails.InBaseImage,
+				Index:       int32(pkg.LayerMetadata.Index),
+				DiffId:      pkg.LayerMetadata.DiffID.String(),
+				ChainId:     pkg.LayerMetadata.ChainID.String(),
+				Command:     pkg.LayerMetadata.Command,
+				InBaseImage: pkg.LayerMetadata.BaseImageIndex > 0,
 			}
 		}
 
@@ -109,7 +112,7 @@ func Convert(pkgs []*extractor.Package, opts Options) []osv.PkgInput {
 			}
 		}
 
-		for _, loc := range pkg.Locations {
+		for _, loc := range paths {
 			manager, manifestPath, ok := manifests.DetectManager(loc, pkg.PURLType)
 			if !ok {
 				continue
