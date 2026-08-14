@@ -368,6 +368,9 @@ func generateBaselineWithExcludes(ctx context.Context, scanner secrets.Scanner, 
 			}
 			return nil
 		}
+		if d.Type()&fs.ModeType != 0 {
+			return nil
+		}
 
 		// Get relative path
 		relPath := filepath.FromSlash(path)
@@ -418,6 +421,9 @@ func scanDirectoryForBaseline(ctx context.Context, scanner secrets.Scanner, dir 
 			if base == ".git" || base == "node_modules" || base == "vendor" || base == ".venv" {
 				return fs.SkipDir
 			}
+			return nil
+		}
+		if d.Type()&fs.ModeType != 0 {
 			return nil
 		}
 

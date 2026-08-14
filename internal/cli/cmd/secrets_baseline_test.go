@@ -35,6 +35,46 @@ func (s failingBaselineScanner) ScanFile(context.Context, string, []byte) ([]sec
 	return nil, s.err
 }
 
+func TestBaselineWalksSkipDirectorySymlinks(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("target", filepath.Join(dir, "target-link")); err != nil {
+		t.Skipf("creating directory symlink: %v", err)
+	}
+
+	scanner := failingBaselineScanner{err: errors.New("scanner should not be called")}
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "create",
+			run: func() error {
+				_, err := generateBaselineWithExcludes(t.Context(), scanner, dir, "test", nil)
+				return err
+			},
+		},
+		{
+			name: "update",
+			run: func() error {
+				_, err := scanDirectoryForBaseline(t.Context(), scanner, dir)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.run(); err != nil {
+				t.Fatalf("directory symlink caused baseline failure: %v", err)
+			}
+		})
+	}
+}
+
 func TestBaselineWalksReturnScanErrors(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "credentials.txt"), []byte("secret"), 0o600); err != nil {
