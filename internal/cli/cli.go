@@ -77,7 +77,17 @@ func Run(ctx context.Context) error {
 // hosts resolve to private addresses. Finding no config file at all is not an
 // error, it yields the defaults with a nil error.
 func loadRuntimeConfig() (*config.Config, error) {
-	configPath := config.FindConfigFile()
+	configPath, err := config.ResolveConfigFile()
+	if err != nil {
+		// An explicitly requested file that is not there is the same downgrade
+		// this function exists to prevent: without this, discovery would fall
+		// back to some other file, or to none, and the command would run on
+		// settings the operator did not ask for.
+		return nil, deputyerrors.Suggest(
+			fmt.Errorf("failed to load config: %w", err),
+			"Point DEPUTY_CONFIG at a readable config file, or unset it to use auto-discovery",
+		)
+	}
 	cfg, err := config.NewLoader(configPath).Load()
 	if err != nil {
 		if configPath != "" {

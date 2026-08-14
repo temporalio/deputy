@@ -1393,8 +1393,33 @@ func (lc LogConfig) ToSlogLevel() slog.Level {
 	}
 }
 
+// ResolveConfigFile reports which config file to load, and fails when one was
+// explicitly requested but cannot be used. DEPUTY_CONFIG names a specific file,
+// so a path that cannot be stated is an error rather than a cue to look
+// elsewhere: discarding it silently hands the caller an auto-discovered file,
+// or no configuration at all, in place of the one it asked for. An empty path
+// with a nil error means no config file was requested and none was discovered,
+// which is normal.
+//
+// FindConfigFile keeps the lenient behavior for callers that are reporting on
+// configuration rather than acting on it.
+func ResolveConfigFile() (string, error) {
+	if path := os.Getenv("DEPUTY_CONFIG"); path != "" {
+		if _, err := os.Stat(path); err != nil {
+			return "", &errors.ConfigError{
+				Path:    path,
+				Message: "config file named by DEPUTY_CONFIG is unavailable",
+				Cause:   err,
+			}
+		}
+		return path, nil
+	}
+	return FindConfigFile(), nil
+}
+
 // FindConfigFile searches for a config file in standard locations.
-// Returns the path if found, empty string otherwise.
+// Returns the path if found, empty string otherwise. An unusable DEPUTY_CONFIG
+// is ignored here; use [ResolveConfigFile] when that must be an error.
 func FindConfigFile() string {
 	// Check explicit DEPUTY_CONFIG env var first
 	if path := os.Getenv("DEPUTY_CONFIG"); path != "" {

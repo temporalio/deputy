@@ -171,6 +171,80 @@ func TestLoadRuntimeConfig(t *testing.T) {
 	}
 }
 
+// TestLoadRuntimeConfigExplicitPath covers DEPUTY_CONFIG, which names one
+// specific file. Discovery treats an unusable explicit path as a cue to look
+// elsewhere, which reintroduces the exact downgrade this package guards
+// against: the operator names a file, does not get it, and is told nothing.
+func TestLoadRuntimeConfigExplicitPath(t *testing.T) {
+	const pinnedSource = "https://advisories.example.com"
+	explicit := "advisory_sources:\n  - url: \"" + pinnedSource + "\"\n"
+
+	tests := []struct {
+		name string
+		// explicitExists writes the file DEPUTY_CONFIG points at.
+		explicitExists bool
+		// discoverable writes a different .deputy.yaml in the working
+		// directory, which discovery would otherwise silently substitute.
+		discoverable bool
+		wantErr      bool
+		wantErrHas   string
+	}{
+		{
+			name:           "explicit path that exists is loaded",
+			explicitExists: true,
+		},
+		{
+			name:       "missing explicit path is an error",
+			wantErr:    true,
+			wantErrHas: "DEPUTY_CONFIG is unavailable",
+		},
+		{
+			name:         "missing explicit path is an error even when another config is discoverable",
+			discoverable: true,
+			wantErr:      true,
+			wantErrHas:   "DEPUTY_CONFIG is unavailable",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := isolatedConfigDir(t)
+			explicitPath := filepath.Join(dir, "explicit.yaml")
+			if test.explicitExists {
+				if err := os.WriteFile(explicitPath, []byte(explicit), 0o644); err != nil {
+					t.Fatalf("write explicit config: %v", err)
+				}
+			}
+			if test.discoverable {
+				writeConfigFile(t, "logging:\n  level: debug\n")
+			}
+			t.Setenv("DEPUTY_CONFIG", explicitPath)
+
+			cfg, err := loadRuntimeConfig()
+
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("loadRuntimeConfig() error = nil, want an error; cfg = %+v", cfg)
+				}
+				if !strings.Contains(err.Error(), test.wantErrHas) {
+					t.Errorf("error %q does not contain %q", err.Error(), test.wantErrHas)
+				}
+				if got := deputyerrors.GetSuggestion(err); !strings.Contains(got, "DEPUTY_CONFIG") {
+					t.Errorf("suggestion = %q, want it to mention DEPUTY_CONFIG", got)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("loadRuntimeConfig() error = %v, want nil", err)
+			}
+			if len(cfg.AdvisorySources) != 1 || cfg.AdvisorySources[0].URL != pinnedSource {
+				t.Errorf("AdvisorySources = %+v, want the source pinned by the explicit file", cfg.AdvisorySources)
+			}
+		})
+	}
+}
+
 // TestRootRefusesUnloadableConfig proves the load failure reaches command
 // execution rather than stopping at loadRuntimeConfig: a command must fail
 // instead of running on defaults. It drives the root command the way Run does,
