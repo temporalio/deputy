@@ -186,6 +186,17 @@ type manifestScan struct {
 	npmResolved map[string]map[string]bool
 }
 
+// npmResolution is what one npm lockfile contributes: the versioned keys naming
+// each declaration it resolved, and the declaration spellings those keys answer
+// for. The two differ for an aliased entry, which is declared under the alias and
+// resolved under the package it really is, so both spellings have to be known
+// here or the alias keeps a bare key that answers for every version of whatever
+// else goes by that name.
+type npmResolution struct {
+	versionKeys map[string]bool
+	resolved    map[string]bool
+}
+
 // newManifestScan starts a scan from the direct dependencies already collected
 // for Go, whose manifest is walked separately for its module root and stdlib
 // pseudo-dependency handling.
@@ -212,10 +223,10 @@ func (s *manifestScan) recordNpmDeclarations(scope manifestScope, names map[stri
 	maps.Copy(declared, names)
 }
 
-// recordNpmResolutions notes which names the lockfile in a directory resolved to
-// a version, so a declaration under that directory knows its bare key is
-// unnecessary. The versioned keys themselves are positive facts and go straight
-// into the direct set.
+// recordNpmResolutions notes which declaration spellings the lockfile in a
+// directory resolved to a version, so a declaration under that directory knows its
+// bare key is unnecessary. The versioned keys themselves are positive facts and go
+// straight into the direct set.
 func (s *manifestScan) recordNpmResolutions(dir string, names map[string]bool) {
 	resolved, ok := s.npmResolved[dir]
 	if !ok {
@@ -234,6 +245,7 @@ func (s *manifestScan) recordNpmResolutions(dir string, names map[string]bool) {
 // [manifestScan.governingRenames] does: a nearer lockfile is the only one that
 // resolves a project's declarations, and reaching past it would let an unrelated
 // project's resolutions decide what this one declared.
+//
 // Directories are spelled as [path.Dir] gives them, so the tree root is "." and
 // the walk ends when it stops changing. Normalizing the root to "" instead left a
 // workspace member searching for a key the root lockfile never wrote.
@@ -373,18 +385,18 @@ func collectManifestDependencies(name string, read func() ([]byte, error), scan 
 	}
 	scope := manifestScope{kind: base, dir: path.Dir(path.Clean(name))}
 	if hasDeps {
-		parsed := parseDeps(data)
-		switch base {
-		case npmManifestBase:
+		switch {
+		case base == npmManifestBase:
 			// Deferred: whether these names need a bare key depends on the
 			// lockfile governing this directory, which is a file this call does
 			// not have. See [manifestScan.resolve].
-			scan.recordNpmDeclarations(scope, parsed)
-		case npmLockBase:
-			mergeDirectDependencies(scan.direct, parsed)
-			scan.recordNpmResolutions(scope.dir, npmResolvedNames(parsed))
+			scan.recordNpmDeclarations(scope, parseDeps(data))
+		case base == npmLockBase:
+			resolution := npmLockResolution(data)
+			mergeDirectDependencies(scan.direct, resolution.versionKeys)
+			scan.recordNpmResolutions(scope.dir, resolution.resolved)
 		default:
-			mergeDirectDependencies(scan.direct, parsed)
+			mergeDirectDependencies(scan.direct, parseDeps(data))
 		}
 	}
 	if hasAliases {
@@ -694,15 +706,34 @@ func resolveNpmInstall(lock npmLockfile, site, name string) (npmLockEntry, bool)
 // today, and is the same gap as issue #246: the flag has one bit where the answer
 // has structure.
 func getNpmLockDirectDeps(data []byte) map[string]bool {
-	deps := make(map[string]bool)
+	return npmLockResolution(data).versionKeys
+}
+
+// npmLockResolution parses an npm lockfile into the versioned keys its
+// declarations resolved to and the declaration spellings those keys answer for.
+//
+// The two sets are not the same, and deriving one from the other is what made an
+// alias over-claim. An entry such as my-lodash: "npm:lodash@^4" is installed under
+// the alias and records the package it really is, so the key is lodash@4.17.21 and
+// reading the names back out of the keys yields only "lodash". The manifest,
+// meanwhile, declares both spellings (see [recordNpmDependency]), so "my-lodash"
+// was left unresolved and kept a bare key, which then answered for every version
+// of any package genuinely called my-lodash that the tree happened to carry.
+// Recording the spelling the declaration used, alongside the name it resolved to,
+// is what suppresses both.
+func npmLockResolution(data []byte) npmResolution {
+	resolution := npmResolution{
+		versionKeys: make(map[string]bool),
+		resolved:    make(map[string]bool),
+	}
 
 	var lock npmLockfile
 	if err := json.Unmarshal(data, &lock); err != nil {
-		return deps
+		return resolution
 	}
 	root, ok := lock.Packages[""]
 	if !ok {
-		return deps
+		return resolution
 	}
 
 	for _, site := range npmDeclarationSites(lock, root) {
@@ -716,25 +747,13 @@ func getNpmLockDirectDeps(data []byte) map[string]bool {
 				// package it actually is, which is the name every npm extractor
 				// reports and therefore the name the lookup will ask about.
 				name := cmp.Or(installed.Name, declared)
-				deps[DirectVersionKey(name, installed.Version)] = true
+				resolution.versionKeys[DirectVersionKey(name, installed.Version)] = true
+				resolution.resolved[name] = true
+				resolution.resolved[declared] = true
 			}
 		}
 	}
-	return deps
-}
-
-// npmResolvedNames returns the package names behind a set of versioned keys, so
-// the names a lockfile resolved are read back out of the keys it produced rather
-// than tracked a second time. The version is separated by the last "@", which is
-// never the one that opens a scope because a scope only leads the name.
-func npmResolvedNames(versionKeys map[string]bool) map[string]bool {
-	names := make(map[string]bool, len(versionKeys))
-	for key := range versionKeys {
-		if idx := strings.LastIndex(key, "@"); idx > 0 {
-			names[key[:idx]] = true
-		}
-	}
-	return names
+	return resolution
 }
 
 // recordNpmDependency records the names a single package.json entry can be
