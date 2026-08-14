@@ -31,11 +31,14 @@ import (
 func Run(ctx context.Context) error {
 	// Load configuration for runtime defaults (OTel, egress allowlists). A
 	// config file that exists but cannot be loaded is fatal, not ignorable:
-	// every control it configures would otherwise revert to its default with
-	// nothing said. The failure is carried into the root command instead of
-	// being returned here, because main only maps a Run error to an exit code;
-	// reporting it from PersistentPreRunE routes it through fang so the user
-	// sees the same diagnostic 'deputy config show' prints.
+	// every setting it carries would otherwise revert to its default with
+	// nothing said, and a configured advisory mirror quietly becoming the
+	// public default sources is a security problem, not a degraded mode.
+	//
+	// The failure is carried into the root command instead of being returned
+	// here, because main only maps a Run error to an exit code; reporting it
+	// from PersistentPreRunE routes it through fang so the user sees the same
+	// diagnostic 'deputy config show' prints.
 	cfg, cfgErr := loadRuntimeConfig()
 
 	// Apply local egress allowlists before services are initialized.
@@ -67,10 +70,12 @@ func Run(ctx context.Context) error {
 // loadRuntimeConfig loads configuration from the environment and the
 // auto-discovered config file. A non-nil error means a configuration source was
 // present but unusable (unreadable or malformed file, or a value that fails
-// validation), which callers must treat as fatal: continuing would silently run
-// with default egress allowlists, advisory sources, and OTel settings instead of
-// the configured ones. Finding no config file at all is not an error, it yields
-// the defaults with a nil error.
+// validation), which callers must treat as fatal: continuing would silently
+// substitute defaults for whatever the file configured. That means querying the
+// public advisory sources in place of a pinned internal mirror, exporting no
+// telemetry, and dropping the egress relaxations that let allowlisted internal
+// hosts resolve to private addresses. Finding no config file at all is not an
+// error, it yields the defaults with a nil error.
 func loadRuntimeConfig() (*config.Config, error) {
 	configPath := config.FindConfigFile()
 	cfg, err := config.NewLoader(configPath).Load()
@@ -181,8 +186,9 @@ func silentErrorHandler(w io.Writer, styles fang.Styles, err error) {
 
 // newRoot returns the root command with all subcommands attached. configErr
 // carries a configuration failure detected before command construction; when it
-// is non-nil every command except the config diagnostics refuses to run, so a
-// config file that cannot be honored never masquerades as an absent one.
+// is non-nil every command outside commandsRunnableWithoutConfig refuses to
+// run, so a config file that cannot be honored never masquerades as an absent
+// one.
 func newRoot(configErr error) *cobra.Command {
 	logLevel := defaultLogLevel()
 	logFormat := defaultLogFormat()
@@ -299,12 +305,13 @@ CONNECTION MODES:
 
 	rootCmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
 		// Refuse to run on a configuration that could not be loaded. This is
-		// checked first: a command that proceeds here would enforce default
-		// egress allowlists, query default advisory sources, and export no
-		// telemetry, none of which the user asked for. The config subtree is
-		// exempt because those commands exist to diagnose exactly this failure
-		// and report it themselves.
-		if configErr != nil && !inConfigCommandTree(c) {
+		// checked first: a command that proceeds here would query the default
+		// advisory sources instead of the configured ones, export no
+		// telemetry, and lose the egress relaxations the file granted, none of
+		// which the user asked for. A short allowlist of commands that do not
+		// act on configuration stays runnable, so the failure can be diagnosed
+		// and reported.
+		if configErr != nil && !runsWithoutConfig(c) {
 			return configErr
 		}
 
@@ -345,23 +352,59 @@ CONNECTION MODES:
 	return rootCmd
 }
 
-// inConfigCommandTree reports whether cmd is 'deputy config' or one of its
-// subcommands. Those commands read and report on configuration rather than
-// acting on it, so they stay available when the discovered config file is the
-// thing that is broken: refusing to run them would take away the tools that
-// explain the failure.
-// The exemption is deliberately narrow: only the top-level "config" command
-// qualifies, so a future subcommand that happens to be named "config" under some
-// other command (say 'deputy proxy config') cannot inherit it and quietly become
-// runnable on a config file that failed to load.
-func inConfigCommandTree(cmd *cobra.Command) bool {
+// commandsRunnableWithoutConfig is the allowlist of top-level commands that
+// still run when the discovered config file cannot be loaded. Membership is
+// earned by not acting on configuration at all:
+//
+//   - config, because its subcommands exist to diagnose exactly this failure,
+//     and refusing to run them would take away the tools that explain it.
+//   - version, because it is the first thing a user runs when filing a bug
+//     report, and because 'deputy --version' answers with the version whether
+//     or not a config file loads; the subcommand must not disagree with it.
+//   - completion and cobra's hidden completion helpers, because their output is
+//     sourced at shell startup and requested on every tab press, so gating them
+//     would inject errors into an interactive shell rather than into a command
+//     the user chose to run.
+//   - help, because the help command (unlike the --help flag, which cobra
+//     resolves before this check) is dispatched like any other command.
+var commandsRunnableWithoutConfig = map[string]bool{
+	"config":                        true,
+	"version":                       true,
+	"completion":                    true,
+	"help":                          true,
+	cobra.ShellCompRequestCmd:       true,
+	cobra.ShellCompNoDescRequestCmd: true,
+}
+
+// runsWithoutConfig reports whether cmd belongs to a top-level command that is
+// allowed to run when configuration could not be loaded. The allowlist is keyed
+// on the top-level command rather than on cmd's own name, so a future
+// subcommand that happens to share an exempt name (say 'deputy proxy config')
+// cannot inherit the exemption and quietly become runnable on a config file
+// that failed to load.
+func runsWithoutConfig(cmd *cobra.Command) bool {
+	top := topLevelCommand(cmd)
+	if top == nil {
+		// The root command itself, which runs diff when invoked bare, so it
+		// acts on configuration and is not exempt.
+		return false
+	}
+	return commandsRunnableWithoutConfig[top.Name()]
+}
+
+// topLevelCommand returns the ancestor of cmd that is a direct child of the
+// root command, or nil when cmd is the root itself.
+func topLevelCommand(cmd *cobra.Command) *cobra.Command {
 	for c := cmd; c != nil; c = c.Parent() {
 		parent := c.Parent()
-		if c.Name() == "config" && parent != nil && !parent.HasParent() {
-			return true
+		if parent == nil {
+			return nil
+		}
+		if !parent.HasParent() {
+			return c
 		}
 	}
-	return false
+	return nil
 }
 
 // isInGitRepo checks if the current working directory is inside a git repository.

@@ -37,7 +37,11 @@ Override with `DEPUTY_CONFIG=/path/to/config.yaml`.
 
 ## Invalid Configuration
 
-Having no config file is normal: Deputy runs on built-in defaults without comment. A config file that *is* found but cannot be read, parsed, or validated is a different situation, and Deputy refuses to run rather than falling back to defaults, because settings such as `egress` allowlists and `advisory_sources` would otherwise be silently dropped. The command exits non-zero and names the file:
+Having no config file is normal: Deputy runs on built-in defaults without comment. A config file that *is* found but cannot be read, parsed, or validated is a different situation, and Deputy refuses to run rather than falling back to defaults, because every setting the file carries would otherwise be silently dropped.
+
+Dropping them is not a safe fallback. `advisory_sources` is the one with real security weight: a deployment that pinned its vulnerability data to an internal mirror would silently query the public defaults instead. The `otel` block goes the same way, so a deployment that believes it is exporting traces exports nothing. The `egress` block is a list of relaxations (hosts and CIDRs permitted to resolve to private addresses), so losing it does not loosen anything, it makes allowlisted internal hosts unreachable and breaks the deployment in a way that is hard to trace back to the config file.
+
+The command exits non-zero and names the file:
 
 ```console
 $ deputy list
@@ -46,7 +50,7 @@ Failed to load config from .deputy.yaml: validation failed for logging.level: mu
 Suggestion: Fix the file, or run 'deputy config validate .deputy.yaml' for details
 ```
 
-The `deputy config` commands (`validate`, `show`, `path`) keep working in this state so you can diagnose the file.
+Commands that do not act on configuration keep working in this state: `deputy config` (`validate`, `show`, `path`) so you can diagnose the file, plus `deputy version`, `deputy help`, `deputy completion`, and shell tab completion. Everything else refuses to run until the file is fixed.
 
 ## Starter Config
 
