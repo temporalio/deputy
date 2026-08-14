@@ -568,7 +568,7 @@ func (c *Client) EvaluatePolicy(ctx context.Context, policies []*PolicySource, i
 //	for _, finding := range scanResult.GetFindings() {
 //	    result, err := client.EvaluatePolicyForVulnerability(ctx, policies, finding)
 //	    if err != nil {
-//	        return fmt.Errorf("evaluate policy for %s: %w", finding.GetId(), err)
+//	        return fmt.Errorf("evaluate policy for %s: %w", finding.GetAdvisoryId(), err)
 //	    }
 //	    if result.GetOutcome() == sdk.ActionDeny {
 //	        // Handle policy violation
