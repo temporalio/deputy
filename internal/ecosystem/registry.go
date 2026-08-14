@@ -440,7 +440,7 @@ func (r *Registry) registerDefaults() {
 		Aliases:         []string{"javascript", "node", "nodejs"},
 		ScalibrPrefixes: []string{"javascript"},
 		Manifests:       []string{"package.json"},
-		Lockfiles:       []string{"package-lock.json", "yarn.lock", "pnpm-lock.yaml"},
+		Lockfiles:       []string{"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"},
 		UpstreamURL:     "https://registry.npmjs.org",
 		OSVName:         "npm",
 		PURLType:        packageurl.TypeNPM,

@@ -34,20 +34,30 @@ import (
 var manifestDirectDepParsers = map[string]func([]byte) map[string]bool{
 	npmManifestBase:    getNpmDirectDeps,
 	npmLockBase:        getNpmLockDirectDeps,
+	npmShrinkwrapBase:  getNpmLockDirectDeps,
 	"Cargo.toml":       getCargoDirectDeps,
 	"pyproject.toml":   getPyprojectDirectDeps,
 	"requirements.txt": getRequirementsDirectDeps,
 }
 
-// npmManifestBase and npmLockBase are the two npm files whose contributions have
-// to be combined per project rather than merged on sight: the manifest declares
-// names and the lockfile says which versions they resolved to, so what the
-// manifest still needs to contribute depends on what the lockfile answered. See
-// [manifestScan.resolve].
+// The npm files whose contributions have to be combined per project rather than
+// merged on sight: the manifest declares names, a lockfile says which versions
+// they resolved to, and which lockfile is authoritative depends on whether the
+// other one is beside it. See [manifestScan.resolve].
+//
+// npm-shrinkwrap.json is a package-lock.json under another name, published rather
+// than kept local, so one parser reads both.
 const (
-	npmManifestBase = "package.json"
-	npmLockBase     = "package-lock.json"
+	npmManifestBase   = "package.json"
+	npmLockBase       = "package-lock.json"
+	npmShrinkwrapBase = "npm-shrinkwrap.json"
 )
+
+// isNpmLockBase reports whether a filename is one of the npm lockfiles this
+// collector resolves declarations against.
+func isNpmLockBase(base string) bool {
+	return base == npmLockBase || base == npmShrinkwrapBase
+}
 
 // DirectVersionKey is the key under which a declared dependency's resolved
 // version is recorded, for the ecosystems whose lockfile says which version a
@@ -173,17 +183,19 @@ type manifestScope struct {
 // Both are keyed by scope rather than pooled per repository: one repository can
 // hold several independent workspace roots, and an alias means whatever the
 // member's own root says it means.
-// npmDeclared and npmResolved are the same idea for npm, and the reason they are
+// npmDeclared and npmLocks are the same idea for npm, and the reason they are
 // scoped is that one repository can hold several npm projects with different
-// tooling. A package.json's names are deferred rather than merged on sight,
-// because whether a name needs its bare key depends on whether that project's own
-// lockfile resolved it, and the two files are read independently.
+// tooling. Neither a package.json's names nor a lockfile's resolutions are merged
+// on sight: whether a name needs its bare key depends on whether that project's
+// lockfile resolved it, and which lockfile governs depends on what other lockfile
+// sits beside it, so all three files are read independently and reconciled once
+// the walk has seen them.
 type manifestScan struct {
 	direct      map[string]bool
 	inherited   map[manifestScope]map[string]bool
 	roots       map[manifestScope]map[string]string
 	npmDeclared map[manifestScope]map[string]bool
-	npmResolved map[string]map[string]bool
+	npmLocks    map[manifestScope]npmResolution
 }
 
 // npmResolution is what one npm lockfile contributes: the versioned keys naming
@@ -206,7 +218,7 @@ func newManifestScan(direct map[string]bool) *manifestScan {
 		inherited:   make(map[manifestScope]map[string]bool),
 		roots:       make(map[manifestScope]map[string]string),
 		npmDeclared: make(map[manifestScope]map[string]bool),
-		npmResolved: make(map[string]map[string]bool),
+		npmLocks:    make(map[manifestScope]npmResolution),
 	}
 }
 
@@ -223,17 +235,57 @@ func (s *manifestScan) recordNpmDeclarations(scope manifestScope, names map[stri
 	maps.Copy(declared, names)
 }
 
-// recordNpmResolutions notes which declaration spellings the lockfile in a
-// directory resolved to a version, so a declaration under that directory knows its
-// bare key is unnecessary. The versioned keys themselves are positive facts and go
-// straight into the direct set.
-func (s *manifestScan) recordNpmResolutions(dir string, names map[string]bool) {
-	resolved, ok := s.npmResolved[dir]
+// recordNpmLock notes what one lockfile contributes, under the directory and
+// filename it was found at. Nothing is merged into the direct set yet, because a
+// package-lock.json is only authoritative if no npm-shrinkwrap.json sits beside
+// it, and the walk may not have reached the sibling.
+func (s *manifestScan) recordNpmLock(scope manifestScope, resolution npmResolution) {
+	existing, ok := s.npmLocks[scope]
 	if !ok {
-		resolved = make(map[string]bool, len(names))
-		s.npmResolved[dir] = resolved
+		s.npmLocks[scope] = resolution
+		return
 	}
-	maps.Copy(resolved, names)
+	maps.Copy(existing.versionKeys, resolution.versionKeys)
+	maps.Copy(existing.resolved, resolution.resolved)
+}
+
+// governingNpmLocks reduces the lockfiles the walk found to the one per directory
+// that actually governs, applying npm's precedence: where an npm-shrinkwrap.json
+// and a package-lock.json share a directory, the shrinkwrap wins and the
+// package-lock is ignored outright.
+//
+// The precedence is not taken from npm's documentation but from what Deputy's own
+// inventory does, since the two have to agree about which file is authoritative.
+// OSV-SCALIBR's packagelockjson extractor returns nothing at all for a
+// package-lock.json with a shrinkwrap beside it, so a stale package-lock resolving
+// a name to a version the inventory never reports would otherwise suppress the
+// declaration and leave the version inventory does report classified as
+// transitive.
+// Two lockfiles that survive for one directory are unioned rather than allowed
+// to overwrite each other. The precedence above means that cannot happen with the
+// two kinds npm has, but the result of this function must not depend on map
+// iteration order, and a union is the answer that keeps every entry a positive
+// fact if a third kind is ever read here.
+func (s *manifestScan) governingNpmLocks() map[string]npmResolution {
+	governing := make(map[string]npmResolution, len(s.npmLocks))
+	for scope, resolution := range s.npmLocks {
+		if scope.kind == npmLockBase {
+			if _, shadowed := s.npmLocks[manifestScope{kind: npmShrinkwrapBase, dir: scope.dir}]; shadowed {
+				continue
+			}
+		}
+		existing, ok := governing[scope.dir]
+		if !ok {
+			governing[scope.dir] = npmResolution{
+				versionKeys: maps.Clone(resolution.versionKeys),
+				resolved:    maps.Clone(resolution.resolved),
+			}
+			continue
+		}
+		maps.Copy(existing.versionKeys, resolution.versionKeys)
+		maps.Copy(existing.resolved, resolution.resolved)
+	}
+	return governing
 }
 
 // governingNpmResolutions returns the names resolved by the nearest npm lockfile
@@ -249,10 +301,10 @@ func (s *manifestScan) recordNpmResolutions(dir string, names map[string]bool) {
 // Directories are spelled as [path.Dir] gives them, so the tree root is "." and
 // the walk ends when it stops changing. Normalizing the root to "" instead left a
 // workspace member searching for a key the root lockfile never wrote.
-func (s *manifestScan) governingNpmResolutions(dir string) map[string]bool {
+func governingNpmResolutions(governing map[string]npmResolution, dir string) map[string]bool {
 	for {
-		if resolved, ok := s.npmResolved[dir]; ok {
-			return resolved
+		if resolution, ok := governing[dir]; ok {
+			return resolution.resolved
 		}
 		parent := path.Dir(dir)
 		if parent == dir {
@@ -350,8 +402,14 @@ func (s *manifestScan) resolve() map[string]bool {
 	// it, so a transitive copy in the locked project reads direct. That is
 	// over-claiming, which is the direction to fail in: the alternative denies a
 	// dependency a project explicitly declared.
+	// Only the governing lockfile's keys reach the set, so a package-lock that a
+	// shrinkwrap displaces contributes neither a resolution nor a suppression.
+	governing := s.governingNpmLocks()
+	for _, resolution := range governing {
+		mergeDirectDependencies(s.direct, resolution.versionKeys)
+	}
 	for scope, declared := range s.npmDeclared {
-		resolved := s.governingNpmResolutions(scope.dir)
+		resolved := governingNpmResolutions(governing, scope.dir)
 		for name := range declared {
 			if resolved[name] {
 				continue
@@ -391,10 +449,11 @@ func collectManifestDependencies(name string, read func() ([]byte, error), scan 
 			// lockfile governing this directory, which is a file this call does
 			// not have. See [manifestScan.resolve].
 			scan.recordNpmDeclarations(scope, parseDeps(data))
-		case base == npmLockBase:
-			resolution := npmLockResolution(data)
-			mergeDirectDependencies(scan.direct, resolution.versionKeys)
-			scan.recordNpmResolutions(scope.dir, resolution.resolved)
+		case isNpmLockBase(base):
+			// Deferred too, because a package-lock.json beside an
+			// npm-shrinkwrap.json contributes nothing at all and this call
+			// cannot see its sibling.
+			scan.recordNpmLock(scope, npmLockResolution(data))
 		default:
 			mergeDirectDependencies(scan.direct, parseDeps(data))
 		}

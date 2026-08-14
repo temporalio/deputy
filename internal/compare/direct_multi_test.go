@@ -1340,3 +1340,80 @@ func TestNpmAliasResolutionSuppressesBothSpellings(t *testing.T) {
 		t.Errorf("the alias kept a bare key even though the declaration was resolved\nset: %v", direct)
 	}
 }
+
+// TestNpmShrinkwrapGovernsOverPackageLock pins the collector to the same
+// precedence the inventory applies. SCALIBR's packagelockjson extractor ignores
+// package-lock.json outright when a sibling npm-shrinkwrap.json exists, so a
+// stale package-lock must not contribute resolutions here either: it would answer
+// for a version the inventory never reports, while the version inventory does
+// report has no key and loses to the suppressed declaration.
+func TestNpmShrinkwrapGovernsOverPackageLock(t *testing.T) {
+	files := map[string]string{
+		"package.json": `{"name":"app","dependencies":{"lodash":"^4.17.0"}}`,
+		// Stale, and what npm and the inventory both ignore.
+		"package-lock.json": `{
+  "name": "app",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "app", "dependencies": {"lodash": "^4.17.0"}},
+    "node_modules/lodash": {"version": "4.17.20"}
+  }
+}`,
+		"npm-shrinkwrap.json": `{
+  "name": "app",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "app", "dependencies": {"lodash": "^4.17.0"}},
+    "node_modules/lodash": {"version": "4.17.21"}
+  }
+}`,
+	}
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+	for name, contents := range files {
+		if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	direct := CollectDirectDependenciesFromWorkspace(ws)
+
+	if !LookupDirect(direct, "lodash", "4.17.21") {
+		t.Errorf("the version the shrinkwrap resolved is not direct\nset: %v", direct)
+	}
+	if LookupDirect(direct, "lodash", "4.17.20") {
+		t.Errorf("the stale package-lock's version is direct, so package-lock was not ignored\nset: %v", direct)
+	}
+}
+
+// TestNpmShrinkwrapAloneStillResolves keeps the precedence from swallowing the
+// ordinary case: a shrinkwrap with no package-lock beside it governs on its own.
+func TestNpmShrinkwrapAloneStillResolves(t *testing.T) {
+	files := map[string]string{
+		"package.json": `{"name":"app","dependencies":{"lodash":"^4.17.0"}}`,
+		"npm-shrinkwrap.json": `{
+  "name": "app",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "app", "dependencies": {"lodash": "^4.17.0"}},
+    "node_modules/lodash": {"version": "4.17.21"},
+    "node_modules/legacy": {"version": "1.0.0", "dependencies": {"lodash": "3.10.1"}},
+    "node_modules/legacy/node_modules/lodash": {"version": "3.10.1"}
+  }
+}`,
+	}
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+	for name, contents := range files {
+		if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	direct := CollectDirectDependenciesFromWorkspace(ws)
+
+	if !LookupDirect(direct, "lodash", "4.17.21") {
+		t.Errorf("a shrinkwrap on its own did not resolve the declaration\nset: %v", direct)
+	}
+	if LookupDirect(direct, "lodash", "3.10.1") {
+		t.Errorf("the nested copy is direct, so the shrinkwrap did not narrow the name\nset: %v", direct)
+	}
+}

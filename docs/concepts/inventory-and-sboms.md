@@ -38,9 +38,11 @@ in the file that declares it.
 
 A manifest names a version range, not a version, so a lockfile that carries two
 copies of a declared package needs the resolution to tell them apart. npm is the
-ecosystem where that is routine, and Deputy reads `package-lock.json` to mark only
-the version the declaration resolved to, so a nested copy of a declared name reads
-as transitive. In a workspace every member's own declarations count, resolved
+ecosystem where that is routine, and Deputy reads `package-lock.json`, or
+`npm-shrinkwrap.json` where a project publishes one instead, to mark only the
+version the declaration resolved to, so a nested copy of a declared name reads as
+transitive. A project carrying both files is read the way npm and Deputy's own
+inventory read it: the shrinkwrap governs and the `package-lock.json` is ignored. In a workspace every member's own declarations count, resolved
 against the copy nearest to that member, and `direct` describes the scan as a
 whole: a package any member declares is direct, and two members declaring
 different versions make both direct. Which member a package is direct *for* is not
