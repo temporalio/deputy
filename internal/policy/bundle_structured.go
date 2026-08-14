@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	yaml "gopkg.in/yaml.v3"
@@ -288,22 +289,22 @@ func (p structuredPolicy) toCELSource() (string, error) {
 	}
 	metadata := []string{}
 	if p.Name != "" {
-		metadata = append(metadata, fmt.Sprintf("//! policy.name = \"%s\"", escapeComment(p.Name)))
+		metadata = appendPolicyMetadata(metadata, "name", p.Name)
 	}
 	if p.Description != "" {
-		metadata = append(metadata, fmt.Sprintf("//! policy.description = \"%s\"", escapeComment(p.Description)))
+		metadata = appendPolicyMetadata(metadata, "description", p.Description)
 	}
 	if len(p.Entrypoints) > 0 {
-		metadata = append(metadata, fmt.Sprintf("//! policy.entrypoints = \"%s\"", strings.Join(p.Entrypoints, ",")))
+		metadata = appendPolicyMetadata(metadata, "entrypoints", strings.Join(p.Entrypoints, ","))
 	}
 	if len(p.Commands) > 0 {
-		metadata = append(metadata, fmt.Sprintf("//! policy.commands = \"%s\"", strings.Join(p.Commands, ",")))
+		metadata = appendPolicyMetadata(metadata, "commands", strings.Join(p.Commands, ","))
 	}
 	if p.Mode != "" && p.Mode != "enforce" {
-		metadata = append(metadata, fmt.Sprintf("//! policy.mode = \"%s\"", p.Mode))
+		metadata = appendPolicyMetadata(metadata, "mode", p.Mode)
 	}
 	if len(p.Ecosystems) > 0 {
-		metadata = append(metadata, fmt.Sprintf("//! policy.ecosystems = \"%s\"", strings.Join(p.Ecosystems, ",")))
+		metadata = appendPolicyMetadata(metadata, "ecosystems", strings.Join(p.Ecosystems, ","))
 	}
 	if len(metadata) == 0 {
 		return body, nil
@@ -321,7 +322,7 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 	if len(ecosystems) > 0 {
 		quoted := make([]string, len(ecosystems))
 		for i, eco := range ecosystems {
-			quoted[i] = fmt.Sprintf("\"%s\"", eco)
+			quoted[i] = celString(eco)
 		}
 		guard := fmt.Sprintf("(request.?ecosystem.orValue(\"\") in [%s]) || (pkg.ecosystem in [%s])", strings.Join(quoted, ","), strings.Join(quoted, ","))
 		when = fmt.Sprintf("((%s) && (%s))", guard, when)
@@ -355,6 +356,35 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 // escapeComment escapes characters in a string to make it safe for inclusion
 // in a generated CEL comment. Multi-line strings (from YAML | or >) must have
 // newlines escaped to avoid breaking the single-line comment format.
+// appendPolicyMetadata appends one "//! policy.<key> = <value>" header line,
+// escaping the value on the way in.
+//
+// Every metadata write goes through here rather than escaping at each call site,
+// which is the shape #166 settled on after authored values reached these headers
+// raw. Four of the six keys were still interpolated directly, safe only because
+// entrypoints, commands, and mode are checked against closed vocabularies. The
+// ecosystem list stopped being one of those (see [validateEcosystems]), so the
+// value that could not be escaped was the value that no longer needed to be
+// trusted.
+func appendPolicyMetadata(metadata []string, key, value string) []string {
+	return append(metadata, fmt.Sprintf("//! policy.%s = \"%s\"", key, escapeComment(value)))
+}
+
+// celString renders s as a CEL string literal, escaping whatever it contains.
+//
+// CEL takes the same escape sequences in a string literal that Go does, so
+// [strconv.Quote] produces a literal that parses back to exactly s: a quote ends
+// the literal early without it, and a backslash is read as the start of an escape,
+// so "acme\registry" silently became "acme" and a carriage return rather than
+// failing to compile.
+//
+// Every authored value interpolated into generated CEL has to come through here.
+// Doing it at the one call site that took an unregistered value would leave the
+// next one to rediscover why.
+func celString(s string) string {
+	return strconv.Quote(s)
+}
+
 func escapeComment(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "\"", "\\\"")

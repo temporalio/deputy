@@ -2176,3 +2176,84 @@ func TestOSEcosystemGuardMatchesContainerSpelling(t *testing.T) {
 		})
 	}
 }
+
+// TestEcosystemFilterCannotInjectCEL is the cost of opening the ecosystem
+// vocabulary. While only registered names were accepted, interpolating one into
+// the generated guard with a bare "%s" was safe because the set was closed and
+// contained nothing to escape. Accepting values a scanner might report made the
+// same interpolation an injection: an ecosystem carrying a quote ends the string
+// literal early, and one carrying a backslash is read as an escape sequence and
+// silently becomes a different string.
+//
+// Every case has to compile, because a policy that fails to compile is a policy
+// that does not run, and match only a package reporting the value the author
+// actually wrote.
+func TestEcosystemFilterCannotInjectCEL(t *testing.T) {
+	tests := []struct {
+		name string
+		eco  string
+	}{
+		{name: "double quote", eco: `acme"registry`},
+		{name: "backslash", eco: `acme\registry`},
+		{name: "backslash before r", eco: `acme\registry-r`},
+		{name: "escaped quote sequence", eco: `acme\"registry`},
+		{name: "list break out", eco: `x","go`},
+		{name: "newline", eco: "acme\nregistry"},
+		{name: "carriage return", eco: "acme\rregistry"},
+		{name: "comment break out", eco: "go\n//! policy.name = \"pwned\""},
+		{name: "quote in a metadata comment", eco: `acme"registry`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := structuredPolicy{
+				Name:       "injection",
+				Ecosystems: []string{tt.eco},
+				Rules:      []structuredRule{{Action: "deny", When: `pkg.name != ""`, Reason: "matched"}},
+			}
+			src, err := p.toCELSource()
+			if err != nil {
+				t.Fatalf("toCELSource(%q): %v", tt.eco, err)
+			}
+			sources := []Source{{Name: "injection.yaml", Body: src}}
+			if _, err := NewEngine(sources); err != nil {
+				t.Fatalf("generated CEL does not compile for ecosystem %q: %v\nsource:\n%s", tt.eco, err, src)
+			}
+
+			// The value the author wrote, folded the way the payload is folded,
+			// is the only thing the guard may match.
+			want := NormalizeEcosystem(tt.eco)
+			matching := map[string]any{
+				"pkg":     map[string]any{"name": "openssl", "ecosystem": want, "version": "1"},
+				"request": nil,
+			}
+			actions, err := EvaluateMap(t.Context(), sources, matching)
+			if err != nil {
+				t.Fatalf("EvaluateMap on the declared ecosystem %q: %v", want, err)
+			}
+			if len(actions) != 1 || actions[0].Type != ActionDeny {
+				t.Errorf("guard did not match a package reporting %q: actions=%v\nsource:\n%s", want, actions, src)
+			}
+
+			// And nothing else: a package reporting a neighbouring spelling must
+			// not match, which is what a swallowed escape would produce.
+			for _, other := range []string{"go", "acme-registry", "acme", "x", strings.ReplaceAll(want, `"`, "")} {
+				if other == want {
+					continue
+				}
+				payload := map[string]any{
+					"pkg":     map[string]any{"name": "openssl", "ecosystem": other, "version": "1"},
+					"request": nil,
+				}
+				actions, err := EvaluateMap(t.Context(), sources, payload)
+				if err != nil {
+					t.Fatalf("EvaluateMap on %q: %v", other, err)
+				}
+				if len(actions) != 0 {
+					t.Errorf("ecosystem %q also matched %q, so the literal was not the one authored: actions=%v\nsource:\n%s",
+						tt.eco, other, actions, src)
+				}
+			}
+		})
+	}
+}
