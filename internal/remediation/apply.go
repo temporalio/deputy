@@ -46,12 +46,42 @@ type deputyCommandSpec struct {
 	// that has moved on since the plan was written. filePath names the target
 	// in the refusal only; nothing here writes.
 	matchTarget func(parts []string, filePath string, content []byte) error
+	// publishes is how the opcode writes its edit, which decides what preflight
+	// can prove about permission before the run. The zero value is
+	// [writeInPlace], so an opcode added without a thought about this is probed
+	// rather than exempted: being wrong that way is a refusal its tests will
+	// show, while being wrong the other way is a dry run promising an edit that
+	// cannot happen.
+	publishes writeMode
 }
 
+// writeMode is how an opcode publishes its edit. The two modes need different
+// permissions, so preflight cannot ask one question for all of them.
+type writeMode int
+
+const (
+	// writeInPlace rewrites the target file itself, so the permission that
+	// decides is the target's own, and opening it for writing asks exactly what
+	// the apply path will ask.
+	writeInPlace writeMode = iota
+	// writeByReplacement writes a temporary beside the target and renames over
+	// it, so the target's own mode decides nothing: a read-only file in a
+	// writable directory is replaced without complaint, and refusing it would
+	// block a fix that works. What decides is the directory, and the only
+	// accurate probe of a directory is creating a file in it, which a preview
+	// must not do, so this mode is left to fail at apply time.
+	writeByReplacement
+)
+
 // deputyCommandSpecs is the single source of truth for which deputy-internal
-// opcodes exist, how many arguments they take, and which argument names the
-// file they edit. Validation, preflight, and application all read it, so a
-// dry run cannot approve a command the apply path would reject.
+// opcodes exist, how many arguments they take, which argument names the file
+// they edit, and how they publish that edit. Validation, preflight, and
+// application all read it, so a dry run cannot approve a command the apply path
+// would reject.
+//
+// An entry that says nothing about publishing rewrites its target in place and
+// is checked for write permission; only deputy:mise:update publishes by
+// replacement, and says so.
 var deputyCommandSpecs = map[string]deputyCommandSpec{
 	// deputy:action:update <file> <owner/repo> <new-version>
 	"deputy:action:update": {arity: 4, pathArg: 1, matchTarget: matchActionUpdate},
@@ -72,7 +102,11 @@ var deputyCommandSpecs = map[string]deputyCommandSpec{
 	// is a file that can be edited, and leaves the content verdict to the run;
 	// giving pinmise a plan-only entry point is the way to close that, not a
 	// paraphrase of it here.
-	"deputy:mise:update": {arity: 4, pathArg: 1},
+	//
+	// Both halves of its edit, the config and the sibling lockfile, are
+	// published by renaming a temporary over the target, so the target's own
+	// write permission decides nothing; see [writeByReplacement].
+	"deputy:mise:update": {arity: 4, pathArg: 1, publishes: writeByReplacement},
 }
 
 // matchActionUpdate reports whether a deputy:action:update command has an edit
@@ -335,7 +369,7 @@ func resolveDeputyCommand(repoDir, cmd string) ([]string, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid file path: %w", err)
 	}
-	if err := requireEditableFile(file); err != nil {
+	if err := requireEditableFile(file, spec.publishes); err != nil {
 		return nil, "", err
 	}
 	if spec.validateArgs != nil {
@@ -360,8 +394,9 @@ func resolveDeputyCommand(repoDir, cmd string) ([]string, string, error) {
 }
 
 // requireEditableFile refuses a deputy-internal command whose target the apply
-// path could not edit: one that does not exist, and one that exists but is not
-// a regular file.
+// path could not edit: one that does not exist, one that exists but is not a
+// regular file, and, for an opcode that rewrites its target in place, one this
+// process may read and not write.
 //
 // Existence is checked here, rather than left to the opcode's own read, because
 // preflight and application have to agree. Every opcode opens its target as its
@@ -385,7 +420,32 @@ func resolveDeputyCommand(repoDir, cmd string) ([]string, string, error) {
 // asks for. A mise config reached through an in-repository symlink is judged by
 // the file the link names, since that is the file the edit lands on. The refusal
 // names the path it could not use, so it says what the read would have.
-func requireEditableFile(path string) error {
+//
+// Write permission is decided by opening the file for writing, which is the
+// question the apply path puts to the kernel and the only way to get the whole
+// answer. Mode bits describe neither an ACL that denies this process nor a
+// read-only mount, and they describe the file's owner rather than whoever Deputy
+// is running as; a check on the bits would pass a file that cannot be written
+// and fail one that can. The open carries no O_CREATE and no O_TRUNC, so it
+// creates nothing, truncates nothing, and leaves the content and mtime as they
+// were: a preview that edited the workspace to find out whether it could edit
+// the workspace would be worse than the gap it closes.
+//
+// The probe runs after the regular-file check and depends on that order:
+// opening a FIFO for writing blocks until a reader appears, which is the hang
+// the check above exists to prevent.
+//
+// What this establishes is that the edit was permitted when preflight asked, not
+// that the run will succeed. Permissions, mounts, and the file itself can all
+// change in between, and no check here can promise otherwise; what it removes is
+// a dry run reporting an edit as applicable against a file it could already see
+// was read-only.
+//
+// Only an opcode that writes the target itself is asked (see [writeMode]). One
+// that publishes by renaming a temporary over the target needs its directory
+// writable and not its target, so probing the target would refuse fixes that
+// work.
+func requireEditableFile(path string, publishes writeMode) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("cannot edit %s: %w", path, err)
@@ -393,7 +453,14 @@ func requireEditableFile(path string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("%s is not a regular file", path)
 	}
-	return nil
+	if publishes != writeInPlace {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("cannot edit %s: %w", path, err)
+	}
+	return f.Close()
 }
 
 // ApplyDeputyCommand executes a deputy-internal command.

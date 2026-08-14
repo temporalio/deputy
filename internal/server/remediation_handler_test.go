@@ -1242,6 +1242,11 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 		// the row would pass on the wrapper being absent rather than on how its
 		// path was resolved.
 		execFiles []string
+		// readOnlyFiles are created under the work directory as readable files
+		// this process cannot write, keyed by path, for rows about a target the
+		// apply path can read and not modify. A row using them is skipped when
+		// the test runs as root, which writes whatever the mode says.
+		readOnlyFiles map[string]string
 		// emptyPath runs the row with a PATH holding nothing, which is what a
 		// minimal CI image or an isolated agent container looks like to a step
 		// naming a package manager that was never installed.
@@ -1311,6 +1316,14 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			wantReason: "cannot edit",
 		},
 		{
+			// The workflow really uses the action, so the row is about the
+			// permission and not about the target having moved on.
+			name:          "deputy command target that cannot be written",
+			step:          &remediationv1.Step{Id: "step-1", Title: "bump a read-only workflow", Command: "deputy:action:update .github/workflows/ci.yml actions/checkout v5", Executable: true},
+			wantReason:    "permission denied",
+			readOnlyFiles: map[string]string{".github/workflows/ci.yml": workflowUsingCheckout},
+		},
+		{
 			name:       "deputy command target reached through a traversal",
 			step:       &remediationv1.Step{Id: "step-1", Title: "pin around", Command: "deputy:action:pin .github/../../outside/ci.yml actions/checkout deadbeef v4", Executable: true},
 			wantReason: "escapes base directory",
@@ -1340,6 +1353,18 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 					t.Fatalf("MkdirAll for %q: %v", file, err)
 				}
 				if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatalf("WriteFile %q: %v", file, err)
+				}
+			}
+			if len(tt.readOnlyFiles) > 0 && os.Geteuid() == 0 {
+				t.Skip("root writes files whatever their mode says, so nothing here is unwritable")
+			}
+			for file, content := range tt.readOnlyFiles {
+				path := filepath.Join(workDir, file)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatalf("MkdirAll for %q: %v", file, err)
+				}
+				if err := os.WriteFile(path, []byte(content), 0o444); err != nil {
 					t.Fatalf("WriteFile %q: %v", file, err)
 				}
 			}

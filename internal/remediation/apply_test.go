@@ -2554,6 +2554,117 @@ func TestDeputyCommandRefusesIrregularTarget(t *testing.T) {
 	}
 }
 
+// TestDeputyCommandRefusesUnwritableTarget pins the permission half of the same
+// agreement: a target this process can read and not write is refused by both
+// paths, in the same words, rather than previewed as an edit that would apply
+// and then failed on the write.
+//
+// The opcode's own way of publishing decides what is asked. The three that
+// rewrite the target in place are refused, since the file's own permission is
+// what their write needs. deputy:mise:update replaces the file by renaming a
+// temporary over it, so a read-only config in a writable directory really is
+// editable, and refusing it would block a fix that works: that row is the
+// control, and it fails if the probe is ever applied to every opcode alike.
+func TestDeputyCommandRefusesUnwritableTarget(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes files whatever their mode says, so nothing here is unwritable")
+	}
+
+	const (
+		workflow   = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
+		dockerfile = "FROM alpine:3.18\nRUN true\n"
+		miseConfig = "[tools]\ngo = \"1.22.12\"\n"
+	)
+
+	tests := []struct {
+		name string
+		// file is the unwritable target, and content is what it holds, chosen
+		// so the command has something to change: a row must fail on the
+		// permission rather than on the file not matching.
+		file    string
+		content string
+		cmd     string
+		// editable marks the opcode whose write does not need the target's own
+		// permission, which both paths must therefore accept.
+		editable bool
+	}{
+		{
+			name:    "action update",
+			file:    ".github/workflows/ci.yml",
+			content: workflow,
+			cmd:     "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+		},
+		{
+			name:    "action pin",
+			file:    ".github/workflows/ci.yml",
+			content: workflow,
+			cmd:     "deputy:action:pin .github/workflows/ci.yml actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4.2.2",
+		},
+		{
+			name:    "dockerfile update",
+			file:    "Dockerfile",
+			content: dockerfile,
+			cmd:     "deputy:dockerfile:update Dockerfile alpine 3.19",
+		},
+		{
+			name:     "mise update publishes by replacement",
+			file:     "mise.toml",
+			content:  miseConfig,
+			cmd:      "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			editable: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, tt.file)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			// Readable, not writable, in a directory that is both.
+			if err := os.WriteFile(target, []byte(tt.content), 0o444); err != nil {
+				t.Fatal(err)
+			}
+
+			preflight := PreflightDeputyCommand(dir, tt.cmd)
+			apply := ApplyDeputyCommand(t.Context(), dir, tt.cmd)
+
+			if tt.editable {
+				if preflight != nil {
+					t.Errorf("preflight refused an edit that does not need the target writable: %v", preflight)
+				}
+				if apply != nil {
+					t.Errorf("apply refused an edit that does not need the target writable: %v", apply)
+				}
+				return
+			}
+			if apply == nil {
+				t.Fatalf("ApplyDeputyCommand(%q) accepted a target it cannot write", tt.cmd)
+			}
+			if preflight == nil {
+				t.Fatalf("PreflightDeputyCommand(%q) accepted a target the apply path refuses with: %v", tt.cmd, apply)
+			}
+			if preflight.Error() != apply.Error() {
+				t.Errorf("dry run and execution refused differently:\npreflight: %v\napply:     %v", preflight, apply)
+			}
+			// The refusal has to say what is wrong, since "cannot edit" alone
+			// reads as a missing file.
+			if got := preflight.Error(); !strings.Contains(got, "permission denied") {
+				t.Errorf("refusal %q does not name the permission that failed", got)
+			}
+			// A refused command leaves the workspace alone.
+			after, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != tt.content {
+				t.Errorf("the refused command modified the target:\n%s", after)
+			}
+		})
+	}
+}
+
 // TestDeputyCommandRefusesMissingTarget pins that preflight refuses a command
 // whose target is not there, on the same terms and in the same words as the
 // apply path. Reporting the edit as one that would apply, and then failing on
