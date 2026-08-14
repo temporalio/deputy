@@ -1417,3 +1417,83 @@ func TestNpmShrinkwrapAloneStillResolves(t *testing.T) {
 		t.Errorf("the nested copy is direct, so the shrinkwrap did not narrow the name\nset: %v", direct)
 	}
 }
+
+// TestNestedStandaloneProjectKeepsItsOwnAnswer guards the ancestor walk that
+// workspace members need. A member keeps its declarations in its own
+// package.json while the lockfile sits at the workspace root, so the search for a
+// governing lockfile has to look upward; but a project the root does not claim is
+// not a member, and letting the root's lockfile answer for it suppressed a
+// declaration the root never resolved.
+//
+// Here the root is an ordinary npm project, not a workspace at all, and tools/ is
+// a separate Yarn project declaring a different major of the same package. Nothing
+// resolved the nested declaration, so it keeps the name-only answer rather than
+// being denied by a lockfile that never mentioned it.
+func TestNestedStandaloneProjectKeepsItsOwnAnswer(t *testing.T) {
+	files := map[string]string{
+		"package.json": `{"name":"root","dependencies":{"lodash":"^4.17.21"}}`,
+		"package-lock.json": `{
+  "name": "root",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "root", "dependencies": {"lodash": "^4.17.21"}},
+    "node_modules/lodash": {"version": "4.17.21"}
+  }
+}`,
+		"tools/package.json": `{"name":"tools","dependencies":{"lodash":"^3.10.1"}}`,
+		"tools/yarn.lock":    "lodash@^3.10.1:\n  version \"3.10.1\"\n",
+	}
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+	for name, contents := range files {
+		if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	direct := CollectDirectDependenciesFromWorkspace(ws)
+
+	if !LookupDirect(direct, "lodash", "4.17.21") {
+		t.Errorf("the root's resolved version is not direct\nset: %v", direct)
+	}
+	if !LookupDirect(direct, "lodash", "3.10.1") {
+		t.Errorf("the nested project's declaration was denied by a lockfile that does not claim it\nset: %v", direct)
+	}
+}
+
+// TestWorkspaceMemberIsStillGovernedByTheRootLock is the other side of the same
+// rule, so the fix for the nested project cannot be "stop looking upward". A
+// member the root claims through its workspaces globs is resolved by the root's
+// lockfile, and its nested copy stays transitive.
+func TestWorkspaceMemberIsStillGovernedByTheRootLock(t *testing.T) {
+	files := map[string]string{
+		"package.json":              `{"name":"monorepo","workspaces":["packages/*"]}`,
+		"packages/api/package.json": `{"name":"@acme/api","dependencies":{"lodash":"^4.17.21"}}`,
+		"package-lock.json": `{
+  "name": "monorepo",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "monorepo", "workspaces": ["packages/*"]},
+    "packages/api": {"name": "@acme/api", "dependencies": {"lodash": "^4.17.21"}},
+    "node_modules/@acme/api": {"resolved": "packages/api", "link": true},
+    "node_modules/lodash": {"version": "4.17.21"},
+    "node_modules/legacy": {"version": "1.0.0", "dependencies": {"lodash": "3.10.1"}},
+    "node_modules/legacy/node_modules/lodash": {"version": "3.10.1"}
+  }
+}`,
+	}
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+	for name, contents := range files {
+		if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	direct := CollectDirectDependenciesFromWorkspace(ws)
+
+	if !LookupDirect(direct, "lodash", "4.17.21") {
+		t.Errorf("the member's declaration was not resolved by the root lockfile\nset: %v", direct)
+	}
+	if LookupDirect(direct, "lodash", "3.10.1") {
+		t.Errorf("the nested copy is direct, so the member kept a bare key\nset: %v", direct)
+	}
+}

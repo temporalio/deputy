@@ -42,11 +42,16 @@ ecosystem where that is routine, and Deputy reads `package-lock.json`, or
 `npm-shrinkwrap.json` where a project publishes one instead, to mark only the
 version the declaration resolved to, so a nested copy of a declared name reads as
 transitive. A project carrying both files is read the way npm and Deputy's own
-inventory read it: the shrinkwrap governs and the `package-lock.json` is ignored. In a workspace every member's own declarations count, resolved
-against the copy nearest to that member, and `direct` describes the scan as a
-whole: a package any member declares is direct, and two members declaring
-different versions make both direct. Which member a package is direct *for* is not
-something a boolean can say.
+inventory read it: the shrinkwrap governs and the `package-lock.json` is ignored.
+
+In a workspace every member's own declarations count, resolved against the copy
+nearest to that member. A lockfile answers only for the members its own
+`workspaces` globs claim, so a standalone project nested in the tree, a `tools/`
+directory with its own `package.json` and a Yarn lockfile, keeps its own answer
+rather than being resolved by a lockfile that never mentioned it. `direct`
+describes the scan as a whole: a package any member declares is direct, and two
+members declaring different versions make both direct. Which member a package is
+direct *for* is not something a boolean can say.
 
 That precision needs the resolution, so it holds per project and not per
 repository. A repository whose npm projects all commit a `package-lock.json` gets
