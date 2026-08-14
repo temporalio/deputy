@@ -1300,3 +1300,43 @@ func TestDirectSetIsMonotone(t *testing.T) {
 		}
 	}
 }
+
+// TestNpmAliasResolutionSuppressesBothSpellings covers the alias case. An entry
+// such as my-lodash: "npm:lodash@^4" is installed under the alias and records the
+// package it really is, so the lockfile answers for it under the target's name
+// and version. The manifest contributes both spellings, and only the target was
+// being suppressed, which left the alias answering by name: a package genuinely
+// called my-lodash, arriving transitively at any version, then read as direct.
+func TestNpmAliasResolutionSuppressesBothSpellings(t *testing.T) {
+	files := map[string]string{
+		"package.json": `{"name":"app","dependencies":{"my-lodash":"npm:lodash@^4.17.21"}}`,
+		"package-lock.json": `{
+  "name": "app",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "app", "dependencies": {"my-lodash": "npm:lodash@^4.17.21"}},
+    "node_modules/my-lodash": {"name": "lodash", "version": "4.17.21"}
+  }
+}`,
+	}
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+	for name, contents := range files {
+		if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	direct := CollectDirectDependenciesFromWorkspace(ws)
+
+	if !LookupDirect(direct, "lodash", "4.17.21") {
+		t.Errorf("the aliased package is not direct at its resolved version\nset: %v", direct)
+	}
+	// The alias is a name npm registers nothing under, but nothing stops a real
+	// package from having it, and the declaration resolved to something else.
+	if LookupDirect(direct, "my-lodash", "9.9.9") {
+		t.Errorf("a package named like the alias is direct at a version nothing declared\nset: %v", direct)
+	}
+	if direct["my-lodash"] {
+		t.Errorf("the alias kept a bare key even though the declaration was resolved\nset: %v", direct)
+	}
+}
