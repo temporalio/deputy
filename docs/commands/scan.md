@@ -89,6 +89,8 @@ can plug into the same scan flow as providers are added.
 | `--detect-base-image` | | `false` | Detect base image layers in container scans (requires network, queries deps.dev) |
 | `--no-verify-fixes` | | `false` | Skip Go module proxy verification of fixed versions (offline; trusts advisory data verbatim) |
 
+`text` output is colored only when it lands on a terminal, so `--output` to a file and a redirected stdout are both plain. See [Color](README.md#color).
+
 ### Date Format
 
 Date flags accept: `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, or RFC3339.
