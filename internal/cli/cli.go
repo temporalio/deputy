@@ -83,7 +83,13 @@ func loadRuntimeConfig() (*config.Config, error) {
 				fmt.Sprintf("Fix the file, or run 'deputy config validate %s' for details", configPath),
 			)
 		}
-		return nil, fmt.Errorf("failed to load config: %w", err)
+		// No file was found, so the offending value came from the environment.
+		// 'deputy config validate' cannot help here (it reads files), so point
+		// at the variables instead.
+		return nil, deputyerrors.Suggest(
+			fmt.Errorf("failed to load config: %w", err),
+			"Check the DEPUTY_* environment variables for an invalid value",
+		)
 	}
 	return cfg, nil
 }
@@ -344,10 +350,14 @@ CONNECTION MODES:
 // acting on it, so they stay available when the discovered config file is the
 // thing that is broken: refusing to run them would take away the tools that
 // explain the failure.
+// The exemption is deliberately narrow: only the top-level "config" command
+// qualifies, so a future subcommand that happens to be named "config" under some
+// other command (say 'deputy proxy config') cannot inherit it and quietly become
+// runnable on a config file that failed to load.
 func inConfigCommandTree(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
-		// The root command is "deputy", so this cannot match the whole CLI.
-		if c.Name() == "config" && c.Parent() != nil {
+		parent := c.Parent()
+		if c.Name() == "config" && parent != nil && !parent.HasParent() {
 			return true
 		}
 	}

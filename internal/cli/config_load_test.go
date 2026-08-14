@@ -46,11 +46,15 @@ func TestLoadRuntimeConfig(t *testing.T) {
 	tests := []struct {
 		name string
 		// writeFile is false for the absent-config case.
-		writeFile   bool
-		contents    string
-		wantErr     bool
-		wantErrHas  []string
-		checkConfig func(t *testing.T, cfg *config.Config)
+		writeFile bool
+		contents  string
+		// env is applied after the isolating setup, for the case where the
+		// environment rather than a file carries the bad value.
+		env               map[string]string
+		wantErr           bool
+		wantErrHas        []string
+		wantSuggestionHas string
+		checkConfig       func(t *testing.T, cfg *config.Config)
 	}{
 		{
 			name:      "no config file loads defaults without error",
@@ -71,14 +75,26 @@ func TestLoadRuntimeConfig(t *testing.T) {
 			wantErr:   true,
 			// The path must be named: the offending file can live in the
 			// home directory, far from where the command was run.
-			wantErrHas: []string{"failed to load config from", ".deputy.yaml", "failed to parse config file"},
+			wantErrHas:        []string{"failed to load config from", ".deputy.yaml", "failed to parse config file"},
+			wantSuggestionHas: "deputy config validate",
 		},
 		{
-			name:       "valid yaml with an invalid value is an error",
-			writeFile:  true,
-			contents:   "logging:\n  level: shouty\n",
-			wantErr:    true,
-			wantErrHas: []string{"failed to load config from", ".deputy.yaml", "validation failed for logging.level"},
+			name:              "valid yaml with an invalid value is an error",
+			writeFile:         true,
+			contents:          "logging:\n  level: shouty\n",
+			wantErr:           true,
+			wantErrHas:        []string{"failed to load config from", ".deputy.yaml", "validation failed for logging.level"},
+			wantSuggestionHas: "deputy config validate",
+		},
+		{
+			// With no file to blame, the error must not point at
+			// 'config validate', which only reads files.
+			name:              "invalid environment value is an error without a file",
+			writeFile:         false,
+			env:               map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			wantErr:           true,
+			wantErrHas:        []string{"failed to load config", "validation failed for logging.level"},
+			wantSuggestionHas: "DEPUTY_* environment variables",
 		},
 		{
 			name:      "valid config is loaded and honored",
@@ -108,6 +124,9 @@ func TestLoadRuntimeConfig(t *testing.T) {
 			if test.writeFile {
 				writeConfigFile(t, test.contents)
 			}
+			for k, v := range test.env {
+				t.Setenv(k, v)
+			}
 
 			cfg, err := loadRuntimeConfig()
 
@@ -123,8 +142,8 @@ func TestLoadRuntimeConfig(t *testing.T) {
 						t.Errorf("error %q does not contain %q", err.Error(), want)
 					}
 				}
-				if got := deputyerrors.GetSuggestion(err); !strings.Contains(got, "deputy config validate") {
-					t.Errorf("suggestion = %q, want it to point at 'deputy config validate'", got)
+				if got := deputyerrors.GetSuggestion(err); !strings.Contains(got, test.wantSuggestionHas) {
+					t.Errorf("suggestion = %q, want it to contain %q", got, test.wantSuggestionHas)
 				}
 				return
 			}
@@ -277,6 +296,21 @@ func TestInConfigCommandTree(t *testing.T) {
 			}
 		})
 	}
+
+	// The exemption keys on the top-level config command, not on the name
+	// alone, so a command named "config" nested under something else must not
+	// pick it up and become runnable on a config file that failed to load.
+	t.Run("nested command named config is not exempt", func(t *testing.T) {
+		fake := &cobra.Command{Use: "deputy"}
+		proxy := &cobra.Command{Use: "proxy"}
+		nested := &cobra.Command{Use: "config"}
+		proxy.AddCommand(nested)
+		fake.AddCommand(proxy)
+
+		if inConfigCommandTree(nested) {
+			t.Error("inConfigCommandTree(deputy proxy config) = true, want false")
+		}
+	})
 }
 
 // executeRootWithConfigErr builds the root command the way Run does, with a
