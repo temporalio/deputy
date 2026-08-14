@@ -382,14 +382,9 @@ func generateBaselineWithExcludes(ctx context.Context, scanner secrets.Scanner, 
 			return nil
 		}
 
-		content, err := fs.ReadFile(rootFS, path)
+		findings, err := scanBaselineFile(ctx, rootFS, scanner, path)
 		if err != nil {
-			return nil
-		}
-
-		findings, err := scanner.ScanFile(ctx, relPath, content)
-		if err != nil {
-			return nil
+			return err
 		}
 
 		baseline.AddFindings(findings, reason)
@@ -431,16 +426,9 @@ func scanDirectoryForBaseline(ctx context.Context, scanner secrets.Scanner, dir 
 			return nil
 		}
 
-		content, err := fs.ReadFile(rootFS, path)
+		findings, err := scanBaselineFile(ctx, rootFS, scanner, path)
 		if err != nil {
-			return nil
-		}
-
-		relPath := filepath.FromSlash(path)
-
-		findings, err := scanner.ScanFile(ctx, relPath, content)
-		if err != nil {
-			return nil
+			return err
 		}
 
 		allFindings = append(allFindings, findings...)
@@ -448,6 +436,21 @@ func scanDirectoryForBaseline(ctx context.Context, scanner secrets.Scanner, dir 
 	})
 
 	return allFindings, err
+}
+
+func scanBaselineFile(ctx context.Context, rootFS fs.FS, scanner secrets.Scanner, path string) ([]secrets.Finding, error) {
+	content, err := fs.ReadFile(rootFS, path)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+
+	relPath := filepath.FromSlash(path)
+	findings, err := scanner.ScanFile(ctx, relPath, content)
+	if err != nil {
+		return nil, fmt.Errorf("scanning %s: %w", relPath, err)
+	}
+
+	return findings, nil
 }
 
 // isBinaryFileByExtension checks if a file is binary by extension.
