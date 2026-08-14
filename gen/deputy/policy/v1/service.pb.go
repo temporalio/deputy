@@ -330,12 +330,18 @@ type EvaluateResponse struct {
 	// and no response is returned at all. ALLOW therefore never means "we could
 	// not tell".
 	Outcome ActionType `protobuf:"varint,2,opt,name=outcome,proto3,enum=deputy.policy.v1.ActionType" json:"outcome,omitempty"`
-	// Errors is populated by Validate, not by Evaluate.
+	// Errors is never populated and no response will ever carry it.
 	//
 	// Evaluate reports load, compile, and runtime failures as RPC errors:
 	// INVALID_ARGUMENT for a source it could not load or compile, INTERNAL for
 	// an evaluation failure, and CANCELED or DEADLINE_EXCEEDED when the request
-	// context ended first. It leaves this field empty.
+	// context ended first. A response therefore always describes a decision that
+	// every policy actually produced, and a client must not read this field to
+	// decide whether the outcome is trustworthy.
+	//
+	// Validation errors live on a different message: see ValidateResponse.errors,
+	// which Validate returns instead. The field is retained here for wire
+	// compatibility only.
 	Errors        []*PolicyError `protobuf:"bytes,3,rep,name=errors,proto3" json:"errors,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
