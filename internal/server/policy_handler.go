@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
@@ -43,19 +44,28 @@ func NewPolicyHandler(opts ...PolicyOption) *PolicyHandler {
 var _ policyv1connect.PolicyServiceHandler = (*PolicyHandler)(nil)
 
 // Evaluate runs policy evaluation against provided context.
+//
+// Evaluate fails closed. Any failure to load, compile, or evaluate a policy is
+// returned as an error rather than as a decision, so a caller reading the
+// outcome field can never read a failure as a permission: a policy that did
+// not run cannot have allowed anything. This matches every other policy path
+// (the service interceptor answers CodeInternal, the proxy answers 500, the
+// CLI errors out). Callers that want per-policy problems reported as data,
+// without evaluating, should use Validate.
 func (h *PolicyHandler) Evaluate(
 	ctx context.Context,
 	req *connect.Request[policyv1.EvaluateRequest],
 ) (*connect.Response[policyv1.EvaluateResponse], error) {
 	msg := req.Msg
 
-	// Load policies from sources
+	// Load policies from sources. A source that failed to load is a policy that
+	// will not run, so evaluating the remainder would answer with a decision
+	// that silently omits it. Refuse instead, matching how the other handlers
+	// report caller-supplied source problems (CodeInvalidArgument), including
+	// the local-mode refusal for path sources.
 	sources, policyErrors := h.loadPolicySources(msg.Policies)
-	if len(policyErrors) > 0 && len(sources) == 0 {
-		return connect.NewResponse(&policyv1.EvaluateResponse{
-			Outcome: policyv1.ActionType_ACTION_TYPE_UNSPECIFIED,
-			Errors:  policyErrors,
-		}), nil
+	if len(policyErrors) > 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, policySourceLoadError(policyErrors))
 	}
 
 	// Build CEL activation based on context type
@@ -70,11 +80,13 @@ func (h *PolicyHandler) Evaluate(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("compile policies: %w", err))
 	}
 
+	// An evaluation failure leaves the decision unknown, and unknown is not
+	// allowed. The engine stops at the first failing policy and returns no
+	// actions, so there is no partial result to hand back here either.
 	actions, err := engine.EvaluateAll(ctx, input, command, entrypoint)
 	if err != nil {
-		policyErrors = append(policyErrors, &policyv1.PolicyError{
-			Message: fmt.Sprintf("evaluation error: %v", err),
-		})
+		return nil, connect.NewError(connect.CodeInternal,
+			fmt.Errorf("evaluate policies for entrypoint %q: %w", entrypoint, err))
 	}
 
 	// Convert actions to proto through the shared converter so this surface
@@ -97,10 +109,12 @@ func (h *PolicyHandler) Evaluate(
 		}
 	}
 
+	// Errors is deliberately left empty: reaching this point means every policy
+	// loaded, compiled, and ran, so the outcome is a real decision. Anything
+	// else already returned an error above.
 	return connect.NewResponse(&policyv1.EvaluateResponse{
 		Actions: protoActions,
 		Outcome: outcome,
-		Errors:  policyErrors,
 	}), nil
 }
 
@@ -227,6 +241,24 @@ func (h *PolicyHandler) loadPolicySources(protoSources []*policyv1.PolicySource)
 	}
 
 	return sources, errors
+}
+
+// policySourceLoadError collapses source load failures into one error so
+// Evaluate can fail closed on them. Every message is kept, and the policy name
+// where the loader knew one, because the caller no longer receives the response
+// errors field once the RPC answers with an error instead of a decision: this
+// error text is all it has to debug with.
+func policySourceLoadError(policyErrors []*policyv1.PolicyError) error {
+	causes := make([]error, 0, len(policyErrors))
+	for _, pe := range policyErrors {
+		msg := pe.GetMessage()
+		if name := pe.GetPolicyName(); name != "" {
+			causes = append(causes, fmt.Errorf("%s: %s", name, msg))
+			continue
+		}
+		causes = append(causes, errors.New(msg))
+	}
+	return fmt.Errorf("load policy sources: %w", errors.Join(causes...))
 }
 
 // buildActivation constructs the policy input proto from request input.
