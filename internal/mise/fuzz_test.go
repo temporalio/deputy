@@ -57,6 +57,6 @@ func FuzzParseLock(f *testing.F) {
 		// Lookups and accessors must not panic on any parsed lockfile.
 		_ = lf.First("node")
 		_ = lf.Locked("node", "20.11.0")
-		_ = lf.Lookup(ToolSpec{Name: "node", Key: "node"}, "20")
+		_ = lf.Lookup(ToolSpec{Name: "node", Key: "node"}, "20", nil)
 	})
 }

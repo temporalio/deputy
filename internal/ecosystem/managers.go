@@ -21,8 +21,9 @@ import "github.com/temporalio/deputy/internal/collections"
 //   - Haskell: cabal (20), stack (21)
 //   - R: renv (22)
 //   - C++: conan (23)
-//   - CI/CD: github-actions (24)
-//   - Container: docker, oci (25)
+//   - Toolchain version managers: mise (24), asdf (25)
+//   - CI/CD: github-actions (26)
+//   - Container: docker, oci (27)
 func ManagerRank(name string) int {
 	switch collections.NormalizeLower(name) {
 	// Go
@@ -101,13 +102,21 @@ func ManagerRank(name string) int {
 	case "conan":
 		return 23
 
+	// Toolchain version managers (mise, asdf) install language runtimes and
+	// dev tools; they sort after single-language managers but ahead of CI/CD
+	// and container artifacts.
+	case "mise":
+		return 24
+	case "asdf":
+		return 25
+
 	// CI/CD
 	case "github-actions", "githubactions":
-		return 24
+		return 26
 
 	// Container
 	case "docker", "oci", "container":
-		return 25
+		return 27
 
 	default:
 		return 100

@@ -1,13 +1,18 @@
 package remediation
 
 import (
+	"os"
+	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
@@ -352,15 +357,16 @@ func TestCommandsFromConsolidatedGoToolchain(t *testing.T) {
 }
 
 func TestCommandsFromConsolidatedMiseBackendTool(t *testing.T) {
-	// A vulnerable mise-managed backend tool fixes via `mise use <key>@<version>`,
-	// using the exact config key (with backend prefix), not the canonical name.
+	// A vulnerable mise-managed backend tool fixes via a deputy-internal config
+	// edit, using the exact config key (with backend prefix), not the
+	// canonical name.
 	tests := []struct {
 		name         string
 		componentKey string
 		wantCommand  string
 	}{
-		{"npm backend tool", "npm:lodash", "mise use npm:lodash@4.17.21"},
-		{"cargo backend tool", "cargo:ripgrep", "mise use cargo:ripgrep@4.17.21"},
+		{"npm backend tool", "npm:lodash", "deputy:mise:update mise.toml npm:lodash 4.17.21 4.17.20"},
+		{"cargo backend tool", "cargo:ripgrep", "deputy:mise:update mise.toml cargo:ripgrep 4.17.21 4.17.20"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -407,8 +413,8 @@ func TestCommandsFromConsolidatedStdlibSourceAware(t *testing.T) {
 	if !hasCommand("go get go@1.20.1") {
 		t.Errorf("expected go.mod toolchain command 'go get go@1.20.1'; commands=%+v", commands)
 	}
-	if !hasCommand("mise use go@1.20.1") {
-		t.Errorf("expected mise command 'mise use go@1.20.1'; commands=%+v", commands)
+	if !hasCommand("deputy:mise:update mise.toml go 1.20.1 1.20.0") {
+		t.Errorf("expected mise command 'deputy:mise:update mise.toml go 1.20.1 1.20.0'; commands=%+v", commands)
 	}
 }
 
@@ -433,8 +439,41 @@ func TestCommandsFromConsolidatedStdlibMiseOnly(t *testing.T) {
 	if hasCommand("go get go@1.20.1") {
 		t.Errorf("did not expect a go.mod command for a mise-only stdlib finding; commands=%+v", commands)
 	}
-	if !hasCommand("mise use go@1.20.1") {
-		t.Errorf("expected 'mise use go@1.20.1'; commands=%+v", commands)
+	if !hasCommand("deputy:mise:update mise.toml go 1.20.1 1.20.0") {
+		t.Errorf("expected 'deputy:mise:update mise.toml go 1.20.1 1.20.0'; commands=%+v", commands)
+	}
+}
+
+func TestCommandsFromConsolidatedStdlibMultipleCurrents(t *testing.T) {
+	// Two stdlib findings with different current Go versions (e.g. a
+	// multi-version array where both pins are vulnerable): the single mise
+	// edit must carry every vulnerable version, sorted, so the apply replaces
+	// each matching element.
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:     "GO-2025-1234",
+			Package:       "stdlib",
+			Version:       "1.20.0",
+			FixedVersions: []string{"1.20.1"},
+			ManifestRefs: []dependencyv1.ManifestRef{
+				dependency.NewManifestRef("mise.toml", "mise", nil, "go"),
+			},
+		},
+		{
+			PrimaryID:     "GO-2025-5678",
+			Package:       "stdlib",
+			Version:       "1.21.0",
+			FixedVersions: []string{"1.21.5"},
+			ManifestRefs: []dependencyv1.ManifestRef{
+				dependency.NewManifestRef("mise.toml", "mise", nil, "go"),
+			},
+		},
+	}
+	commands, _ := CommandsFromConsolidated(cons)
+
+	want := "deputy:mise:update mise.toml go 1.21.5 1.20.0 1.21.0"
+	if !slices.ContainsFunc(commands, func(c Command) bool { return c.Command == want }) {
+		t.Errorf("expected %q; commands=%+v", want, commands)
 	}
 }
 
@@ -607,5 +646,241 @@ func TestStdlibCommandsSkipsVendoredGoMod(t *testing.T) {
 
 	if len(commands) != 0 {
 		t.Errorf("expected no commands for a stdlib finding sourced only from a vendored go.mod, got %d: %+v", len(commands), commands)
+	}
+}
+
+// TestDeputyCommandsRoundTripOrAreNotExecutable pins the invariant behind every
+// deputy-internal command: the text is re-parsed at apply time, so a command
+// marked executable has to parse back to the tokens it was built from. Anything
+// else is a fix Deputy generated and its own applier refuses, or worse accepts
+// as different arguments than intended.
+//
+// The shapes here are ordinary paths, not hostile ones: directories with spaces
+// are everywhere, and a newline is legal in a POSIX path. A step Deputy cannot
+// express as a command is offered as guidance rather than as a fix that must
+// fail, and it is rendered on one line either way.
+func TestDeputyCommandsRoundTripOrAreNotExecutable(t *testing.T) {
+	// render covers every generator that emits a deputy: command with a
+	// filesystem path in it, so a new one cannot quietly skip the invariant.
+	renders := map[string]func(manifestPath string) commandResult{
+		"mise": func(p string) commandResult {
+			return miseUpdateCommand(p, "go", []string{"1.22.12"}, "1.24.3")
+		},
+		"github actions": func(p string) commandResult {
+			return recommendCommand("github-actions", p, "actions/checkout", nil, "v4.2.2", nil, "")
+		},
+		"dockerfile": func(p string) commandResult {
+			return recommendCommand("docker", p, "nginx", nil, "1.27.3", nil, "")
+		},
+	}
+
+	paths := []struct {
+		name string
+		path string
+		// wantExecutable says whether the command can be applied at all; when
+		// it is false the command is guidance and must still be one line.
+		wantExecutable bool
+	}{
+		{name: "a plain path", path: "config/mise.toml", wantExecutable: true},
+		{name: "a directory with a space", path: "my project/mise.toml", wantExecutable: true},
+		{name: "a directory with a quote", path: `quote"dir/mise.toml`, wantExecutable: true},
+		{name: "a directory with a backslash", path: `back\slash/mise.toml`, wantExecutable: true},
+		{name: "a projected mount", path: "..data/mise.toml", wantExecutable: true},
+		{name: "a newline in the path", path: "line\nbreak/mise.toml"},
+		{name: "a carriage return in the path", path: "line\rbreak/mise.toml"},
+	}
+
+	for generator, render := range renders {
+		for _, tt := range paths {
+			t.Run(generator+"/"+tt.name, func(t *testing.T) {
+				// The generators key off the manifest's extension, so give each
+				// one a path it recognizes while keeping the directory shape.
+				manifest := tt.path
+				switch generator {
+				case "github actions":
+					manifest = path.Dir(tt.path) + "/workflow.yml"
+				case "dockerfile":
+					manifest = path.Dir(tt.path) + "/Dockerfile"
+				}
+
+				res := render(manifest)
+				if !strings.HasPrefix(res.command, "deputy:") {
+					t.Fatalf("generator produced no deputy command: %q", res.command)
+				}
+				if res.executable != tt.wantExecutable {
+					t.Errorf("executable = %v, want %v for %q", res.executable, tt.wantExecutable, res.command)
+				}
+				if strings.ContainsAny(res.command, "\r\n") {
+					t.Errorf("the rendered command spans lines: %q", res.command)
+				}
+				if !res.executable {
+					return
+				}
+				// An executable command has to parse back to the manifest it
+				// was rendered for, in the argument position the applier reads.
+				args, err := ParseCommandArgs(res.command)
+				if err != nil {
+					t.Fatalf("ParseCommandArgs(%q): %v", res.command, err)
+				}
+				if len(args) < 2 || args[1] != manifest {
+					t.Errorf("command %q parses to %q, want %q in the file position", res.command, args, manifest)
+				}
+			})
+		}
+	}
+}
+
+// TestCommandsFromConsolidatedCarriesEveryMergedVersion pins the fix for a
+// declaration whose versions are all covered by one advisory. Consolidation
+// merges those findings by alias into a single record, and a command built from
+// that record's single Version rewrites one element of
+// `go = ["1.22.12", "1.23.8"]`, reports success, and leaves the other vulnerable
+// version declared. The generated command has to name every merged version, so
+// the apply targets each vulnerable element.
+//
+// The findings start as findings rather than as consolidated records because the
+// loss happened during consolidation: a test that hands the plan two records
+// already carries the versions the bug drops.
+func TestCommandsFromConsolidatedCarriesEveryMergedVersion(t *testing.T) {
+	finding := func(version string) vulnerability.Finding {
+		return vulnerability.Finding{
+			AdvisoryID: "GO-2025-1234",
+			Dependency: dependency.ID{Name: "stdlib", Ecosystem: "Go"},
+			Version:    version,
+			Affected:   true,
+			Direct:     true,
+			ManifestRefs: []dependencyv1.ManifestRef{
+				dependency.NewManifestRef("mise.toml", "mise", nil, "go"),
+			},
+		}
+	}
+	cons := vulnerability.Consolidate(
+		[]vulnerability.Finding{finding("1.22.12"), finding("1.23.8")},
+		map[string]*vulnerabilityv1.Advisory{
+			"GO-2025-1234": {Id: "GO-2025-1234", Aliases: []string{"CVE-2025-1111"}, FixedVersions: []string{"1.24.3"}},
+		},
+	)
+	if len(cons) != 1 {
+		t.Fatalf("expected the two findings to merge into one record, got %d", len(cons))
+	}
+
+	commands, _ := CommandsFromConsolidated(cons)
+	const want = "deputy:mise:update mise.toml go 1.24.3 1.22.12 1.23.8"
+	if !slices.ContainsFunc(commands, func(c Command) bool { return c.Command == want }) {
+		t.Fatalf("expected %q; commands=%+v", want, commands)
+	}
+
+	// The command is only right if applying it leaves nothing vulnerable
+	// declared, which is the harm the missing version caused.
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "mise.toml")
+	if err := os.WriteFile(configPath, []byte("[tools]\ngo = [\"1.22.12\", \"1.23.8\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyDeputyCommand(dir, want); err != nil {
+		t.Fatalf("ApplyDeputyCommand: %v", err)
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := mise.Parse("mise.toml", after)
+	if err != nil {
+		t.Fatalf("parsing the rewritten config: %v", err)
+	}
+	for _, spec := range cfg.Tools {
+		if spec.Key != "go" {
+			continue
+		}
+		for _, version := range spec.Versions {
+			if version != "1.24.3" {
+				t.Errorf("go still declares %q after the fix:\n%s", version, after)
+			}
+		}
+	}
+}
+
+// TestCommandsFromConsolidatedNeverDowngradesAMergedVersion pins that carrying
+// every merged version into one command cannot move a tool backwards. One
+// advisory can fix several release branches at different versions, so a record
+// merged from findings on both branches has one target computed from one of its
+// versions while holding another that is newer than it.
+//
+// Handing them all to a single edit rewrote the newer declaration to the older
+// target: `go = ["1.23.9", "1.24.3"]` under an advisory fixing 1.23 at 1.23.10
+// became `["1.23.10", "1.23.10"]`, moving the 1.24 toolchain back a minor line
+// and deleting its lock entry, reported as a successful fix. A version the target
+// cannot replace is therefore left out of the command: the declaration stays as it
+// is and the next scan reports it again, which is what a partial fix has to look
+// like.
+func TestCommandsFromConsolidatedNeverDowngradesAMergedVersion(t *testing.T) {
+	finding := func(version string) vulnerability.Finding {
+		return vulnerability.Finding{
+			AdvisoryID: "GO-2025-4444",
+			Dependency: dependency.ID{Name: "stdlib", Ecosystem: "Go"},
+			Version:    version,
+			Affected:   true,
+			Direct:     true,
+			ManifestRefs: []dependencyv1.ManifestRef{
+				dependency.NewManifestRef("mise.toml", "mise", nil, "go"),
+			},
+		}
+	}
+	cons := vulnerability.Consolidate(
+		[]vulnerability.Finding{finding("1.23.9"), finding("1.24.3")},
+		map[string]*vulnerabilityv1.Advisory{
+			// The advisory fixes the 1.23 line at 1.23.10 and the 1.24 line at
+			// 1.24.4, the shape of a real Go security release.
+			"GO-2025-4444": {
+				Id:            "GO-2025-4444",
+				Aliases:       []string{"CVE-2025-4444"},
+				FixedVersions: []string{"1.23.10", "1.24.4"},
+			},
+		},
+	)
+	if len(cons) != 1 {
+		t.Fatalf("expected the two findings to merge into one record, got %d", len(cons))
+	}
+
+	commands, _ := CommandsFromConsolidated(cons)
+	const want = "deputy:mise:update mise.toml go 1.23.10 1.23.9"
+	if !slices.ContainsFunc(commands, func(c Command) bool { return c.Command == want }) {
+		t.Fatalf("expected %q, so the 1.24 toolchain is not an argument of a 1.23 fix; commands=%+v", want, commands)
+	}
+
+	// Applying the plan must leave the version it cannot fix exactly as it was,
+	// lock entry included: unfixed and still reported beats quietly older.
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "mise.toml")
+	if err := os.WriteFile(configPath, []byte("[tools]\ngo = [\"1.23.9\", \"1.24.3\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(dir, "mise.lock")
+	lock := "[[tools.go]]\nversion = \"1.23.9\"\n\n[[tools.go]]\nversion = \"1.24.3\"\n\n[tools.go.platforms.linux-x64]\nchecksum = \"sha256:keep24\"\n"
+	if err := os.WriteFile(lockPath, []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range commands {
+		if !strings.HasPrefix(c.Command, "deputy:") {
+			continue
+		}
+		if err := ApplyDeputyCommand(dir, c.Command); err != nil {
+			t.Fatalf("ApplyDeputyCommand(%q): %v", c.Command, err)
+		}
+	}
+
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(after), "[tools]\ngo = [\"1.23.10\", \"1.24.3\"]\n"; got != want {
+		t.Errorf("config after the fix:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	lockAfter, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(lockAfter), "sha256:keep24") {
+		t.Errorf("the lock entry of the version the fix could not replace was pruned:\n%s", lockAfter)
 	}
 }
