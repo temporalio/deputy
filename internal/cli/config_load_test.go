@@ -89,16 +89,18 @@ func TestLoadRuntimeConfig(t *testing.T) {
 			wantErr:   true,
 			// The path must be named: the offending file can live in the
 			// home directory, far from where the command was run.
-			wantErrHas:        []string{"failed to load config from", ".deputy.yaml", "failed to parse config file"},
+			wantErrHas:        []string{"failed to load config", ".deputy.yaml", "failed to parse config file"},
 			wantSuggestionHas: "deputy config validate",
 		},
 		{
-			name:              "valid yaml with an invalid value is an error",
-			writeFile:         true,
-			contents:          "logging:\n  level: shouty\n",
-			wantErr:           true,
-			wantErrHas:        []string{"failed to load config from", ".deputy.yaml", "validation failed for logging.level"},
-			wantSuggestionHas: "deputy config validate",
+			name:      "valid yaml with an invalid value is an error",
+			writeFile: true,
+			contents:  "logging:\n  level: shouty\n",
+			wantErr:   true,
+			// A merged-config validation failure must not be blamed on the
+			// file: the offending value may have come from the environment.
+			wantErrHas:        []string{"invalid configuration", "validation failed for logging.level"},
+			wantSuggestionHas: "check both",
 		},
 		{
 			// With no file to blame, the error must not point at
@@ -107,7 +109,7 @@ func TestLoadRuntimeConfig(t *testing.T) {
 			writeFile:         false,
 			env:               map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
 			wantErr:           true,
-			wantErrHas:        []string{"failed to load config", "validation failed for logging.level"},
+			wantErrHas:        []string{"invalid configuration", "validation failed for logging.level"},
 			wantSuggestionHas: "DEPUTY_* environment variables",
 		},
 		{
@@ -167,6 +169,77 @@ func TestLoadRuntimeConfig(t *testing.T) {
 			}
 			if test.checkConfig != nil {
 				test.checkConfig(t, cfg)
+			}
+		})
+	}
+}
+
+// TestConfigLoadErrorAttribution pins where the diagnostic points. A merged
+// configuration is validated after the environment and flags are folded in, so
+// a validation failure cannot be pinned on the file just because a file exists.
+// Getting this wrong is worse than saying nothing: it sends the operator to
+// 'deputy config validate', which passes on the file it names.
+func TestConfigLoadErrorAttribution(t *testing.T) {
+	parseFailure := &deputyerrors.ConfigError{
+		Path:    ".deputy.yaml",
+		Message: "failed to parse config file",
+	}
+	validationFailure := &deputyerrors.ValidationError{
+		Field:   "logging.level",
+		Value:   "shouty",
+		Message: "must be one of: debug, info, warn, error",
+	}
+
+	tests := []struct {
+		name              string
+		configPath        string
+		err               error
+		wantErrHas        string
+		wantSuggestionHas string
+		// wantSuggestionLacks catches the misattribution directly.
+		wantSuggestionLacks string
+	}{
+		{
+			name:              "unreadable file blames the file",
+			configPath:        ".deputy.yaml",
+			err:               parseFailure,
+			wantErrHas:        "failed to load config",
+			wantSuggestionHas: "deputy config validate .deputy.yaml",
+		},
+		{
+			name:                "validation with a file names both sources",
+			configPath:          ".deputy.yaml",
+			err:                 validationFailure,
+			wantErrHas:          "invalid configuration",
+			wantSuggestionHas:   "check both",
+			wantSuggestionLacks: "deputy config validate",
+		},
+		{
+			name:                "validation without a file blames the environment",
+			configPath:          "",
+			err:                 validationFailure,
+			wantErrHas:          "invalid configuration",
+			wantSuggestionHas:   "DEPUTY_* environment variables",
+			wantSuggestionLacks: "deputy config validate",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := configLoadError(test.configPath, test.err)
+
+			if !strings.Contains(got.Error(), test.wantErrHas) {
+				t.Errorf("error %q does not contain %q", got.Error(), test.wantErrHas)
+			}
+			if !errors.Is(got, test.err) {
+				t.Errorf("error %v does not wrap the cause %v", got, test.err)
+			}
+			suggestion := deputyerrors.GetSuggestion(got)
+			if !strings.Contains(suggestion, test.wantSuggestionHas) {
+				t.Errorf("suggestion %q does not contain %q", suggestion, test.wantSuggestionHas)
+			}
+			if test.wantSuggestionLacks != "" && strings.Contains(suggestion, test.wantSuggestionLacks) {
+				t.Errorf("suggestion %q must not contain %q: the named command passes and teaches nothing", suggestion, test.wantSuggestionLacks)
 			}
 		})
 	}

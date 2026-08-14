@@ -90,23 +90,36 @@ func loadRuntimeConfig() (*config.Config, error) {
 	}
 	cfg, err := config.NewLoader(configPath).LoadWithOverrides(loggingFlagOverrides(os.Args[1:]))
 	if err != nil {
-		if configPath != "" {
-			// Name the file: an offending config can be in the home directory,
-			// far from the directory the command was run in.
-			return nil, deputyerrors.Suggest(
-				fmt.Errorf("failed to load config from %s: %w", configPath, err),
-				fmt.Sprintf("Fix the file, or run 'deputy config validate %s' for details", configPath),
-			)
-		}
-		// No file was found, so the offending value came from the environment.
-		// 'deputy config validate' cannot help here (it reads files), so point
-		// at the variables instead.
-		return nil, deputyerrors.Suggest(
-			fmt.Errorf("failed to load config: %w", err),
-			"Check the DEPUTY_* environment variables for an invalid value",
-		)
+		return nil, configLoadError(configPath, err)
 	}
 	return cfg, nil
+}
+
+// configLoadError turns a load failure into a diagnostic that points at a
+// source which can actually be at fault. Read and parse failures are the file's
+// by construction, since the loader only raises them with a file in hand.
+// Validation is different: it runs on the merged result of file, environment,
+// and flags, so blaming the file for it sends the operator to
+// 'deputy config validate', which passes, and teaches them nothing. Where the
+// provenance is genuinely unknown, the message says so rather than guessing.
+func configLoadError(configPath string, err error) error {
+	if _, ok := errors.AsType[*deputyerrors.ConfigError](err); ok {
+		// ConfigError already names the path it failed to read or parse.
+		return deputyerrors.Suggest(
+			fmt.Errorf("failed to load config: %w", err),
+			fmt.Sprintf("Fix the file, or run 'deputy config validate %s' for details", configPath),
+		)
+	}
+	if configPath == "" {
+		return deputyerrors.Suggest(
+			fmt.Errorf("invalid configuration: %w", err),
+			"No config file was loaded, so check the DEPUTY_* environment variables for an invalid value",
+		)
+	}
+	return deputyerrors.Suggest(
+		fmt.Errorf("invalid configuration: %w", err),
+		fmt.Sprintf("The value can come from %s or from a DEPUTY_* environment variable, which overrides the file; check both", configPath),
+	)
 }
 
 // loggingFlagOverrides scrapes the logging flags out of the raw arguments,

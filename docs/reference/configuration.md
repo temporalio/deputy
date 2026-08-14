@@ -43,13 +43,22 @@ Dropping them is not a safe fallback. `advisory_sources` is the one with real se
 
 Precedence still applies to this check: a value is only invalid if nothing higher in the order replaces it, so `--log-level=debug` corrects an invalid `DEPUTY_LOG_LEVEL` rather than being rejected by it.
 
-The command exits non-zero and names the file:
+The command exits non-zero, and the diagnostic points at the source that can actually be at fault. A file that cannot be read or parsed is the file's problem:
 
 ```console
 $ deputy list
-Failed to load config from .deputy.yaml: validation failed for logging.level: must be one of: debug, info, warn, error.
+Failed to load config: config error in .deputy.yaml: failed to parse config file.
 
 Suggestion: Fix the file, or run 'deputy config validate .deputy.yaml' for details
+```
+
+A value that fails validation is attributed more carefully, because validation runs on the merged result of file, environment, and flags:
+
+```console
+$ DEPUTY_LOG_LEVEL=shouty deputy list
+Invalid configuration: validation failed for logging.level: must be one of: debug, info, warn, error.
+
+Suggestion: The value can come from .deputy.yaml or from a DEPUTY_* environment variable, which overrides the file; check both
 ```
 
 Commands that do not act on configuration keep working in this state: `deputy config` (`validate`, `show`, `path`) so you can diagnose the file, plus `deputy version`, `deputy help`, `deputy completion`, and shell tab completion. Everything else refuses to run until the file is fixed.
