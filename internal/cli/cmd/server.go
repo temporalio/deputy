@@ -245,15 +245,22 @@ func parseTLSClientAuth(auth string) tls.ClientAuthType {
 
 // loadServerConfig builds a server.Config with proper precedence:
 // CLI flags > environment variables > config file > defaults.
-func loadServerConfig(flags *serverFlags, cmd *cobra.Command) server.Config {
+// A config file that cannot be loaded is an error rather than a fall back to
+// defaults: silently ignoring it would start the server on a different address,
+// without the configured TLS settings, and with different egress allowlists
+// than the operator asked for. The CLI already refuses to run any command in
+// this state (see internal/cli.loadRuntimeConfig), so this is a second line of
+// defense for callers that construct the command directly.
+func loadServerConfig(flags *serverFlags, cmd *cobra.Command) (server.Config, error) {
 	// Load config file + env vars (config.Loader handles file + env precedence)
 	configPath := config.FindConfigFile()
 	loader := config.NewLoader(configPath)
 	fileCfg, err := loader.Load()
 	if err != nil {
-		// Log but continue with defaults - config file is optional
-		logs.Debug(context.Background(), "config file load failed, using defaults", "error", err)
-		fileCfg = &config.Config{}
+		if configPath != "" {
+			return server.Config{}, fmt.Errorf("failed to load config from %s: %w", configPath, err)
+		}
+		return server.Config{}, fmt.Errorf("failed to load config: %w", err)
 	}
 
 	// Start with defaults, then apply config file values
@@ -535,12 +542,15 @@ func loadServerConfig(flags *serverFlags, cmd *cobra.Command) server.Config {
 		}
 	}
 
-	return cfg
+	return cfg, nil
 }
 
 func runServer(ctx context.Context, flags *serverFlags, cmd *cobra.Command) error {
 	// Load configuration with proper precedence: flags > env > config file > defaults
-	cfg := loadServerConfig(flags, cmd)
+	cfg, err := loadServerConfig(flags, cmd)
+	if err != nil {
+		return err
+	}
 
 	srv, err := server.New(cfg)
 	if err != nil {

@@ -194,9 +194,12 @@ func excludePathsFromCmd(cmd *cobra.Command) []string {
 }
 
 // discoverConfigExcludePaths returns scan.exclude_paths from an auto-discovered
-// .deputy.yaml (relative to the current working directory, then home). It is
-// best-effort: a missing or unparseable config yields no patterns rather than a
-// hard error, so a malformed config never blocks a scan.
+// .deputy.yaml (relative to the current working directory, then home). A missing
+// config yields no patterns. An unparseable one also yields none, which is safe
+// only because the CLI refuses to run any command whose config file failed to
+// load (see internal/cli.loadRuntimeConfig): by the time a scan reaches here the
+// config is known to be loadable, so this returns nothing only when the setting
+// is genuinely absent.
 func discoverConfigExcludePaths() []string {
 	path := config.FindConfigFile()
 	if path == "" {
