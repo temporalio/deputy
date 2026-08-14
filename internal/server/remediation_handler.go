@@ -1052,11 +1052,20 @@ func stepExecDir(workDir string, step *remediationv1.Step) (string, error) {
 // The name is returned as written rather than as the path it resolved to, so
 // the command still runs relative to its own directory and argv[0] reads the way
 // the plan wrote it.
+//
+// The name keeps its spelling on the way to the check, too. A relative name is
+// placed under execDir by concatenation rather than by [filepath.Join], because
+// Join cleans the result and the kernel will not: exec hands the name over as
+// written and it is resolved component by component, so "missing/../gradlew"
+// stops at a "missing" that is not there, while Join reduces it to
+// "<execDir>/gradlew", finds the wrapper, and previews a step that cannot start.
+// That is preflight predicting something execution refuses, which is the one
+// thing this function exists to prevent.
 func resolveExecutable(execDir, name string) (string, error) {
 	if filepath.Base(name) != name {
 		target := name
 		if !filepath.IsAbs(target) {
-			target = filepath.Join(execDir, target)
+			target = execDir + string(filepath.Separator) + target
 		}
 		if err := requireExecutableFile(target); err != nil {
 			return "", fmt.Errorf("cannot resolve executable %q: %w", name, err)

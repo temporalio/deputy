@@ -1023,6 +1023,15 @@ func TestResolveExecutableMatchesExecCommand(t *testing.T) {
 			path:       binDir,
 		},
 		{
+			// The wrapper is present, and this spelling cannot reach it: exec
+			// resolves the name component by component, so it stops at a
+			// "missing" that is not there. Cleaning the path first would find
+			// the wrapper and call a step runnable that cannot start.
+			name:       "relative wrapper reached through a directory that does not exist is refused",
+			executable: "missing/../gradlew",
+			path:       binDir,
+		},
+		{
 			name:       "absolute path is left as written",
 			executable: filepath.Join(binDir, "widgetpm"),
 			path:       t.TempDir(),
@@ -1228,6 +1237,11 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 		// rows whose step must get past the check that its execution
 		// directory exists to reach the check under test.
 		dirs []string
+		// execFiles are created under the work directory as executable files,
+		// for rows whose step names a wrapper that has to be there: without it
+		// the row would pass on the wrapper being absent rather than on how its
+		// path was resolved.
+		execFiles []string
 		// emptyPath runs the row with a PATH holding nothing, which is what a
 		// minimal CI image or an isolated agent container looks like to a step
 		// naming a package manager that was never installed.
@@ -1275,6 +1289,18 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			dirs:             []string{"services/api"},
 		},
 		{
+			// The wrapper is there, and the path the step spells cannot reach
+			// it: exec hands the name to the kernel as written, which walks
+			// "missing/" and stops. Cleaning the path first finds the wrapper
+			// and previews a step that cannot start.
+			name:             "relative wrapper reached through a directory that does not exist",
+			step:             &remediationv1.Step{Id: "step-1", Title: "refresh dependencies", Command: "missing/../gradlew dependencies", Manager: "gradle", Executable: true, ManifestPath: "services/api/build.gradle"},
+			wantReason:       `cannot resolve executable "missing/../gradlew"`,
+			needsProcessTree: true,
+			dirs:             []string{"services/api"},
+			execFiles:        []string{"services/api/gradlew"},
+		},
+		{
 			name:       "deputy command target escaping the work directory",
 			step:       &remediationv1.Step{Id: "step-1", Title: "pin elsewhere", Command: "deputy:action:update ../outside/ci.yml actions/checkout v4", Executable: true},
 			wantReason: `path traversal detected: ../outside/ci.yml escapes base directory`,
@@ -1307,6 +1333,15 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			}
 			if err := os.WriteFile(filepath.Join(workDir, "notadir"), []byte("not a directory"), 0o644); err != nil {
 				t.Fatalf("WriteFile notadir: %v", err)
+			}
+			for _, file := range tt.execFiles {
+				path := filepath.Join(workDir, file)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatalf("MkdirAll for %q: %v", file, err)
+				}
+				if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatalf("WriteFile %q: %v", file, err)
+				}
 			}
 
 			message, outcome, rejectErr := dryRunStep(1, 1, workDir, tt.step, processTreeTerminationSupported)
