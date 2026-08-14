@@ -86,7 +86,9 @@ RubyGems, containers, operating system packages, GitHub Actions workflows/action
 Use --ecosystems to limit scanning to specific sets when you don't need the full inventory.
 
 OUTPUT FORMATS:
-• text: Human-readable colored output with severity indicators and fix suggestions
+• text: Human-readable output with severity indicators and fix suggestions. Color is
+  decided from the destination: a terminal gets it, --output to a file or a redirected
+  stdout does not, and NO_COLOR turns it off everywhere.
 • json: Machine-readable structured output for integration with CI/CD and other tools
 
 The scan command automatically detects your module's dependencies and queries for
