@@ -450,14 +450,26 @@ func ApplyDeputyCommand(ctx context.Context, repoDir, cmd string) error {
 		// target it returned: the manifest's own location is what determines
 		// its sibling lockfile.
 		//
-		// The deadline is checked once, here, and not again between the config
-		// rewrite and the lockfile prune. Those two writes are halves of one
-		// fix, and mise's rewriter takes no context, so abandoning the second
-		// on an expired deadline would leave the workspace holding a config
-		// that declares the new version beside a lock entry that still installs
-		// the old one, having told the caller the step did not run. The rewrite
-		// is idempotent for exactly this reason: the recovery is a retry, not
-		// an abort partway through.
+		// The deadline is checked before the edit and again after it, never
+		// between its halves. The config rewrite and the lockfile prune are one
+		// fix in two writes, and mise's rewriter takes no context, so a check in
+		// the middle could not undo the first write: it could only stop before
+		// the second and leave the workspace declaring the new version beside a
+		// lock entry that still installs the old one, which scans as unfixed
+		// while reading as fixed. Aborting there buys nothing the caller wanted
+		// and costs a state no caller asked for, so the edit finishes.
+		//
+		// The check after it is the honest half. A step that finished late is
+		// not a step that did nothing, and reporting the bare deadline would
+		// tell the caller its workspace is untouched when both halves are on
+		// disk. The refusal therefore names what was written and still wraps the
+		// deadline, so the failure is classified the same way while saying what
+		// happened. Retrying it is safe either way: the rewrite is idempotent,
+		// which is what makes a retry the recovery rather than an abort.
+		//
+		// Bounding the edit itself, rather than reporting an overrun, needs a
+		// rewriter that takes a context. That is the decision in #241, and
+		// #288's plan-only entry point for mise is where it would land.
 		if err := ensureLive(ctx, "editing", file); err != nil {
 			return err
 		}
@@ -468,7 +480,13 @@ func ApplyDeputyCommand(ctx context.Context, repoDir, cmd string) error {
 		tool := parts[2]
 		newVersion := parts[3]
 		currentVersions := parts[4:]
-		return applyMiseUpdate(repoDir, configRel, tool, currentVersions, newVersion)
+		if err := applyMiseUpdate(repoDir, configRel, tool, currentVersions, newVersion); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("edited %s and its lockfile, then found the deadline gone: %w", configRel, err)
+		}
+		return nil
 
 	case "deputy:dockerfile:update":
 		// Format: deputy:dockerfile:update <file> <image> <new-version>
@@ -496,9 +514,12 @@ func ApplyDeputyCommand(ctx context.Context, repoDir, cmd string) error {
 // then been told the step timed out and is entitled to treat the workspace as
 // untouched by it.
 //
-// deputy:mise:update is checked once, before its first read, and the reason is
-// in [ApplyDeputyCommand]: its edit is two writes that have to happen together,
-// so the second check would have to abort between them.
+// deputy:mise:update is the exception, and the reason is in
+// [ApplyDeputyCommand]: its edit is two writes that have to happen together, so
+// a check between them could only leave the workspace half fixed. Its second
+// check comes after both, where it no longer decides whether to write but what
+// to report, and it is made there directly rather than through this function,
+// since what it has to say is that the edit did land.
 func ensureLive(ctx context.Context, operation, filePath string) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("not %s %s: %w", operation, filePath, err)

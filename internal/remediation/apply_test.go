@@ -2335,19 +2335,26 @@ func TestApplyDeputyCommandHonorsContext(t *testing.T) {
 	}
 }
 
-// TestApplyMiseUpdateHonorsContextBeforeEditing pins the deadline for the one
-// opcode that cannot be checked twice. A mise fix is two writes, the config and
+// TestApplyMiseUpdateHonorsContextAroundEditing pins the deadline for the one
+// opcode whose edit cannot be split. A mise fix is two writes, the config and
 // its sibling lockfile, that only make sense together, and mise's rewriter takes
-// no context, so the check sits ahead of both: an expired deadline costs no
-// filesystem work, and a deadline that expires mid-edit lets the edit finish
-// rather than leaving a config declaring the new version beside a lock entry
-// that still installs the old one.
+// no context, so the checks sit on either side of both writes and never between
+// them:
+//
+//   - a deadline already gone costs no filesystem work,
+//   - one that expires while the edit runs lets the edit finish, since stopping
+//     between the halves cannot undo the first write and would leave a config
+//     declaring the new version beside a lock entry that still installs the old
+//     one, and
+//   - the caller is then told the edit landed late rather than told it timed
+//     out, because a step that finished after its deadline is not a step that
+//     did nothing, and the report is the only thing left to get right.
 //
 // The opcode is therefore absent from TestApplyDeputyCommandHonorsContext, whose
-// table requires a second check before the write. This is the part of that
-// contract mise can keep, and the live control is what keeps the refusals from
-// passing vacuously.
-func TestApplyMiseUpdateHonorsContextBeforeEditing(t *testing.T) {
+// table requires a second check to refuse before writing. This is the shape of
+// that contract mise can keep, and the live control is what keeps the refusals
+// from passing vacuously.
+func TestApplyMiseUpdateHonorsContextAroundEditing(t *testing.T) {
 	const (
 		config = "[tools]\ngo = \"1.22.12\"\n"
 		lock   = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
@@ -2415,25 +2422,58 @@ func TestApplyMiseUpdateHonorsContextBeforeEditing(t *testing.T) {
 		})
 	}
 
-	t.Run("live context applies both halves", func(t *testing.T) {
-		dir := workspace(t)
-		if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
-			t.Fatalf("ApplyDeputyCommand() failed: %v", err)
-		}
+	// requireFixed fails unless both halves of the fix are on disk.
+	requireFixed := func(t *testing.T, dir string) {
+		t.Helper()
 		got, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(string(got), "1.24.3") {
-			t.Fatalf("config not rewritten, the refusals above are vacuous:\n%s", got)
+			t.Errorf("the config was not rewritten:\n%s", got)
 		}
 		locked, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(string(locked), "1.22.12") {
-			t.Fatalf("the stale lock entry survived, so only half the fix ran:\n%s", locked)
+			t.Errorf("the stale lock entry survived, so only half the fix ran:\n%s", locked)
 		}
+	}
+
+	t.Run("deadline expiring during the edit reports the edit it finished", func(t *testing.T) {
+		dir := workspace(t)
+		// Live for the check before the edit, gone for the one after it, which
+		// is the window a real clock cannot be aimed at: between the write and
+		// the report.
+		ctx := &expiringContext{Context: t.Context()}
+
+		err := ApplyDeputyCommand(ctx, dir, cmd)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("ApplyDeputyCommand() error = %v, want context.DeadlineExceeded", err)
+		}
+		// Telling the caller only that the deadline passed would describe a
+		// workspace it no longer has.
+		if got := err.Error(); !strings.Contains(got, "mise.toml") || !strings.Contains(got, "lockfile") {
+			t.Errorf("refusal %q does not say which edits landed", got)
+		}
+		// Stopping between the halves is the failure this row rules out: the
+		// lockfile prune is the second write, and a config declaring the new
+		// version beside a stale lock entry scans as unfixed.
+		requireFixed(t, dir)
+		if ctx.checks < 2 {
+			t.Errorf("the deadline was consulted %d time(s); the report has to consult it again", ctx.checks)
+		}
+	})
+
+	t.Run("live context applies both halves", func(t *testing.T) {
+		dir := workspace(t)
+		if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
+			t.Fatalf("ApplyDeputyCommand() failed: %v", err)
+		}
+		// Also the positive control for the rows above: without it, a path that
+		// refused every command would pass them.
+		requireFixed(t, dir)
 	})
 }
 
