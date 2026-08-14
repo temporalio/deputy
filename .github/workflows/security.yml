@@ -8,8 +8,10 @@ name: Security
 on:
   push:
     branches: [main]
+  # No branch filter, matching ci.yml: a stacked pull request targets its
+  # parent branch, so filtering on main leaves every layer of a stack
+  # unscanned.
   pull_request:
-    branches: [main]
   schedule:
     # Weekly scan on Mondays at 9am UTC
     - cron: '0 9 * * 1'
