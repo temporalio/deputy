@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	yaml "gopkg.in/yaml.v3"
@@ -329,7 +330,7 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 	if len(ecosystems) > 0 {
 		quoted := make([]string, len(ecosystems))
 		for i, eco := range ecosystems {
-			quoted[i] = fmt.Sprintf("\"%s\"", eco)
+			quoted[i] = celString(eco)
 		}
 		guard := fmt.Sprintf("(request.?ecosystem.orValue(\"\") in [%s]) || (pkg.ecosystem in [%s])", strings.Join(quoted, ","), strings.Join(quoted, ","))
 		when = fmt.Sprintf("((%s) && (%s))", guard, when)
@@ -358,4 +359,19 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 		return "", fmt.Errorf("marshal action: %w", err)
 	}
 	return fmt.Sprintf("((%s) ? [%s] : [])", when, string(actionJSON)), nil
+}
+
+// celString renders s as a CEL string literal, escaping whatever it contains.
+//
+// CEL takes the same escape sequences in a string literal that Go does, so
+// [strconv.Quote] produces a literal that parses back to exactly s: a quote ends
+// the literal early without it, and a backslash is read as the start of an escape,
+// so "acme\registry" silently became "acme" and a carriage return rather than
+// failing to compile.
+//
+// Every authored value interpolated into generated CEL has to come through here.
+// Doing it at the one call site that took an unregistered value would leave the
+// next one to rediscover why.
+func celString(s string) string {
+	return strconv.Quote(s)
 }
