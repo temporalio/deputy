@@ -322,9 +322,20 @@ type EvaluateResponse struct {
 	// Actions triggered by policy evaluation.
 	Actions []*Action `protobuf:"bytes,1,rep,name=actions,proto3" json:"actions,omitempty"`
 	// Overall outcome based on triggered actions.
-	// DENY if any deny action, WARN if any warn action, ALLOW otherwise.
+	// DENY if any deny action, WARN if any warn action, ALLOW if every policy
+	// ran and none of them denied or warned.
+	//
+	// Evaluate fails closed, so this is always a real decision: a policy that
+	// could not be loaded, compiled, or evaluated is reported as an RPC error
+	// and no response is returned at all. ALLOW therefore never means "we could
+	// not tell".
 	Outcome ActionType `protobuf:"varint,2,opt,name=outcome,proto3,enum=deputy.policy.v1.ActionType" json:"outcome,omitempty"`
-	// Errors encountered during evaluation (syntax errors, missing vars, etc).
+	// Errors is populated by Validate, not by Evaluate.
+	//
+	// Evaluate reports load, compile, and runtime failures as RPC errors:
+	// INVALID_ARGUMENT for a source it could not load or compile, INTERNAL for
+	// an evaluation failure, and CANCELED or DEADLINE_EXCEEDED when the request
+	// context ended first. It leaves this field empty.
 	Errors        []*PolicyError `protobuf:"bytes,3,rep,name=errors,proto3" json:"errors,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
