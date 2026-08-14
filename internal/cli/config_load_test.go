@@ -645,6 +645,97 @@ func nestedCommand(t *testing.T, parentName, childName string) *cobra.Command {
 	return child
 }
 
+// TestRootConfigGateBySource pins exemption as a property that holds across
+// every way configuration can be broken, not just the one the gate happens to
+// check. An invalid logging value in the environment used to take down the
+// exempt commands anyway, because the gate skipped its own error and then
+// logging setup failed on the same value: exempt in one branch and not in the
+// next is not exempt.
+func TestRootConfigGateBySource(t *testing.T) {
+	sources := []struct {
+		name string
+		// apply breaks the configuration in one specific way.
+		apply func(t *testing.T)
+	}{
+		{
+			name: "unparseable file",
+			apply: func(t *testing.T) {
+				writeConfigFile(t, "logging:\n  level: \"unclosed\n   bogus: [1, 2\n")
+			},
+		},
+		{
+			name: "invalid value in file",
+			apply: func(t *testing.T) {
+				writeConfigFile(t, "logging:\n  level: shouty\n")
+			},
+		},
+		{
+			name: "invalid value in environment",
+			apply: func(t *testing.T) {
+				t.Setenv("DEPUTY_LOG_LEVEL", "shouty")
+			},
+		},
+		{
+			name: "invalid format in environment",
+			apply: func(t *testing.T) {
+				t.Setenv("DEPUTY_LOG_FORMAT", "bogus")
+			},
+		},
+		{
+			name: "both file and environment broken",
+			apply: func(t *testing.T) {
+				writeConfigFile(t, "logging:\n  level: shouty\n")
+				t.Setenv("DEPUTY_LOG_LEVEL", "alsoshouty")
+			},
+		},
+	}
+
+	commands := []struct {
+		name string
+		args []string
+		// wantRefused is true for commands the gate must stop whatever the
+		// source of the breakage.
+		wantRefused bool
+	}{
+		{name: "version", args: []string{"version"}},
+		{name: "help", args: []string{"help"}},
+		{name: "completion zsh", args: []string{"completion", "zsh"}},
+		{name: "config path", args: []string{"config", "path"}},
+		{name: "hidden completion", args: []string{cobra.ShellCompRequestCmd, "list", ""}},
+
+		{name: "list", args: []string{"list", "."}, wantRefused: true},
+		{name: "diff", args: []string{"diff"}, wantRefused: true},
+	}
+
+	for _, source := range sources {
+		for _, command := range commands {
+			t.Run(source.name+"/"+command.name, func(t *testing.T) {
+				isolatedConfigDir(t)
+				source.apply(t)
+
+				cfg, cfgErr := loadRuntimeConfig()
+				if cfgErr == nil && cfg == nil {
+					t.Fatal("loadRuntimeConfig returned neither a config nor an error")
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				err := executeRootWithConfigErr(t, ctx, cfgErr, command.args...)
+
+				if command.wantRefused {
+					if err == nil {
+						t.Errorf("%v succeeded with a broken configuration; it ran on defaults instead of being refused", command.args)
+					}
+					return
+				}
+				if err != nil {
+					t.Errorf("%v failed with a broken configuration: %v; exempt commands must work in exactly this state", command.args, err)
+				}
+			})
+		}
+	}
+}
+
 // TestRootConfigGateByCommand runs the real commands against a real broken
 // config file, so the allowlist is pinned where it actually takes effect rather
 // than only at the predicate. Exempt commands must succeed; gated commands must

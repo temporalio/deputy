@@ -370,12 +370,24 @@ CONNECTION MODES:
 		// which the user asked for. A short allowlist of commands that do not
 		// act on configuration stays runnable, so the failure can be diagnosed
 		// and reported.
-		if configErr != nil && !runsWithoutConfig(c) {
+		exempt := runsWithoutConfig(c)
+		if configErr != nil && !exempt {
 			return configErr
 		}
 
 		if err := configureLogging(logLevel, logFormat); err != nil {
-			return err
+			if !exempt {
+				return err
+			}
+			// Exempt means exempt for the whole startup, not just for the
+			// check above. An invalid DEPUTY_LOG_LEVEL is a configuration
+			// fault like any other, and taking 'deputy version' or shell
+			// completion down with it defeats the point of the allowlist, so
+			// these commands fall back to the built-in logging defaults.
+			slog.Debug("ignoring invalid logging configuration for a command that runs without configuration", "error", err)
+			if err := configureLogging(fallbackLogLevel, fallbackLogFormat); err != nil {
+				return err
+			}
 		}
 
 		// Apply --no-cache flag to context if set
@@ -473,6 +485,15 @@ func isInGitRepo() bool {
 	return err == nil
 }
 
+const (
+	// fallbackLogLevel and fallbackLogFormat are the built-in logging settings.
+	// Warn keeps interactive output clean; they are also what a command that
+	// runs without configuration falls back to when the requested values do
+	// not parse.
+	fallbackLogLevel  = "warn"
+	fallbackLogFormat = "text"
+)
+
 // defaultLogLevel returns the default log level from the environment or "warn".
 // Default is warn to keep CLI output clean for interactive use. Users who want
 // verbose observability logs can set DEPUTY_LOG_LEVEL=info or --log-level=info.
@@ -480,7 +501,7 @@ func defaultLogLevel() string {
 	if v := strings.TrimSpace(os.Getenv("DEPUTY_LOG_LEVEL")); v != "" {
 		return v
 	}
-	return "warn"
+	return fallbackLogLevel
 }
 
 // defaultLogFormat returns the default log format from the environment or "text".
@@ -488,7 +509,7 @@ func defaultLogFormat() string {
 	if v := strings.TrimSpace(os.Getenv("DEPUTY_LOG_FORMAT")); v != "" {
 		return v
 	}
-	return "text"
+	return fallbackLogFormat
 }
 
 // configureLogging sets up the global slog logger based on the provided level and format.
