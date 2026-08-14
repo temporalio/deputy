@@ -992,6 +992,16 @@ func resolveWorkDir(dir string) (string, error) {
 // nor the mistake. The work directory itself is not restated here: the caller
 // resolves it through resolveWorkDir, which already requires an existing
 // directory.
+//
+// Containment is decided on the paths the kernel will use, not on the ones the
+// plan spelled. A checked-out repository is free to contain a symlink, so a
+// directory that reads as contained can be a link to somewhere else entirely:
+// services -> /tmp/elsewhere makes services/api/package.json look like a
+// subdirectory of the workspace while exec.Cmd's chdir lands outside it. Both
+// sides go through [filepath.EvalSymlinks] before they are compared, and the
+// directory that survives the comparison is the one returned, so the command
+// runs in the path that was checked rather than in a spelling of it that has to
+// be resolved a second time.
 func stepExecDir(workDir string, step *remediationv1.Step) (string, error) {
 	manifestPath := step.GetManifestPath()
 	if manifestPath == "" {
@@ -1002,8 +1012,7 @@ func stepExecDir(workDir string, step *remediationv1.Step) (string, error) {
 		return workDir, nil
 	}
 	candidate := filepath.Join(workDir, relDir)
-	rel, err := filepath.Rel(workDir, candidate)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !dirContains(workDir, candidate) {
 		return "", fmt.Errorf("manifest path %q escapes the work directory", manifestPath)
 	}
 	info, err := os.Stat(candidate)
@@ -1013,7 +1022,30 @@ func stepExecDir(workDir string, step *remediationv1.Step) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("manifest path %q does not name a directory", manifestPath)
 	}
-	return candidate, nil
+	resolvedWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return "", fmt.Errorf("resolving the work directory %q: %w", workDir, err)
+	}
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolving manifest path %q: %w", manifestPath, err)
+	}
+	if !dirContains(resolvedWorkDir, resolved) {
+		return "", fmt.Errorf("manifest path %q leaves the work directory through a link to %s", manifestPath, resolved)
+	}
+	return resolved, nil
+}
+
+// dirContains reports whether path lies within root, both taken as written.
+// It answers the lexical half of containment only, so callers that care where
+// the filesystem actually leads must resolve both arguments first: a path can
+// read as contained and still be a symlink to anywhere.
+func dirContains(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // resolveExecutable resolves the executable a step's command names to a path on

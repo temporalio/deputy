@@ -1251,6 +1251,10 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 		// minimal CI image or an isolated agent container looks like to a step
 		// naming a package manager that was never installed.
 		emptyPath bool
+		// linksOutside are names created under the work directory as symlinks
+		// to a directory outside it, for rows about a step whose manifest path
+		// reads as contained and leads somewhere else.
+		linksOutside []string
 	}{
 		{
 			name:       "manifest path escaping the work directory",
@@ -1273,6 +1277,15 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			name:       "manifest path naming a directory that does not exist",
 			step:       &remediationv1.Step{Id: "step-1", Title: "tidy a subproject", Command: "go mod tidy", Manager: "go", Executable: true, ManifestPath: "services/api/go.mod"},
 			wantReason: `manifest path "services/api/go.mod" names a directory that does not exist`,
+		},
+		{
+			// The path reads as contained, so only following the link says
+			// where the command would actually run: a repository is free to
+			// contain symlinks, and chdir follows them.
+			name:         "manifest path whose directory links out of the work directory",
+			step:         &remediationv1.Step{Id: "step-1", Title: "install elsewhere", Command: "npm install left-pad", Manager: "npm", Executable: true, ManifestPath: "service/package.json"},
+			wantReason:   `manifest path "service/package.json" leaves the work directory through a link to `,
+			linksOutside: []string{"service"},
 		},
 		{
 			name:       "manifest path whose directory is a regular file",
@@ -1347,6 +1360,12 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(workDir, "notadir"), []byte("not a directory"), 0o644); err != nil {
 				t.Fatalf("WriteFile notadir: %v", err)
 			}
+			for _, link := range tt.linksOutside {
+				outside := t.TempDir()
+				if err := os.Symlink(outside, filepath.Join(workDir, link)); err != nil {
+					t.Fatalf("Symlink %q: %v", link, err)
+				}
+			}
 			for _, file := range tt.execFiles {
 				path := filepath.Join(workDir, file)
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -1396,6 +1415,133 @@ func TestDryRunMatchesExecutionRejection(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestStepExecDirResolvesLinks pins where a step's command is allowed to run
+// once symlinks are followed. A manifest path is plan data and a checked-out
+// repository may contain links, so a directory that reads as contained can
+// lead anywhere: only the resolved path says whether exec.Cmd's chdir would
+// land inside the workspace the caller selected. The rows that must be
+// accepted are as much of the contract as the one that must be refused, since
+// refusing every link would break a workspace that legitimately uses one.
+func TestStepExecDirResolvesLinks(t *testing.T) {
+	tests := []struct {
+		name string
+		// layout prepares the work directory and returns the directory the
+		// step's command must end up in, or "" when the step must be refused.
+		layout func(t *testing.T, workDir string) string
+		// manifestPath is the step's plan data under test.
+		manifestPath string
+		// wantReason is the substring the refusal must carry.
+		wantReason string
+	}{
+		{
+			name: "plain subdirectory",
+			layout: func(t *testing.T, workDir string) string {
+				t.Helper()
+				dir := filepath.Join(workDir, "services", "api")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatalf("MkdirAll: %v", err)
+				}
+				return resolvePath(t, dir)
+			},
+			manifestPath: "services/api/package.json",
+		},
+		{
+			name: "link to a directory inside the work directory",
+			layout: func(t *testing.T, workDir string) string {
+				t.Helper()
+				real := filepath.Join(workDir, "packages", "api")
+				if err := os.MkdirAll(real, 0o755); err != nil {
+					t.Fatalf("MkdirAll: %v", err)
+				}
+				if err := os.Symlink(real, filepath.Join(workDir, "service")); err != nil {
+					t.Fatalf("Symlink: %v", err)
+				}
+				return resolvePath(t, real)
+			},
+			manifestPath: "service/package.json",
+		},
+		{
+			name: "link to a directory outside the work directory",
+			layout: func(t *testing.T, workDir string) string {
+				t.Helper()
+				if err := os.Symlink(t.TempDir(), filepath.Join(workDir, "service")); err != nil {
+					t.Fatalf("Symlink: %v", err)
+				}
+				return ""
+			},
+			manifestPath: "service/package.json",
+			wantReason:   `manifest path "service/package.json" leaves the work directory through a link to `,
+		},
+		{
+			name: "link reached through a contained parent",
+			layout: func(t *testing.T, workDir string) string {
+				t.Helper()
+				parent := filepath.Join(workDir, "services")
+				if err := os.MkdirAll(parent, 0o755); err != nil {
+					t.Fatalf("MkdirAll: %v", err)
+				}
+				if err := os.Symlink(t.TempDir(), filepath.Join(parent, "api")); err != nil {
+					t.Fatalf("Symlink: %v", err)
+				}
+				return ""
+			},
+			manifestPath: "services/api/package.json",
+			wantReason:   `manifest path "services/api/package.json" leaves the work directory through a link to `,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workDir := t.TempDir()
+			want := tt.layout(t, workDir)
+			step := &remediationv1.Step{
+				Id:           "step-1",
+				Title:        "install",
+				Command:      "npm install left-pad",
+				Manager:      "npm",
+				Executable:   true,
+				ManifestPath: tt.manifestPath,
+			}
+
+			execDir, err := stepExecDir(workDir, step)
+			if tt.wantReason != "" {
+				if err == nil {
+					t.Fatalf("stepExecDir accepted %q and would run in %q", tt.manifestPath, execDir)
+				}
+				if !strings.Contains(err.Error(), tt.wantReason) {
+					t.Fatalf("refusal %q does not contain %q", err, tt.wantReason)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("stepExecDir refused %q: %v", tt.manifestPath, err)
+			}
+			if execDir != want {
+				t.Fatalf("exec dir = %q, want %q", execDir, want)
+			}
+			// The point of the check is where the command lands, so confirm
+			// the returned directory really is inside the work directory once
+			// both are followed through their links.
+			if !dirContains(resolvePath(t, workDir), execDir) {
+				t.Fatalf("exec dir %q is outside work directory %q", execDir, workDir)
+			}
+		})
+	}
+}
+
+// resolvePath follows every symlink on path, failing the test if it cannot.
+// Test temporary directories live under a linked path on some platforms
+// (/var is a link to /private/var on macOS), so an expectation built from a
+// path as written would not match one the code resolved.
+func resolvePath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("EvalSymlinks %q: %v", path, err)
+	}
+	return resolved
 }
 
 // TestProcessTreeTerminationSupported pins the platform contract this build
