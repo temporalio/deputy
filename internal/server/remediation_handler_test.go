@@ -2115,6 +2115,103 @@ func TestAwaitApprovalAnswerPrefersTheAgentAnswer(t *testing.T) {
 	}
 }
 
+// TestAwaitApprovalVerdictPrefersABufferedAnswer covers the window the leading
+// probe cannot: a verdict handed over after that probe ran, followed by the
+// session ending, leaves the blocking wait with two ready cases. Calling the
+// blocking wait directly is what puts it in that state, since a caller going
+// through awaitApprovalAnswer would have the probe take the answer first and
+// never reach the branch under test.
+//
+// A plain select would report the session's end on about half of the contested
+// rows, so they repeat: a decision the plugin took must never come back as one
+// it never saw, and a wrong branch taken sometimes is worse than one taken
+// always.
+func TestAwaitApprovalVerdictPrefersABufferedAnswer(t *testing.T) {
+	// contested is how many times a row with two ready cases repeats.
+	const contested = 500
+
+	deadCtx := func(t *testing.T) context.Context {
+		t.Helper()
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		return ctx
+	}
+
+	tests := []struct {
+		name string
+		// setup builds the wait's inputs, already in the state under test.
+		setup func(t *testing.T) (context.Context, *pendingApproval, chan struct{})
+		// repeat is how many times the row runs.
+		repeat int
+		// wantAnswer is the verdict the wait must return, when it returns one.
+		wantAnswer approvalAnswer
+		// wantErr is the error it must return instead.
+		wantErr error
+	}{
+		{
+			name: "answer buffered before the session ended",
+			setup: func(t *testing.T) (context.Context, *pendingApproval, chan struct{}) {
+				pending := &pendingApproval{answer: make(chan approvalAnswer, 1)}
+				pending.reply(approvalAnswer{accepted: true, message: "taken"})
+				done := make(chan struct{})
+				close(done)
+				return t.Context(), pending, done
+			},
+			repeat:     contested,
+			wantAnswer: approvalAnswer{accepted: true, message: "taken"},
+		},
+		{
+			name: "answer buffered before the caller gave up",
+			setup: func(t *testing.T) (context.Context, *pendingApproval, chan struct{}) {
+				pending := &pendingApproval{answer: make(chan approvalAnswer, 1)}
+				pending.reply(approvalAnswer{accepted: false, message: "refused"})
+				return deadCtx(t), pending, make(chan struct{})
+			},
+			repeat:     contested,
+			wantAnswer: approvalAnswer{accepted: false, message: "refused"},
+		},
+		{
+			name: "session ended with nothing buffered",
+			setup: func(t *testing.T) (context.Context, *pendingApproval, chan struct{}) {
+				done := make(chan struct{})
+				close(done)
+				return t.Context(), &pendingApproval{answer: make(chan approvalAnswer, 1)}, done
+			},
+			repeat:  contested,
+			wantErr: errApprovalSessionEnded,
+		},
+		{
+			name: "caller gave up with nothing buffered",
+			setup: func(t *testing.T) (context.Context, *pendingApproval, chan struct{}) {
+				return deadCtx(t), &pendingApproval{answer: make(chan approvalAnswer, 1)}, make(chan struct{})
+			},
+			repeat:  contested,
+			wantErr: context.Canceled,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for i := range tt.repeat {
+				ctx, pending, done := tt.setup(t)
+				answer, err := awaitApprovalVerdict(ctx, pending, done)
+				if tt.wantErr != nil {
+					if !errors.Is(err, tt.wantErr) {
+						t.Fatalf("attempt %d: error = %v, want %v", i, err, tt.wantErr)
+					}
+					continue
+				}
+				if err != nil {
+					t.Fatalf("attempt %d: awaitApprovalVerdict failed: %v", i, err)
+				}
+				if answer != tt.wantAnswer {
+					t.Fatalf("attempt %d: answer = %+v, want %+v", i, answer, tt.wantAnswer)
+				}
+			}
+		})
+	}
+}
+
 // receiveAgentEvent returns the next streamed agent event, failing the test if
 // the stream stalls or ends first.
 func receiveAgentEvent(t *testing.T, events <-chan *remediationv1.AgentEvent) *remediationv1.AgentEvent {

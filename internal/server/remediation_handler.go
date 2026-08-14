@@ -1656,19 +1656,54 @@ var errApprovalSessionEnded = errors.New("The agent execution ended before this 
 // session's end racing each other may go either way, and at that moment either
 // report is true.
 func awaitApprovalAnswer(ctx context.Context, pending *pendingApproval, done <-chan struct{}) (approvalAnswer, error) {
-	select {
-	case answer := <-pending.answer:
+	if answer, ok := bufferedApprovalAnswer(pending); ok {
 		return answer, nil
-	default:
 	}
+	return awaitApprovalVerdict(ctx, pending, done)
+}
 
+// awaitApprovalVerdict waits for whichever comes first once nothing is
+// buffered, and asks the buffer again before reporting either ending.
+//
+// The leading probe in awaitApprovalAnswer only covers verdicts handed over
+// before it ran. An agent that takes a decision and finishes in the moment
+// between that probe and this select leaves both cases ready here, and a select
+// over ready cases chooses among them pseudo-randomly, so the wait would
+// sometimes report that a decision the agent took never reached it. The
+// verdict is written to the buffer before the session ends, so asking the
+// buffer again on the way out turns that coin flip back into the fact: an
+// answer that exists is reported, and only its absence is an ending.
+//
+// Reaching the recheck costs nothing when there is no answer: the buffer holds
+// at most one, is written once, and is probed without blocking.
+func awaitApprovalVerdict(ctx context.Context, pending *pendingApproval, done <-chan struct{}) (approvalAnswer, error) {
 	select {
 	case answer := <-pending.answer:
 		return answer, nil
 	case <-done:
+		if answer, ok := bufferedApprovalAnswer(pending); ok {
+			return answer, nil
+		}
 		return approvalAnswer{}, errApprovalSessionEnded
 	case <-ctx.Done():
+		if answer, ok := bufferedApprovalAnswer(pending); ok {
+			return answer, nil
+		}
 		return approvalAnswer{}, ctx.Err()
+	}
+}
+
+// bufferedApprovalAnswer takes the verdict already handed over, reporting
+// whether there was one. It never blocks: [pendingApproval.answer] is buffered
+// for a single answer and written once, so a verdict given before the ask is
+// sitting in the buffer rather than waiting for a receiver, and one that has
+// not been given yet is simply absent.
+func bufferedApprovalAnswer(pending *pendingApproval) (approvalAnswer, bool) {
+	select {
+	case answer := <-pending.answer:
+		return answer, true
+	default:
+		return approvalAnswer{}, false
 	}
 }
 
