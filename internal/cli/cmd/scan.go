@@ -22,6 +22,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/opencontainers/go-digest"
 	packageurl "github.com/package-url/packageurl-go"
 	"github.com/protobom/protobom/pkg/sbom"
 	spdxjson "github.com/spdx/tools-golang/json"
@@ -36,6 +37,7 @@ import (
 	cliflags "github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/collections"
 	"github.com/temporalio/deputy/internal/container/image"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/dockerfile"
 	deperrors "github.com/temporalio/deputy/internal/errors"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
@@ -1646,7 +1648,8 @@ func parseProtobomPackages(data []byte) ([]*extractor.Package, map[string]bool, 
 		// "deputy:direct" restores the direct dependency status.
 		// "deputy:location" restores the file path (e.g. go.mod) needed for remediation.
 		// "deputy:layer-*" restores container image layer details for layer-aware analysis.
-		var layerDetails *extractor.LayerDetails
+		var layerMetadata *extractor.LayerMetadata
+		var locations []string
 		for _, prop := range n.GetProperties() {
 			switch prop.GetName() {
 			case "deputy:direct":
@@ -1654,37 +1657,43 @@ func parseProtobomPackages(data []byte) ([]*extractor.Package, map[string]bool, 
 					direct[purlStr] = true
 				}
 			case "deputy:location":
-				pkg.Locations = append(pkg.Locations, prop.GetData())
+				locations = append(locations, prop.GetData())
 			case "deputy:layer-index":
-				if layerDetails == nil {
-					layerDetails = &extractor.LayerDetails{}
+				if layerMetadata == nil {
+					layerMetadata = &extractor.LayerMetadata{}
 				}
 				if idx, err := strconv.Atoi(prop.GetData()); err == nil {
-					layerDetails.Index = idx
+					layerMetadata.Index = idx
 				}
 			case "deputy:layer-diffid":
-				if layerDetails == nil {
-					layerDetails = &extractor.LayerDetails{}
+				if layerMetadata == nil {
+					layerMetadata = &extractor.LayerMetadata{}
 				}
-				layerDetails.DiffID = prop.GetData()
+				layerMetadata.DiffID = digest.Digest(prop.GetData())
 			case "deputy:layer-chainid":
-				if layerDetails == nil {
-					layerDetails = &extractor.LayerDetails{}
+				if layerMetadata == nil {
+					layerMetadata = &extractor.LayerMetadata{}
 				}
-				layerDetails.ChainID = prop.GetData()
+				layerMetadata.ChainID = digest.Digest(prop.GetData())
 			case "deputy:layer-command":
-				if layerDetails == nil {
-					layerDetails = &extractor.LayerDetails{}
+				if layerMetadata == nil {
+					layerMetadata = &extractor.LayerMetadata{}
 				}
-				layerDetails.Command = prop.GetData()
+				layerMetadata.Command = prop.GetData()
 			case "deputy:layer-in-base-image":
-				if layerDetails == nil {
-					layerDetails = &extractor.LayerDetails{}
+				if layerMetadata == nil {
+					layerMetadata = &extractor.LayerMetadata{}
 				}
-				layerDetails.InBaseImage = prop.GetData() == "true"
+				// The SBOM only records base image membership as a boolean, and
+				// SCALIBR wants an index into the image's base image matches where
+				// 0 means "no match", so a member restores as index 1.
+				if prop.GetData() == "true" {
+					layerMetadata.BaseImageIndex = 1
+				}
 			}
 		}
-		pkg.LayerDetails = layerDetails
+		dependency.SetPackagePaths(pkg, locations)
+		pkg.LayerMetadata = layerMetadata
 		pkgs = append(pkgs, pkg)
 	}
 	imageRefs = dedupeImageRefs(imageRefs)
@@ -1752,7 +1761,7 @@ func parseCycloneDXPackages(data []byte) ([]*extractor.Package, map[string]bool,
 					}
 				}
 				if prop.Name == "deputy:location" {
-					pkg.Locations = append(pkg.Locations, prop.Value)
+					dependency.SetPackagePaths(pkg, append(dependency.PackagePaths(pkg), prop.Value))
 				}
 			}
 		}

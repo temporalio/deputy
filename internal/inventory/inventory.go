@@ -23,6 +23,7 @@ import (
 	pl "github.com/google/osv-scalibr/plugin/list"
 
 	"github.com/temporalio/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/ecosystem"
 	asdfx "github.com/temporalio/deputy/internal/inventory/plugins/asdf/asdfx"
@@ -257,7 +258,7 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	case len(scalibrNames) > 0:
 		// SCALIBR ecosystems specified
 		var err error
-		plugins, err = pl.FromNames(scalibrNames)
+		plugins, err = pl.FromNames(scalibrNames, nil)
 		if err != nil {
 			return nil, fmt.Errorf("unsupported ecosystem filter (expected names like go, npm, pypi, cargo): %w", err)
 		}
@@ -267,7 +268,11 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 		// Only internal ecosystems (user specified something but no SCALIBR names)
 	default:
 		// "all" case
-		plugins = pl.FromCapabilities(cap)
+		var err error
+		plugins, err = pl.FromCapabilities(cap, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to enumerate SCALIBR plugins: %w", err)
+		}
 		plugins = appendRegisteredPlugins(plugins)
 	}
 
@@ -601,7 +606,7 @@ func preferLockfileResolutions(pkgs []*extractor.Package) []*extractor.Package {
 		if pkg == nil {
 			continue
 		}
-		for _, loc := range pkg.Locations {
+		for _, loc := range dependency.PackagePaths(pkg) {
 			base := path.Base(loc)
 			for _, lock := range manifestLockPairs {
 				if base != lock {
@@ -649,18 +654,23 @@ func preferLockfileResolutions(pkgs []*extractor.Package) []*extractor.Package {
 
 	out := make([]*extractor.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
-		if pkg == nil || len(pkg.Locations) == 0 {
+		if pkg == nil {
+			out = append(out, pkg)
+			continue
+		}
+		locations := dependency.PackagePaths(pkg)
+		if len(locations) == 0 {
 			out = append(out, pkg)
 			continue
 		}
 		key := packageIdentityKey(pkg)
-		kept := slices.DeleteFunc(slices.Clone(pkg.Locations), func(loc string) bool {
+		kept := slices.DeleteFunc(locations, func(loc string) bool {
 			return resolved(key, loc)
 		})
 		if len(kept) == 0 {
 			continue
 		}
-		pkg.Locations = kept
+		dependency.SetPackagePaths(pkg, kept)
 		out = append(out, pkg)
 	}
 	return out
@@ -695,7 +705,7 @@ func deduplicatePackages(pkgs []*extractor.Package) []*extractor.Package {
 		key := purl.String()
 		if existing, ok := seen[key]; ok {
 			// Merge locations from duplicate
-			existing.Locations = mergeLocations(existing.Locations, pkg.Locations)
+			dependency.SetPackagePaths(existing, mergeLocations(dependency.PackagePaths(existing), dependency.PackagePaths(pkg)))
 			// Merge licenses (take non-empty)
 			if len(existing.Licenses) == 0 && len(pkg.Licenses) > 0 {
 				existing.Licenses = pkg.Licenses

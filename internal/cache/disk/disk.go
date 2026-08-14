@@ -34,6 +34,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 // DefaultTTL is the default time-to-live for cache entries when not specified.
@@ -79,13 +82,34 @@ func Path(subdir, key string) string {
 // Cache entries are considered expired based on the TTL for the given subdir.
 // If ttl is 0, DefaultTTL is used.
 func Read(subdir, key string, ttl time.Duration, v any) bool {
+	b, ok := readFresh(subdir, key, ttl)
+	if !ok {
+		return false
+	}
+	return json.Unmarshal(b, v) == nil
+}
+
+// ReadProto is [Read] for protobuf messages, decoding the entry with protojson
+// so well-known types, enums and oneofs round-trip. Unknown fields are
+// discarded so an entry written by a build with a newer schema still loads.
+func ReadProto(subdir, key string, ttl time.Duration, m proto.Message) bool {
+	b, ok := readFresh(subdir, key, ttl)
+	if !ok {
+		return false
+	}
+	return protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(b, m) == nil
+}
+
+// readFresh returns the raw bytes of a cache entry that exists and has not
+// expired. Expired entries are removed so a later write replaces them.
+func readFresh(subdir, key string, ttl time.Duration) ([]byte, bool) {
 	p := Path(subdir, key)
 	if p == "" {
-		return false
+		return nil, false
 	}
 	info, err := os.Stat(p)
 	if err != nil {
-		return false
+		return nil, false
 	}
 	// Check TTL based on file modification time
 	if ttl == 0 {
@@ -94,31 +118,42 @@ func Read(subdir, key string, ttl time.Duration, v any) bool {
 	if time.Since(info.ModTime()) > ttl {
 		// Cache entry expired, remove it
 		_ = os.Remove(p)
-		return false
+		return nil, false
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return false
+		return nil, false
 	}
-	if err := json.Unmarshal(b, v); err != nil {
-		return false
-	}
-	return true
+	return b, true
 }
 
 // Write serializes and saves a value to the cache on disk.
 // It creates the necessary directories if they do not exist. Errors during
 // serialization or file writing are silently ignored.
 func Write(subdir, key string, v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	writeBytes(subdir, key, b)
+}
+
+// WriteProto is [Write] for protobuf messages, encoding the entry with
+// protojson so [ReadProto] can decode it losslessly.
+func WriteProto(subdir, key string, m proto.Message) {
+	b, err := protojson.Marshal(m)
+	if err != nil {
+		return
+	}
+	writeBytes(subdir, key, b)
+}
+
+func writeBytes(subdir, key string, b []byte) {
 	p := Path(subdir, key)
 	if p == "" {
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
 		return
 	}
 	_ = os.WriteFile(p, b, 0o644)

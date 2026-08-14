@@ -252,10 +252,10 @@ func depsToPackages(deps []MavenDependency, location string) []*extractor.Packag
 		}
 
 		pkg := &extractor.Package{
-			Name:      dep.Name(),
-			Version:   dep.Version,
-			PURLType:  purl.TypeMaven,
-			Locations: []string{location},
+			Name:     dep.Name(),
+			Version:  dep.Version,
+			PURLType: purl.TypeMaven,
+			Location: extractor.LocationFromPath(location),
 			Metadata: &MavenMetadata{
 				GroupID:    dep.GroupID,
 				ArtifactID: dep.ArtifactID,

@@ -60,10 +60,10 @@ require (
 func TestConvert_GitHubActions_WorkflowUsesAreDirect(t *testing.T) {
 	pkgs := []*extractor.Package{
 		{
-			Name:      "actions/download-artifact",
-			Version:   "v4",
-			PURLType:  purlx.TypeGitHubActions,
-			Locations: []string{".github/workflows/build.yaml"},
+			Name:     "actions/download-artifact",
+			Version:  "v4",
+			PURLType: purlx.TypeGitHubActions,
+			Location: extractor.LocationFromPath(".github/workflows/build.yaml"),
 		},
 	}
 
@@ -86,10 +86,10 @@ func TestConvert_GitHubActions_WorkflowUsesAreDirect(t *testing.T) {
 func TestConvert_GitHubActions_ActionManifestUsesAreDirect(t *testing.T) {
 	pkgs := []*extractor.Package{
 		{
-			Name:      "actions/checkout",
-			Version:   "v4",
-			PURLType:  purlx.TypeGitHubActions,
-			Locations: []string{"tools/action/action.yml"},
+			Name:     "actions/checkout",
+			Version:  "v4",
+			PURLType: purlx.TypeGitHubActions,
+			Location: extractor.LocationFromPath("tools/action/action.yml"),
 		},
 	}
 
@@ -166,22 +166,22 @@ func TestConvert_NPMDirectDetection(t *testing.T) {
 
 	pkgs := []*extractor.Package{
 		{
-			Name:      "react",
-			Version:   "18.2.0",
-			PURLType:  scalpurl.TypeNPM,
-			Locations: []string{"web/package-lock.json"},
+			Name:     "react",
+			Version:  "18.2.0",
+			PURLType: scalpurl.TypeNPM,
+			Location: extractor.LocationFromPath("web/package-lock.json"),
 		},
 		{
-			Name:      "typescript",
-			Version:   "5.1.0",
-			PURLType:  scalpurl.TypeNPM,
-			Locations: []string{"web/package-lock.json"},
+			Name:     "typescript",
+			Version:  "5.1.0",
+			PURLType: scalpurl.TypeNPM,
+			Location: extractor.LocationFromPath("web/package-lock.json"),
 		},
 		{
-			Name:      "left-pad",
-			Version:   "1.3.0",
-			PURLType:  scalpurl.TypeNPM,
-			Locations: []string{"web/package-lock.json"},
+			Name:     "left-pad",
+			Version:  "1.3.0",
+			PURLType: scalpurl.TypeNPM,
+			Location: extractor.LocationFromPath("web/package-lock.json"),
 		},
 	}
 
@@ -263,10 +263,10 @@ dev = [
 	})
 
 	pkgs := []*extractor.Package{
-		{Name: "runtime-one", Version: "1.0.0", PURLType: scalpurl.TypePyPi, Locations: []string{"uv.lock"}},
-		{Name: "optional-one", Version: "0.1.0", PURLType: scalpurl.TypePyPi, Locations: []string{"uv.lock"}},
-		{Name: "pytest", Version: "7.0.0", PURLType: scalpurl.TypePyPi, Locations: []string{"uv.lock"}},
-		{Name: "transitive", Version: "0.0.1", PURLType: scalpurl.TypePyPi, Locations: []string{"uv.lock"}},
+		{Name: "runtime-one", Version: "1.0.0", PURLType: scalpurl.TypePyPi, Location: extractor.LocationFromPath("uv.lock")},
+		{Name: "optional-one", Version: "0.1.0", PURLType: scalpurl.TypePyPi, Location: extractor.LocationFromPath("uv.lock")},
+		{Name: "pytest", Version: "7.0.0", PURLType: scalpurl.TypePyPi, Location: extractor.LocationFromPath("uv.lock")},
+		{Name: "transitive", Version: "0.0.1", PURLType: scalpurl.TypePyPi, Location: extractor.LocationFromPath("uv.lock")},
 	}
 
 	inputs := Convert(pkgs, Options{Resolver: resolver})
@@ -322,11 +322,11 @@ libc = "0.2"
 		return nil, fmt.Errorf("not found: %s", rel)
 	})
 	pkgs := []*extractor.Package{
-		{Name: "tokio", Version: "1.0.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
-		{Name: "criterion", Version: "0.5.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
-		{Name: "serde", Version: "1.0.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
-		{Name: "cc", Version: "1.0.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
-		{Name: "libc", Version: "0.2.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
+		{Name: "tokio", Version: "1.0.0", PURLType: scalpurl.TypeCargo, Location: extractor.LocationFromPath("Cargo.lock")},
+		{Name: "criterion", Version: "0.5.0", PURLType: scalpurl.TypeCargo, Location: extractor.LocationFromPath("Cargo.lock")},
+		{Name: "serde", Version: "1.0.0", PURLType: scalpurl.TypeCargo, Location: extractor.LocationFromPath("Cargo.lock")},
+		{Name: "cc", Version: "1.0.0", PURLType: scalpurl.TypeCargo, Location: extractor.LocationFromPath("Cargo.lock")},
+		{Name: "libc", Version: "0.2.0", PURLType: scalpurl.TypeCargo, Location: extractor.LocationFromPath("Cargo.lock")},
 	}
 	inputs := Convert(pkgs, Options{Resolver: resolver})
 	if len(inputs) != 5 {
@@ -356,10 +356,10 @@ libc = "0.2"
 func TestConvert_PythonRequirementsMarkedDirect(t *testing.T) {
 	pkgs := []*extractor.Package{
 		{
-			Name:      "requests",
-			Version:   "2.32.0",
-			PURLType:  scalpurl.TypePyPi,
-			Locations: []string{"requirements.txt"},
+			Name:     "requests",
+			Version:  "2.32.0",
+			PURLType: scalpurl.TypePyPi,
+			Location: extractor.LocationFromPath("requirements.txt"),
 		},
 	}
 	inputs := Convert(pkgs, Options{})
@@ -832,12 +832,12 @@ func TestConvert_LayerDetails(t *testing.T) {
 				Name:     "openssl",
 				Version:  "1.1.1k",
 				PURLType: "deb",
-				LayerDetails: &extractor.LayerDetails{
-					Index:       2,
-					DiffID:      "sha256:abc123",
-					ChainID:     "sha256:def456",
-					Command:     "RUN apt-get install openssl",
-					InBaseImage: true,
+				LayerMetadata: &extractor.LayerMetadata{
+					Index:          2,
+					DiffID:         "sha256:abc123",
+					ChainID:        "sha256:def456",
+					Command:        "RUN apt-get install openssl",
+					BaseImageIndex: 1,
 				},
 			},
 		}
@@ -869,10 +869,10 @@ func TestConvert_LayerDetails(t *testing.T) {
 	t.Run("nil layer details remains nil", func(t *testing.T) {
 		pkgs := []*extractor.Package{
 			{
-				Name:         "lodash",
-				Version:      "4.17.21",
-				PURLType:     scalpurl.TypeNPM,
-				LayerDetails: nil,
+				Name:          "lodash",
+				Version:       "4.17.21",
+				PURLType:      scalpurl.TypeNPM,
+				LayerMetadata: nil,
 			},
 		}
 		inputs := Convert(pkgs, Options{})
@@ -890,18 +890,18 @@ func TestConvert_LayerDetails(t *testing.T) {
 				Name:     "curl",
 				Version:  "7.80.0",
 				PURLType: "deb",
-				LayerDetails: &extractor.LayerDetails{
-					Index:       1,
-					InBaseImage: true,
+				LayerMetadata: &extractor.LayerMetadata{
+					Index:          1,
+					BaseImageIndex: 1,
 				},
 			},
 			{
 				Name:     "curl",
 				Version:  "7.80.0",
 				PURLType: "deb",
-				LayerDetails: &extractor.LayerDetails{
-					Index:       5,
-					InBaseImage: false,
+				LayerMetadata: &extractor.LayerMetadata{
+					Index:          5,
+					BaseImageIndex: 0,
 				},
 			},
 		}

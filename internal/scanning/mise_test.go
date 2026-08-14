@@ -12,11 +12,11 @@ import (
 
 func TestPackagesToProtoUsesMiseLockedVersion(t *testing.T) {
 	pkg := &extractor.Package{
-		Name:      "go",
-		Version:   "1.20",
-		PURLType:  purlx.TypeMise,
-		Locations: []string{"mise.toml"},
-		Metadata:  &mise.Metadata{LockedVersion: "1.20.1"},
+		Name:     "go",
+		Version:  "1.20",
+		PURLType: purlx.TypeMise,
+		Location: extractor.LocationFromPath("mise.toml"),
+		Metadata: &mise.Metadata{LockedVersion: "1.20.1"},
 	}
 
 	inputs := packagesToProto([]*extractor.Package{pkg}, nil)

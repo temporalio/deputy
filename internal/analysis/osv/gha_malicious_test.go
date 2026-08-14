@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ossf/osv-schema/bindings/go/osvconstants"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/temporalio/deputy/internal/cache/disk"
 )
@@ -32,35 +33,35 @@ func TestGitHubActionsMALDetection(t *testing.T) {
 	// Simulate a MAL advisory for a malicious GitHub Action
 	// MAL advisories typically indicate credential stealing, data exfiltration, etc.
 	// For malicious actions without a fix, use "Introduced: 0" with no Fixed event.
-	malVuln := osvschema.Vulnerability{
-		ID:      "MAL-2024-1234",
+	malVuln := &osvschema.Vulnerability{
+		Id:      "MAL-2024-1234",
 		Summary: "Malicious GitHub Action steals secrets",
 		Details: "This action exfiltrates GITHUB_TOKEN and other secrets to an external server. It was discovered to be part of a supply chain attack.",
 		Aliases: []string{},
-		Affected: []osvschema.Affected{
+		Affected: []*osvschema.Affected{
 			{
-				Package:  osvschema.Package{Name: "malicious-actor/evil-action", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Package:  &osvschema.Package{Name: "malicious-actor/evil-action", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
 				Versions: []string{"1.0.0", "1.0.1", "1.1.0"},
-				Ranges: []osvschema.Range{
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "0"}, // All versions from beginning, no fix
 						},
 					},
 				},
 			},
 		},
-		Severity: []osvschema.Severity{
-			{Type: osvschema.SeverityCVSSV3, Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N"},
+		Severity: []*osvschema.Severity{
+			{Type: osvschema.Severity_CVSS_V3, Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N"},
 		},
-		DatabaseSpecific: map[string]any{
+		DatabaseSpecific: osvStruct(map[string]any{
 			"severity": "CRITICAL",
 			"malware":  true,
-		},
+		}),
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"MAL-2024-1234.json": malVuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -99,16 +100,16 @@ func TestGitHubActionsMALMultipleVersions(t *testing.T) {
 	}
 
 	// MAL advisory with specific version ranges
-	malVuln := osvschema.Vulnerability{
-		ID:      "MAL-2024-5678",
+	malVuln := &osvschema.Vulnerability{
+		Id:      "MAL-2024-5678",
 		Summary: "Cryptocurrency miner injected into action",
-		Affected: []osvschema.Affected{
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "crypto-miner/hidden-action", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
+				Package: &osvschema.Package{Name: "crypto-miner/hidden-action", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "2.0.0"},
 							{Fixed: "2.5.0"}, // Maintainer regained control and fixed
 						},
@@ -118,7 +119,7 @@ func TestGitHubActionsMALMultipleVersions(t *testing.T) {
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"MAL-2024-5678.json": malVuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -170,21 +171,21 @@ func TestGitHubActionsTyposquattingDetection(t *testing.T) {
 	}
 
 	// Typosquatting advisories - similar to popular actions
-	typosquatVuln := osvschema.Vulnerability{
-		ID:      "MAL-2024-TYPO-001",
+	typosquatVuln := &osvschema.Vulnerability{
+		Id:      "MAL-2024-TYPO-001",
 		Summary: "Typosquatting attack on actions/checkout",
 		Details: "This action is a typosquatting attack mimicking actions/checkout. It exfiltrates repository contents.",
-		Affected: []osvschema.Affected{
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "action/checkout", Ecosystem: string(osvschema.EcosystemGitHubActions)}, // Missing 's'
-				Ranges: []osvschema.Range{
-					{Type: osvschema.RangeEcosystem, Events: []osvschema.Event{{Introduced: "0"}}}, // All versions, no fix
+				Package: &osvschema.Package{Name: "action/checkout", Ecosystem: string(osvconstants.EcosystemGitHubActions)}, // Missing 's'
+				Ranges: []*osvschema.Range{
+					{Type: osvschema.Range_ECOSYSTEM, Events: []*osvschema.Event{{Introduced: "0"}}}, // All versions, no fix
 				},
 			},
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"MAL-2024-TYPO-001.json": typosquatVuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -228,16 +229,16 @@ func TestGitHubActionsSHAPinnedVersions(t *testing.T) {
 	}
 
 	// Vulnerability with specific affected versions
-	vuln := osvschema.Vulnerability{
-		ID:      "GHSA-sha-test",
+	vuln := &osvschema.Vulnerability{
+		Id:      "GHSA-sha-test",
 		Summary: "Vulnerability in specific versions",
-		Affected: []osvschema.Affected{
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "owner/vulnerable-action", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
+				Package: &osvschema.Package{Name: "owner/vulnerable-action", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "1.0.0"},
 							{Fixed: "1.5.0"},
 						},
@@ -247,7 +248,7 @@ func TestGitHubActionsSHAPinnedVersions(t *testing.T) {
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-sha-test.json": vuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -315,32 +316,32 @@ func TestGitHubActionsMultipleVulnerabilities(t *testing.T) {
 	}
 
 	// Multiple vulnerabilities for the same action
-	vuln1 := osvschema.Vulnerability{
-		ID:      "GHSA-vuln-001",
+	vuln1 := &osvschema.Vulnerability{
+		Id:      "GHSA-vuln-001",
 		Summary: "First vulnerability",
-		Affected: []osvschema.Affected{
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "owner/multi-vuln-action", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
-					{Type: osvschema.RangeEcosystem, Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "2.0.0"}}},
+				Package: &osvschema.Package{Name: "owner/multi-vuln-action", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
+					{Type: osvschema.Range_ECOSYSTEM, Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "2.0.0"}}},
 				},
 			},
 		},
 	}
-	vuln2 := osvschema.Vulnerability{
-		ID:      "GHSA-vuln-002",
+	vuln2 := &osvschema.Vulnerability{
+		Id:      "GHSA-vuln-002",
 		Summary: "Second vulnerability",
-		Affected: []osvschema.Affected{
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "owner/multi-vuln-action", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
-					{Type: osvschema.RangeEcosystem, Events: []osvschema.Event{{Introduced: "1.5.0"}, {Fixed: "2.5.0"}}},
+				Package: &osvschema.Package{Name: "owner/multi-vuln-action", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
+					{Type: osvschema.Range_ECOSYSTEM, Events: []*osvschema.Event{{Introduced: "1.5.0"}, {Fixed: "2.5.0"}}},
 				},
 			},
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-vuln-001.json": vuln1,
 		"GHSA-vuln-002.json": vuln2,
 	}); err != nil {
@@ -398,20 +399,20 @@ func TestGitHubActionsReusableWorkflowDetection(t *testing.T) {
 	}
 
 	// Vulnerability affecting a reusable workflow
-	vuln := osvschema.Vulnerability{
-		ID:      "GHSA-workflow-001",
+	vuln := &osvschema.Vulnerability{
+		Id:      "GHSA-workflow-001",
 		Summary: "Vulnerable reusable workflow",
-		Affected: []osvschema.Affected{
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "org/shared-workflows", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
-					{Type: osvschema.RangeEcosystem, Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "2.0.0"}}},
+				Package: &osvschema.Package{Name: "org/shared-workflows", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
+					{Type: osvschema.Range_ECOSYSTEM, Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "2.0.0"}}},
 				},
 			},
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-workflow-001.json": vuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -444,20 +445,20 @@ func TestGitHubActionsCaseInsensitiveMatching(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	vuln := osvschema.Vulnerability{
-		ID:      "GHSA-case-test",
+	vuln := &osvschema.Vulnerability{
+		Id:      "GHSA-case-test",
 		Summary: "Case test vulnerability",
-		Affected: []osvschema.Affected{
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "Owner/Action-Name", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
-					{Type: osvschema.RangeEcosystem, Events: []osvschema.Event{{Introduced: "0"}}}, // All versions
+				Package: &osvschema.Package{Name: "Owner/Action-Name", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
+					{Type: osvschema.Range_ECOSYSTEM, Events: []*osvschema.Event{{Introduced: "0"}}}, // All versions
 				},
 			},
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-case-test.json": vuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -502,28 +503,28 @@ func TestGitHubActionsGHSAIDFormats(t *testing.T) {
 	}
 
 	// Different ID formats used in OSV
-	vulns := map[string]osvschema.Vulnerability{
+	vulns := map[string]*osvschema.Vulnerability{
 		"GHSA-test-ghsa.json": {
-			ID:      "GHSA-1234-5678-abcd",
+			Id:      "GHSA-1234-5678-abcd",
 			Summary: "GHSA format advisory",
 			Aliases: []string{"CVE-2024-12345"},
-			Affected: []osvschema.Affected{
+			Affected: []*osvschema.Affected{
 				{
-					Package: osvschema.Package{Name: "owner/ghsa-action", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-					Ranges:  []osvschema.Range{{Type: osvschema.RangeEcosystem, Events: []osvschema.Event{{Introduced: "0"}}}}, // All versions
+					Package: &osvschema.Package{Name: "owner/ghsa-action", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+					Ranges:  []*osvschema.Range{{Type: osvschema.Range_ECOSYSTEM, Events: []*osvschema.Event{{Introduced: "0"}}}}, // All versions
 				},
 			},
 		},
 		"MAL-2024-001.json": {
-			ID:      "MAL-2024-0001",
+			Id:      "MAL-2024-0001",
 			Summary: "MAL format advisory",
-			Affected: []osvschema.Affected{
+			Affected: []*osvschema.Affected{
 				{
-					Package: osvschema.Package{Name: "owner/mal-action", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-					Ranges:  []osvschema.Range{{Type: osvschema.RangeEcosystem, Events: []osvschema.Event{{Introduced: "0"}}}}, // All versions, malicious
+					Package: &osvschema.Package{Name: "owner/mal-action", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+					Ranges:  []*osvschema.Range{{Type: osvschema.Range_ECOSYSTEM, Events: []*osvschema.Event{{Introduced: "0"}}}}, // All versions, malicious
 				},
 			},
-			DatabaseSpecific: map[string]any{"malware": true},
+			DatabaseSpecific: osvStruct(map[string]any{"malware": true}),
 		},
 	}
 
@@ -576,22 +577,22 @@ func TestGitHubActionsKnownVulnerableVersions(t *testing.T) {
 
 	// Simulating real-world vulnerable actions (based on actual advisories)
 	// GHSA-3jfq-742w-xg8j - actions/download-artifact artifact poisoning
-	downloadArtifactVuln := osvschema.Vulnerability{
-		ID:      "GHSA-3jfq-742w-xg8j",
+	downloadArtifactVuln := &osvschema.Vulnerability{
+		Id:      "GHSA-3jfq-742w-xg8j",
 		Summary: "Artifact poisoning in actions/download-artifact",
 		Details: "Cross-workflow artifact access vulnerability",
-		Affected: []osvschema.Affected{
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
-					{Type: osvschema.RangeEcosystem, Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "4.1.3"}}},
+				Package: &osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
+					{Type: osvschema.Range_ECOSYSTEM, Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "4.1.3"}}},
 				},
 			},
 		},
-		Severity: []osvschema.Severity{{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"}},
+		Severity: []*osvschema.Severity{{Type: osvschema.Severity_CVSS_V3, Score: "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"}},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"GHSA-3jfq-742w-xg8j.json": downloadArtifactVuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)
@@ -671,28 +672,28 @@ func TestGitHubActionsWithZipRefresh(t *testing.T) {
 	t.Cleanup(restore)
 
 	// Create initial zip with one vulnerability
-	vulnV1 := map[string]osvschema.Vulnerability{
+	vulnV1 := map[string]*osvschema.Vulnerability{
 		"GHSA-001.json": {
-			ID:      "GHSA-001",
+			Id:      "GHSA-001",
 			Summary: "First vulnerability",
-			Affected: []osvschema.Affected{
+			Affected: []*osvschema.Affected{
 				{
-					Package: osvschema.Package{Name: "owner/action-v1", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-					Ranges:  []osvschema.Range{{Type: osvschema.RangeEcosystem, Events: []osvschema.Event{{Introduced: "0"}}}},
+					Package: &osvschema.Package{Name: "owner/action-v1", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+					Ranges:  []*osvschema.Range{{Type: osvschema.Range_ECOSYSTEM, Events: []*osvschema.Event{{Introduced: "0"}}}},
 				},
 			},
 		},
 	}
 
-	vulnV2 := map[string]osvschema.Vulnerability{
+	vulnV2 := map[string]*osvschema.Vulnerability{
 		"GHSA-001.json": vulnV1["GHSA-001.json"],
 		"MAL-002.json": {
-			ID:      "MAL-002",
+			Id:      "MAL-002",
 			Summary: "New malicious action",
-			Affected: []osvschema.Affected{
+			Affected: []*osvschema.Affected{
 				{
-					Package: osvschema.Package{Name: "owner/action-v2", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-					Ranges:  []osvschema.Range{{Type: osvschema.RangeEcosystem, Events: []osvschema.Event{{Introduced: "0"}}}},
+					Package: &osvschema.Package{Name: "owner/action-v2", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+					Ranges:  []*osvschema.Range{{Type: osvschema.Range_ECOSYSTEM, Events: []*osvschema.Event{{Introduced: "0"}}}},
 				},
 			},
 		},
@@ -794,16 +795,16 @@ func TestGitHubActionsIntroducedZeroOpenEnded(t *testing.T) {
 	}
 
 	// Malicious package with Introduced: "0" and no Fixed (all versions affected)
-	vuln := osvschema.Vulnerability{
-		ID:      "MAL-OPEN-ENDED",
+	vuln := &osvschema.Vulnerability{
+		Id:      "MAL-OPEN-ENDED",
 		Summary: "Malicious package - never use any version",
-		Affected: []osvschema.Affected{
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "malicious/package", Ecosystem: string(osvschema.EcosystemGitHubActions)},
-				Ranges: []osvschema.Range{
+				Package: &osvschema.Package{Name: "malicious/package", Ecosystem: string(osvconstants.EcosystemGitHubActions)},
+				Ranges: []*osvschema.Range{
 					{
-						Type: osvschema.RangeEcosystem,
-						Events: []osvschema.Event{
+						Type: osvschema.Range_ECOSYSTEM,
+						Events: []*osvschema.Event{
 							{Introduced: "0"}, // All versions from beginning
 							// No Fixed event - all versions are affected forever
 						},
@@ -813,7 +814,7 @@ func TestGitHubActionsIntroducedZeroOpenEnded(t *testing.T) {
 		},
 	}
 
-	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+	if err := writeGHATestZip(zipPath, map[string]*osvschema.Vulnerability{
 		"MAL-OPEN-ENDED.json": vuln,
 	}); err != nil {
 		t.Fatalf("write zip: %v", err)

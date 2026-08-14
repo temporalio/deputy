@@ -10,37 +10,37 @@ import (
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/temporalio/deputy/internal/cache/disk"
 	"github.com/temporalio/deputy/internal/vulnerability"
-	"osv.dev/bindings/go/osvdev"
+	"osv.dev/bindings/go/api"
 )
 
 // fakeClient mocks the OSV client for testing purposes.
 // It returns a fixed set of vulnerabilities regardless of the input query.
 type fakeClient struct{}
 
-func (f *fakeClient) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
-	return &osvdev.BatchedResponse{Results: []osvdev.MinimalResponse{{Vulns: []osvdev.MinimalVulnerability{{ID: "V-1"}}}}}, nil
+func (f *fakeClient) QueryBatch(ctx context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
+	return &api.BatchVulnerabilityList{Results: []*api.VulnerabilityList{{Vulns: []*osvschema.Vulnerability{{Id: "V-1"}}}}}, nil
 }
 func (f *fakeClient) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
 	v := &osvschema.Vulnerability{
-		ID:      id,
+		Id:      id,
 		Summary: "sum",
 		Details: "det",
 		Aliases: []string{"CVE-1"},
-		Affected: []osvschema.Affected{{
-			Package: osvschema.Package{Name: "github.com/example/pkg"},
-			Ranges:  []osvschema.Range{{Type: "SEMVER", Events: []osvschema.Event{{Introduced: "0"}}}},
+		Affected: []*osvschema.Affected{{
+			Package: &osvschema.Package{Name: "github.com/example/pkg"},
+			Ranges:  []*osvschema.Range{{Type: osvschema.Range_SEMVER, Events: []*osvschema.Event{{Introduced: "0"}}}},
 		}},
 	}
 	return v, nil
 }
 
 type captureQueryClient struct {
-	queries []*osvdev.Query
+	queries []*api.Query
 }
 
-func (c *captureQueryClient) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
+func (c *captureQueryClient) QueryBatch(ctx context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
 	c.queries = slices.Clone(queries)
-	return &osvdev.BatchedResponse{Results: make([]osvdev.MinimalResponse, len(queries))}, nil
+	return &api.BatchVulnerabilityList{Results: make([]*api.VulnerabilityList, len(queries))}, nil
 }
 
 func (c *captureQueryClient) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
@@ -156,17 +156,17 @@ func Test_QueryRaw_usesNameEcosystemForPURLInputs(t *testing.T) {
 				t.Fatalf("QueryRaw() sent %d queries, want 1", len(client.queries))
 			}
 			got := client.queries[0]
-			if got.Package.Name != "golang.org/x/crypto" {
-				t.Errorf("query package name = %q, want %q", got.Package.Name, "golang.org/x/crypto")
+			if got.GetPackage().GetName() != "golang.org/x/crypto" {
+				t.Errorf("query package name = %q, want %q", got.GetPackage().GetName(), "golang.org/x/crypto")
 			}
-			if got.Package.Ecosystem != "Go" {
-				t.Errorf("query package ecosystem = %q, want %q", got.Package.Ecosystem, "Go")
+			if got.GetPackage().GetEcosystem() != "Go" {
+				t.Errorf("query package ecosystem = %q, want %q", got.GetPackage().GetEcosystem(), "Go")
 			}
-			if got.Package.PURL != "" {
-				t.Errorf("query package purl = %q, want empty when name/ecosystem are available", got.Package.PURL)
+			if got.GetPackage().GetPurl() != "" {
+				t.Errorf("query package purl = %q, want empty when name/ecosystem are available", got.GetPackage().GetPurl())
 			}
-			if got.Version != version {
-				t.Errorf("query version = %q, want %q", got.Version, version)
+			if got.GetVersion() != version {
+				t.Errorf("query version = %q, want %q", got.GetVersion(), version)
 			}
 		})
 	}
@@ -174,7 +174,7 @@ func Test_QueryRaw_usesNameEcosystemForPURLInputs(t *testing.T) {
 
 type fakeClientQueryErr struct{}
 
-func (f *fakeClientQueryErr) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
+func (f *fakeClientQueryErr) QueryBatch(ctx context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
 	return nil, errors.New("query-failed")
 }
 func (f *fakeClientQueryErr) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
@@ -192,8 +192,8 @@ func Test_QueryRaw_query_error(t *testing.T) {
 
 type fakeClientGetErr struct{}
 
-func (f *fakeClientGetErr) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
-	return &osvdev.BatchedResponse{Results: []osvdev.MinimalResponse{{Vulns: []osvdev.MinimalVulnerability{{ID: "V-2"}}}}}, nil
+func (f *fakeClientGetErr) QueryBatch(ctx context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
+	return &api.BatchVulnerabilityList{Results: []*api.VulnerabilityList{{Vulns: []*osvschema.Vulnerability{{Id: "V-2"}}}}}, nil
 }
 func (f *fakeClientGetErr) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
 	return nil, errors.New("get-failed")
@@ -210,18 +210,18 @@ func Test_QueryRaw_getvuln_error(t *testing.T) {
 
 type fakeClientFixed struct{}
 
-func (f *fakeClientFixed) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
-	return &osvdev.BatchedResponse{Results: []osvdev.MinimalResponse{{Vulns: []osvdev.MinimalVulnerability{{ID: "V-fixed"}}}}}, nil
+func (f *fakeClientFixed) QueryBatch(ctx context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
+	return &api.BatchVulnerabilityList{Results: []*api.VulnerabilityList{{Vulns: []*osvschema.Vulnerability{{Id: "V-fixed"}}}}}, nil
 }
 
 func (f *fakeClientFixed) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
 	return &osvschema.Vulnerability{
-		ID: id,
-		Affected: []osvschema.Affected{{
-			Package: osvschema.Package{Name: "github.com/example/pkg"},
-			Ranges: []osvschema.Range{{
-				Type:   "SEMVER",
-				Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "1.34.0"}},
+		Id: id,
+		Affected: []*osvschema.Affected{{
+			Package: &osvschema.Package{Name: "github.com/example/pkg"},
+			Ranges: []*osvschema.Range{{
+				Type:   osvschema.Range_SEMVER,
+				Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "1.34.0"}},
 			}},
 		}},
 	}, nil
@@ -241,29 +241,29 @@ func Test_QueryRaw_skips_fixed_version(t *testing.T) {
 
 type fakeClientAWS struct{}
 
-func (f *fakeClientAWS) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
-	return &osvdev.BatchedResponse{Results: []osvdev.MinimalResponse{{Vulns: []osvdev.MinimalVulnerability{{ID: "GHSA-7f33-f4f5-xwgw"}, {ID: "GO-2022-0635"}, {ID: "GHSA-f5pg-7wfw-84q9"}, {ID: "GO-2022-0646"}}}}}, nil
+func (f *fakeClientAWS) QueryBatch(ctx context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
+	return &api.BatchVulnerabilityList{Results: []*api.VulnerabilityList{{Vulns: []*osvschema.Vulnerability{{Id: "GHSA-7f33-f4f5-xwgw"}, {Id: "GO-2022-0635"}, {Id: "GHSA-f5pg-7wfw-84q9"}, {Id: "GO-2022-0646"}}}}}, nil
 }
 
 func (f *fakeClientAWS) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
-	base := osvschema.Vulnerability{ID: id, Affected: []osvschema.Affected{{Package: osvschema.Package{Name: "github.com/aws/aws-sdk-go"}}}}
+	base := osvschema.Vulnerability{Id: id, Affected: []*osvschema.Affected{{Package: &osvschema.Package{Name: "github.com/aws/aws-sdk-go"}}}}
 	switch id {
 	case "GHSA-7f33-f4f5-xwgw":
 		base.Aliases = []string{"CVE-2020-8912"}
-		base.Severity = []osvschema.Severity{{Type: osvschema.SeverityCVSSV3, Score: "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N"}}
-		base.DatabaseSpecific = map[string]any{"severity": "LOW"}
-		base.Affected[0].Ranges = []osvschema.Range{{Type: osvschema.RangeSemVer, Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "1.34.0"}}}}
+		base.Severity = []*osvschema.Severity{{Type: osvschema.Severity_CVSS_V3, Score: "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N"}}
+		base.DatabaseSpecific = osvStruct(map[string]any{"severity": "LOW"})
+		base.Affected[0].Ranges = []*osvschema.Range{{Type: osvschema.Range_SEMVER, Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "1.34.0"}}}}
 	case "GO-2022-0635":
 		base.Aliases = []string{"CVE-2020-8912", "GHSA-7f33-f4f5-xwgw"}
-		base.Affected[0].Ranges = []osvschema.Range{{Type: osvschema.RangeSemVer, Events: []osvschema.Event{{Introduced: "0"}}}}
+		base.Affected[0].Ranges = []*osvschema.Range{{Type: osvschema.Range_SEMVER, Events: []*osvschema.Event{{Introduced: "0"}}}}
 	case "GHSA-f5pg-7wfw-84q9":
 		base.Aliases = []string{"CVE-2020-8911"}
-		base.Severity = []osvschema.Severity{{Type: osvschema.SeverityCVSSV3, Score: "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N"}}
-		base.DatabaseSpecific = map[string]any{"severity": "LOW"}
-		base.Affected[0].Ranges = []osvschema.Range{{Type: osvschema.RangeSemVer, Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "1.34.0"}}}}
+		base.Severity = []*osvschema.Severity{{Type: osvschema.Severity_CVSS_V3, Score: "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N"}}
+		base.DatabaseSpecific = osvStruct(map[string]any{"severity": "LOW"})
+		base.Affected[0].Ranges = []*osvschema.Range{{Type: osvschema.Range_SEMVER, Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "1.34.0"}}}}
 	case "GO-2022-0646":
 		base.Aliases = []string{"CVE-2020-8911", "GHSA-f5pg-7wfw-84q9"}
-		base.Affected[0].Ranges = []osvschema.Range{{Type: osvschema.RangeSemVer, Events: []osvschema.Event{{Introduced: "0"}}}}
+		base.Affected[0].Ranges = []*osvschema.Range{{Type: osvschema.Range_SEMVER, Events: []*osvschema.Event{{Introduced: "0"}}}}
 	default:
 		return nil, fmt.Errorf("unknown id %s", id)
 	}
@@ -306,24 +306,24 @@ func Test_QueryRaw_awssdkv1(t *testing.T) {
 
 type fakeClientAlias struct{}
 
-func (f *fakeClientAlias) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
-	return &osvdev.BatchedResponse{Results: []osvdev.MinimalResponse{{Vulns: []osvdev.MinimalVulnerability{{ID: "GHSA-base"}}}}}, nil
+func (f *fakeClientAlias) QueryBatch(ctx context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
+	return &api.BatchVulnerabilityList{Results: []*api.VulnerabilityList{{Vulns: []*osvschema.Vulnerability{{Id: "GHSA-base"}}}}}, nil
 }
 
 func (f *fakeClientAlias) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
 	switch id {
 	case "GHSA-base":
 		return &osvschema.Vulnerability{
-			ID:      id,
+			Id:      id,
 			Aliases: []string{"CVE-TEST"},
-			Affected: []osvschema.Affected{{
-				Package: osvschema.Package{Name: "github.com/example/pkg"},
-				Ranges:  []osvschema.Range{{Type: osvschema.RangeSemVer, Events: []osvschema.Event{{Introduced: "0"}}}},
+			Affected: []*osvschema.Affected{{
+				Package: &osvschema.Package{Name: "github.com/example/pkg"},
+				Ranges:  []*osvschema.Range{{Type: osvschema.Range_SEMVER, Events: []*osvschema.Event{{Introduced: "0"}}}},
 			}},
 		}, nil
 	case "CVE-TEST":
 		// alias record missing affected info
-		return &osvschema.Vulnerability{ID: id}, nil
+		return &osvschema.Vulnerability{Id: id}, nil
 	default:
 		return nil, fmt.Errorf("unknown id %s", id)
 	}
@@ -343,28 +343,28 @@ func Test_QueryRaw_aliasWithoutRange(t *testing.T) {
 
 type fakeClientAliasUnmatchedPackage struct{}
 
-func (f *fakeClientAliasUnmatchedPackage) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
-	return &osvdev.BatchedResponse{Results: []osvdev.MinimalResponse{{Vulns: []osvdev.MinimalVulnerability{{ID: "GHSA-base"}}}}}, nil
+func (f *fakeClientAliasUnmatchedPackage) QueryBatch(ctx context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
+	return &api.BatchVulnerabilityList{Results: []*api.VulnerabilityList{{Vulns: []*osvschema.Vulnerability{{Id: "GHSA-base"}}}}}, nil
 }
 
 func (f *fakeClientAliasUnmatchedPackage) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
 	switch id {
 	case "GHSA-base":
 		return &osvschema.Vulnerability{
-			ID:      id,
+			Id:      id,
 			Aliases: []string{"CVE-ALIAS"},
-			Affected: []osvschema.Affected{{
-				Package: osvschema.Package{Name: "github.com/example/pkg", Ecosystem: "Go"},
-				Ranges:  []osvschema.Range{{Type: osvschema.RangeSemVer, Events: []osvschema.Event{{Introduced: "0"}}}},
+			Affected: []*osvschema.Affected{{
+				Package: &osvschema.Package{Name: "github.com/example/pkg", Ecosystem: "Go"},
+				Ranges:  []*osvschema.Range{{Type: osvschema.Range_SEMVER, Events: []*osvschema.Event{{Introduced: "0"}}}},
 			}},
 		}, nil
 	case "CVE-ALIAS":
 		return &osvschema.Vulnerability{
-			ID: id,
-			Affected: []osvschema.Affected{{
+			Id: id,
+			Affected: []*osvschema.Affected{{
 				// Alias record does not identify the package; it should not influence results.
-				Package: osvschema.Package{},
-				Ranges:  []osvschema.Range{{Type: osvschema.RangeSemVer, Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "v9.9.9"}}}},
+				Package: &osvschema.Package{},
+				Ranges:  []*osvschema.Range{{Type: osvschema.Range_SEMVER, Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "v9.9.9"}}}},
 			}},
 		}, nil
 	default:
@@ -389,17 +389,17 @@ func Test_QueryRaw_ignoresAliasWithoutPackageIdentity(t *testing.T) {
 
 type countingClient struct{ calls int }
 
-func (c *countingClient) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
-	return &osvdev.BatchedResponse{Results: []osvdev.MinimalResponse{{Vulns: []osvdev.MinimalVulnerability{{ID: "V-cache"}}}}}, nil
+func (c *countingClient) QueryBatch(ctx context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
+	return &api.BatchVulnerabilityList{Results: []*api.VulnerabilityList{{Vulns: []*osvschema.Vulnerability{{Id: "V-cache"}}}}}, nil
 }
 
 func (c *countingClient) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
 	c.calls++
 	return &osvschema.Vulnerability{
-		ID: id,
-		Affected: []osvschema.Affected{{
-			Package: osvschema.Package{Name: "github.com/example/pkg"},
-			Ranges:  []osvschema.Range{{Type: osvschema.RangeSemVer, Events: []osvschema.Event{{Introduced: "0"}}}},
+		Id: id,
+		Affected: []*osvschema.Affected{{
+			Package: &osvschema.Package{Name: "github.com/example/pkg"},
+			Ranges:  []*osvschema.Range{{Type: osvschema.Range_SEMVER, Events: []*osvschema.Event{{Introduced: "0"}}}},
 		}},
 	}, nil
 }

@@ -10,7 +10,7 @@ require (
 	connectrpc.com/cors v0.1.0
 	connectrpc.com/otelconnect v0.9.0
 	connectrpc.com/validate v0.6.0
-	deps.dev/api/v3 v3.0.0-20250903005441-604c45d5b44b
+	deps.dev/api/v3 v3.0.0-20260422013440-90c27f84dd6f
 	github.com/BurntSushi/toml v1.6.0
 	github.com/CycloneDX/cyclonedx-go v0.11.0
 	github.com/alecthomas/chroma/v2 v2.25.0
@@ -25,16 +25,16 @@ require (
 	github.com/google/go-github/v63 v63.0.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/licensecheck v0.3.1
-	github.com/google/osv-scalibr v0.3.4
+	github.com/google/osv-scalibr v0.5.2
 	github.com/hashicorp/go-cleanhttp v0.5.2
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/lima-vm/go-qcow2reader v0.7.1
 	github.com/masahiro331/go-disk v0.0.0-20260423015231-f7a470ebd472
 	github.com/masahiro331/go-ext4-filesystem v0.0.0-20260423010602-fe51f5b5e52b
-	github.com/moby/moby/api v1.54.2
-	github.com/moby/moby/client v0.4.1
+	github.com/moby/moby/api v1.55.0
+	github.com/moby/moby/client v0.5.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
-	github.com/ossf/osv-schema/bindings/go v0.0.0-20250902063920-695987a6b7da
+	github.com/ossf/osv-schema/bindings/go v0.0.0-20260424063704-83285ce2a866
 	github.com/package-url/packageurl-go v0.1.6
 	github.com/pandatix/go-cvss v0.6.2
 	github.com/picatz/jose v0.0.0-20250816152409-7521c7f65f1b
@@ -72,7 +72,7 @@ require (
 	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
-	osv.dev/bindings/go v0.0.0-20250808040635-c189436f8791
+	osv.dev/bindings/go v0.0.0-20260512064147-daa692bbd4ed
 	pluginrpc.com/pluginrpc v0.5.0
 )
 
@@ -80,64 +80,63 @@ require (
 	buf.build/gen/go/pluginrpc/pluginrpc/protocolbuffers/go v1.36.10-20241007202033-cf42259fcbfc.1 // indirect
 	charm.land/lipgloss/v2 v2.0.3 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
-	cyphar.com/go-pathrs v0.2.1 // indirect
-	github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 // indirect
-	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20230306123547-8075edf89bb0 // indirect
-	github.com/Microsoft/hcsshim v0.14.1 // indirect
+	github.com/aead/serpent v0.0.0-20160714141033-fba169763ea6 // indirect
+	github.com/anchore/go-lzo v0.1.0 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/ayoubfaouzi/pkcs7 v0.2.3 // indirect
+	github.com/bazelbuild/buildtools v0.0.0-20260319080235-05d2ebe49b0f // indirect
+	github.com/canonical/chisel-manifest v1.2.0 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20260527151214-009e6338d40d // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/containerd/cgroups/v3 v3.1.3 // indirect
-	github.com/containerd/containerd v1.7.33 // indirect
-	github.com/containerd/containerd/api v1.10.0 // indirect
-	github.com/containerd/continuity v0.5.0 // indirect
-	github.com/containerd/fifo v1.1.0 // indirect
-	github.com/containerd/log v0.1.0 // indirect
-	github.com/containerd/platforms v1.0.0-rc.2 // indirect
-	github.com/containerd/ttrpc v1.2.8 // indirect
+	github.com/compose-spec/compose-go/v2 v2.10.2 // indirect
+	github.com/diskfs/go-diskfs v1.7.0 // indirect
+	github.com/djherbis/times v1.6.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.1.0 // indirect
-	github.com/docker/go-events v0.0.0-20250808211157-605354379745 // indirect
+	github.com/dsoprea/go-exfat v0.0.0-20190906070738-5e932fbdb589 // indirect
+	github.com/dsoprea/go-logging v0.0.0-20200710184922-b02d349568dd // indirect
+	github.com/elliotwutingfeng/asciiset v0.0.0-20260129054604-cfde2086bc57 // indirect
+	github.com/go-errors/errors v1.5.1 // indirect
+	github.com/go-restruct/restruct v1.2.0-alpha // indirect
+	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
+	github.com/ianlancetaylor/demangle v0.0.0-20260505044615-1ff4bf46051f // indirect
+	github.com/icholy/digest v1.1.0 // indirect
 	github.com/lunixbochs/struc v0.0.0-20241101090106-8d528fa2c543 // indirect
+	github.com/mattn/go-shellwords v1.0.13 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
-	github.com/moby/locker v1.0.1 // indirect
-	github.com/moby/sys/atomicwriter v0.1.0 // indirect
-	github.com/moby/sys/mountinfo v0.7.2 // indirect
-	github.com/moby/sys/sequential v0.6.0 // indirect
-	github.com/moby/sys/signal v0.7.1 // indirect
-	github.com/moby/sys/user v0.4.0 // indirect
-	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
-	github.com/opencontainers/runtime-spec v1.3.0 // indirect
-	github.com/opencontainers/selinux v1.14.1 // indirect
+	github.com/pierrec/lz4/v4 v4.1.26 // indirect
+	github.com/pkg/xattr v0.4.12 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/tink-crypto/tink-go/v2 v2.6.0 // indirect
+	github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb // indirect
+	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark v1.8.2 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
-	go.opencensus.io v0.24.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	google.golang.org/genproto v0.0.0-20260401024825-9d38bb4040a9 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.4 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260511170946-3700d4141b60 // indirect
 	pgregory.net/rapid v1.3.0 // indirect
+	www.velocidex.com/golang/go-ntfs v0.2.0 // indirect
 )
 
 require (
 	cel.dev/expr v0.25.2 // indirect
 	dario.cat/mergo v1.0.2 // indirect
-	deps.dev/api/v3alpha v0.0.0-20250903005441-604c45d5b44b // indirect
-	deps.dev/util/maven v0.0.0-20260422013440-90c27f84dd6f // indirect
+	deps.dev/api/v3alpha v0.0.0-20260422013440-90c27f84dd6f // indirect
+	deps.dev/util/maven v0.0.0-20260528042559-b92437de09fd // indirect
 	deps.dev/util/pypi v0.0.0-20260422013440-90c27f84dd6f // indirect
-	deps.dev/util/resolve v0.0.0-20250903005441-604c45d5b44b // indirect
-	deps.dev/util/semver v0.0.0-20260422013440-90c27f84dd6f
+	deps.dev/util/resolve v0.0.0-20260422013440-90c27f84dd6f // indirect
+	deps.dev/util/semver v0.0.0-20260529052642-cf1e78d92744
 	github.com/GehirnInc/crypt v0.0.0-20230320061759-8cc1b52080c5 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
@@ -163,7 +162,6 @@ require (
 	github.com/deitch/magic v0.0.0-20240306090643-c67ab88f10cb // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v29.5.2+incompatible // indirect
-	github.com/docker/docker v28.5.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.7 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -207,7 +205,7 @@ require (
 	github.com/olekukonko/errors v1.3.0 // indirect
 	github.com/olekukonko/ll v0.1.8 // indirect
 	github.com/olekukonko/tablewriter v1.1.4 // indirect
-	github.com/opencontainers/go-digest v1.0.0 // indirect
+	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
@@ -244,7 +242,7 @@ require (
 	golang.org/x/tools v0.47.0 // indirect
 	golang.org/x/vuln v1.3.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260511170946-3700d4141b60 // indirect
 	gopkg.in/ini.v1 v1.67.2 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	modernc.org/libc v1.72.5 // indirect
@@ -255,11 +253,3 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 	www.velocidex.com/golang/regparser v0.0.0-20250203141505-31e704a67ef7 // indirect
 )
-
-// Pin runtime-spec to v1.2.1. Patched buildkit (>=0.28.1) and cgroups/v3 pull
-// runtime-spec v1.3.0, which changed LinuxPids.Limit to *int64. osv-scalibr's
-// containerd standalone extractor still uses containerd v1.7, whose oci package
-// assigns int64 to that field and fails to compile against v1.3.0 (Linux only).
-// Remove this once osv-scalibr's released containerd extractor moves to
-// containerd v2 (already done on osv-scalibr main, not yet released).
-replace github.com/opencontainers/runtime-spec => github.com/opencontainers/runtime-spec v1.2.1

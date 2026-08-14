@@ -108,10 +108,10 @@ func (e *VerificationMetadataExtractor) Extract(ctx context.Context, input *file
 		seen[key] = true
 
 		pkg := &extractor.Package{
-			Name:      fmt.Sprintf("%s:%s", comp.Group, comp.Name),
-			Version:   comp.Version,
-			PURLType:  purl.TypeMaven,
-			Locations: []string{input.Path},
+			Name:     fmt.Sprintf("%s:%s", comp.Group, comp.Name),
+			Version:  comp.Version,
+			PURLType: purl.TypeMaven,
+			Location: extractor.LocationFromPath(input.Path),
 			Metadata: &MavenMetadata{
 				GroupID:    comp.Group,
 				ArtifactID: comp.Name,
@@ -131,6 +131,11 @@ type MavenMetadata struct {
 	Type       string
 	Scope      string
 }
+
+// IsProtoable marks MavenMetadata as OSV-SCALIBR package metadata. Deputy attaches it to
+// an extractor.Package but never converts it to a proto message, so the marker
+// only satisfies the upstream metadata.Protoable interface.
+func (*MavenMetadata) IsProtoable() {}
 
 // Ensure VerificationMetadataExtractor implements filesystem.Extractor.
 var _ filesystem.Extractor = (*VerificationMetadataExtractor)(nil)

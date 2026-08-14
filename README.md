@@ -125,11 +125,13 @@ See the [GitHub Actions Guide](docs/guides/github-actions.md) for workflow recip
 
 ### Go install
 
+Requires Go 1.26 or newer (see the `go` directive in [`go.mod`](go.mod)).
+
 ```console
 $ go install github.com/temporalio/deputy@latest
 ```
 
-Pin a specific version for reproducibility: `go install github.com/temporalio/deputy@vX.Y.Z`
+Pin a specific version for reproducibility: `go install github.com/temporalio/deputy@vX.Y.Z`, or a commit for an untagged build: `go install github.com/temporalio/deputy@<commit-sha>`
 <!-- TODO: Re-enable Homebrew and binary release installation docs once those distribution channels exist. -->
 
 ### Build from source

@@ -156,10 +156,10 @@ func (e *BuildGradleExtractor) Extract(ctx context.Context, input *filesystem.Sc
 		}
 
 		pkg := &extractor.Package{
-			Name:      dep.Name(),
-			Version:   dep.Version,
-			PURLType:  purl.TypeMaven,
-			Locations: []string{input.Path},
+			Name:     dep.Name(),
+			Version:  dep.Version,
+			PURLType: purl.TypeMaven,
+			Location: extractor.LocationFromPath(input.Path),
 			Metadata: &MavenMetadata{
 				GroupID:    dep.GroupID,
 				ArtifactID: dep.ArtifactID,

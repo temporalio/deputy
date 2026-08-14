@@ -25,6 +25,7 @@ import (
 
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/container/image"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/dockerfile"
 	"github.com/temporalio/deputy/internal/gitutil"
 	"github.com/temporalio/deputy/internal/mise"
@@ -718,10 +719,10 @@ func scanGoBinary(ctx context.Context, path string) ([]*extractor.Package, error
 	// Add main module if present
 	if info.Main.Path != "" {
 		pkgs = append(pkgs, &extractor.Package{
-			Name:      info.Main.Path,
-			Version:   info.Main.Version,
-			PURLType:  "golang",
-			Locations: []string{path},
+			Name:     info.Main.Path,
+			Version:  info.Main.Version,
+			PURLType: "golang",
+			Location: extractor.LocationFromPath(path),
 		})
 	}
 
@@ -735,10 +736,10 @@ func scanGoBinary(ctx context.Context, path string) ([]*extractor.Package, error
 			dep = dep.Replace
 		}
 		pkgs = append(pkgs, &extractor.Package{
-			Name:      dep.Path,
-			Version:   dep.Version,
-			PURLType:  "golang",
-			Locations: []string{path},
+			Name:     dep.Path,
+			Version:  dep.Version,
+			PURLType: "golang",
+			Location: extractor.LocationFromPath(path),
 		})
 	}
 
@@ -920,7 +921,7 @@ func sbomDocToPackages(doc *sbom.Document) []*extractor.Package {
 				lockedVersion = strings.TrimSpace(prop.Data)
 			case "deputy:location":
 				if loc := strings.TrimSpace(prop.Data); loc != "" {
-					pkg.Locations = append(pkg.Locations, loc)
+					dependency.SetPackagePaths(pkg, append(dependency.PackagePaths(pkg), loc))
 				}
 			}
 		}

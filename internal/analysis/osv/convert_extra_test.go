@@ -7,8 +7,8 @@ import (
 )
 
 func Test_ProcessOSVVulnerability_identifierPreference(t *testing.T) {
-	v := osvschema.Vulnerability{
-		ID:      "GHSA-xxxx-yyyy",
+	v := &osvschema.Vulnerability{
+		Id:      "GHSA-xxxx-yyyy",
 		Summary: "s",
 		Details: "d",
 		Aliases: []string{"CVE-2024-1234", "GO-2024-0001"},
@@ -21,12 +21,12 @@ func Test_ProcessOSVVulnerability_identifierPreference(t *testing.T) {
 
 func Test_ProcessOSVVulnerability_severityPreference(t *testing.T) {
 	t.Run("ghsa_overrides_cvss", func(t *testing.T) {
-		v := osvschema.Vulnerability{
-			ID:               "GHSA-aaa-bbb",
+		v := &osvschema.Vulnerability{
+			Id:               "GHSA-aaa-bbb",
 			Summary:          "s",
 			Details:          "d",
-			Severity:         []osvschema.Severity{{Type: "CVSS_V3", Score: "7.5"}},
-			DatabaseSpecific: map[string]any{"severity": "HIGH"},
+			Severity:         []*osvschema.Severity{{Type: osvschema.Severity_CVSS_V3, Score: "7.5"}},
+			DatabaseSpecific: osvStruct(map[string]any{"severity": "HIGH"}),
 		}
 		out := ProcessOSVVulnerability(v, PkgInput{QueryKey: QueryKey{Name: "github.com/example/mod", Version: "v1.0.0"}})
 		if out.Severity != "HIGH" || out.SeverityType != "GHSA" {
@@ -34,12 +34,12 @@ func Test_ProcessOSVVulnerability_severityPreference(t *testing.T) {
 		}
 	})
 	t.Run("cvss_retained_when_not_ghsa", func(t *testing.T) {
-		v := osvschema.Vulnerability{
-			ID:               "CVE-2024-9999",
+		v := &osvschema.Vulnerability{
+			Id:               "CVE-2024-9999",
 			Summary:          "s",
 			Details:          "d",
-			Severity:         []osvschema.Severity{{Type: "CVSS_V3", Score: "9.8"}},
-			DatabaseSpecific: map[string]any{"severity": "CRITICAL"},
+			Severity:         []*osvschema.Severity{{Type: osvschema.Severity_CVSS_V3, Score: "9.8"}},
+			DatabaseSpecific: osvStruct(map[string]any{"severity": "CRITICAL"}),
 		}
 		out := ProcessOSVVulnerability(v, PkgInput{QueryKey: QueryKey{Name: "github.com/example/mod", Version: "v1.0.0"}})
 		if out.Severity != "9.8" || out.SeverityType != "CVSS_V3" {
@@ -49,17 +49,17 @@ func Test_ProcessOSVVulnerability_severityPreference(t *testing.T) {
 }
 
 func Test_ProcessOSVVulnerability_extractsImports(t *testing.T) {
-	v := osvschema.Vulnerability{
-		ID: "GO-IMPORTS",
-		Affected: []osvschema.Affected{
+	v := &osvschema.Vulnerability{
+		Id: "GO-IMPORTS",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "github.com/example/mod", Ecosystem: "Go"},
-				EcosystemSpecific: map[string]any{
+				Package: &osvschema.Package{Name: "github.com/example/mod", Ecosystem: "Go"},
+				EcosystemSpecific: osvStruct(map[string]any{
 					"imports": []any{
 						map[string]any{"path": "net/http", "symbols": []any{"Serve", "ListenAndServe", "Serve"}},
 						map[string]any{"path": "crypto/tls"},
 					},
-				},
+				}),
 			},
 		},
 	}
@@ -79,9 +79,9 @@ func Test_ProcessOSVVulnerability_extractsImports(t *testing.T) {
 }
 
 func Test_ProcessOSVVulnerability_databaseSpecific(t *testing.T) {
-	v := osvschema.Vulnerability{
-		ID:               "GO-DBSPEC",
-		DatabaseSpecific: map[string]any{"url": "https://pkg.go.dev/vuln/GO-DBSPEC", "review_status": "REVIEWED", "count": 5},
+	v := &osvschema.Vulnerability{
+		Id:               "GO-DBSPEC",
+		DatabaseSpecific: osvStruct(map[string]any{"url": "https://pkg.go.dev/vuln/GO-DBSPEC", "review_status": "REVIEWED", "count": 5}),
 	}
 	out := ProcessOSVVulnerability(v, PkgInput{QueryKey: QueryKey{Name: "github.com/example/mod", Version: "v1.0.0", Ecosystem: "Go"}})
 	if out.DatabaseSpecific["url"] != "https://pkg.go.dev/vuln/GO-DBSPEC" {

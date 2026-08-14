@@ -11,7 +11,7 @@ import (
 )
 
 func TestFilterInventoryPluginsIncludesGoPlugin(t *testing.T) {
-	plugins, err := pl.FromNames([]string{"go/gomod"})
+	plugins, err := pl.FromNames([]string{"go/gomod"}, nil)
 	if err != nil {
 		t.Fatalf("pl.FromNames: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestFilterInventoryPluginsIncludesGitHubActionsPlugin(t *testing.T) {
 
 func TestFilterInventoryPluginsMixedPlugins(t *testing.T) {
 	// Test that both SCALIBR plugins and Deputy's custom plugins pass through
-	scalibrPlugins, err := pl.FromNames([]string{"go/gomod", "javascript/packagejson"})
+	scalibrPlugins, err := pl.FromNames([]string{"go/gomod", "javascript/packagejson"}, nil)
 	if err != nil {
 		t.Fatalf("pl.FromNames: %v", err)
 	}

@@ -178,7 +178,7 @@ func TestSBOMLayerDetailsRoundTrip(t *testing.T) {
 	// Check if any packages have layer details before serialization
 	hasLayerDetails := false
 	for _, pkg := range result.Packages {
-		if pkg.LayerDetails != nil {
+		if pkg.LayerMetadata != nil {
 			hasLayerDetails = true
 			break
 		}
@@ -212,11 +212,11 @@ func TestSBOMLayerDetailsRoundTrip(t *testing.T) {
 	if hasLayerDetails {
 		restoredWithLayers := 0
 		for _, pkg := range pkgs {
-			if pkg.LayerDetails != nil {
+			if pkg.LayerMetadata != nil {
 				restoredWithLayers++
 				// Verify layer fields are populated
-				if pkg.LayerDetails.Index < 0 {
-					t.Errorf("restored layer index is negative: %d", pkg.LayerDetails.Index)
+				if pkg.LayerMetadata.Index < 0 {
+					t.Errorf("restored layer index is negative: %d", pkg.LayerMetadata.Index)
 				}
 			}
 		}

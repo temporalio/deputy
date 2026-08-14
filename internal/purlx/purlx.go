@@ -179,3 +179,19 @@ func cleanSubpath(subpath string) string {
 	}
 	return s
 }
+
+// NPMPackageName reassembles an npm package name from a PURL's namespace and
+// name, restoring the "@scope/name" form npm itself uses.
+//
+// OSV-SCALIBR splits a scoped name into the PURL namespace with its leading "@"
+// already attached, while other PURL producers leave the "@" off, so it is added
+// only when it is missing. An empty namespace means the package is unscoped.
+func NPMPackageName(namespace, name string) string {
+	if namespace == "" {
+		return name
+	}
+	if !strings.HasPrefix(namespace, "@") {
+		namespace = "@" + namespace
+	}
+	return namespace + "/" + name
+}
