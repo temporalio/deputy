@@ -1574,8 +1574,16 @@ func (h *RemediationHandler) ApproveStep(
 	// because the decision was acted on, can_proceed is false because the step
 	// must not continue. Here there is no answer yet, so there is nothing to
 	// call accepted.
-	select {
-	case answer := <-pending.answer:
+	answer, err := awaitApprovalAnswer(ctx, pending, session.done)
+	switch {
+	case errors.Is(err, errApprovalSessionEnded):
+		return connect.NewResponse(&remediationv1.ApproveStepResponse{
+			Accepted: false,
+			Message:  err.Error(),
+		}), nil
+	case err != nil:
+		return nil, err
+	default:
 		return connect.NewResponse(&remediationv1.ApproveStepResponse{
 			Accepted: answer.accepted,
 			Message:  answer.message,
@@ -1584,15 +1592,51 @@ func (h *RemediationHandler) ApproveStep(
 			// caller approved.
 			CanProceed: answer.accepted && req.Msg.GetApproved(),
 		}), nil
-	case <-session.done:
-		// The execution returned before the agent read this decision, which is
-		// the case for a decision naming an operation it never asked about.
-		return connect.NewResponse(&remediationv1.ApproveStepResponse{
-			Accepted: false,
-			Message:  "The agent execution ended before this decision reached the agent",
-		}), nil
+	}
+}
+
+// errApprovalSessionEnded reports that an agent execution returned before the
+// agent read a submitted decision, which is what becomes of a decision naming
+// an operation the agent never asks about. Its text is what the RPC reports, so
+// the reason the caller reads and the reason the handler branches on are one
+// thing.
+var errApprovalSessionEnded = errors.New("The agent execution ended before this decision reached the agent")
+
+// awaitApprovalAnswer waits for the agent's verdict on a submitted decision,
+// returning errApprovalSessionEnded when the execution ended without reading it
+// and the context's error when the caller gave up first.
+//
+// The verdict is looked for on its own first, because an agent that takes a
+// decision and then finishes leaves two facts true at once and only one of them
+// describes what happened to the decision. A single select over all three cases
+// chooses pseudo-randomly among the ready ones, so it would sometimes report
+// that a decision the agent took never reached it: wrong, and wrong only
+// sometimes, which is worse. The same applies to a caller's context that expired
+// in that window, since a verdict already given is worth reporting to a caller
+// that may still be listening.
+//
+// Finding it is possible because [pendingApproval.answer] is buffered for one
+// answer and written once, so a verdict handed over before this call runs is
+// sitting in the buffer rather than waiting for a receiver.
+//
+// The priority is over answers already given, not a claim about which of two
+// concurrent events wins. Once there is nothing buffered, an answer and the
+// session's end racing each other may go either way, and at that moment either
+// report is true.
+func awaitApprovalAnswer(ctx context.Context, pending *pendingApproval, done <-chan struct{}) (approvalAnswer, error) {
+	select {
+	case answer := <-pending.answer:
+		return answer, nil
+	default:
+	}
+
+	select {
+	case answer := <-pending.answer:
+		return answer, nil
+	case <-done:
+		return approvalAnswer{}, errApprovalSessionEnded
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return approvalAnswer{}, ctx.Err()
 	}
 }
 
