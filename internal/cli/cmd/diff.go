@@ -136,15 +136,12 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			}
 
 			// Set up output writer
-			var outW io.Writer = cmd.OutOrStdout()
-			if outPath != "" && outPath != "-" {
-				f, err := os.Create(outPath)
-				if err != nil {
-					return fmt.Errorf("failed to create output file: %w", err)
-				}
-				defer f.Close()
-				outW = f
+			out, err := openOutputWriter(cmd, outPath)
+			if err != nil {
+				return err
 			}
+			defer out.Close()
+			outW := out.Writer
 
 			// Render-only mode: re-render a previously saved structured output
 			// without re-running analysis. CI uses this to derive both counts

@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -226,35 +225,6 @@ func unionStrings(lists ...[]string) []string {
 		}
 	}
 	return out
-}
-
-// outputWriter represents a writer that may need to be closed.
-type outputWriter struct {
-	Writer io.Writer
-	closer io.Closer
-}
-
-// Close closes the underlying writer if it's a file.
-func (ow *outputWriter) Close() error {
-	if ow.closer != nil {
-		return ow.closer.Close()
-	}
-	return nil
-}
-
-// openOutputWriter creates an output writer based on the output path.
-// If outPath is empty or "-", it returns stdout. Otherwise, it creates a file.
-// The caller must call Close() on the returned outputWriter.
-func openOutputWriter(cmd *cobra.Command, outPath string) (*outputWriter, error) {
-	if outPath == "" || outPath == "-" {
-		return &outputWriter{Writer: cmd.OutOrStdout()}, nil
-	}
-
-	f, err := os.Create(outPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create output file: %w", err)
-	}
-	return &outputWriter{Writer: f, closer: f}, nil
 }
 
 // loadIgnoreRules loads ignore rules from the specified file or auto-discovers them.

@@ -232,15 +232,12 @@ DETAIL LEVELS:
 			}
 
 			// Output
-			out := cmd.OutOrStdout()
-			if output != "" && output != "-" {
-				f, err := os.Create(output)
-				if err != nil {
-					return fmt.Errorf("create output file: %w", err)
-				}
-				defer f.Close()
-				out = f
+			dest, err := openOutputWriter(cmd, output)
+			if err != nil {
+				return err
 			}
+			defer dest.Close()
+			out := dest.Writer
 
 			// Write header comment if to stdout
 			if output == "" || output == "-" {

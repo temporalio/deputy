@@ -459,16 +459,13 @@ func resolveDir(args []string) (string, error) {
 
 // outputPinReport writes the report in the requested format. dryRun adjusts the
 // human-readable wording so a preview never claims files were modified.
-func outputPinReport(_ *cobra.Command, report *pin.Report, format, outPath string, dryRun bool) error {
-	var w io.Writer = os.Stdout
-	if outPath != "" && outPath != "-" {
-		f, err := os.Create(outPath)
-		if err != nil {
-			return fmt.Errorf("creating output file: %w", err)
-		}
-		defer f.Close()
-		w = f
+func outputPinReport(cmd *cobra.Command, report *pin.Report, format, outPath string, dryRun bool) error {
+	out, err := openOutputWriter(cmd, outPath)
+	if err != nil {
+		return err
 	}
+	defer out.Close()
+	w := out.Writer
 
 	switch format {
 	case "json":
