@@ -5,6 +5,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 )
@@ -38,9 +39,26 @@ func configureProcessGroup(cmd *exec.Cmd) {
 // terminateProcessGroup kills the command's entire process group, which is
 // what configureProcessGroup set up. Killing the group (negative pid) rather
 // than the process is the point: the direct child is often a launcher whose
-// real work happens in a grandchild. A group that is already gone is not an
-// error. If the group kill fails for any other reason, the direct child is
-// killed as a fallback so cancellation is never silently a no-op.
+// real work happens in a grandchild. If the group kill fails for any reason
+// other than the group being gone, the direct child is killed as a fallback so
+// cancellation is never silently a no-op.
+//
+// A group that is already gone reports os.ErrProcessDone rather than success,
+// because this runs as [exec.Cmd.Cancel] and os/exec reads the two differently.
+// Success there means the command was interrupted, so os/exec replaces a
+// successful exit status with the context's error; ErrProcessDone means the
+// command had already finished and os/exec keeps the status it earned. A kill
+// racing a command that completed on its own returns ESRCH once the child has
+// been reaped, and calling that an interruption reported a step that ran to
+// completion and mutated the workspace as timed out, which skips every step
+// depending on it.
+//
+// ESRCH also covers a direct child that left the group on purpose, which is
+// outside the guarantee processTreeTerminationSupported states. Reporting the
+// command as already finished is still the safer reading: [exec.Cmd.WaitDelay]
+// is set on these commands, so os/exec kills the child itself once the delay
+// elapses, and a child killed that way exits unsuccessfully rather than being
+// mistaken for a step that completed.
 func terminateProcessGroup(cmd *exec.Cmd) error {
 	proc := cmd.Process
 	if proc == nil {
@@ -49,8 +67,10 @@ func terminateProcessGroup(cmd *exec.Cmd) error {
 
 	err := syscall.Kill(-proc.Pid, syscall.SIGKILL)
 	switch {
-	case err == nil, errors.Is(err, syscall.ESRCH):
+	case err == nil:
 		return nil
+	case errors.Is(err, syscall.ESRCH):
+		return os.ErrProcessDone
 	default:
 		if killErr := proc.Kill(); killErr != nil {
 			return fmt.Errorf("killing process group %d: %w (direct kill also failed: %v)", proc.Pid, err, killErr)
