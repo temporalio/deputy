@@ -49,6 +49,11 @@ var (
 		"top_packages", // Triage package summaries, most urgent first
 		"base_ref",     // Diff base reference
 		"target_ref",   // Diff target reference
+		// Service diff request targets. A diff authorizes two independent
+		// resources, so service_diff_request binds a target per side instead
+		// of the single "target" the other service entrypoints bind.
+		"diff_base",
+		"diff_target",
 		// Container diff specific variables
 		"base_image",
 		"target_image",

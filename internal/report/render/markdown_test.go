@@ -36,9 +36,9 @@ func diffMarkdownFixture() *diffv1.DiffVulnerabilitiesResponse {
 		},
 	}
 	return &diffv1.DiffVulnerabilitiesResponse{
-		BaseTarget:   &targetv1.Target{DisplayPath: "main"},
-		TargetTarget: &targetv1.Target{DisplayPath: "feature"},
-		Changes:      changes,
+		Base:    &targetv1.Target{DisplayPath: "main"},
+		Target:  &targetv1.Target{DisplayPath: "feature"},
+		Changes: changes,
 		ChangeStats: &diffv1.DiffStats{
 			AddedCount:    1,
 			RemovedCount:  1,
@@ -117,9 +117,9 @@ func TestDiffMarkdown(t *testing.T) {
 
 func TestDiffMarkdown_EmptyDiff(t *testing.T) {
 	out := DiffMarkdown(&diffv1.DiffVulnerabilitiesResponse{
-		BaseTarget:   &targetv1.Target{DisplayPath: "main"},
-		TargetTarget: &targetv1.Target{DisplayPath: "main"},
-		ChangeStats:  &diffv1.DiffStats{},
+		Base:        &targetv1.Target{DisplayPath: "main"},
+		Target:      &targetv1.Target{DisplayPath: "main"},
+		ChangeStats: &diffv1.DiffStats{},
 	})
 	if !strings.Contains(out, "No dependency changes detected") {
 		t.Fatalf("expected empty-diff message, got:\n%s", out)

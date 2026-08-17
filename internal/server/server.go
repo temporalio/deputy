@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -383,9 +384,24 @@ func New(cfg Config) (*Server, error) {
 	// Note: Authentication is now handled at the HTTP layer via authn middleware.
 	// Claims are accessible via jwt.ClaimsFromAuthn(ctx) in handlers and interceptors.
 
-	// Add policy interceptor if policies are configured
+	// Add policy interceptor if policies are configured. The engine is compiled
+	// once here rather than per request: policies are read at startup and never
+	// reloaded, so recompiling every CEL source on each RPC only bought latency,
+	// and a malformed bundle now fails startup instead of every request.
 	if len(policies) > 0 {
-		interceptors = append(interceptors, policyInterceptor(policies))
+		policyEngine, err := policy.NewEngine(policies)
+		if err != nil {
+			if allowInsecure(cfg) {
+				logs.Warn(context.Background(), "policy compilation failed; continuing without policies (insecure override)",
+					"error", err,
+					"paths", cfg.Policies,
+				)
+			} else {
+				return nil, fmt.Errorf("compile policies: %w", err)
+			}
+		} else {
+			interceptors = append(interceptors, policyInterceptor(policyEngine))
+		}
 	}
 
 	// Create service handlers
@@ -1033,28 +1049,79 @@ func recoveryInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
-// procedureToEntrypoint maps RPC procedures to the policy entrypoints that
-// authorize them. Procedures absent from this map are allowed without policy
-// evaluation, so every entry is security-relevant: a stale procedure name
-// silently disables enforcement for that RPC. A drift test checks each key
-// against the procedures the server actually registers.
+// procedureToEntrypoint maps every procedure of a policy-bearing service to
+// the policy entrypoint that authorizes it. Procedures absent from this map
+// are allowed without evaluating any policy, so an omission silently disables
+// authorization for that RPC. A drift test checks the map against the
+// procedures the server actually registers, in both directions.
+//
+// Keys are the generated Connect procedure constants rather than string
+// literals: a renamed or removed procedure then breaks the build here instead
+// of turning into a dead key whose entrypoint is never evaluated.
+//
+// Streaming procedures are listed for completeness but are inert today, since
+// policyInterceptor is a connect.UnaryInterceptorFunc whose
+// WrapStreamingHandler returns the next handler untouched. Enforcing them
+// needs a streaming interceptor, tracked in #194.
 var procedureToEntrypoint = map[string]policy.Entrypoint{
-	"/deputy.scan.v1.ScanService/Scan":           policy.EntrypointServiceScanRequest,
-	"/deputy.scan.v1.ScanService/StreamScan":     policy.EntrypointServiceScanRequest,
-	"/deputy.list.v1.ListService/ListPackages":   policy.EntrypointServiceListRequest,
-	"/deputy.list.v1.ListService/ListEcosystems": policy.EntrypointServiceListRequest,
-	"/deputy.sbom.v1.SBOMService/Generate":       policy.EntrypointServiceSBOMRequest,
-	"/deputy.sbom.v1.SBOMService/Diff":           policy.EntrypointServiceSBOMRequest,
-	"/deputy.diff.v1.DiffService/Diff":           policy.EntrypointServiceDiffRequest,
-	"/deputy.secrets.v1.SecretsService/Scan":     policy.EntrypointServiceSecretsRequest,
-	"/deputy.graph.v1.GraphService/Resolve":      policy.EntrypointServiceGraphRequest,
-	"/deputy.graph.v1.GraphService/Why":          policy.EntrypointServiceGraphRequest,
+	scanv1connect.ScanServiceScanProcedure:       policy.EntrypointServiceScanRequest,
+	scanv1connect.ScanServiceStreamScanProcedure: policy.EntrypointServiceScanRequest,
+
+	listv1connect.ListServiceListPackagesProcedure:   policy.EntrypointServiceListRequest,
+	listv1connect.ListServiceListEcosystemsProcedure: policy.EntrypointServiceListRequest,
+
+	sbomv1connect.SBOMServiceGenerateProcedure: policy.EntrypointServiceSBOMRequest,
+	sbomv1connect.SBOMServiceDiffProcedure:     policy.EntrypointServiceSBOMRequest,
+
+	diffv1connect.DiffServiceDiffPackagesProcedure:        policy.EntrypointServiceDiffRequest,
+	diffv1connect.DiffServiceDiffVulnerabilitiesProcedure: policy.EntrypointServiceDiffRequest,
+	diffv1connect.DiffServiceDiffContainerImagesProcedure: policy.EntrypointServiceDiffRequest,
+
+	secretsv1connect.SecretsServiceScanProcedure:             policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceStreamScanProcedure:       policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceScanHistoryProcedure:      policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceScanDiffProcedure:         policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceVerifyProcedure:           policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceListDetectorsProcedure:    policy.EntrypointServiceSecretsRequest,
+	secretsv1connect.SecretsServiceRegisterDetectorProcedure: policy.EntrypointServiceSecretsRequest,
+
+	graphv1connect.GraphServiceBuildGraphProcedure:    policy.EntrypointServiceGraphRequest,
+	graphv1connect.GraphServiceWhyDependencyProcedure: policy.EntrypointServiceGraphRequest,
+	graphv1connect.GraphServiceQueryGraphProcedure:    policy.EntrypointServiceGraphRequest,
+}
+
+// serverPolicyCommand is the policy command every request the server evaluates
+// runs under. It is both the value policies read as env.command and the value
+// the engine filters commands: declarations against, so the two cannot drift.
+const serverPolicyCommand = "server"
+
+// evaluateServicePolicies runs the configured policy sources for one RPC at the
+// entrypoint the interceptor resolved from procedureToEntrypoint.
+//
+// It exists to forward both scoping dimensions. The package-level
+// policy.EvaluateAll helper evaluates with an empty command and entrypoint, and
+// shouldSkip applies each filter only when its argument is non-empty, so every
+// loaded policy would run at every mapped procedure: a policy declaring
+// entrypoints: [service_scan_request] would deny diff requests, and a policy
+// declaring commands: [scan] would run against server payloads it was never
+// written for.
+//
+// Both arguments must stay non-empty. Over-application is not merely noisy
+// here: policyInterceptor turns any evaluation error into CodeInternal, so one
+// CLI-scoped policy in a shared bundle whose expression does not fit a server
+// payload fails every mapped RPC closed. The command is always "server", which
+// is what buildPolicyPayload reports as env.command, so a policy's declared
+// scope and the scope it is filtered by cannot disagree.
+func evaluateServicePolicies(ctx context.Context, engine *policy.Engine, entrypoint policy.Entrypoint, payload proto.Message) ([]policy.Action, error) {
+	return engine.EvaluateAll(ctx, payload, serverPolicyCommand, entrypoint.String())
 }
 
 // policyInterceptor evaluates service-level policies for authorization.
-// It maps RPC procedures to policy entrypoints and evaluates policies with
-// JWT claims (jwt.*), request metadata, and target information.
-func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
+// It maps RPC procedures to policy entrypoints via procedureToEntrypoint and
+// evaluates policies with JWT claims (jwt.*), request metadata, and target
+// information. Procedures with no mapping, and every streaming procedure, are
+// passed through unevaluated (see procedureToEntrypoint and #194).
+func policyInterceptor(engine *policy.Engine) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			procedure := req.Spec().Procedure
@@ -1069,8 +1136,8 @@ func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
 			// Build the policy payload
 			payload := buildPolicyPayload(ctx, req, entrypoint)
 
-			// Evaluate policies
-			actions, err := policy.EvaluateAll(ctx, policies, payload)
+			// Evaluate policies that declare this entrypoint
+			actions, err := evaluateServicePolicies(ctx, engine, entrypoint, payload)
 			if err != nil {
 				logs.Error(ctx, "policy evaluation failed",
 					"procedure", procedure,
@@ -1131,7 +1198,7 @@ func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
 func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint policy.Entrypoint) proto.Message {
 	// Build common fields
 	env := &policyv1.Environment{
-		Command:    "server",
+		Command:    serverPolicyCommand,
 		Entrypoint: entrypoint.String(),
 	}
 
@@ -1163,16 +1230,21 @@ func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint 
 		Procedure: req.Spec().Procedure,
 	}
 
-	// Build target if extractable
-	var target *targetv1.Target
+	// Extract the targets the request names. Diff requests name two, and both
+	// have to reach the policy, so authorization cannot be satisfied by the
+	// base side alone.
+	var extracted requestTargets
 	if msg := req.Any(); msg != nil {
-		if targetStr := extractTargetFromMessage(msg); targetStr != "" {
-			svcReq.Target = targetStr
-			target = &targetv1.Target{
-				DisplayPath: targetStr,
-			}
-		}
+		extracted = extractRequestTargets(msg)
 	}
+
+	// ServiceRequest.target is a single string, so a two-sided request reports
+	// its base there (falling back to the target side when the base is
+	// absent). diff_base and diff_target on the typed diff input below are
+	// what a diff policy should match on.
+	svcReq.Target = cmp.Or(extracted.base, extracted.target)
+
+	target := policyTarget(extracted.target)
 
 	// Return the appropriate typed input based on entrypoint
 	switch entrypoint {
@@ -1198,13 +1270,14 @@ func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint 
 			Env:     env,
 		}
 	case policy.EntrypointServiceDiffRequest:
-		// Diff has base_target and target_target instead of target
+		// Diff has diff_base and diff_target instead of target, and each
+		// carries its own side of the comparison.
 		return &policyv1.ServiceDiffRequestPolicyInput{
-			Jwt:          jwtClaims,
-			Request:      svcReq,
-			BaseTarget:   target,
-			TargetTarget: target,
-			Env:          env,
+			Jwt:        jwtClaims,
+			Request:    svcReq,
+			DiffBase:   diffSideTarget(extracted.base),
+			DiffTarget: diffSideTarget(extracted.target),
+			Env:        env,
 		}
 	case policy.EntrypointServiceSecretsRequest:
 		return &policyv1.ServiceSecretsRequestPolicyInput{
@@ -1231,25 +1304,67 @@ func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint 
 	}
 }
 
-// extractTargetFromMessage attempts to extract the target field from request messages.
-// This uses type assertions for known request types with GetTarget/GetPath methods.
-func extractTargetFromMessage(msg any) string {
-	// Check for Target field (most scan/list/sbom requests)
-	if m, ok := msg.(interface{ GetTarget() string }); ok {
-		return m.GetTarget()
+// requestTargets are the targets a request names. Most requests name one, in
+// target. A diff compares two independent resources, so it names both, and
+// each has to reach the policy on its own field: a policy that authorizes one
+// side must not be handed that side twice.
+type requestTargets struct {
+	base   string
+	target string
+}
+
+// extractRequestTargets pulls the targets out of a request message by the
+// getters its generated type carries. A request that names no target yields
+// the zero value; how the caller renders that is its own decision, since a
+// procedure with no target at all and a diff side the caller omitted are not
+// the same thing.
+func extractRequestTargets(msg any) requestTargets {
+	// Two-sided requests are matched first, and on both getters at once, so a
+	// diff can never fall through to a single-target case and report one side
+	// as if it were the whole request. Order matters here: a diff request also
+	// satisfies the single GetTarget() case below, so moving or dropping this
+	// case would silently reduce a diff to its target side.
+	switch m := msg.(type) {
+	case interface {
+		GetBase() string
+		GetTarget() string
+	}:
+		// DiffPackages, DiffVulnerabilities.
+		return requestTargets{base: m.GetBase(), target: m.GetTarget()}
+	case interface {
+		GetBaseImage() string
+		GetTargetImage() string
+	}:
+		// DiffContainerImages.
+		return requestTargets{base: m.GetBaseImage(), target: m.GetTargetImage()}
+	case interface{ GetTarget() string }:
+		// Scan, list, sbom, secrets, and graph requests.
+		return requestTargets{target: m.GetTarget()}
+	case interface{ GetPath() string }:
+		return requestTargets{target: m.GetPath()}
 	}
 
-	// Check for BaseTarget (diff requests)
-	if m, ok := msg.(interface{ GetBaseTarget() string }); ok {
-		if base := m.GetBaseTarget(); base != "" {
-			return base
-		}
-	}
+	return requestTargets{}
+}
 
-	// Check for Path (secrets requests)
-	if m, ok := msg.(interface{ GetPath() string }); ok {
-		return m.GetPath()
+// policyTarget renders a target string as a policy target, or nil when the
+// request did not name one. Nil rather than an empty Target keeps "the request
+// named no target" distinguishable from "the request named the empty string",
+// which matters for procedures that have no target at all (SecretsService
+// Verify, ListDetectors, RegisterDetector).
+func policyTarget(value string) *targetv1.Target {
+	if value == "" {
+		return nil
 	}
+	return &targetv1.Target{DisplayPath: value}
+}
 
-	return ""
+// diffSideTarget renders one side of a diff request as a policy target. Both
+// sides are always bound, even when the caller left one empty, because a diff
+// always has two sides and the policy has to be able to talk about each. An
+// omitted side therefore reads as an empty display_path, which fails any
+// allowlist check, rather than dropping the variable and making every policy
+// that references it error out.
+func diffSideTarget(value string) *targetv1.Target {
+	return &targetv1.Target{DisplayPath: value}
 }

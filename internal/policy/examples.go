@@ -15,6 +15,7 @@ import (
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -177,7 +178,11 @@ func generateVariableValue(ep Entrypoint, varName string, level ExampleLevel, re
 	case "jwt":
 		return generateJWT(level), "JWT claims (anonymous if no auth)"
 	case "target":
-		return generateTarget(level), "scan target metadata"
+		return generateTarget(ep, level), "scan target metadata"
+	case "diff_base":
+		return generateDiffTarget(level, "base"), "the base side of the diff"
+	case "diff_target":
+		return generateDiffTarget(level, "target"), "the target side of the diff"
 	case "image", "image_info":
 		return generateImageInfo(level), "container image configuration"
 	case "licenses":
@@ -250,6 +255,10 @@ func generateVariableValue(ep Entrypoint, varName string, level ExampleLevel, re
 		return generateLayerDiff(level), "layer difference"
 	case "repo":
 		return "github.com/example/app", "repository path"
+	case "base_ref":
+		return "main", "the git ref the diff starts from"
+	case "target_ref":
+		return "feature/upgrade-deps", "the git ref being compared"
 	default:
 		return nil, ""
 	}
@@ -494,20 +503,62 @@ func generateJWT(level ExampleLevel) map[string]any {
 	return mustProtoToMap(jwt)
 }
 
-// generateTarget creates target metadata.
-func generateTarget(level ExampleLevel) map[string]any {
-	target := map[string]any{
-		"display_path": "/path/to/project",
-		"type":         "directory",
+// exampleTarget builds a target fixture from targetv1.Target and converts it
+// with the same function the engine uses at evaluation time, so the example
+// cannot advertise a field a policy will not find on a real request.
+//
+// The hand written maps this replaces had drifted from the proto: they emitted
+// "type" and "origin", which the message does not define, and put a branch name
+// in "reference", which holds a container image reference. A policy copied from
+// that output compiled, because these variables are dynamic, then failed with a
+// missing field error during evaluation.
+func exampleTarget(level ExampleLevel, displayPath, ref, commit string) map[string]any {
+	target := &targetv1.Target{
+		Kind:        targetv1.TargetKind_TARGET_KIND_DIR,
+		DisplayPath: displayPath,
 	}
 
 	if level != ExampleLevelMinimal {
-		target["commit_hash"] = "abc123def456"
-		target["reference"] = "main"
-		target["origin"] = "https://github.com/example/project.git"
+		target.Ref = ref
+		target.EffectiveRef = ref
+		target.CommitHash = commit
+		target.OriginUrl = "https://github.com/example/project.git"
 	}
 
-	return target
+	return mustProtoToMap(target)
+}
+
+// serviceTarget builds the target fixture for a service entrypoint, where the
+// server names a resource with a string and nothing else. buildPolicyPayload
+// wraps that string as a Target carrying only display_path, so populating a
+// kind, ref, commit, or origin here would let a policy pass a fixture and then
+// never match a real request.
+func serviceTarget(displayPath string) map[string]any {
+	return mustProtoToMap(&targetv1.Target{DisplayPath: displayPath})
+}
+
+// generateTarget creates target metadata. Service entrypoints receive the
+// display-path-only shape their payload actually carries; CLI entrypoints
+// resolve a real target and see the fuller message.
+func generateTarget(ep Entrypoint, level ExampleLevel) map[string]any {
+	if ep.Category() == "server" {
+		return serviceTarget("/path/to/project")
+	}
+	return exampleTarget(level, "/path/to/project", "main", "abc123def456")
+}
+
+// generateDiffTarget creates one side of a diff request's target pair. The two
+// sides get distinct values because a diff compares independent resources, and
+// a fixture that repeated one value would let a policy checking only one side
+// pass against it.
+//
+// Diff sides only ever occur on a service entrypoint, so both carry just a
+// display path, matching diffSideTarget in the server.
+func generateDiffTarget(level ExampleLevel, side string) map[string]any {
+	if side == "base" {
+		return serviceTarget("/path/to/base")
+	}
+	return serviceTarget("/path/to/target")
 }
 
 // generateImageInfo creates container image information.

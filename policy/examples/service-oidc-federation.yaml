@@ -15,7 +15,22 @@
 #   - Azure AD: https://login.microsoftonline.com/{tenant}/v2.0
 #   - Kubernetes: https://kubernetes.default.svc.cluster.local
 #
+# A subject prefix is a claim, not a proof of origin, so every rule below pairs a
+# subject shape with the issuer allowed to mint it. Without that, any accepted
+# issuer that can carry custom claims can present sub=system:serviceaccount:...
+# and be treated as a Kubernetes workload. Replace these issuer URLs with your
+# own: a cluster issuer is deployment-specific, and "sa:" here stands for
+# Deputy's own service account issuer.
+#
 # JWT claims vary by provider. See examples below for provider-specific patterns.
+#
+# Two kinds of rule appear below, and the difference decides which entrypoints
+# each one declares. A rule that decides whether a caller is trusted at all
+# covers every service entrypoint, because an identity that may not scan may not
+# diff or build a dependency graph either. A rule scoped to one operation, such
+# as restricting secrets scanning to approved repositories, names only that
+# operation's entrypoint. Adding a service entrypoint means revisiting the first
+# kind; internal/policy enforces that with a test over EntrypointsService.
 
 policies:
   # =============================================================================
@@ -40,8 +55,11 @@ policies:
     description: Only allow workflows from trusted GitHub organizations
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
       - service_secrets_request
+      - service_diff_request
+      - service_graph_request
     rules:
       - action: deny
         when: |
@@ -123,11 +141,15 @@ policies:
     description: Only allow GitLab projects from trusted namespaces
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
+      - service_diff_request
+      - service_graph_request
+      - service_secrets_request
     rules:
       - action: deny
         when: |
-          jwt.?iss.orValue("").contains("gitlab") &&
+          jwt.?iss.orValue("") == "https://gitlab.com" &&
           !jwt.?namespace_path.orValue("").matches("^(acme|acme-security|acme-platform)(/.*)?$")
         reason: "Only projects from trusted GitLab namespaces allowed"
 
@@ -138,7 +160,7 @@ policies:
     rules:
       - action: deny
         when: |
-          jwt.?iss.orValue("").contains("gitlab") &&
+          jwt.?iss.orValue("") == "https://gitlab.com" &&
           jwt.?environment.orValue("") != "" &&
           !(jwt.?environment.orValue("") in ["production", "staging"])
         reason: "Secrets scanning requires protected environment"
@@ -159,8 +181,11 @@ policies:
     description: Only allow specific GCP service accounts
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
       - service_secrets_request
+      - service_diff_request
+      - service_graph_request
     rules:
       - action: deny
         when: |
@@ -177,6 +202,11 @@ policies:
     description: Restrict to service accounts from specific GCP projects
     entrypoints:
       - service_scan_request
+      - service_list_request
+      - service_diff_request
+      - service_graph_request
+      - service_sbom_request
+      - service_secrets_request
     rules:
       - action: deny
         when: |
@@ -195,12 +225,30 @@ policies:
   # The AWS account/role context is in the assumed role ARN.
 
   - name: aws-account-restriction
-    description: Restrict based on AWS account ID in assumed role claims
+    description: |
+      Restrict based on the AWS account ID in assumed role claims.
+
+      AWS does not mint the token Deputy sees. A workload exchanges a token from
+      its own identity provider for AWS credentials, so the assumed-role ARN
+      arrives as a claim on that provider's token. The issuer named here is
+      therefore the identity provider, not AWS, and a deployment must set it to
+      whichever provider it trusts to assert an ARN.
+
+      Naming it is the whole point. Without an issuer, any other accepted issuer
+      able to set custom claims could present
+      amr: ["arn:aws:sts::123456789012:assumed-role/anything"], and this rule
+      would read the approved account number and admit it.
     entrypoints:
       - service_scan_request
+      - service_list_request
+      - service_diff_request
+      - service_graph_request
+      - service_sbom_request
+      - service_secrets_request
     rules:
       - action: deny
         when: |
+          jwt.?iss.orValue("") == "https://acme.okta.com" &&
           has(jwt.amr) &&
           jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::")) &&
           !jwt.?amr.orValue([]).exists(a,
@@ -226,11 +274,15 @@ policies:
     description: Only allow tokens from specific Azure AD tenants
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
+      - service_diff_request
+      - service_graph_request
+      - service_secrets_request
     rules:
       - action: deny
         when: |
-          jwt.?iss.orValue("").contains("login.microsoftonline.com") &&
+          jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
           !(jwt.?tid.orValue("") in [
             "12345678-1234-1234-1234-123456789abc",
             "87654321-4321-4321-4321-cba987654321"
@@ -244,7 +296,7 @@ policies:
     rules:
       - action: deny
         when: |
-          jwt.?iss.orValue("").contains("login.microsoftonline.com") &&
+          jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
           jwt.?idtyp.orValue("") == "app" &&
           !(jwt.?oid.orValue("") in [
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -268,10 +320,15 @@ policies:
     description: Only allow workloads from specific Kubernetes namespaces
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
+      - service_diff_request
+      - service_graph_request
+      - service_secrets_request
     rules:
       - action: deny
         when: |
+          jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
           jwt.?sub.orValue("").startsWith("system:serviceaccount:") &&
           !("kubernetes.io/serviceaccount/namespace" in jwt &&
             jwt["kubernetes.io/serviceaccount/namespace"] in ["security", "ci-cd", "production"])
@@ -284,6 +341,7 @@ policies:
     rules:
       - action: deny
         when: |
+          jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
           jwt.?sub.orValue("").startsWith("system:serviceaccount:") &&
           !jwt.?sub.orValue("").matches("^system:serviceaccount:(security|ci-cd):(deputy-scanner|security-bot)$")
         reason: "Service account not authorized for secrets scanning"
@@ -297,22 +355,70 @@ policies:
   # These tokens contain user-specific claims like email, groups, roles.
 
   - name: human-require-mfa
-    description: Require MFA for human users accessing sensitive operations
+    description: |
+      Require MFA for human users accessing sensitive operations.
+
+      "Human" means an identity that is not recognizably a machine, so the test
+      enumerates the machine shapes this file documents. It has to enumerate
+      them: a machine identity carries no MFA factor and never will, so treating
+      an unrecognized subject as human denies a CI job rather than challenging a
+      person. The earlier version recognized only Deputy service accounts,
+      Kubernetes workloads, and GitHub Actions, which left GitLab, Google, AWS,
+      and Azure machine identities denied unconditionally at this entrypoint.
+
+      Each branch recognizes a provider and pairs the shape with its issuer where
+      the shape alone is a name any issuer could mint, which is the same reason
+      the GCP branch of unified-identity-authorization checks the issuer. Which
+      accounts and namespaces are acceptable stays with the per-provider rules;
+      this only decides whether a caller is a machine.
+
+      That provider recognition is now written twice in this file, here and in
+      unified-identity-authorization, because a policy cannot share a definition
+      with another policy. Both copies drifting is a real risk.
     entrypoints:
       - service_secrets_request
     rules:
       - action: deny
         when: |
           !jwt.anonymous &&
-          !jwt.?sub.orValue("").startsWith("system:") &&
-          !jwt.?sub.orValue("").startsWith("sa:") &&
-          !jwt.?sub.orValue("").startsWith("repo:") &&
-          !jwt.?amr.orValue([]).exists(a, a in ["mfa", "otp", "hwk", "swk"])
+          !(
+            // Deputy service account, Kubernetes workload, or GitHub Actions.
+            (jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
+             jwt.?sub.orValue("").startsWith("system:")) ||
+            (jwt.?iss.orValue("") == "https://deputy.acme-corp.internal" &&
+             jwt.?sub.orValue("").startsWith("sa:")) ||
+            (jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+             jwt.?sub.orValue("").startsWith("repo:")) ||
+            // GitLab CI job.
+            (jwt.?iss.orValue("") == "https://gitlab.com" &&
+             jwt.?sub.orValue("").startsWith("project_path:")) ||
+            // AWS role assumed through web identity.
+            (jwt.?iss.orValue("") == "https://acme.okta.com" &&
+             jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::"))) ||
+            // Google service account.
+            (jwt.?iss.orValue("") == "https://accounts.google.com" &&
+             jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com")) ||
+            // Azure application identity rather than a user.
+            (jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
+             jwt.?idtyp.orValue("") == "app")
+          ) &&
+          !((jwt.?iss.orValue("") == "https://acme.okta.com" ||
+             jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/")) &&
+            jwt.?amr.orValue([]).exists(a, a in ["mfa", "otp", "hwk", "swk"]))
         reason: "Multi-factor authentication required for secrets scanning"
         remediation: "Re-authenticate with MFA enabled"
 
   - name: human-group-restriction
-    description: Require security group membership for sensitive operations
+    description: |
+      Require security group membership for sensitive operations.
+
+      The machine exemption is the same one human-require-mfa applies, and for
+      the same reason: an email claim does not mean a person. A Google service
+      account presents deputy-scanner@acme-prod.iam.gserviceaccount.com, so
+      keying on the presence of an email denied every service account here.
+
+      This is the fourth copy of provider recognition in this file, because a
+      policy cannot share a definition with another policy.
     entrypoints:
       - service_secrets_request
     rules:
@@ -320,7 +426,25 @@ policies:
         when: |
           !jwt.anonymous &&
           jwt.?email.orValue("") != "" &&
-          !jwt.?groups.orValue([]).exists(g, g in ["security-team", "sre-oncall", "platform-admins"])
+          !(
+            (jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
+             jwt.?sub.orValue("").startsWith("system:")) ||
+            (jwt.?iss.orValue("") == "https://deputy.acme-corp.internal" &&
+             jwt.?sub.orValue("").startsWith("sa:")) ||
+            (jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+             jwt.?sub.orValue("").startsWith("repo:")) ||
+            (jwt.?iss.orValue("") == "https://gitlab.com" &&
+             jwt.?sub.orValue("").startsWith("project_path:")) ||
+            (jwt.?iss.orValue("") == "https://acme.okta.com" &&
+             jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::"))) ||
+            (jwt.?iss.orValue("") == "https://accounts.google.com" &&
+             jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com")) ||
+            (jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") &&
+             jwt.?idtyp.orValue("") == "app")
+          ) &&
+          !((jwt.?iss.orValue("") == "https://acme.okta.com" ||
+             jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/")) &&
+            jwt.?groups.orValue([]).exists(g, g in ["security-team", "sre-oncall", "platform-admins"]))
         reason: "Security group membership required"
         remediation: "Request access in #security-access channel"
 
@@ -331,49 +455,83 @@ policies:
 
   - name: unified-identity-authorization
     description: |
-      Unified policy supporting both human and machine identities.
-      Determines identity type from token claims and applies appropriate rules.
+      Deny any authenticated identity that is not one of the shapes this
+      deployment trusts, for both human and machine callers.
+
+      This is one deny whose condition negates every trusted shape, rather than
+      a list of allow rules followed by a catch-all deny, because that shape
+      cannot express what it looks like it expresses. Rules do not short circuit
+      and a deny is final regardless of any allow, so a catch-all "deny unless
+      anonymous" fires for the trusted identities too and the policy denies
+      everyone. Writing the trusted set once and negating it keeps the two in
+      agreement, at the cost of one long expression. Whether an allow should be
+      able to lift a deny is a separate question.
+
+      Each branch recognizes a provider, and deliberately does not repeat which
+      organizations, namespaces, projects, accounts, or tenants that provider is
+      allowed to present. Those live in the per-provider rules above, and every
+      one of them denies at every service entrypoint, so the two compose: this
+      rule refuses an identity that matches no provider at all, and each gate
+      refuses the callers its own provider should not admit. Restating an
+      allowlist here would create a second copy to drift, which it did: an
+      earlier version trusted two organizations while the allowlist accepted
+      three, so the third was admitted by one rule and denied by the other.
+
+      The human branch is the exception and it needs a rule of its own, because
+      no other policy here gates general human access by group. It carries the
+      union of every group this file names anywhere. A broad gate has to admit
+      everyone a narrow gate admits, or the narrow gate is unreachable: when this
+      list held three groups and the secrets rule accepted sre-oncall, an
+      sre-oncall human was accepted for secrets and refused entry, so they could
+      not reach it at all.
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
+      - service_diff_request
+      - service_graph_request
+      - service_secrets_request
     rules:
-      # GitHub Actions: allow from trusted repos
-      - action: allow
-        when: |
-          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
-          jwt.?repository_owner.orValue("") in ["acme-corp", "acme-infra"]
-        reason: "Trusted GitHub Actions workflow"
-
-      # GitLab CI: allow from trusted namespaces
-      - action: allow
-        when: |
-          jwt.?iss.orValue("").contains("gitlab") &&
-          jwt.?namespace_path.orValue("").startsWith("acme")
-        reason: "Trusted GitLab CI pipeline"
-
-      # GCP Service Account: allow from trusted projects
-      - action: allow
-        when: |
-          jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com") &&
-          jwt.?email.orValue("").matches("@acme-(prod|staging|ci)\\.iam")
-        reason: "Trusted GCP service account"
-
-      # Kubernetes: allow from security namespace
-      - action: allow
-        when: |
-          jwt.?sub.orValue("").startsWith("system:serviceaccount:security:")
-        reason: "Trusted Kubernetes security workload"
-
-      # Humans: allow with appropriate group membership
-      - action: allow
-        when: |
-          jwt.?email.orValue("") != "" &&
-          jwt.?groups.orValue([]).exists(g, g in ["developers", "security-team", "platform"])
-        reason: "Authorized human user"
-
-      # Deny everything else that's not anonymous (anonymous handled by auth)
       - action: deny
-        when: "!jwt.anonymous"
+        when: |
+          !jwt.anonymous &&
+          !(
+            // A GitHub Actions workflow. Which organizations are acceptable is
+            // github-actions-organization-allowlist's decision, not this rule's.
+            jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" ||
+            // A GitLab CI job; gitlab-namespace-restriction picks the namespaces.
+            jwt.?iss.orValue("") == "https://gitlab.com" ||
+            // A Google service account; the two gcp- rules pick the accounts and
+            // projects. The issuer is part of the shape, because the email claim
+            // alone is a name any issuer can mint.
+            (jwt.?iss.orValue("") == "https://accounts.google.com" &&
+             jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com")) ||
+            // An assumed AWS role; aws-account-restriction picks the accounts.
+            (jwt.?iss.orValue("") == "https://acme.okta.com" &&
+             jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::"))) ||
+            // An Azure AD identity; azure-tenant-restriction picks the tenants.
+            jwt.?iss.orValue("").startsWith("https://login.microsoftonline.com/") ||
+            // A Kubernetes workload; kubernetes-namespace-restriction picks the
+            // namespaces. The issuer is part of the shape: any issuer that can
+            // carry custom claims could otherwise mint this subject.
+            (jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
+             jwt.?sub.orValue("").startsWith("system:serviceaccount:")) ||
+            // A Deputy-issued service account; service-account-scopes picks the
+            // scopes. The human-only rules already recognize this shape, and
+            // omitting it here denied it everywhere.
+            (jwt.?iss.orValue("") == "https://deputy.acme-corp.internal" &&
+             jwt.?sub.orValue("").startsWith("sa:")) ||
+            // A human from the corporate identity provider, with an authorized
+            // group membership. The issuer is as load-bearing here as in every
+            // machine branch: a group claim only means something when it comes
+            // from the directory that assigns groups.
+            (jwt.?iss.orValue("") == "https://acme.okta.com" &&
+             jwt.?email.orValue("") != "" &&
+             jwt.?groups.orValue([]).exists(g, g in [
+               "developers", "security-team", "platform",
+               "sre-oncall", "platform-admins"
+             ]))
+          )
         reason: "Identity not authorized"
         remediation: "Contact security team for access"
 
