@@ -12,9 +12,20 @@ import (
 var (
 	yamlTopKeys = []string{"policies", "metadata"}
 	policyKeys  = []string{"name", "description", "ecosystems", "entrypoints", "commands", "mode", "vars", "rules"}
-	actions     = []string{"allow", "deny", "warn"}
-	modes       = []string{"enforce", "advisory"}
 )
+
+// actions is the vocabulary offered for a rule's action field. It comes from the
+// deputy.policy.v1.ActionType descriptor by way of policy.ActionTypes, the same
+// list validation enforces, so an action added to the proto is suggested by the
+// editor as soon as it is accepted by the linter.
+var actions = policy.ActionTypes()
+
+// modes is the vocabulary offered for a policy's mode field. It comes from
+// policy.Modes, the list ValidateMode accepts, so a mode Deputy gains is
+// suggested by the editor as soon as it is accepted by the linter. A copy kept
+// here drifts the moment one is added, and the editor is where an author looks to
+// find out what they may write.
+var modes = policy.Modes()
 
 // celVariables are the common identifiers injected into CEL environments.
 var celVariables = append([]string{}, policy.DefaultVariableNames()...)

@@ -41,7 +41,7 @@ Deputy uses the Common Expression Language (CEL) to define security policies for
 
 SUBCOMMANDS:
 • eval:    Evaluate a policy against a JSON input
-• lint:    Check policy syntax and types
+• lint:    Check policy structure, syntax, and types
 • test:    Run unit tests for policies
 • bundle:  Package multiple policies into a single file
 • repl:    Interactive policy development shell
@@ -312,44 +312,67 @@ func newPolicyLintCommand() *cobra.Command {
 	var extraVars []string
 	cmd := &cobra.Command{
 		Use:           "lint <policy.yaml> [policy2.yaml ...]",
-		Short:         "Lint CEL policies for syntax/type issues",
+		Short:         "Lint policy bundles for structure, syntax, and type issues",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stdinUsed := false
+			failures := 0
 			for _, path := range args {
-				if path == "-" {
-					data, err := readPathOrStdinOnce(cmd.InOrStdin(), path, &stdinUsed)
+				data, err := readPathOrStdinOnce(cmd.InOrStdin(), path, &stdinUsed)
+				if err != nil {
+					return fmt.Errorf("read %q: %w", path, err)
+				}
+				// Prefer structured lint for YAML bundles: it validates the whole
+				// bundle, not just the CEL, and reports clearer errors. The choice is
+				// made from the bytes, so a bundle reaches the same checks however it
+				// is supplied; deciding it from the path used to lint a piped bundle
+				// as raw CEL and fail on its first key.
+				handled, problems, err := lintStructuredBundle(data, path, extraVars, cmd.OutOrStdout())
+				if err != nil {
+					return err
+				}
+				if handled {
+					failures += problems
+					continue
+				}
+				// A compiled bundle holds its policies as compiled CEL, so it is loaded
+				// as the policies it carries rather than compiled as one expression.
+				// Loading it from the bytes is what makes stdin behave as the
+				// identical file does, since stdin has no path to reread.
+				if policy.IsCompiledBundle(data) {
+					sources, err := policy.LoadSourcesFromBytes(data, path)
 					if err != nil {
-						return fmt.Errorf("read %q: %w", path, err)
+						return err
 					}
-					if err := policy.Compile(string(data), extraVars); err != nil {
-						known := append(policy.DefaultVariableNames(), extraVars...)
-						return fmt.Errorf("%s: %s", path, formatCelCompileError(err, string(data), known))
+					if err := lintSources(sources, extraVars); err != nil {
+						return err
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
 					continue
 				}
-				// Prefer structured lint for YAML bundles for clearer CEL errors.
-				ok, err := lintStructuredBundle(path, extraVars, cmd.OutOrStdout())
-				if err != nil {
-					return err
-				}
-				if ok {
+				// Raw CEL. Stdin is checked as the one source it is, while a file is
+				// loaded, since it may hold several. Both go through lintSources, so a
+				// source piped in is asked the same questions as the identical file.
+				if path == "-" {
+					if err := lintSources([]policy.Source{{Name: path, Body: string(data)}}, extraVars); err != nil {
+						return err
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
 					continue
 				}
 				sources, err := policy.LoadSources([]string{path})
 				if err != nil {
 					return err
 				}
-				for _, src := range sources {
-					if err := policy.Compile(src.Body, extraVars); err != nil {
-						known := append(policy.DefaultVariableNames(), extraVars...)
-						return fmt.Errorf("%s: %s", src.Name, formatCelCompileError(err, src.Body, known))
-					}
+				if err := lintSources(sources, extraVars); err != nil {
+					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
+			}
+			if failures > 0 {
+				return fmt.Errorf("%d policy problem(s) found", failures)
 			}
 			return nil
 		},
@@ -358,33 +381,94 @@ func newPolicyLintCommand() *cobra.Command {
 	return cmd
 }
 
-// lintStructuredBundle lints a YAML structured bundle with friendlier CEL errors.
-// Returns ok=true if the bundle was structured and handled here.
-func lintStructuredBundle(path string, extraVars []string, out io.Writer) (ok bool, err error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-	bundle, parsed, err := policy.TryParseStructuredBundleBytes(data)
-	if err != nil {
-		return true, err
-	}
-	if !parsed {
-		return false, nil
-	}
-	for pi, pol := range bundle.Policies {
-		declared := append(extraVars, pol.Vars.Names()...)
-		known := append(policy.DefaultVariableNames(), declared...)
-		for ri, rule := range pol.Rules {
-			if err := policy.Compile(rule.When, declared); err != nil {
-				pref := fmt.Sprintf("%s::%s rule[%d]", path, pol.Name, ri)
-				return true, fmt.Errorf("%s: %s", pref, formatCelCompileError(err, rule.When, known))
-			}
+// lintSources checks every source a policy file loaded into the way loading it to
+// run it does: the CEL has to compile, and the `//!` metadata beside it has to name
+// vocabularies Deputy recognizes. It stops at the first source that fails, in the
+// order the engine asks the same two questions, and renders a compiler failure with
+// the caret snippet lint uses for a condition. A file may hold several policies, and
+// a compiled bundle holds one source per policy it was built from.
+//
+// The metadata check is the engine's own (policy.ValidateSourceMetadata) rather than
+// a second reading of it, and it is here for the raw source lint reads off stdin,
+// which is the one source that reaches this without a loader having refused it
+// already. A loaded source is checked as it is loaded, and an authored bundle
+// reaches the same vocabularies through the node walk (see policy.ValidateBundle),
+// so every path lint takes asks what loading the source to run it asks. Checking
+// only the CEL let lint certify an artifact the loader refuses, which is worse than
+// no lint: it is Deputy telling an operator their policy is fine.
+func lintSources(sources []policy.Source, extraVars []string) error {
+	for _, src := range sources {
+		if err := policy.Compile(src.Body, extraVars); err != nil {
+			known := append(policy.DefaultVariableNames(), extraVars...)
+			return fmt.Errorf("%s: %s", src.Name, formatCelCompileError(err, src.Body, known))
 		}
-		_ = pi
+		if err := policy.ValidateSourceMetadata(src); err != nil {
+			return err
+		}
 	}
-	fmt.Fprintf(out, "%s OK\n", labelPath(path))
-	return true, nil
+	return nil
+}
+
+// lintStructuredBundle validates a YAML structured bundle with the same checks
+// the editor runs, printing every issue it finds instead of stopping at the
+// first. It reports handled=false when the data is not a structured bundle so
+// the caller can fall back to compiling it as raw CEL, and returns the number of
+// issues serious enough to fail the run (hints are advice, not failures).
+//
+// It takes the bytes rather than reading them, so stdin and a file are linted
+// the same way; path only names the source in the issues it prints.
+func lintStructuredBundle(data []byte, path string, extraVars []string, out io.Writer) (handled bool, problems int, err error) {
+	// Gate on the bundle's shape, not on whether it decodes: a policy with a
+	// mistyped field must reach validation and be told which field is wrong,
+	// rather than falling through to the generic unrecognized-format error.
+	if !policy.LooksLikeStructuredBundle(data) {
+		return false, 0, nil
+	}
+	issues, err := policy.ValidateBundle(string(data), policy.ValidateOptions{
+		Source:    path,
+		ExtraVars: extraVars,
+		CheckWhen: func(when policy.RuleWhen) []policy.Issue {
+			compileErr := policy.Compile(when.Expr, when.DeclaredVars)
+			if compileErr == nil {
+				return nil
+			}
+			known := append(policy.DefaultVariableNames(), when.DeclaredVars...)
+			return []policy.Issue{{
+				Policy:    when.Policy,
+				RuleIndex: when.RuleIndex,
+				Line:      when.Line,
+				Column:    when.Column,
+				Severity:  policy.IssueError,
+				Code:      "cel-error",
+				Message:   formatCelCompileError(compileErr, when.Expr, known),
+			}}
+		},
+	})
+	if err != nil {
+		return true, 0, fmt.Errorf("lint %q: %w", path, err)
+	}
+	for _, issue := range issues {
+		if issue.Severity != policy.IssueHint {
+			problems++
+		}
+		fmt.Fprintf(out, "%s\n", formatLintIssue(path, issue))
+	}
+	if problems == 0 {
+		fmt.Fprintf(out, "%s OK\n", labelPath(path))
+	}
+	return true, problems, nil
+}
+
+// formatLintIssue renders one issue as a file-anchored line an editor or a human
+// can jump to. Issues that come from loading the bundle name the file in their
+// own message, so that prefix is dropped rather than printed twice.
+func formatLintIssue(path string, issue policy.Issue) string {
+	text := strings.Replace(issue.String(), path+"/", "", 1)
+	text = strings.Replace(text, path+": ", "", 1)
+	if issue.Line <= 0 {
+		return fmt.Sprintf("%s: %s", labelPath(path), text)
+	}
+	return fmt.Sprintf("%s:%s", labelPath(path), text)
 }
 
 // readPathOrStdin reads data from the given path or stdin if path is "-".
@@ -459,6 +543,14 @@ func formatCelCompileError(err error, src string, known []string) string {
 		return celDetail(msg)
 	}
 	line := strings.ReplaceAll(lines[lineNum-1], "\t", " ")
+	// A caret needs a character to sit under. CEL names a line with none when the
+	// source is empty, as a compiled bundle carrying no source for a policy is, and
+	// when the error falls on a blank line inside one. Clamping the column to the
+	// end of that line put it before the line's start and panicked the process, so
+	// the detail is reported without a snippet, as the editor's formatter does.
+	if line == "" {
+		return celDetail(msg)
+	}
 	target := colNum - 1
 	if name := extractUndeclaredName(msg); name != "" {
 		if idx := strings.Index(line, name); idx >= 0 {
@@ -872,6 +964,19 @@ func inspectPolicyPath(w io.Writer, path string) error {
 		return err
 	}
 	if bundle, ok := policy.ParseBundle(data); ok {
+		// Describing a bundle is not the same question as loading one, and inspect
+		// used to answer only the first: it read the bundle's shape and reported the
+		// policies it holds, so a bundle whose `//! policy.mode` the loader refuses
+		// was described as if Deputy could run it. Ask the loader for its verdict
+		// before reporting anything, so every command that reads a compiled bundle
+		// agrees about which ones are bundles Deputy will load.
+		//
+		// The shape is still read separately because the loader returns the policy
+		// sources and not the schema version or the generation time, which are what
+		// inspect exists to show.
+		if _, err := policy.LoadSourcesFromBytes(data, path); err != nil {
+			return err
+		}
 		fmt.Fprintf(w, "Bundle: %s\n", path)
 		fmt.Fprintf(w, "  Schema: %s\n", bundle.SchemaVersion)
 		if bundle.Generated != "" {

@@ -150,7 +150,7 @@ policies:
     description: Recommend distroless images for production
     entrypoints: ["scan_report"]
     rules:
-      - action: info
+      - action: warn
         when: |
           pkg.ecosystem == "docker" &&
           (pkg.name == "debian" || pkg.name == "ubuntu") &&

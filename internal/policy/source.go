@@ -53,33 +53,66 @@ func LoadSources(paths []string) ([]Source, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read policy %q: %w", path, err)
 		}
-		// Try JSON bundle format first (compiled bundles)
-		if bundle, ok := tryParseBundle(data); ok {
-			for _, p := range bundle.Policies {
-				name := p.Name
-				if name == "" {
-					name = filepath.Base(path)
-				}
-				sources = append(sources, Source{
-					Name: fmt.Sprintf("%s::%s", path, name),
-					Body: p.Source,
-				})
-			}
-			continue
-		}
-		// Try structured YAML format (human-authored policies)
-		s, ok, err := tryParseStructuredBundle(data, path)
+		s, err := LoadSourcesFromBytes(data, path)
 		if err != nil {
 			return nil, err
 		}
-		if ok {
-			sources = append(sources, s...)
-			continue
-		}
-		// Neither format matched - provide helpful error
-		return nil, fmt.Errorf("%s: unrecognized policy format; expected YAML with 'policies:' key or JSON bundle with 'schemaVersion' field", path)
+		sources = append(sources, s...)
 	}
 	return sources, nil
+}
+
+// LoadSourcesFromBytes returns the policy sources data holds, trying the
+// compiled bundle format first and the authored one second, exactly as
+// LoadSources does; it is the implementation LoadSources reads files for.
+//
+// It exists for a caller that already has the bytes and no file to reread, such
+// as lint reading stdin. Sharing it is what keeps a policy supplied on stdin
+// loading the same way as the identical file, rather than each caller deciding
+// the format for itself.
+//
+// path names the source in errors and in generated source names; a caller
+// without a file may pass any label.
+func LoadSourcesFromBytes(data []byte, path string) ([]Source, error) {
+	// Try JSON bundle format first (compiled bundles)
+	if bundle, ok := tryParseBundle(data); ok {
+		sources := make([]Source, 0, len(bundle.Policies))
+		for _, p := range bundle.Policies {
+			name := p.Name
+			if name == "" {
+				name = filepath.Base(path)
+			}
+			src := Source{
+				Name: fmt.Sprintf("%s::%s", path, name),
+				Body: p.Source,
+			}
+			// A compiled policy carries its mode and entrypoints as `//!` comments,
+			// and the authored branch below refuses a value outside either vocabulary
+			// while it expands the policy, so refusing one here is what makes loading
+			// a bundle mean the same thing in both of the formats this reads.
+			//
+			// This is the one place every reader of a compiled bundle passes through,
+			// which is why the check belongs here: each caller compiled the CEL and
+			// stopped, so `policy lint` certified a bundle declaring `advsiory` and
+			// `policy bundle` repackaged it, both of them producing an artifact
+			// NewEngine refuses to load.
+			if err := ValidateSourceMetadata(src); err != nil {
+				return nil, err
+			}
+			sources = append(sources, src)
+		}
+		return sources, nil
+	}
+	// Try structured YAML format (human-authored policies)
+	sources, ok, err := tryParseStructuredBundle(data, path)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return sources, nil
+	}
+	// Neither format matched - provide helpful error
+	return nil, fmt.Errorf("%s: unrecognized policy format; expected YAML with 'policies:' key or JSON bundle with 'schemaVersion' field", path)
 }
 
 // BuildBundle compiles all provided policy sources and returns a bundle structure.
@@ -110,6 +143,16 @@ func BuildBundle(paths []string) (*Bundle, error) {
 		Generated:     time.Now().UTC().Format(time.RFC3339),
 		Policies:      policies,
 	}, nil
+}
+
+// IsCompiledBundle reports whether data is a bundle produced by
+// `deputy policy bundle`. JSON is valid YAML, and a compiled bundle also has a
+// non-empty "policies" array, so callers that probe for a structured bundle must
+// rule this shape out first: its entries carry compiled CEL under "source"
+// rather than the rules an authored policy has.
+func IsCompiledBundle(data []byte) bool {
+	_, ok := tryParseBundle(data)
+	return ok
 }
 
 func tryParseBundle(data []byte) (*Bundle, bool) {
