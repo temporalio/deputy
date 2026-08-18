@@ -1,6 +1,7 @@
 package githubactions
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -17,7 +18,15 @@ import (
 // The output format is Dependabot-compatible:
 //
 //	uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-func RewriteWorkflow(root *os.Root, relPath string, updates []pin.Update) error {
+//
+// ctx bounds the write, not the read: a caller that gave up while the file was
+// being read and rewritten has been told its work did not happen, and must not
+// find the file changed afterwards. Reading a workflow is a single bounded
+// read of a regular file, so the check that matters is the one between that
+// read and the write it feeds. [Strategy.Rewrite] passes a background context
+// because [pin.Strategy] carries none; callers that do have a deadline, such as
+// Deputy's deputy:action:pin remediation step, pass theirs here.
+func RewriteWorkflow(ctx context.Context, root *os.Root, relPath string, updates []pin.Update) error {
 	if len(updates) == 0 {
 		return nil
 	}
@@ -38,24 +47,11 @@ func RewriteWorkflow(root *os.Root, relPath string, updates []pin.Update) error 
 	modified := false
 
 	for _, u := range updates {
-		if err := validateUpdate(u); err != nil {
+		if err := ValidateUpdate(u); err != nil {
 			return err
 		}
 
-		escapedRef := regexp.QuoteMeta(u.Name)
-
-		// Match: uses: <optional-quote><action-ref>@<old-ref><optional-quote><optional-comment>
-		// Captures:
-		//   1: prefix including "uses:" and optional quote
-		//   2: the action ref (owner/repo or owner/repo/subpath)
-		//   3: the old version/SHA ref (full token)
-		//   4: optional trailing quote
-		//   5: everything after the ref on the same line (comment, etc.)
-		pattern := fmt.Sprintf(
-			`(uses:\s*["']?)(%s)@([^\s"'#]+)(["']?)(\s*#[^\n]*)?`,
-			escapedRef,
-		)
-		re, err := regexp.Compile(pattern)
+		re, err := actionReferenceRe(u.Name)
 		if err != nil {
 			return fmt.Errorf("compiling regex for %s: %w", u.Name, err)
 		}
@@ -86,6 +82,13 @@ func RewriteWorkflow(root *os.Root, relPath string, updates []pin.Update) error 
 		return nil
 	}
 
+	// Last chance to abandon the rewrite: past this point the file is
+	// truncated, so a caller whose deadline expired during the read above
+	// would otherwise be told the work was abandoned and find it done.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("not writing %s: %w", relPath, err)
+	}
+
 	// Write back via os.Root for path-traversal safety.
 	f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
 	if err != nil {
@@ -99,9 +102,54 @@ func RewriteWorkflow(root *os.Root, relPath string, updates []pin.Update) error 
 	return writeErr
 }
 
-// validateUpdate checks that an Update has valid fields to prevent injection
+// actionReferenceRe compiles the pattern matching a workflow's `uses:`
+// reference to one action. It is the single description of what counts as a
+// reference to an action, so the rewrite that edits one and the check that
+// asks whether one is present cannot disagree.
+//
+// Captures:
+//
+//	1: prefix including "uses:" and optional quote
+//	2: the action ref (owner/repo or owner/repo/subpath)
+//	3: the old version/SHA ref (full token)
+//	4: optional trailing quote
+//	5: everything after the ref on the same line (comment, etc.)
+func actionReferenceRe(actionRef string) (*regexp.Regexp, error) {
+	return regexp.Compile(fmt.Sprintf(
+		`(uses:\s*["']?)(%s)@([^\s"'#]+)(["']?)(\s*#[^\n]*)?`,
+		regexp.QuoteMeta(actionRef),
+	))
+}
+
+// ReferencesAction reports whether content uses actionRef at least once.
+//
+// It exists so a caller can predict whether [RewriteWorkflow] has anything to
+// rewrite before running it. The rewrite is deliberately silent when it finds
+// no match, which keeps re-pinning an already-pinned workflow a success; that
+// same silence would let a remediation step whose workflow no longer mentions
+// the action report as applied while changing nothing. Asking here separates
+// "nothing to do because it is already done" from "nothing to do because the
+// plan describes a file that has moved on".
+//
+// The question is answered with the rewrite's own pattern, so an actionRef
+// spelling one accepts is one the other accepts.
+func ReferencesAction(content []byte, actionRef string) (bool, error) {
+	re, err := actionReferenceRe(actionRef)
+	if err != nil {
+		return false, fmt.Errorf("compiling regex for %s: %w", actionRef, err)
+	}
+	return re.Match(content), nil
+}
+
+// ValidateUpdate checks that an Update has valid fields to prevent injection
 // via crafted version tags or pinned values.
-func validateUpdate(u pin.Update) error {
+//
+// It is exported because it is the only description of what RewriteWorkflow
+// accepts, and a caller that predicts the rewrite's verdict before running it
+// has to ask the same question. Deputy's remediation preflight validates a
+// deputy:action:pin step through here, so a dry run cannot report an edit as
+// one that would apply and then watch the rewrite refuse the same arguments.
+func ValidateUpdate(u pin.Update) error {
 	if u.Name == "" {
 		return fmt.Errorf("empty action name in update")
 	}

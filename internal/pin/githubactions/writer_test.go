@@ -74,7 +74,7 @@ func TestRewriteWorkflow_Golden(t *testing.T) {
 
 			root := writerTestRoot(t, "workflow.yml", input)
 
-			if err := RewriteWorkflow(root, "workflow.yml", tc.updates); err != nil {
+			if err := RewriteWorkflow(t.Context(), root, "workflow.yml", tc.updates); err != nil {
 				t.Fatal(err)
 			}
 
@@ -110,7 +110,7 @@ jobs:
 `
 	root := writerTestRoot(t, "workflow.yml", input)
 
-	if err := RewriteWorkflow(root, "workflow.yml", nil); err != nil {
+	if err := RewriteWorkflow(t.Context(), root, "workflow.yml", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -136,7 +136,7 @@ func TestRewriteWorkflow_PreservesIndentation(t *testing.T) {
 
 	root := writerTestRoot(t, "workflow.yml", input)
 
-	err := RewriteWorkflow(root, "workflow.yml", []pin.Update{
+	err := RewriteWorkflow(t.Context(), root, "workflow.yml", []pin.Update{
 		{Name: "actions/checkout", PinnedValue: "aaaa0000" + strings.Repeat("0", 32), VersionTag: "v4.2.2"},
 		{Name: "actions/setup-go", PinnedValue: "bbbb0000" + strings.Repeat("0", 32), VersionTag: "v5.4.0"},
 	})
@@ -181,7 +181,7 @@ func TestRewriteWorkflow_MultipleVersionsSameAction(t *testing.T) {
 
 	sha4 := "34e114876b0b11c390a56381ad16ebd13914f8d5"
 	sha6 := "df4cb1c069e1874edd31b4311f1884172cec0e10"
-	err := RewriteWorkflow(root, "workflow.yml", []pin.Update{
+	err := RewriteWorkflow(t.Context(), root, "workflow.yml", []pin.Update{
 		{Name: "actions/checkout", FromVersion: "v4", PinnedValue: sha4, VersionTag: "v4.3.1"},
 		{Name: "actions/checkout", FromVersion: "v6", PinnedValue: sha6, VersionTag: "v6.0.3"},
 	})
@@ -220,7 +220,7 @@ func TestRewriteWorkflow_PreservesPermissions(t *testing.T) {
 	}
 	defer root.Close()
 
-	err = RewriteWorkflow(root, "workflow.yml", []pin.Update{
+	err = RewriteWorkflow(t.Context(), root, "workflow.yml", []pin.Update{
 		{Name: "actions/checkout", PinnedValue: "11bd71901bbe5b1630ceea73d27597364c9af683", VersionTag: "v4.2.2"},
 	})
 	if err != nil {
@@ -269,7 +269,7 @@ func TestRewriteWorkflow_ValidatesInput(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := RewriteWorkflow(root, "workflow.yml", []pin.Update{tc.update})
+			err := RewriteWorkflow(t.Context(), root, "workflow.yml", []pin.Update{tc.update})
 			if err == nil {
 				t.Fatal("expected error")
 			}
