@@ -60,7 +60,7 @@ func chdirToGoModFixture(t *testing.T) {
 // ignore: they assert on where the RPC landed, not on the RPC succeeding.
 func executeRoot(t *testing.T, args ...string) error {
 	t.Helper()
-	root := newRoot()
+	root := newRoot(nil)
 	root.SetArgs(args)
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)

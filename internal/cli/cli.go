@@ -29,8 +29,17 @@ import (
 // Run constructs the root command hierarchy and executes it with all
 // subcommands registered. It is the primary entry point used by main.
 func Run(ctx context.Context) error {
-	// Load configuration for runtime defaults (OTel, egress allowlists).
-	cfg := loadRuntimeConfig()
+	// Load configuration for runtime defaults (OTel, egress allowlists). A
+	// config file that exists but cannot be loaded is fatal, not ignorable:
+	// every setting it carries would otherwise revert to its default with
+	// nothing said, and a configured advisory mirror quietly becoming the
+	// public default sources is a security problem, not a degraded mode.
+	//
+	// The failure is carried into the root command instead of being returned
+	// here, because main only maps a Run error to an exit code; reporting it
+	// from PersistentPreRunE routes it through fang so the user sees the same
+	// diagnostic 'deputy config show' prints.
+	cfg, cfgErr := loadRuntimeConfig()
 
 	// Apply local egress allowlists before services are initialized.
 	applyLocalEgressConfig(cfg)
@@ -55,18 +64,98 @@ func Run(ctx context.Context) error {
 		}
 	}()
 
-	return fang.Execute(ctx, newRoot(), fang.WithErrorHandler(silentErrorHandler), fang.WithVersion(version.Value))
+	return fang.Execute(ctx, newRoot(cfgErr), fang.WithErrorHandler(silentErrorHandler), fang.WithVersion(version.Value))
 }
 
-// loadRuntimeConfig loads configuration from environment and config file.
-func loadRuntimeConfig() *config.Config {
-	configPath := config.FindConfigFile()
-	loader := config.NewLoader(configPath)
-	cfg, err := loader.Load()
+// loadRuntimeConfig loads configuration from the environment and the
+// auto-discovered config file. A non-nil error means a configuration source was
+// present but unusable (unreadable or malformed file, or a value that fails
+// validation), which callers must treat as fatal: continuing would silently
+// substitute defaults for whatever the file configured. That means querying the
+// public advisory sources in place of a pinned internal mirror, exporting no
+// telemetry, and dropping the egress relaxations that let allowlisted internal
+// hosts resolve to private addresses. Finding no config file at all is not an
+// error, it yields the defaults with a nil error.
+func loadRuntimeConfig() (*config.Config, error) {
+	configPath, err := config.ResolveConfigFile()
 	if err != nil {
-		return nil
+		// An explicitly requested file that is not there is the same downgrade
+		// this function exists to prevent: without this, discovery would fall
+		// back to some other file, or to none, and the command would run on
+		// settings the operator did not ask for.
+		return nil, deputyerrors.Suggest(
+			fmt.Errorf("failed to load config: %w", err),
+			"Point DEPUTY_CONFIG at a readable config file, or unset it to use auto-discovery",
+		)
 	}
-	return cfg
+	cfg, err := config.NewLoader(configPath).LoadWithOverrides(loggingFlagOverrides(os.Args[1:]))
+	if err != nil {
+		return nil, configLoadError(configPath, err)
+	}
+	return cfg, nil
+}
+
+// configLoadError turns a load failure into a diagnostic that points at a
+// source which can actually be at fault. Read and parse failures are the file's
+// by construction, since the loader only raises them with a file in hand.
+// Validation is different: it runs on the merged result of file, environment,
+// and flags, so blaming the file for it sends the operator to
+// 'deputy config validate', which passes, and teaches them nothing. Where the
+// provenance is genuinely unknown, the message says so rather than guessing.
+func configLoadError(configPath string, err error) error {
+	if _, ok := errors.AsType[*deputyerrors.ConfigError](err); ok {
+		// ConfigError already names the path it failed to read or parse.
+		return deputyerrors.Suggest(
+			fmt.Errorf("failed to load config: %w", err),
+			fmt.Sprintf("Fix the file, or run 'deputy config validate %s' for details", configPath),
+		)
+	}
+	if configPath == "" {
+		return deputyerrors.Suggest(
+			fmt.Errorf("invalid configuration: %w", err),
+			"No config file was loaded, so check the DEPUTY_* environment variables for an invalid value",
+		)
+	}
+	return deputyerrors.Suggest(
+		fmt.Errorf("invalid configuration: %w", err),
+		fmt.Sprintf("The value can come from %s or from a DEPUTY_* environment variable, which overrides the file; check both", configPath),
+	)
+}
+
+// loggingFlagOverrides scrapes the logging flags out of the raw arguments,
+// before cobra has parsed anything. Configuration has to be loaded this early
+// (egress allowlists and advisory sources must be applied before any client is
+// built), but flags outrank the environment, so validating the merged config
+// without them would reject a value the user already corrected on the command
+// line, contradicting the documented precedence.
+//
+// Only explicitly set flags are returned. Unknown flags are tolerated rather
+// than treated as errors, since the real parse happens later and reports them;
+// arguments after "--" are left alone, so a passthrough command such as
+// 'deputy proxy npm -- npm install --log-level=silly' cannot be mistaken for a
+// Deputy flag. A flag this pre-parse fails to spot simply leaves the
+// environment value standing, which fails closed.
+func loggingFlagOverrides(args []string) map[string]string {
+	fs := pflag.NewFlagSet("logging-precedence", pflag.ContinueOnError)
+	fs.ParseErrorsWhitelist.UnknownFlags = true
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+
+	var level, format string
+	fs.StringVar(&level, "log-level", "", "")
+	fs.StringVar(&format, "log-format", "", "")
+	// A parse failure here is not actionable: cobra parses these arguments
+	// again, properly, and reports anything wrong with them.
+	_ = fs.Parse(args)
+
+	overrides := make(map[string]string, 2)
+	if fs.Changed("log-level") {
+		overrides["log-level"] = level
+	}
+	if fs.Changed("log-format") {
+		overrides["log-format"] = format
+	}
+	return overrides
 }
 
 // applyAdvisorySourceConfig hands the config file's advisory_sources entries to
@@ -154,8 +243,12 @@ func silentErrorHandler(w io.Writer, styles fang.Styles, err error) {
 	}
 }
 
-// newRoot returns the root command with all subcommands attached.
-func newRoot() *cobra.Command {
+// newRoot returns the root command with all subcommands attached. configErr
+// carries a configuration failure detected before command construction; when it
+// is non-nil every command outside commandsRunnableWithoutConfig refuses to
+// run, so a config file that cannot be honored never masquerades as an absent
+// one.
+func newRoot(configErr error) *cobra.Command {
 	logLevel := defaultLogLevel()
 	logFormat := defaultLogFormat()
 	var serverAddr string
@@ -270,6 +363,17 @@ CONNECTION MODES:
 	cmd.RegisterCommands(rootCmd, deps)
 
 	rootCmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
+		// Refuse to run on a configuration that could not be loaded. This is
+		// checked first: a command that proceeds here would query the default
+		// advisory sources instead of the configured ones, export no
+		// telemetry, and lose the egress relaxations the file granted, none of
+		// which the user asked for. A short allowlist of commands that do not
+		// act on configuration stays runnable, so the failure can be diagnosed
+		// and reported.
+		if configErr != nil && !runsWithoutConfig(c) {
+			return configErr
+		}
+
 		if err := configureLogging(logLevel, logFormat); err != nil {
 			return err
 		}
@@ -305,6 +409,61 @@ CONNECTION MODES:
 	}
 
 	return rootCmd
+}
+
+// commandsRunnableWithoutConfig is the allowlist of top-level commands that
+// still run when the discovered config file cannot be loaded. Membership is
+// earned by not acting on configuration at all:
+//
+//   - config, because its subcommands exist to diagnose exactly this failure,
+//     and refusing to run them would take away the tools that explain it.
+//   - version, because it is the first thing a user runs when filing a bug
+//     report, and because 'deputy --version' answers with the version whether
+//     or not a config file loads; the subcommand must not disagree with it.
+//   - completion and cobra's hidden completion helpers, because their output is
+//     sourced at shell startup and requested on every tab press, so gating them
+//     would inject errors into an interactive shell rather than into a command
+//     the user chose to run.
+//   - help, because the help command (unlike the --help flag, which cobra
+//     resolves before this check) is dispatched like any other command.
+var commandsRunnableWithoutConfig = map[string]bool{
+	"config":                        true,
+	"version":                       true,
+	"completion":                    true,
+	"help":                          true,
+	cobra.ShellCompRequestCmd:       true,
+	cobra.ShellCompNoDescRequestCmd: true,
+}
+
+// runsWithoutConfig reports whether cmd belongs to a top-level command that is
+// allowed to run when configuration could not be loaded. The allowlist is keyed
+// on the top-level command rather than on cmd's own name, so a future
+// subcommand that happens to share an exempt name (say 'deputy proxy config')
+// cannot inherit the exemption and quietly become runnable on a config file
+// that failed to load.
+func runsWithoutConfig(cmd *cobra.Command) bool {
+	top := topLevelCommand(cmd)
+	if top == nil {
+		// The root command itself, which runs diff when invoked bare, so it
+		// acts on configuration and is not exempt.
+		return false
+	}
+	return commandsRunnableWithoutConfig[top.Name()]
+}
+
+// topLevelCommand returns the ancestor of cmd that is a direct child of the
+// root command, or nil when cmd is the root itself.
+func topLevelCommand(cmd *cobra.Command) *cobra.Command {
+	for c := cmd; c != nil; c = c.Parent() {
+		parent := c.Parent()
+		if parent == nil {
+			return nil
+		}
+		if !parent.HasParent() {
+			return c
+		}
+	}
+	return nil
 }
 
 // isInGitRepo checks if the current working directory is inside a git repository.

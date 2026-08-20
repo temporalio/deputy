@@ -610,6 +610,15 @@ func NewLoader(configPath string) *Loader {
 // Load reads configuration from all sources and applies precedence rules.
 // Precedence: explicit flags > environment variables > config file > defaults.
 func (l *Loader) Load() (*Config, error) {
+	return l.LoadWithOverrides(nil)
+}
+
+// LoadWithOverrides loads config and applies explicit flag overrides.
+// Overrides are applied before validation, not after, because they sit at the
+// top of the precedence order: a flag the user passed has to be able to correct
+// an invalid value coming from the environment or the file, rather than being
+// rejected by the value it replaces.
+func (l *Loader) LoadWithOverrides(overrides map[string]string) (*Config, error) {
 	cfg := defaultConfig()
 
 	// 1. Load from config file if provided
@@ -622,7 +631,10 @@ func (l *Loader) Load() (*Config, error) {
 	// 2. Override with environment variables
 	l.loadFromEnv(cfg)
 
-	// 3. Validate the final configuration
+	// 3. Apply explicit flag overrides (highest precedence)
+	applyOverrides(cfg, overrides)
+
+	// 4. Validate the fully merged configuration
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -630,14 +642,13 @@ func (l *Loader) Load() (*Config, error) {
 	return cfg, nil
 }
 
-// LoadWithOverrides loads config and applies explicit flag overrides.
-func (l *Loader) LoadWithOverrides(overrides map[string]string) (*Config, error) {
-	cfg, err := l.Load()
-	if err != nil {
-		return nil, err
+// applyOverrides copies explicit flag values over the merged configuration. An
+// override that is present but empty is ignored: an empty flag value means the
+// user did not choose a setting, so the lower-precedence source stands.
+func applyOverrides(cfg *Config, overrides map[string]string) {
+	if len(overrides) == 0 {
+		return
 	}
-
-	// Apply explicit flag overrides (highest precedence)
 	if level, ok := overrides["log-level"]; ok && level != "" {
 		cfg.Logging.Level = level
 	}
@@ -647,8 +658,6 @@ func (l *Loader) LoadWithOverrides(overrides map[string]string) (*Config, error)
 	if color, ok := overrides["log-color"]; ok {
 		cfg.Logging.Color = color == "true" || color == "1"
 	}
-
-	return cfg, nil
 }
 
 // loadFromFile reads configuration from a YAML file.
@@ -1393,8 +1402,33 @@ func (lc LogConfig) ToSlogLevel() slog.Level {
 	}
 }
 
+// ResolveConfigFile reports which config file to load, and fails when one was
+// explicitly requested but cannot be used. DEPUTY_CONFIG names a specific file,
+// so a path that cannot be stated is an error rather than a cue to look
+// elsewhere: discarding it silently hands the caller an auto-discovered file,
+// or no configuration at all, in place of the one it asked for. An empty path
+// with a nil error means no config file was requested and none was discovered,
+// which is normal.
+//
+// FindConfigFile keeps the lenient behavior for callers that are reporting on
+// configuration rather than acting on it.
+func ResolveConfigFile() (string, error) {
+	if path := os.Getenv("DEPUTY_CONFIG"); path != "" {
+		if _, err := os.Stat(path); err != nil {
+			return "", &errors.ConfigError{
+				Path:    path,
+				Message: "config file named by DEPUTY_CONFIG is unavailable",
+				Cause:   err,
+			}
+		}
+		return path, nil
+	}
+	return FindConfigFile(), nil
+}
+
 // FindConfigFile searches for a config file in standard locations.
-// Returns the path if found, empty string otherwise.
+// Returns the path if found, empty string otherwise. An unusable DEPUTY_CONFIG
+// is ignored here; use [ResolveConfigFile] when that must be an error.
 func FindConfigFile() string {
 	// Check explicit DEPUTY_CONFIG env var first
 	if path := os.Getenv("DEPUTY_CONFIG"); path != "" {

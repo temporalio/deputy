@@ -799,3 +799,85 @@ performance:
 		t.Errorf("expected cache max size 512, got %d", cfg.Performance.Cache.MaxSize)
 	}
 }
+
+// TestLoadWithOverridesBeforeValidation pins the precedence the reference
+// documents: a flag outranks the environment, so an explicit flag has to be
+// able to correct an invalid environment value rather than being rejected by
+// it. Applying overrides after validation, as this used to, made the highest
+// precedence source unable to fix the one below it.
+func TestLoadWithOverridesBeforeValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		env       map[string]string
+		overrides map[string]string
+		wantErr   bool
+		wantLevel string
+		wantFmt   string
+	}{
+		{
+			name:      "flag corrects an invalid environment level",
+			env:       map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			overrides: map[string]string{"log-level": "debug"},
+			wantLevel: "debug",
+			wantFmt:   "text",
+		},
+		{
+			name:      "flag corrects an invalid environment format",
+			env:       map[string]string{"DEPUTY_LOG_FORMAT": "bogus"},
+			overrides: map[string]string{"log-format": "json"},
+			wantLevel: "info",
+			wantFmt:   "json",
+		},
+		{
+			name:    "invalid environment value stands without an override",
+			env:     map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			wantErr: true,
+		},
+		{
+			name:      "an override for a different field does not rescue it",
+			env:       map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			overrides: map[string]string{"log-format": "json"},
+			wantErr:   true,
+		},
+		{
+			name:      "an invalid override is itself rejected",
+			overrides: map[string]string{"log-level": "nope"},
+			wantErr:   true,
+		},
+		{
+			name:      "an empty override leaves the lower source in place",
+			env:       map[string]string{"DEPUTY_LOG_LEVEL": "error"},
+			overrides: map[string]string{"log-level": ""},
+			wantLevel: "error",
+			wantFmt:   "text",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("DEPUTY_LOG_LEVEL", "")
+			t.Setenv("DEPUTY_LOG_FORMAT", "")
+			for k, v := range test.env {
+				t.Setenv(k, v)
+			}
+
+			cfg, err := NewLoader("").LoadWithOverrides(test.overrides)
+
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("LoadWithOverrides() error = nil, want an error; cfg = %+v", cfg)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadWithOverrides() error = %v, want nil", err)
+			}
+			if cfg.Logging.Level != test.wantLevel {
+				t.Errorf("Logging.Level = %q, want %q", cfg.Logging.Level, test.wantLevel)
+			}
+			if cfg.Logging.Format != test.wantFmt {
+				t.Errorf("Logging.Format = %q, want %q", cfg.Logging.Format, test.wantFmt)
+			}
+		})
+	}
+}
