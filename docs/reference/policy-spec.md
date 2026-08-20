@@ -62,7 +62,7 @@ flowchart TB
 
 ### Expansion semantics
 - Each var is expanded as `([expr]).map(name, BODY)[0]` from last to first, so each name is in scope for subsequent vars and rules.
-- CEL environment includes optional types plus cel-go extensions: `ext.Strings`, `ext.Regex`, `ext.Lists`, `ext.Sets`, `ext.Bindings`, `ext.Encoders`, and `ext.Math`. See the [policy framework](policy-framework.md#cel-helpers-and-extensions) for details.
+- CEL environment includes optional types plus cel-go extensions: `ext.Strings`, `ext.Regex`, `ext.Lists`, `ext.Sets`, `ext.Bindings`, `ext.Encoders`, and `ext.Math`. Each is enabled at a pinned cel-go library version, so an upgrade cannot change what the extension functions in an existing policy mean. See the [policy framework](policy-framework.md#cel-helpers-and-extensions) for details.
 
 ### Entrypoint inputs
 - Standard top-level identifiers include `request`, `pkg`, `target`, `image`, `vulnerabilities`, `vulnerability`, `jwt`, `changes`, `packages`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`, and `change`. See the [policy inputs](policy-inputs.md) for the full list and example payloads.
@@ -147,7 +147,7 @@ policies:
 ## Tooling and tests
 - `deputy policy lint` rejects malformed bundles or CEL expressions.
 - `go test ./internal/policy` compiles all examples and runs entrypoint evaluations.
-- CEL extensions are configured in `internal/policy/evaluator.go` if you need to audit or change the environment.
+- CEL extensions and their pinned library versions are configured in `internal/policy/celextensions.go`; the rest of the environment (variables, proto types, helpers) is in `internal/policy/evaluator.go`.
 
 ## Compatibility
 - Raw `.cel` files are not supported. Author structured bundles and load them directly.

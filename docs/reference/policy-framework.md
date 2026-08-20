@@ -206,6 +206,8 @@ Enabled CEL extensions (cel-go):
 
 These lists are not exhaustive; use the CEL language references above for the full standard library, macros, and extension details.
 
+Every extension, and the optional type library, is enabled at an explicit cel-go library version. cel-go versions its libraries so that adding a function or changing a default cannot alter what an existing expression means, so the pinned version is part of the policy language contract: a cel-go upgrade cannot change how a committed policy evaluates through these libraries, and raising a pin is a deliberate change with its own release note. CEL's own standard library has no version option, so it is not pinned. The current pins live in [`internal/policy/celextensions.go`](../../internal/policy/celextensions.go), with tests that fail when a library is enabled without a pin or when cel-go moves past one.
+
 Deputy helper functions:
 
 | Function | Signature | Notes |
