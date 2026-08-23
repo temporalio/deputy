@@ -223,10 +223,14 @@ runs:
     - name: Comment on PR
       if: inputs.comment-on-pr == 'true' && github.event_name == 'pull_request'
       uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+      env:
+        DEPUTY_ACTION_PATH: ${{ github.action_path }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
           const fs = require('fs');
+          const path = require('path');
+          const { truncateMarkdown } = require(path.join(process.env.DEPUTY_ACTION_PATH, 'truncate-comment.js'));
 
           // Fixed marker for idempotent upsert: updates patch the existing
           // comment in place instead of posting a new one per push.
@@ -239,14 +243,10 @@ runs:
             report = fs.readFileSync(reportPath, 'utf-8');
           }
 
-          // GitHub caps comment bodies at 65536 characters; truncate
-          // deterministically and point at the job summary, which carries
-          // the full report.
-          const maxBody = 60000;
-          if (report.length > maxBody) {
-            report = report.slice(0, maxBody) +
-              '\n\n> Report truncated: see the workflow job summary for the full version.';
-          }
+          // Keep complete Markdown lines and close any details block before
+          // pointing at the job summary, which carries the full report.
+          const maxBodyBytes = 60000;
+          report = truncateMarkdown(report, maxBodyBytes);
 
           const body = marker + '\n' + report + footer;
 
