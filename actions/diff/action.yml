@@ -76,8 +76,8 @@ outputs:
     description: 'Path to the full structured diff (deputy diff --format json output) for custom processing'
     value: ${{ steps.diff.outputs.json-path }}
   summary:
-    description: 'Markdown summary of changes (base64 encoded to handle special characters)'
-    value: ${{ steps.diff.outputs.summary_base64 }}
+    description: 'Markdown summary of changes (base64 encoded and bounded for GitHub Actions output limits)'
+    value: ${{ steps.summary.outputs.result }}
 
 runs:
   using: 'composite'
@@ -206,10 +206,6 @@ runs:
         # Log the report for humans reading the run output.
         cat "$COMMENT_MD"
 
-        # Note: use tr -d '\n' for portability (GNU base64 uses -w 0, BSD uses -b 0)
-        SUMMARY_BASE64=$(base64 < "$COMMENT_MD" | tr -d '\n')
-        echo "summary_base64=${SUMMARY_BASE64}" >> "$GITHUB_OUTPUT"
-
         # Surface policy findings as annotations, named by their rules.
         jq -r '.policy_actions[]? | select(.type == "ACTION_TYPE_DENY")
           | "::error::policy deny (\(.policy_name // "?")::\(.rule_name // "?")): \(.reason // .message // "denied")"' "$DIFF_JSON"
@@ -219,6 +215,24 @@ runs:
         if [ "${NEW_VULNS}" -gt 0 ]; then
           echo "::warning::Found ${NEW_VULNS} new vulnerabilities in changed dependencies"
         fi
+
+    - name: Export Markdown summary
+      id: summary
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+      env:
+        DEPUTY_ACTION_PATH: ${{ github.action_path }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        result-encoding: string
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          const { encodeMarkdownOutput } = require(path.join(process.env.DEPUTY_ACTION_PATH, 'truncate-comment.js'));
+
+          // GitHub estimates the 1 MB per-job output limit using UTF-16.
+          // Leave headroom for the action's other outputs.
+          const maxOutputBytes = 800000;
+          return encodeMarkdownOutput(fs.readFileSync(process.env.DIFF_COMMENT_PATH, 'utf8'), maxOutputBytes);
 
     - name: Comment on PR
       if: inputs.comment-on-pr == 'true' && github.event_name == 'pull_request'

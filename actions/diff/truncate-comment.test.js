@@ -3,11 +3,12 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { truncateMarkdown, truncationNotice } = require('./truncate-comment');
+const { encodeMarkdownOutput, truncateMarkdown, truncationNotice } = require('./truncate-comment');
 
 test('leaves reports within the limit unchanged', () => {
   const report = '## Deputy Dependency Diff\n\nNo dependency changes detected\n';
   assert.equal(truncateMarkdown(report, 1000), report);
+  assert.equal(Buffer.from(encodeMarkdownOutput(report, 1000), 'base64').toString('utf8'), report);
 });
 
 test('truncates at a complete line and closes details before the notice', () => {
@@ -81,6 +82,27 @@ test('keeps the complete comment below the GitHub body limit', () => {
 
   assert.ok(Buffer.byteLength(body, 'utf8') < 65536);
   assert.match(body, new RegExp(`${escapeRegExp(truncationNotice)}${escapeRegExp(footer)}$`));
+});
+
+test('keeps the encoded summary within its Actions job-output budget', () => {
+  const report = [
+    '<details><summary>all findings</summary>',
+    '',
+    '| ID | Package |',
+    '| --- | --- |',
+    '| CVE-2026-0001 | example.com/package |\n'.repeat(30000),
+    '</details>',
+  ].join('\n');
+  const unbounded = Buffer.from(report, 'utf8').toString('base64');
+  const outputBudget = 800000;
+
+  assert.ok(Buffer.byteLength(unbounded, 'utf16le') > 1024 * 1024);
+
+  const encoded = encodeMarkdownOutput(report, outputBudget);
+  const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+
+  assert.ok(Buffer.byteLength(encoded, 'utf16le') <= outputBudget);
+  assert.match(decoded, new RegExp(`</details>\n\n${escapeRegExp(truncationNotice)}$`));
 });
 
 function escapeRegExp(value) {

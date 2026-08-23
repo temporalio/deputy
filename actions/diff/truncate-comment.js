@@ -35,7 +35,18 @@ function truncateMarkdown(report, maxBytes) {
   return sliceUtf8(truncationNotice, maxBytes);
 }
 
-module.exports = { truncateMarkdown, truncationNotice };
+function encodeMarkdownOutput(report, maxUtf16Bytes) {
+  if (!Number.isInteger(maxUtf16Bytes) || maxUtf16Bytes < 8) {
+    throw new RangeError('maxUtf16Bytes must be an integer of at least 8');
+  }
+
+  const maxBase64Characters = Math.floor(maxUtf16Bytes / 2);
+  const maxReportBytes = Math.floor(maxBase64Characters / 4) * 3;
+  const markdown = truncateMarkdown(report, maxReportBytes);
+  return Buffer.from(markdown, 'utf8').toString('base64');
+}
+
+module.exports = { encodeMarkdownOutput, truncateMarkdown, truncationNotice };
 
 function completeLinePrefix(report, maxBytes) {
   const prefix = sliceUtf8(report, maxBytes);
