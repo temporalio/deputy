@@ -11,8 +11,7 @@ import (
 
 // bundleSchemaVersion is the compiled bundle format this build writes and the
 // only one it reads. It changes whenever a bundle entry's fields change meaning,
-// so that a reader can refuse a bundle it would otherwise misread instead of
-// applying whichever parts it happens to recognize.
+// so that a reader can refuse a bundle it would otherwise misread.
 //
 // v1alpha2 moved a policy's declared scoping out of `//! policy.*` comments in
 // the CEL body and into typed fields on the entry.
@@ -44,10 +43,8 @@ type BundlePolicy struct {
 }
 
 // checkSchemaVersion rejects a bundle written in a format this build does not
-// read. Recognizing the shape of a bundle is not the same as understanding it:
-// [tryParseBundle] answers the first question so a file can be routed to the
-// right parser, and this answers the second, because an entry's fields mean
-// whatever the format that wrote them says they mean.
+// read, because an entry's fields mean whatever the format that wrote them says
+// they mean.
 //
 // Both directions have to fail. An older bundle kept its policies' scoping in
 // CEL comments this build ignores, and a newer one may keep it somewhere this
@@ -62,8 +59,8 @@ func (b *Bundle) checkSchemaVersion(path string) error {
 	return fmt.Errorf("%s: bundle schema version %q is not the version this build reads (%s); rebuild it from its policy sources with `deputy policy bundle`", path, b.SchemaVersion, bundleSchemaVersion)
 }
 
-// legacyMetadataMarker is the comment prefix Deputy releases before typed
-// bundle metadata used to carry a policy's scoping inside its CEL body.
+// legacyMetadataMarker is the comment prefix that carried a policy's scoping
+// inside its CEL body, before bundle entries had typed metadata fields.
 const legacyMetadataMarker = "//! policy."
 
 // checkLegacyMetadata rejects a bundle entry whose scoping is still encoded in
@@ -83,9 +80,8 @@ func (p BundlePolicy) checkLegacyMetadata(path string) error {
 
 // startsWithLegacyMetadata reports whether body opens with the metadata comment
 // older releases prepended to a compiled policy. Only the leading non-empty
-// line is considered, because that is where those comments were written and a
-// generated body otherwise opens with its rule list; a policy that merely
-// mentions the marker inside a string literal is not a stale entry.
+// line counts, so a policy that merely mentions the marker in a string literal
+// is not mistaken for a stale entry.
 func startsWithLegacyMetadata(body string) bool {
 	for line := range strings.SplitSeq(body, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -219,10 +215,9 @@ func LoadBundle(path string) (*Bundle, error) {
 }
 
 // ParseBundle attempts to parse the provided bytes as a policy bundle. It
-// accepts any version, because a caller that only reports what a file contains
-// (such as `deputy policy inspect`) is more useful than one that refuses to look
-// at a bundle it cannot load. Callers that go on to evaluate the policies must
-// use [LoadBundle] or [LoadSources], which check the version.
+// accepts any schema version, so read-only callers such as `deputy policy
+// inspect` can report what a file contains. Callers that go on to evaluate the
+// policies must use [LoadBundle] or [LoadSources], which check the version.
 func ParseBundle(data []byte) (*Bundle, bool) {
 	return tryParseBundle(data)
 }

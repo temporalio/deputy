@@ -65,12 +65,12 @@ type Metadata struct {
 // validate reports whether everything the policy declares about itself is
 // something Deputy can apply.
 //
-// Every route into the engine shares this check, because only one of them passes
-// through the authoring loader: a compiled bundle is JSON, so unmarshalling it
-// fills a Metadata with whatever the file says. Left unchecked, both mistakes an
-// operator can make in that file fail open. A command the engine does not
-// recognize is dropped from the filter set it builds, so a policy that asked for
-// one command runs for every command; and a mode that is not exactly advisory is
+// Every route into the engine shares this check, because a compiled bundle
+// skips the authoring loader: it is JSON, so unmarshalling fills a Metadata
+// with whatever the file says. Left unchecked, both mistakes an operator can
+// make in that file fail open. A command the engine does not recognize is
+// dropped from the filter set it builds, so a policy that asked for one
+// command runs for every command; and a mode that is not exactly advisory is
 // enforced, so denials the author wanted merely observed block instead.
 //
 // A declaration that names nothing is rejected for the same reason rather than
@@ -94,7 +94,7 @@ func (m Metadata) validate() error {
 }
 
 // modeVocabulary renders the canonical modes for an error message, derived from
-// [Modes] so no message can name a vocabulary that has moved on.
+// [Modes] so the message cannot drift from the modes Deputy accepts.
 func modeVocabulary() string {
 	names := make([]string, 0, len(Modes()))
 	for _, mode := range Modes() {
