@@ -43,15 +43,11 @@ type BundlePolicy struct {
 }
 
 // checkSchemaVersion rejects a bundle written in a format this build does not
-// read, because an entry's fields mean whatever the format that wrote them says
-// they mean.
-//
-// Both directions have to fail. An older bundle kept its policies' scoping in
-// CEL comments this build ignores, and a newer one may keep it somewhere this
-// build cannot see; either way the policy would load with no scoping at all and
-// run for every command and entrypoint, in enforce mode. Refusing the file and
-// naming the version to rebuild is the only outcome that cannot silently widen a
-// policy.
+// read, in either direction, because an entry's fields mean whatever the format
+// that wrote them says they mean. A misread entry would load with no scoping at
+// all and run for every command and entrypoint, in enforce mode, so refusing the
+// file and naming the version to rebuild is the only outcome that cannot
+// silently widen a policy.
 func (b *Bundle) checkSchemaVersion(path string) error {
 	if b.SchemaVersion == bundleSchemaVersion {
 		return nil
