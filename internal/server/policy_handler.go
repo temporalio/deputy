@@ -109,9 +109,9 @@ func (h *PolicyHandler) Evaluate(
 		}
 	}
 
-	// Errors is deliberately left empty: reaching this point means every policy
-	// loaded, compiled, and ran, so the outcome is a real decision. Anything
-	// else already returned an error above.
+	// Reaching this point means every policy loaded, compiled, and ran, so the
+	// outcome is a real decision. Anything else already returned an error
+	// above, which is why EvaluateResponse carries no error list to fill in.
 	return connect.NewResponse(&policyv1.EvaluateResponse{
 		Actions: protoActions,
 		Outcome: outcome,

@@ -317,6 +317,11 @@ func (*PolicySource_Path) isPolicySource_Source() {}
 func (*PolicySource_Url) isPolicySource_Source() {}
 
 // EvaluateResponse contains all policy evaluation results.
+//
+// A response only ever describes a decision that every policy actually
+// produced, so there is no error list here to check before trusting it.
+// Callers that want policy problems reported as data, without evaluating,
+// should use Validate and read ValidateResponse.errors.
 type EvaluateResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Actions triggered by policy evaluation.
@@ -329,20 +334,7 @@ type EvaluateResponse struct {
 	// could not be loaded, compiled, or evaluated is reported as an RPC error
 	// and no response is returned at all. ALLOW therefore never means "we could
 	// not tell".
-	Outcome ActionType `protobuf:"varint,2,opt,name=outcome,proto3,enum=deputy.policy.v1.ActionType" json:"outcome,omitempty"`
-	// Errors is never populated and no response will ever carry it.
-	//
-	// Evaluate reports load, compile, and runtime failures as RPC errors:
-	// INVALID_ARGUMENT for a source it could not load or compile, INTERNAL for
-	// an evaluation failure, and CANCELED or DEADLINE_EXCEEDED when the request
-	// context ended first. A response therefore always describes a decision that
-	// every policy actually produced, and a client must not read this field to
-	// decide whether the outcome is trustworthy.
-	//
-	// Validation errors live on a different message: see ValidateResponse.errors,
-	// which Validate returns instead. The field is retained here for wire
-	// compatibility only.
-	Errors        []*PolicyError `protobuf:"bytes,3,rep,name=errors,proto3" json:"errors,omitempty"`
+	Outcome       ActionType `protobuf:"varint,2,opt,name=outcome,proto3,enum=deputy.policy.v1.ActionType" json:"outcome,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -389,13 +381,6 @@ func (x *EvaluateResponse) GetOutcome() ActionType {
 		return x.Outcome
 	}
 	return ActionType_ACTION_TYPE_UNSPECIFIED
-}
-
-func (x *EvaluateResponse) GetErrors() []*PolicyError {
-	if x != nil {
-		return x.Errors
-	}
-	return nil
 }
 
 // PolicyError describes an error encountered during policy processing.
@@ -1026,11 +1011,10 @@ const file_deputy_policy_v1_service_proto_rawDesc = "" +
 	"\x06inline\x18\x01 \x01(\tH\x00R\x06inline\x12\x14\n" +
 	"\x04path\x18\x02 \x01(\tH\x00R\x04path\x12\x12\n" +
 	"\x03url\x18\x03 \x01(\tH\x00R\x03urlB\b\n" +
-	"\x06source\"\xb5\x01\n" +
+	"\x06source\"\x8c\x01\n" +
 	"\x10EvaluateResponse\x122\n" +
 	"\aactions\x18\x01 \x03(\v2\x18.deputy.policy.v1.ActionR\aactions\x126\n" +
-	"\aoutcome\x18\x02 \x01(\x0e2\x1c.deputy.policy.v1.ActionTypeR\aoutcome\x125\n" +
-	"\x06errors\x18\x03 \x03(\v2\x1d.deputy.policy.v1.PolicyErrorR\x06errors\"\x91\x01\n" +
+	"\aoutcome\x18\x02 \x01(\x0e2\x1c.deputy.policy.v1.ActionTypeR\aoutcomeJ\x04\b\x03\x10\x04R\x06errors\"\x91\x01\n" +
 	"\vPolicyError\x12\x1f\n" +
 	"\vpolicy_name\x18\x01 \x01(\tR\n" +
 	"policyName\x12\x1b\n" +
@@ -1123,25 +1107,24 @@ var file_deputy_policy_v1_service_proto_depIdxs = []int32{
 	17, // 6: deputy.policy.v1.EvaluateRequest.oci_artifact_request:type_name -> deputy.policy.v1.OciArtifactRequestPolicyInput
 	18, // 7: deputy.policy.v1.EvaluateResponse.actions:type_name -> deputy.policy.v1.Action
 	19, // 8: deputy.policy.v1.EvaluateResponse.outcome:type_name -> deputy.policy.v1.ActionType
-	3,  // 9: deputy.policy.v1.EvaluateResponse.errors:type_name -> deputy.policy.v1.PolicyError
-	1,  // 10: deputy.policy.v1.ValidateRequest.policies:type_name -> deputy.policy.v1.PolicySource
-	3,  // 11: deputy.policy.v1.ValidateResponse.errors:type_name -> deputy.policy.v1.PolicyError
-	3,  // 12: deputy.policy.v1.ValidateResponse.warnings:type_name -> deputy.policy.v1.PolicyError
-	6,  // 13: deputy.policy.v1.ValidateResponse.summaries:type_name -> deputy.policy.v1.PolicySummary
-	9,  // 14: deputy.policy.v1.ListEntrypointsResponse.entrypoints:type_name -> deputy.policy.v1.EntrypointInfo
-	10, // 15: deputy.policy.v1.EntrypointInfo.variables:type_name -> deputy.policy.v1.VariableInfo
-	11, // 16: deputy.policy.v1.VariableInfo.fields:type_name -> deputy.policy.v1.FieldInfo
-	0,  // 17: deputy.policy.v1.PolicyService.Evaluate:input_type -> deputy.policy.v1.EvaluateRequest
-	4,  // 18: deputy.policy.v1.PolicyService.Validate:input_type -> deputy.policy.v1.ValidateRequest
-	7,  // 19: deputy.policy.v1.PolicyService.ListEntrypoints:input_type -> deputy.policy.v1.ListEntrypointsRequest
-	2,  // 20: deputy.policy.v1.PolicyService.Evaluate:output_type -> deputy.policy.v1.EvaluateResponse
-	5,  // 21: deputy.policy.v1.PolicyService.Validate:output_type -> deputy.policy.v1.ValidateResponse
-	8,  // 22: deputy.policy.v1.PolicyService.ListEntrypoints:output_type -> deputy.policy.v1.ListEntrypointsResponse
-	20, // [20:23] is the sub-list for method output_type
-	17, // [17:20] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	1,  // 9: deputy.policy.v1.ValidateRequest.policies:type_name -> deputy.policy.v1.PolicySource
+	3,  // 10: deputy.policy.v1.ValidateResponse.errors:type_name -> deputy.policy.v1.PolicyError
+	3,  // 11: deputy.policy.v1.ValidateResponse.warnings:type_name -> deputy.policy.v1.PolicyError
+	6,  // 12: deputy.policy.v1.ValidateResponse.summaries:type_name -> deputy.policy.v1.PolicySummary
+	9,  // 13: deputy.policy.v1.ListEntrypointsResponse.entrypoints:type_name -> deputy.policy.v1.EntrypointInfo
+	10, // 14: deputy.policy.v1.EntrypointInfo.variables:type_name -> deputy.policy.v1.VariableInfo
+	11, // 15: deputy.policy.v1.VariableInfo.fields:type_name -> deputy.policy.v1.FieldInfo
+	0,  // 16: deputy.policy.v1.PolicyService.Evaluate:input_type -> deputy.policy.v1.EvaluateRequest
+	4,  // 17: deputy.policy.v1.PolicyService.Validate:input_type -> deputy.policy.v1.ValidateRequest
+	7,  // 18: deputy.policy.v1.PolicyService.ListEntrypoints:input_type -> deputy.policy.v1.ListEntrypointsRequest
+	2,  // 19: deputy.policy.v1.PolicyService.Evaluate:output_type -> deputy.policy.v1.EvaluateResponse
+	5,  // 20: deputy.policy.v1.PolicyService.Validate:output_type -> deputy.policy.v1.ValidateResponse
+	8,  // 21: deputy.policy.v1.PolicyService.ListEntrypoints:output_type -> deputy.policy.v1.ListEntrypointsResponse
+	19, // [19:22] is the sub-list for method output_type
+	16, // [16:19] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_deputy_policy_v1_service_proto_init() }

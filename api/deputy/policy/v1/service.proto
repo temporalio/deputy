@@ -79,6 +79,11 @@ message PolicySource {
 }
 
 // EvaluateResponse contains all policy evaluation results.
+//
+// A response only ever describes a decision that every policy actually
+// produced, so there is no error list here to check before trusting it.
+// Callers that want policy problems reported as data, without evaluating,
+// should use Validate and read ValidateResponse.errors.
 message EvaluateResponse {
   // Actions triggered by policy evaluation.
   repeated Action actions = 1;
@@ -93,19 +98,14 @@ message EvaluateResponse {
   // not tell".
   ActionType outcome = 2;
 
-  // Errors is never populated and no response will ever carry it.
-  //
-  // Evaluate reports load, compile, and runtime failures as RPC errors:
+  // Field 3 was an "errors" list that nothing ever populated. Evaluate reports
+  // load, compile, and runtime failures as RPC errors instead:
   // INVALID_ARGUMENT for a source it could not load or compile, INTERNAL for
   // an evaluation failure, and CANCELED or DEADLINE_EXCEEDED when the request
-  // context ended first. A response therefore always describes a decision that
-  // every policy actually produced, and a client must not read this field to
-  // decide whether the outcome is trustworthy.
-  //
-  // Validation errors live on a different message: see ValidateResponse.errors,
-  // which Validate returns instead. The field is retained here for wire
-  // compatibility only.
-  repeated PolicyError errors = 3;
+  // context ended first. The number and the name are reserved so that neither
+  // can be reused later for something that means something else.
+  reserved 3;
+  reserved "errors";
 }
 
 // PolicyError describes an error encountered during policy processing.

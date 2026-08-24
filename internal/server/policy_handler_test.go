@@ -258,10 +258,6 @@ func TestPolicyEvaluateFailsClosed(t *testing.T) {
 			if got := len(resp.Msg.GetActions()); got != tt.wantActions {
 				t.Errorf("actions = %d, want %d", got, tt.wantActions)
 			}
-			// A decision is only a decision when nothing failed.
-			if got := resp.Msg.GetErrors(); len(got) != 0 {
-				t.Errorf("errors = %v, want none alongside outcome %v", got, resp.Msg.GetOutcome())
-			}
 		})
 	}
 }
