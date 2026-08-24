@@ -18,9 +18,9 @@ type celExtension struct {
 	version uint32
 
 	// enable builds the environment option that registers the library at the
-	// given version. It takes the version as an argument instead of closing
-	// over the pin so that a test can build the same library at neighboring
-	// versions and compare what each declares.
+	// given version. The version is a parameter rather than a value captured
+	// from the entry so that a test can build the same library at a different
+	// version and compare what each one declares.
 	enable func(version uint32) cel.EnvOption
 }
 
@@ -44,17 +44,17 @@ type celExtension struct {
 // would be indistinguishable from not pinning at all, since cel-go gates
 // features with "version >= n" and a too-high pin silently picks up whatever a
 // later release adds. Every entry records what its pinned version covers so
-// the numbers can be reviewed without reading cel-go's source, and
-// celextensions_test.go keeps both claims honest: it fails when a library is
-// enabled outside this table and when cel-go grows a version beyond a pin.
+// the numbers can be reviewed without reading cel-go's source.
+// celextensions_test.go enforces the table: it fails when a library is enabled
+// outside it and when cel-go grows a version beyond a pin.
 //
 // CEL's own standard library, which cel.NewEnv enables implicitly, exposes no
 // version option, so it cannot be pinned here.
 //
-// Order is load bearing. cel-go registers a singleton library once and the
-// first registration wins, so these options are applied ahead of the rest of
-// the environment, which makes a stray unpinned call added later a no-op
-// rather than a silent unpinning.
+// The order of entries in this table is important. cel-go registers a
+// singleton library once and the first registration wins, so these options are
+// applied ahead of the rest of the environment, which makes a stray unpinned
+// call added later a no-op rather than a silent unpinning.
 var celExtensions = []celExtension{
 	{
 		// Optional types: ?. and ?[] access, optional.of/none/ofNonZeroValue.
