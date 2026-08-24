@@ -48,10 +48,8 @@ func (m Mode) IsValid() bool {
 // Metadata is everything a policy declares about itself apart from its CEL
 // program: who it is, and when it should run.
 //
-// The engine reads Entrypoints, Commands, and Mode; Name and Description are
-// carried for reporting surfaces. Ecosystems is recorded for the same reason
-// rather than filtering at evaluation time, because the structured loader
-// compiles ecosystem scoping into each rule's CEL guard.
+// The engine reads Entrypoints, Commands, and Mode. Name, Description, and
+// Ecosystems are carried for reporting and do not filter anything.
 //
 // The zero Metadata means an unnamed policy with no scoping that runs
 // everywhere in enforce mode, which is what a bare CEL body describes.

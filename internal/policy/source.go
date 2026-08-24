@@ -34,11 +34,11 @@ type Bundle struct {
 }
 
 // BundlePolicy contains the CEL program for a single entry in a bundle, plus
-// the metadata the engine needs to scope it. The metadata fields are inlined so
-// a bundle entry has one field list rather than a copy that can drift from
-// [Metadata].
+// the metadata the engine needs to scope it. [Metadata] is embedded rather than
+// restated field by field, so an entry and a policy share a single field
+// definition instead of two that have to be kept in step.
 type BundlePolicy struct {
-	Metadata // Metadata is the policy's declared identity and scoping, inlined into the entry.
+	Metadata // Metadata is the policy's declared identity and scoping, embedded so its fields sit directly on the entry.
 
 	Source string `json:"source"` // Source is the compiled CEL source code.
 }
@@ -55,10 +55,6 @@ type BundlePolicy struct {
 // run for every command and entrypoint, in enforce mode. Refusing the file and
 // naming the version to rebuild is the only outcome that cannot silently widen a
 // policy.
-//
-// The remedy names the policy sources on purpose: bundling a refused bundle
-// reaches this check again, since `deputy policy bundle` loads its inputs the
-// same way, so only the authored policies can produce a readable one.
 func (b *Bundle) checkSchemaVersion(path string) error {
 	if b.SchemaVersion == bundleSchemaVersion {
 		return nil
@@ -71,16 +67,13 @@ func (b *Bundle) checkSchemaVersion(path string) error {
 const legacyMetadataMarker = "//! policy."
 
 // checkLegacyMetadata rejects a bundle entry whose scoping is still encoded in
-// its CEL body. Nothing reads those comments any more, so such an entry would
-// load with whatever metadata the entry itself declares (for older bundles, a
-// name and nothing else) and run against every entrypoint and command instead
-// of the ones it was written for. Fail loudly and ask for a rebuild rather than
-// quietly widening the policy.
+// its CEL body. Nothing reads those comments any more, so the entry would load
+// with no scoping at all and run for every command and entrypoint, in enforce
+// mode, silently widening the policy.
 //
-// A bundle built by an older release is refused by its schema version before it
-// reaches here (see [Bundle.checkSchemaVersion]); this catches the entry that
-// claims the current version while carrying a body from before it, which is what
-// hand-assembling or merging bundle files produces.
+// [Bundle.checkSchemaVersion] does not cover this: the version is a field in the
+// same file, so a hand-edited or merged bundle can claim the current version
+// while carrying a body from before it.
 func (p BundlePolicy) checkLegacyMetadata(path string) error {
 	if !startsWithLegacyMetadata(p.Source) {
 		return nil
