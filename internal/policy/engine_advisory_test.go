@@ -6,10 +6,9 @@ import (
 
 func TestEngineAdvisoryDowngradesDeny(t *testing.T) {
 	src := Source{
-		Name: "advisory",
-		Body: `//! policy.name = "adv"
-//! policy.mode = "advisory"
-true ? [{"action":"deny","reason":"block it"}] : []`,
+		Name:     "advisory",
+		Body:     `true ? [{"action":"deny","reason":"block it"}] : []`,
+		Metadata: Metadata{Name: "adv", Mode: ModeAdvisory},
 	}
 	eng, err := NewEngine([]Source{src})
 	if err != nil {

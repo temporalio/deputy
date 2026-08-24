@@ -129,14 +129,15 @@ func (h *PolicyHandler) Validate(
 			continue
 		}
 
-		// Extract metadata from the source for summary
-		meta := extractMetadataFromSource(src.Body)
+		// Summarize from the metadata the loader parsed, which travels with the
+		// source as typed data. Rule and variable counts are properties of the
+		// expanded CEL program rather than the policy's declared metadata, so
+		// the summary reports the program as a single rule.
 		summaries = append(summaries, &policyv1.PolicySummary{
-			Name:        meta.name,
-			Description: meta.description,
-			Entrypoints: meta.entrypoints,
-			RuleCount:   int32(meta.ruleCount),
-			Variables:   meta.variables,
+			Name:        src.Metadata.Name,
+			Description: src.Metadata.Description,
+			Entrypoints: src.Metadata.EntrypointNames(),
+			RuleCount:   1,
 		})
 	}
 
@@ -277,39 +278,6 @@ func commandFromEnv(env *policyv1.Environment) string {
 }
 
 // Helper functions
-
-// policyMeta holds extracted metadata from a policy source.
-type policyMeta struct {
-	name        string
-	description string
-	entrypoints []string
-	ruleCount   int
-	variables   []string
-}
-
-// extractMetadataFromSource parses metadata from a CEL source body.
-// It looks for //! comments at the beginning of the source.
-func extractMetadataFromSource(body string) policyMeta {
-	meta := policyMeta{}
-
-	// Try to parse as structured bundle first to get rich metadata
-	bundle, ok, _ := policy.TryParseStructuredBundleBytes([]byte(body))
-	if ok && len(bundle.Policies) > 0 {
-		p := bundle.Policies[0]
-		meta.name = p.Name
-		meta.description = p.Description
-		meta.entrypoints = p.Entrypoints
-		meta.ruleCount = len(p.Rules)
-		meta.variables = p.Vars.Names()
-		return meta
-	}
-
-	// Fall back to parsing //! comments from raw CEL
-	// This is a simplified version - the actual parsing happens in policy.parsePolicyMetadata
-	// but that's internal. We'll just count rules by looking for action patterns.
-	meta.ruleCount = 1 // Default to 1 if we can't determine
-	return meta
-}
 
 func getEntrypointDescription(ep policy.Entrypoint) string {
 	if profile := policy.GetBindingProfile(ep); profile != nil && profile.Description != "" {

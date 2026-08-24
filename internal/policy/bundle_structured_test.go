@@ -3,6 +3,8 @@ package policy
 import (
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestOrderedVarsExpandInAuthorOrder(t *testing.T) {
@@ -85,14 +87,11 @@ func TestStructuredPolicyNormalizesCommandAliases(t *testing.T) {
 		Commands: []string{"exec", "sandbox"},
 		Rules:    []structuredRule{{Action: "deny", When: "true"}},
 	}
-	src, err := p.toCELSource()
+	meta, err := p.metadata()
 	if err != nil {
-		t.Fatalf("toCELSource: %v", err)
+		t.Fatalf("metadata: %v", err)
 	}
-	if !strings.Contains(src, `//! policy.commands = "sandbox"`) {
-		t.Fatalf("compiled source did not use canonical sandbox command: %s", src)
-	}
-	if strings.Contains(src, "exec") {
-		t.Fatalf("compiled source retained legacy exec alias: %s", src)
+	if diff := cmp.Diff([]string{"sandbox"}, meta.Commands); diff != "" {
+		t.Errorf("metadata().Commands mismatch (-want +got):\n%s", diff)
 	}
 }

@@ -14,14 +14,6 @@ import (
 	"github.com/google/cel-go/parser"
 )
 
-func TestExtractPolicyName(t *testing.T) {
-	src := `//! policy.name = "foo-policy"
-true`
-	if got := extractPolicyName(src); got != "foo-policy" {
-		t.Fatalf("extractPolicyName() = %q, want foo-policy", got)
-	}
-}
-
 func TestBuildBundle(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "policy.yaml")
@@ -49,6 +41,88 @@ func TestBuildBundle(t *testing.T) {
 	}
 	if bundle.Policies[0].Source == "" {
 		t.Fatalf("expected policy source to be stored")
+	}
+}
+
+// TestLoadSourcesRejectsUnreadableBundleVersion makes a compiled bundle's
+// schema version a gate rather than a field that only has to be present.
+//
+// A reader that accepts any non-empty version cannot refuse a bundle whose
+// entries mean something other than what it expects: it loads them and applies
+// whatever it recognizes. That is how a policy silently loses its scoping, since
+// the fields the writer put in an entry are not the ones the reader looks for,
+// leaving the policy running for every command and entrypoint in enforce mode.
+// Neither direction is detectable from an entry's contents, so the version has
+// to be checked, and a mismatch has to fail. Both loaders that hand a bundle on
+// to evaluation are covered, since a check on only one of them is a check an
+// unlucky caller misses.
+func TestLoadSourcesRejectsUnreadableBundleVersion(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		version string
+		wantErr bool
+	}{
+		{
+			name:    "the version this build writes",
+			version: bundleSchemaVersion,
+		},
+		{
+			// The format whose entries carried their scoping as //! comments in
+			// the CEL body, which nothing reads any more. The body below has no
+			// comments, so only the version can catch this.
+			name:    "the format before metadata became typed",
+			version: "policy.deputy.sh/v1alpha1",
+			wantErr: true,
+		},
+		{
+			name:    "a format newer than this build",
+			version: "policy.deputy.sh/v2",
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			data := fmt.Sprintf(`{
+  "schemaVersion": %q,
+  "policies": [{"name": "scoped", "source": "[{\"action\": \"allow\"}]"}]
+}`, test.version)
+			path := filepath.Join(t.TempDir(), "bundle.json")
+			if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+				t.Fatalf("write bundle: %v", err)
+			}
+			loaders := map[string]func() error{
+				"LoadSources": func() error {
+					_, err := LoadSources([]string{path})
+					return err
+				},
+				"LoadBundle": func() error {
+					_, err := LoadBundle(path)
+					return err
+				},
+			}
+			for name, load := range loaders {
+				err := load()
+				if !test.wantErr {
+					if err != nil {
+						t.Errorf("%s() error = %v, want nil", name, err)
+					}
+					continue
+				}
+				if err == nil {
+					t.Errorf("%s() error = nil, want a rebuild error", name)
+					continue
+				}
+				// The remedy has to name the policy sources: bundling the
+				// refused bundle would reach this same check.
+				for _, want := range []string{test.version, bundleSchemaVersion, "rebuild it from its policy sources"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("%s() error = %v, want it to contain %q", name, err, want)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -107,8 +181,8 @@ func TestLoadStructuredBundle(t *testing.T) {
 				t.Fatalf("expected 1 source, got %d", len(sources))
 			}
 			body := sources[0].Body
-			if !strings.Contains(body, "policy.name") {
-				t.Fatalf("metadata missing from body: %s", body)
+			if sources[0].Metadata.Name == "" {
+				t.Fatalf("metadata missing from source: %+v", sources[0])
 			}
 			if err := Compile(body, nil); err != nil {
 				t.Fatalf("compiled structured policy invalid: %v", err)

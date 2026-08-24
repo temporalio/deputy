@@ -109,9 +109,11 @@ jobs:
 
       # Or use a bundled policy
       - run: |
-          deputy policy bundle --out corp.bundle.json policy/*.yaml
+          deputy policy bundle --output corp.bundle.json policy/*.yaml
           deputy scan --policy corp.bundle.json
 ```
+
+Build and enforce a bundle with the same Deputy version, as above. A bundle records the schema version it was written for, and a Deputy that predates that version's introduction accepts it while ignoring the scoping in it, which turns an `advisory` policy into a blocking one and runs scoped policies everywhere. If you publish bundles for other jobs to consume, publish the Deputy version alongside them and rebuild both together. See [Bundles and distribution](../reference/policy-framework.md#bundles-and-distribution).
 
 ### PR diff analysis
 
