@@ -392,9 +392,9 @@ func ProtoToMap(msg proto.Message) (map[string]any, error) {
 	if err := dec.Decode(&result); err != nil {
 		return nil, fmt.Errorf("unmarshal json: %w", err)
 	}
-	// Give CEL numbers where the schema declares numbers, using the message
-	// descriptor rather than the shape of each value.
-	result = convertPayloadNumbers(result, msg.ProtoReflect().Descriptor())
+	// Give CEL the Go type the schema declares for each value, using the message
+	// descriptor rather than the shape of the value.
+	result = convertPayload(result, msg.ProtoReflect().Descriptor())
 	// Remove null values so has() checks work correctly.
 	// EmitUnpopulated emits nil message fields as null, but CEL's has() returns
 	// true for keys that exist with null values, causing subsequent field access
@@ -415,10 +415,11 @@ const (
 	wktUint64Value protoreflect.FullName = "google.protobuf.UInt64Value"
 )
 
-// convertPayloadNumbers rewrites the numbers in doc, the protojson document for
-// md, so CEL sees a number wherever the schema declares one. It dispatches on md
-// rather than walking doc's keys directly, because a message with a JSON form of
-// its own (a Struct, or an Any) is a document whose keys are not its fields.
+// convertPayload rewrites doc, the protojson document for md, into the Go types
+// CEL evaluates, deciding every value by the type md declares for it rather than
+// by the shape protojson wrote. It dispatches on md rather than walking doc's
+// keys directly, because a message with a JSON form of its own (a Struct, or an
+// Any) is a document whose keys are not its fields.
 //
 // protojson quotes the 64-bit integer kinds (int64, uint64, sint64, sfixed64,
 // fixed64) so they survive JavaScript's 53-bit floats, so those are the only
@@ -430,8 +431,8 @@ const (
 // shape instead is lossy in a way nothing downstream can repair ("1.20" becomes
 // 1.2). json.Number values become int64 or float64 because CEL cannot compare a
 // json.Number.
-func convertPayloadNumbers(doc map[string]any, md protoreflect.MessageDescriptor) map[string]any {
-	converted, ok := convertMessageNumbers(doc, md).(map[string]any)
+func convertPayload(doc map[string]any, md protoreflect.MessageDescriptor) map[string]any {
+	converted, ok := convertMessage(doc, md).(map[string]any)
 	if !ok {
 		return doc
 	}
@@ -457,15 +458,15 @@ func convertMessageFields(doc map[string]any, md protoreflect.MessageDescriptor)
 			// this walk exists to remove.
 			continue
 		}
-		doc[key] = convertFieldNumbers(val, fd)
+		doc[key] = convertField(val, fd)
 	}
 }
 
-// convertFieldNumbers converts one field's protojson value. Cardinality is
-// resolved first because a list holds element values and a map holds its value
-// type's values, so it is the element kind that decides, never the field's own
-// shape.
-func convertFieldNumbers(v any, fd protoreflect.FieldDescriptor) any {
+// convertField converts one field's protojson value to the Go type fd declares.
+// Cardinality is resolved first because a list holds element values and a map
+// holds its value type's values, so it is the element kind that decides, never
+// the field's own shape.
+func convertField(v any, fd protoreflect.FieldDescriptor) any {
 	switch {
 	case fd.IsMap():
 		entries, ok := v.(map[string]any)
@@ -476,7 +477,7 @@ func convertFieldNumbers(v any, fd protoreflect.FieldDescriptor) any {
 		// can carry a number.
 		value := fd.MapValue()
 		for key, elem := range entries {
-			entries[key] = convertSingularNumbers(elem, value)
+			entries[key] = convertSingularValue(elem, value)
 		}
 		return entries
 	case fd.IsList():
@@ -485,20 +486,20 @@ func convertFieldNumbers(v any, fd protoreflect.FieldDescriptor) any {
 			return v
 		}
 		for i, elem := range elems {
-			elems[i] = convertSingularNumbers(elem, fd)
+			elems[i] = convertSingularValue(elem, fd)
 		}
 		return elems
 	default:
-		return convertSingularNumbers(v, fd)
+		return convertSingularValue(v, fd)
 	}
 }
 
-// convertSingularNumbers converts a single value of fd's declared type, which
+// convertSingularValue converts a single value of fd's declared type, which
 // for a repeated or map field is one element rather than the whole field.
-func convertSingularNumbers(v any, fd protoreflect.FieldDescriptor) any {
+func convertSingularValue(v any, fd protoreflect.FieldDescriptor) any {
 	switch fd.Kind() {
 	case protoreflect.MessageKind, protoreflect.GroupKind:
-		return convertMessageNumbers(v, fd.Message())
+		return convertMessage(v, fd.Message())
 	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind,
 		protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
 		return parseQuotedInteger(v)
@@ -515,9 +516,9 @@ func convertSingularNumbers(v any, fd protoreflect.FieldDescriptor) any {
 	}
 }
 
-// convertMessageNumbers converts the protojson value of a message-typed field,
-// whose descriptor decides how protojson rendered it.
-func convertMessageNumbers(v any, md protoreflect.MessageDescriptor) any {
+// convertMessage converts the protojson value of a message-typed field, whose
+// descriptor decides how protojson rendered it.
+func convertMessage(v any, md protoreflect.MessageDescriptor) any {
 	if md == nil {
 		return v
 	}
@@ -527,7 +528,7 @@ func convertMessageNumbers(v any, md protoreflect.MessageDescriptor) any {
 		// string, whatever either looks like.
 		return convertSchemalessNumbers(v)
 	case wktAny:
-		return convertAnyNumbers(v)
+		return convertAny(v)
 	case wktInt64Value, wktUint64Value:
 		// protojson quotes a wrapped 64-bit integer exactly as it quotes a bare
 		// one.
@@ -544,11 +545,11 @@ func convertMessageNumbers(v any, md protoreflect.MessageDescriptor) any {
 	return doc
 }
 
-// convertAnyNumbers converts a google.protobuf.Any document. protojson writes
-// the payload's fields beside an "@type" key, or under a "value" key when the
+// convertAny converts a google.protobuf.Any document. protojson writes the
+// payload's fields beside an "@type" key, or under a "value" key when the
 // payload has a JSON form of its own, so the payload's descriptor is what
 // decides how to read either shape.
-func convertAnyNumbers(v any) any {
+func convertAny(v any) any {
 	doc, ok := v.(map[string]any)
 	if !ok {
 		return convertJSONNumber(v)
@@ -570,7 +571,7 @@ func convertAnyNumbers(v any) any {
 	// so reading that as a bytes field would leave the whole nested payload
 	// unconverted.
 	if inner, ok := doc["value"]; ok && (md.FullName() == wktAny || md.Fields().ByTextName("value") == nil) {
-		doc["value"] = convertMessageNumbers(inner, md)
+		doc["value"] = convertMessage(inner, md)
 		return doc
 	}
 	convertMessageFields(doc, md)
