@@ -304,6 +304,14 @@ $ deputy fix --format json | custom-remediation-bot
 }
 ```
 
+### Agent Event Stream
+
+Agent execution streams `AgentEvent`s over the remediation API. The terminal
+contract: when the agent reports token usage, a tokens event (nonterminal
+phase) arrives first, followed by the summary event, which carries a terminal
+phase and is always the last detail event for the session. Consumers should
+treat the summary, not the tokens event, as the end-of-run signal.
+
 ---
 
 ## Troubleshooting

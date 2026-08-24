@@ -777,7 +777,7 @@ func TestCommandsFromConsolidatedCarriesEveryMergedVersion(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte("[tools]\ngo = [\"1.22.12\", \"1.23.8\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyDeputyCommand(dir, want); err != nil {
+	if err := ApplyDeputyCommand(t.Context(), dir, want); err != nil {
 		t.Fatalf("ApplyDeputyCommand: %v", err)
 	}
 	after, err := os.ReadFile(configPath)
@@ -864,7 +864,7 @@ func TestCommandsFromConsolidatedNeverDowngradesAMergedVersion(t *testing.T) {
 		if !strings.HasPrefix(c.Command, "deputy:") {
 			continue
 		}
-		if err := ApplyDeputyCommand(dir, c.Command); err != nil {
+		if err := ApplyDeputyCommand(t.Context(), dir, c.Command); err != nil {
 			t.Fatalf("ApplyDeputyCommand(%q): %v", c.Command, err)
 		}
 	}
