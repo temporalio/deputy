@@ -30,125 +30,50 @@ type diagnosticEngine struct{}
 // newDiagnosticEngine creates a new instance of the diagnostic engine.
 func newDiagnosticEngine() *diagnosticEngine { return &diagnosticEngine{} }
 
-// analyze runs YAML parsing, structural checks, and CEL compilation.
+// analyze runs the shared policy bundle validation and renders its issues as LSP
+// diagnostics, supplying the editor's richer CEL error formatting. The checks
+// themselves live in the policy package so `deputy policy lint` and the editor
+// agree on what a valid policy is.
 func (d *diagnosticEngine) analyze(uri protocol.DocumentURI, text string) ([]protocol.Diagnostic, error) {
-	root := &yaml.Node{}
-	if err := yaml.Unmarshal([]byte(text), root); err != nil {
+	issues, err := policy.ValidateBundle(text, policy.ValidateOptions{
+		Source: string(uri),
+		CheckWhen: func(when policy.RuleWhen) []policy.Issue {
+			compileErr := policy.Compile(when.Expr, when.DeclaredVars)
+			if compileErr == nil {
+				return nil
+			}
+			knownNames := append(policy.DefaultVariableNames(), when.DeclaredVars...)
+			return []policy.Issue{celErrorIssue(when, compileErr, knownNames)}
+		},
+	})
+	if err != nil {
 		return []protocol.Diagnostic{yamlErrorToDiagnostic(uri, err)}, nil
 	}
-	diag := make([]protocol.Diagnostic, 0)
-
-	// Navigate to mapping under document.
-	if len(root.Content) == 0 {
-		return diag, nil
-	}
-	doc := root.Content[0]
-	if doc.Kind != yaml.MappingNode {
-		diag = append(diag, makeDiagnostic(uri, doc.Line, doc.Column, "root must be a mapping", protocol.Error))
-		return diag, nil
-	}
-	policiesNode := findMapValue(doc, "policies")
-	if policiesNode == nil {
-		diag = append(diag, makeDiagnostic(uri, doc.Line, doc.Column, "missing required 'policies' list", protocol.Error))
-		return diag, nil
-	}
-	if policiesNode.Kind != yaml.SequenceNode {
-		diag = append(diag, makeDiagnostic(uri, policiesNode.Line, policiesNode.Column, "'policies' must be a list", protocol.Error))
-		return diag, nil
-	}
-	seenNames := map[string]struct{}{}
-	for _, item := range policiesNode.Content {
-		if item.Kind != yaml.MappingNode {
-			diag = append(diag, makeDiagnostic(uri, item.Line, item.Column, "policy must be a mapping", protocol.Error))
-			continue
-		}
-		// name
-		nameNode := findMapValue(item, "name")
-		if nameNode != nil && nameNode.Kind == yaml.ScalarNode {
-			name := strings.TrimSpace(nameNode.Value)
-			if name != "" {
-				if _, dup := seenNames[name]; dup {
-					diag = append(diag, makeDiagnostic(uri, nameNode.Line, nameNode.Column, fmt.Sprintf("duplicate policy name %q", name), protocol.Error))
-				}
-				seenNames[name] = struct{}{}
-			}
-		}
-		// entrypoints / commands enums
-		checkListEnum := func(key string, validator func(string) bool) {
-			node := findMapValue(item, key)
-			if node == nil {
-				return
-			}
-			if node.Kind != yaml.SequenceNode {
-				diag = append(diag, makeDiagnostic(uri, node.Line, node.Column, fmt.Sprintf("'%s' must be a list", key), protocol.Error))
-				return
-			}
-			for _, v := range node.Content {
-				if v.Kind != yaml.ScalarNode {
-					diag = append(diag, makeDiagnostic(uri, v.Line, v.Column, fmt.Sprintf("'%s' items must be strings", key), protocol.Error))
-					continue
-				}
-				if !validator(v.Value) {
-					diag = append(diag, makeDiagnostic(uri, v.Line, v.Column, fmt.Sprintf("invalid %s %q", key[:len(key)-1], v.Value), protocol.Warning))
-				}
-			}
-		}
-		checkListEnum("entrypoints", policy.IsAllowedEntrypoint)
-		checkListEnum("commands", policy.IsAllowedCommand)
-
-		declaredVars := collectDeclaredVars(item)
-		knownNames := append(policy.DefaultVariableNames(), declaredVars...)
-
-		// rules
-		diag = append(diag, validateRulesNode(uri, item, declaredVars, knownNames)...)
-	}
-
-	// Compile the whole policy to ensure bundled vars/metadata are valid.
-	if _, err := policy.ParseStructuredSources([]byte(text), string(uri)); err != nil {
-		diag = append(diag, makeDiagnostic(uri, 0, 0, err.Error(), protocol.Warning))
+	diag := make([]protocol.Diagnostic, 0, len(issues))
+	for _, issue := range issues {
+		diag = append(diag, issueToDiagnostic(uri, issue))
 	}
 	return diag, nil
 }
 
-// validateRulesNode validates the rules list for a policy item and returns diagnostics.
-// It checks for the presence of a rules list, validates each rule's structure,
-// compiles CEL expressions, and checks for missing required fields.
-func validateRulesNode(uri protocol.DocumentURI, item *yaml.Node, declaredVars, knownNames []string) []protocol.Diagnostic {
-	var diag []protocol.Diagnostic
-	rulesNode := findMapValue(item, "rules")
-	if rulesNode == nil {
-		return []protocol.Diagnostic{makeDiagnostic(uri, item.Line, item.Column, "policy missing 'rules'", protocol.Error)}
+// issueToDiagnostic renders a shared validation issue as an LSP diagnostic,
+// preserving its position, width, and quick-fix code.
+func issueToDiagnostic(uri protocol.DocumentURI, issue policy.Issue) protocol.Diagnostic {
+	severity := protocol.Error
+	switch issue.Severity {
+	case policy.IssueWarning:
+		severity = protocol.Warning
+	case policy.IssueHint:
+		severity = protocol.Hint
 	}
-	if rulesNode.Kind != yaml.SequenceNode {
-		return []protocol.Diagnostic{makeDiagnostic(uri, rulesNode.Line, rulesNode.Column, "'rules' must be a list", protocol.Error)}
+	if issue.Length > 0 {
+		return diagWithRangeAndCode(uri, issue.Line, issue.Column, issue.Length, issue.Message, severity, issue.Code)
 	}
-	for _, rule := range rulesNode.Content {
-		if rule.Kind != yaml.MappingNode {
-			diag = append(diag, makeDiagnostic(uri, rule.Line, rule.Column, "rule must be a mapping", protocol.Error))
-			continue
-		}
-		whenNode := findMapValue(rule, "when")
-		if whenNode == nil || whenNode.Kind != yaml.ScalarNode {
-			diag = append(diag, diagWithCode(uri, rule.Line, rule.Column, "rule missing 'when' expression", protocol.Error, "missing-when"))
-			continue
-		}
-		// CEL compile of the when expression with location mapping.
-		if err := policy.Compile(whenNode.Value, declaredVars); err != nil {
-			diag = append(diag, celErrorDiagnostic(uri, whenNode, err, knownNames))
-		}
-		actionNode := findMapValue(rule, "action")
-		if actionNode == nil || actionNode.Kind != yaml.ScalarNode {
-			diag = append(diag, diagWithCode(uri, rule.Line, rule.Column, "rule missing 'action'", protocol.Error, "missing-action"))
-		} else {
-			if actionNode.Value == "deny" || actionNode.Value == "warn" {
-				reasonNode := findMapValue(rule, "reason")
-				if reasonNode == nil || strings.TrimSpace(reasonNode.Value) == "" {
-					diag = append(diag, diagWithRangeAndCode(uri, actionNode.Line, actionNode.Column, len(actionNode.Value), "missing 'reason' for warn/deny", protocol.Hint, "missing-reason"))
-				}
-			}
-		}
+	d := makeDiagnostic(uri, issue.Line, issue.Column, issue.Message, severity)
+	if issue.Code != "" {
+		d.Code = issue.Code
 	}
-	return diag
+	return d
 }
 
 // yamlErrorToDiagnostic converts a YAML parsing error into an LSP diagnostic.
@@ -195,14 +120,6 @@ func makeDiagnostic(_ protocol.DocumentURI, line, col int, msg string, sev proto
 	}
 }
 
-// diagWithCode creates a diagnostic with an associated error code.
-// This code is used by the code action handler to provide quick fixes.
-func diagWithCode(uri protocol.DocumentURI, line, col int, msg string, sev protocol.DiagnosticSeverity, code string) protocol.Diagnostic {
-	d := makeDiagnostic(uri, line, col, msg, sev)
-	d.Code = code
-	return d
-}
-
 // diagWithRangeAndCode creates a diagnostic with a specific length and error code.
 // It is useful for highlighting specific tokens or ranges.
 func diagWithRangeAndCode(uri protocol.DocumentURI, line, col, length int, msg string, sev protocol.DiagnosticSeverity, code string) protocol.Diagnostic {
@@ -212,9 +129,11 @@ func diagWithRangeAndCode(uri protocol.DocumentURI, line, col, length int, msg s
 	return d
 }
 
-// celErrorDiagnostic converts a CEL compilation error into an LSP diagnostic.
-// It attempts to map the error location to the specific AST node in the YAML.
-func celErrorDiagnostic(uri protocol.DocumentURI, node *yaml.Node, err error, knownNames []string) protocol.Diagnostic {
+// celErrorIssue converts a CEL compilation error into a validation issue placed
+// on the offending token. It maps the compiler's line and column back onto the
+// YAML document, widens the range to the smallest covering AST node, and adds a
+// name suggestion and source snippet the plain compiler message lacks.
+func celErrorIssue(when policy.RuleWhen, err error, knownNames []string) policy.Issue {
 	msg := err.Error()
 	lineOffset, colOffset := 0, 0
 	var parsedLine, parsedCol int
@@ -222,28 +141,28 @@ func celErrorDiagnostic(uri protocol.DocumentURI, node *yaml.Node, err error, kn
 		lineOffset = parsedLine - 1
 		colOffset = parsedCol - 1
 	}
-	line := node.Line + lineOffset
-	col := node.Column + colOffset
+	line := when.Line + lineOffset
+	col := when.Column + colOffset
 	length := 1
 	// Try to map to AST offset to widen the range (ident, select chain, call target/args)
-	if rngLen, adjustedCol := widenWithAST(node.Value, node.Column, lineOffset, colOffset); rngLen > 0 {
+	if rngLen, adjustedCol := widenWithAST(when.Expr, when.Column, lineOffset, colOffset); rngLen > 0 {
 		col = adjustedCol
 		length = rngLen
 	}
 	// Fallback to undeclared name widen
 	if length <= 1 {
 		if name := extractUndeclaredName(msg); name != "" {
-			if idx := strings.Index(node.Value, name); idx >= 0 {
-				col = node.Column + idx
+			if idx := strings.Index(when.Expr, name); idx >= 0 {
+				col = when.Column + idx
 				length = len(name)
 			}
 		}
 	}
 	// Final fallback: extend token until whitespace
 	if length <= 1 {
-		if offset := offsetFromLineCol(node.Value, lineOffset, colOffset); offset >= 0 && offset < len(node.Value) {
+		if offset := offsetFromLineCol(when.Expr, lineOffset, colOffset); offset >= 0 && offset < len(when.Expr) {
 			end := offset
-			for end < len(node.Value) && !isSpaceOrPunct(rune(node.Value[end])) {
+			for end < len(when.Expr) && !isSpaceOrPunct(rune(when.Expr[end])) {
 				end++
 			}
 			length = end - offset
@@ -255,14 +174,23 @@ func celErrorDiagnostic(uri protocol.DocumentURI, node *yaml.Node, err error, kn
 			display = fmt.Sprintf("%s (did you mean '%s'?)", display, suggestion)
 		}
 	}
-	if snippet := snippetFromCelError(node.Value, parsedLine, parsedCol, extractUndeclaredName(msg)); snippet.code != "" {
+	if snippet := snippetFromCelError(when.Expr, parsedLine, parsedCol, extractUndeclaredName(msg)); snippet.code != "" {
 		display = fmt.Sprintf("%s\n  %s\n  %s", display, snippet.code, snippet.caret)
 	}
-	d := diagWithRangeAndCode(uri, line, col, length, display, protocol.Error, "cel-error")
+	code := "cel-error"
 	if strings.Contains(msg, "undeclared reference to '") {
-		d.Code = "undeclared"
+		code = "undeclared"
 	}
-	return d
+	return policy.Issue{
+		Policy:    when.Policy,
+		RuleIndex: when.RuleIndex,
+		Line:      line,
+		Column:    col,
+		Length:    length,
+		Severity:  policy.IssueError,
+		Code:      code,
+		Message:   display,
+	}
 }
 
 // widenWithAST attempts to find the smallest AST node (ident/select/call target/arg) containing the offset and returns its length and adjusted column.
@@ -416,32 +344,9 @@ func snippetFromCelError(expr string, line, col int, hint string) snippetInfo {
 	}
 }
 
-// collectDeclaredVars returns the set of variable names declared under vars: for a policy mapping node.
-func collectDeclaredVars(policyNode *yaml.Node) []string {
-	var names []string
-	varsNode := findMapValue(policyNode, "vars")
-	if varsNode == nil || varsNode.Kind != yaml.MappingNode {
-		return names
-	}
-	for i := 0; i+1 < len(varsNode.Content); i += 2 {
-		k := varsNode.Content[i]
-		if k.Kind == yaml.ScalarNode && strings.TrimSpace(k.Value) != "" {
-			names = append(names, k.Value)
-		}
-	}
-	return names
-}
-
 // findMapValue returns the value node for the given key inside a mapping node.
+// The policy package owns the bundle's YAML shape, so this delegates rather than
+// keeping a second copy of the lookup.
 func findMapValue(mapNode *yaml.Node, key string) *yaml.Node {
-	if mapNode.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(mapNode.Content); i += 2 {
-		k := mapNode.Content[i]
-		if k.Kind == yaml.ScalarNode && k.Value == key {
-			return mapNode.Content[i+1]
-		}
-	}
-	return nil
+	return policy.MappingValue(mapNode, key)
 }

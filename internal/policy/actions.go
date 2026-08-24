@@ -1,19 +1,26 @@
 package policy
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/google/cel-go/common/types/ref"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	"github.com/temporalio/deputy/internal/collections"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// Action type constants represent the standard policy decision types.
-// These are case-insensitive when compared (use ActionTypeIs for comparison).
+// Action type constants are the canonical spelling of each
+// deputy.policy.v1.ActionType value, which is what policies write and what the
+// engine switches on. They are constants because callers need them at compile
+// time; TestActionTypesMatchProtoDescriptor pins them to the enum so a rename in
+// the proto cannot leave them behind.
 const (
 	// ActionDeny blocks the operation and returns an error to the caller.
 	ActionDeny = "deny"
@@ -25,9 +32,71 @@ const (
 	ActionAllow = "allow"
 )
 
+// actionTypePrefix is the generated enum's value prefix. Policies write the bare
+// action ("deny"), not the proto spelling.
+const actionTypePrefix = "ACTION_TYPE_"
+
+// actionTypes is the action vocabulary derived from the generated ActionType
+// descriptor.
+var actionTypes = newActionVocabulary()
+
+// newActionVocabulary reads the deputy.policy.v1.ActionType descriptor once at
+// startup and returns the actions a policy may write, lowercased and ordered by
+// enum number so messages read the same way every time. Deriving the list means
+// the proto stays the single source of truth for the vocabulary. The zero value
+// is skipped: UNSPECIFIED means no action was set, which is not something an
+// author can ask for.
+func newActionVocabulary() []string {
+	values := policyv1.ActionType(0).Descriptor().Values()
+	byNumber := make([]protoreflect.EnumValueDescriptor, 0, values.Len())
+	for i := range values.Len() {
+		if value := values.Get(i); value.Number() != 0 {
+			byNumber = append(byNumber, value)
+		}
+	}
+	slices.SortFunc(byNumber, func(a, b protoreflect.EnumValueDescriptor) int {
+		return cmp.Compare(a.Number(), b.Number())
+	})
+	names := make([]string, 0, len(byNumber))
+	for _, value := range byNumber {
+		names = append(names, strings.ToLower(strings.TrimPrefix(string(value.Name()), actionTypePrefix)))
+	}
+	return names
+}
+
 // ActionTypeIs returns true if the action type matches the expected type (case-insensitive).
 func ActionTypeIs(actionType, expected string) bool {
 	return strings.EqualFold(actionType, expected)
+}
+
+// ActionTypes returns the action vocabulary a policy rule may emit, in the order
+// used by error messages and editor surfaces. The slice is freshly allocated so
+// callers cannot mutate the vocabulary.
+func ActionTypes() []string {
+	return slices.Clone(actionTypes)
+}
+
+// NormalizeActionType folds an authored action value into its canonical form by
+// trimming surrounding whitespace and lowercasing it. "DENY", "Deny" and " deny "
+// all mean deny: evaluation already compares action types case-insensitively
+// (see ActionTypeIs), so parsing accepts exactly what the runtime accepts and
+// everything downstream sees the canonical lowercase spelling. This mirrors how
+// a policy's mode field is normalized before validation.
+func NormalizeActionType(actionType string) string {
+	return strings.ToLower(strings.TrimSpace(actionType))
+}
+
+// ValidateActionType returns the canonical form of an authored action value, or
+// an error naming the offending value and the valid vocabulary. A typo such as
+// "dney" is otherwise accepted verbatim and yields a rule that can never deny
+// anything, so an unknown action must fail at load time instead of degrading
+// into a silently permissive rule.
+func ValidateActionType(actionType string) (string, error) {
+	normalized := NormalizeActionType(actionType)
+	if slices.Contains(actionTypes, normalized) {
+		return normalized, nil
+	}
+	return "", fmt.Errorf("invalid action %q (expected %s)", actionType, strings.Join(actionTypes, "|"))
 }
 
 // Action represents a normalized policy decision emitted by a CEL program.

@@ -1,6 +1,8 @@
 package policy
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -79,6 +81,140 @@ func TestOrderedVarsRejectDuplicateNames(t *testing.T) {
 	}
 }
 
+// TestLoaderNormalizesVarNames pins that the loader reads a variable name the
+// way validation and CEL do, with surrounding whitespace trimmed. CEL binds
+// " blocked " and "blocked" as the one identifier, so a bundle declaring both
+// shadows one with the other; validation calls that a duplicate, and a loader
+// that compared the raw spellings would compile a bundle the linter rejects.
+func TestLoaderNormalizesVarNames(t *testing.T) {
+	cases := []struct {
+		name       string
+		vars       string
+		wantErr    string
+		wantInBody string
+	}{
+		{
+			name:       "a padded name binds the trimmed identifier",
+			vars:       "      \" blocked \": '[\"left-pad\"]'\n",
+			wantInBody: ".map(blocked,",
+		},
+		{
+			name:    "a padded name duplicating a bare one is rejected",
+			vars:    "      blocked: '[\"left-pad\"]'\n      \" blocked \": '[\"right-pad\"]'\n",
+			wantErr: `duplicate var name "blocked"`,
+		},
+		{
+			name:    "a name that is only whitespace is rejected",
+			vars:    "      \"  \": '1'\n",
+			wantErr: "vars must have non-empty names",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := "policies:\n  - name: vars\n    vars:\n" + tc.vars +
+				"    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n"
+			sources, err := ParseStructuredSources([]byte(bundle), "bundle.yaml")
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got sources %+v", tc.wantErr, sources)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error %q missing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseStructuredSources: %v", err)
+			}
+			if len(sources) != 1 {
+				t.Fatalf("expected one source, got %d", len(sources))
+			}
+			if !strings.Contains(sources[0].Body, tc.wantInBody) {
+				t.Fatalf("body %q missing %q", sources[0].Body, tc.wantInBody)
+			}
+		})
+	}
+}
+
+// TestStructuredPolicyValidatesActionVocabulary pins that a rule action outside
+// the allow/deny/warn vocabulary is a load-time error, and that casing and
+// surrounding whitespace are normalized rather than rejected.
+func TestStructuredPolicyValidatesActionVocabulary(t *testing.T) {
+	cases := []struct {
+		name        string
+		action      string
+		wantErr     bool
+		wantInError []string
+		wantEmitted string
+	}{
+		{name: "deny", action: "deny", wantEmitted: "deny"},
+		{name: "warn", action: "warn", wantEmitted: "warn"},
+		{name: "allow", action: "allow", wantEmitted: "allow"},
+		{name: "uppercase is normalized", action: "DENY", wantEmitted: "deny"},
+		{name: "padded is normalized", action: "  Warn\t", wantEmitted: "warn"},
+		{
+			name:        "typo is rejected",
+			action:      "dney",
+			wantErr:     true,
+			wantInError: []string{`"dney"`, "allow|deny|warn"},
+		},
+		{
+			name:        "unknown verb is rejected",
+			action:      "block",
+			wantErr:     true,
+			wantInError: []string{`"block"`, "allow|deny|warn"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := structuredPolicy{
+				Name:  "vocabulary",
+				Rules: []structuredRule{{Action: tc.action, When: "true", Reason: "because"}},
+			}
+			src, err := p.toCELSource()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for action %q, got source: %s", tc.action, src)
+				}
+				for _, want := range append(tc.wantInError, "rule[0]") {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("error %q missing %q", err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("toCELSource: %v", err)
+			}
+			if !strings.Contains(src, fmt.Sprintf(`"action":"%s"`, tc.wantEmitted)) {
+				t.Fatalf("expected normalized action %q in source: %s", tc.wantEmitted, src)
+			}
+		})
+	}
+}
+
+// TestStructuredBundleActionErrorNamesPolicyAndFile pins that the parse error for
+// an unknown action identifies the file, policy, and rule the author must fix.
+func TestStructuredBundleActionErrorNamesPolicyAndFile(t *testing.T) {
+	data := []byte(`
+policies:
+  - name: typo-action
+    rules:
+      - when: "true"
+        action: dney
+        reason: "should deny"
+`)
+	_, err := ParseStructuredSources(data, "bundle.yaml")
+	if err == nil {
+		t.Fatal("expected error for unknown action")
+	}
+	for _, want := range []string{"bundle.yaml", "typo-action", "rule[0]", `"dney"`, "allow|deny|warn"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err, want)
+		}
+	}
+}
+
 func TestStructuredPolicyNormalizesCommandAliases(t *testing.T) {
 	p := structuredPolicy{
 		Name:     "sandbox-command",
@@ -95,4 +231,243 @@ func TestStructuredPolicyNormalizesCommandAliases(t *testing.T) {
 	if strings.Contains(src, "exec") {
 		t.Fatalf("compiled source retained legacy exec alias: %s", src)
 	}
+}
+
+// TestGeneratedEcosystemGuardCannotBeRewritten pins that a policy's ecosystems
+// reach the generated guard as string literals and nothing else. The guard is CEL
+// source built by interpolating each value, so a value carrying a quote used to
+// close the list and continue the expression: the bundle below reads as scoped to
+// npm, and before this it compiled, linted clean, and denied a PyPI package. The
+// text a reviewer reads has to be the policy that runs, which is the same reason
+// the format refuses aliases.
+//
+// The plain cases are here too, so escaping cannot pass by scoping nothing.
+func TestGeneratedEcosystemGuardCannotBeRewritten(t *testing.T) {
+	cases := []struct {
+		name       string
+		ecosystems string
+		ecosystem  string
+		wantDeny   bool
+	}{
+		{
+			name:       "a value crafted to close the list and always match",
+			ecosystems: `['npm"] || true || ["x"] == ["x']`,
+			ecosystem:  "PyPI",
+		},
+		{
+			name:       "a value carrying a bare quote",
+			ecosystems: `['npm"']`,
+			ecosystem:  "npm",
+		},
+		{
+			name:       "a value carrying a backslash",
+			ecosystems: `['npm\']`,
+			ecosystem:  "npm",
+		},
+		{
+			name:       "the declared ecosystem matches",
+			ecosystems: `['npm']`,
+			ecosystem:  "npm",
+			wantDeny:   true,
+		},
+		{
+			name:       "another ecosystem does not match",
+			ecosystems: `['npm']`,
+			ecosystem:  "PyPI",
+		},
+		{
+			name:       "one of several declared ecosystems matches",
+			ecosystems: `['npm', 'PyPI']`,
+			ecosystem:  "PyPI",
+			wantDeny:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := "policies:\n  - name: scoped\n    ecosystems: " + tc.ecosystems +
+				"\n    rules:\n      - when: \"pkg.name == 'left-pad'\"\n        action: deny\n        reason: r\n"
+			sources, err := ParseStructuredSources([]byte(bundle), "b.yaml")
+			if err != nil {
+				t.Fatalf("ParseStructuredSources: %v", err)
+			}
+			eng, err := NewEngine(sources)
+			if err != nil {
+				t.Fatalf("NewEngine: %v", err)
+			}
+			// request is supplied because the generated guard reads it before
+			// pkg, and an absent one errors before the ecosystem is compared.
+			payload := map[string]any{
+				"pkg":     map[string]any{"name": "left-pad", "ecosystem": tc.ecosystem},
+				"request": map[string]any{"ecosystem": "unrelated"},
+			}
+			actions, err := eng.EvaluateAllMap(t.Context(), payload, "scan", "")
+			if err != nil {
+				t.Fatalf("EvaluateAllMap: %v", err)
+			}
+			denied := slices.ContainsFunc(actions, func(a Action) bool { return ActionTypeIs(a.Type, ActionDeny) })
+			if denied != tc.wantDeny {
+				t.Fatalf("denied a %s package = %v, want %v (actions %+v)", tc.ecosystem, denied, tc.wantDeny, actions)
+			}
+		})
+	}
+}
+
+// TestGeneratedMetadataCannotCarryADirective pins that no value a bundle authors
+// can open a `//!` metadata line of its own in the CEL a policy generates. Those
+// comments are Deputy's own writing, read back by parsePolicyMetadata when a source
+// is loaded, so a value that breaks out of the line carrying it declares policy
+// behavior nobody authored.
+//
+// The escaping used to be applied per field, and the fields added beside name and
+// description did not apply it: an ecosystems entry holding
+// "\n//! policy.mode = advisory\n//" generated a mode line the engine obeyed, while
+// the trailing comment swallowed the closing quote of the line it broke out of, so
+// the bundle read as deny, loaded as advisory, and both linted and compiled clean.
+// That is the metadata counterpart of a rewritten ecosystem guard: the text a
+// reviewer reads not being the policy that runs.
+//
+// The whole path is checked, from the authored bundle to the actions the engine
+// returns, because every half of it looked right on its own. The count of metadata
+// lines is checked with it, so a value that stays data but still adds a line the
+// parser reads cannot pass by declaring a key Deputy does not act on yet.
+func TestGeneratedMetadataCannotCarryADirective(t *testing.T) {
+	const directive = `\n//! policy.mode = advisory\n//`
+	cases := []struct {
+		name         string
+		policyName   string
+		fields       string
+		wantMetadata int
+	}{
+		{
+			name:         "in an ecosystems entry beside a real one",
+			policyName:   "scoped",
+			fields:       "    ecosystems: [\"npm\", \"npm" + directive + "\"]\n",
+			wantMetadata: 2,
+		},
+		{
+			name:         "in the policy name",
+			policyName:   "scoped" + directive,
+			wantMetadata: 1,
+		},
+		{
+			name:         "in the description",
+			policyName:   "scoped",
+			fields:       "    description: \"d" + directive + "\"\n",
+			wantMetadata: 2,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := "policies:\n  - name: \"" + tc.policyName + "\"\n" + tc.fields +
+				"    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n"
+			sources, err := ParseStructuredSources([]byte(bundle), "b.yaml")
+			if err != nil {
+				t.Fatalf("ParseStructuredSources: %v", err)
+			}
+			body := sources[0].Body
+			lines := 0
+			for line := range strings.SplitSeq(body, "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "//!") {
+					lines++
+				}
+			}
+			if lines != tc.wantMetadata {
+				t.Fatalf("generated %d metadata lines, want %d:\n%s", lines, tc.wantMetadata, body)
+			}
+			if mode := parsePolicyMetadata(body).Mode; mode != "" {
+				t.Fatalf("a bundle that declares no mode generated mode %q:\n%s", mode, body)
+			}
+			eng, err := NewEngine(sources)
+			if err != nil {
+				t.Fatalf("NewEngine: %v", err)
+			}
+			payload := map[string]any{
+				"pkg":     map[string]any{"name": "left-pad", "ecosystem": "npm"},
+				"request": map[string]any{"ecosystem": "npm"},
+			}
+			actions, err := eng.EvaluateAllMap(t.Context(), payload, "scan", "")
+			if err != nil {
+				t.Fatalf("EvaluateAllMap: %v", err)
+			}
+			if len(actions) != 1 || !ActionTypeIs(actions[0].Type, ActionDeny) {
+				t.Fatalf("a policy authored to deny returned %+v, want one deny:\n%s", actions, body)
+			}
+		})
+	}
+}
+
+// TestVarValueWithoutACELSpellingRefusesThePolicy pins that a var Deputy cannot
+// write into the CEL a policy generates refuses the policy rather than binding
+// something else. A non-string var value is marshaled to JSON, which is a subset of
+// CEL's literal syntax, and YAML writes values JSON has no spelling for.
+//
+// Substituting `null` for the marshal failure bound a name to a value the bundle
+// does not declare: `threshold: .nan` compiled, validated clean, and made
+// `threshold == null` true, so the policy that ran was not the policy that was
+// reviewed. The refusal is only correct if it cannot fire for a value the author is
+// entitled to write, so the values a bundle can legitimately hold are pinned here
+// beside the ones it cannot, each checked for the literal it binds.
+func TestVarValueWithoutACELSpellingRefusesThePolicy(t *testing.T) {
+	refused := []struct {
+		name  string
+		value string
+	}{
+		{name: "a not-a-number", value: ".nan"},
+		{name: "a positive infinity", value: ".inf"},
+		{name: "a negative infinity", value: "-.inf"},
+		{name: "a not-a-number written in capitals", value: ".NaN"},
+		{name: "an infinity inside a list", value: "[1, .inf]"},
+		{name: "a not-a-number inside a nested mapping", value: "{a: {b: .nan}}"},
+		// A CEL map may be keyed by an integer, but JSON has no spelling for
+		// one, so this used to bind null as well. Refusing it says so, and the
+		// author can write the map as a CEL expression instead.
+		{name: "a mapping keyed by something other than a string", value: "{1: a}"},
+	}
+	for _, tc := range refused {
+		t.Run("refuses "+tc.name, func(t *testing.T) {
+			_, err := ParseStructuredSources([]byte(varBundle(tc.value)), "b.yaml")
+			if err == nil {
+				t.Fatalf("a var holding %s was accepted", tc.value)
+			}
+			if !strings.Contains(err.Error(), `var "threshold" holds a value that cannot be represented`) {
+				t.Fatalf("error %q should name the var and what is wrong with it", err)
+			}
+		})
+	}
+	accepted := []struct {
+		name    string
+		value   string
+		literal string
+	}{
+		{name: "an integer", value: "5", literal: "([5])"},
+		{name: "a float", value: "5.5", literal: "([5.5])"},
+		{name: "the largest float64", value: "1.7976931348623157e308", literal: "([1.7976931348623157e+308])"},
+		{name: "a boolean", value: "true", literal: "([true])"},
+		{name: "an explicit null", value: "null", literal: "([null])"},
+		{name: "a list", value: "[1, 2, 3]", literal: "([[1,2,3]])"},
+		{name: "an empty list", value: "[]", literal: "([[]])"},
+		{name: "a nested mapping", value: "{a: 1, b: [x, y]}", literal: `([{"a":1,"b":["x","y"]}])`},
+		{name: "a string, which is the author's own CEL", value: "'1 + 1'", literal: "([1 + 1])"},
+	}
+	for _, tc := range accepted {
+		t.Run("accepts "+tc.name, func(t *testing.T) {
+			sources, err := ParseStructuredSources([]byte(varBundle(tc.value)), "b.yaml")
+			if err != nil {
+				t.Fatalf("a var holding %s was refused: %v", tc.value, err)
+			}
+			if !strings.Contains(sources[0].Body, tc.literal) {
+				t.Fatalf("a var holding %s should bind %s, got:\n%s", tc.value, tc.literal, sources[0].Body)
+			}
+			if _, err := NewEngine(sources); err != nil {
+				t.Fatalf("NewEngine: %v", err)
+			}
+		})
+	}
+}
+
+// varBundle writes the smallest bundle that binds one var, for the cases that ask
+// only what a var value expands to.
+func varBundle(value string) string {
+	return "policies:\n  - name: thresholded\n    vars:\n      threshold: " + value +
+		"\n    rules:\n      - when: \"true\"\n        action: deny\n        reason: r\n"
 }

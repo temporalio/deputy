@@ -63,10 +63,66 @@ $ deputy policy eval \
 
 ## `lint`
 
-Validate CEL policy syntax and type safety.
+Validate policy bundles: CEL syntax and type safety plus the surrounding
+structure. Lint runs the same checks the editor language server runs, so a
+policy that lints clean is a policy the editor considers clean:
+
+- `action` values outside `allow|deny|warn`
+- unknown `entrypoints` and `commands`
+- duplicate policy names and duplicate var names, compared with surrounding
+  whitespace trimmed, since that is the name CEL binds and loading reads
+- a `policies` key that is missing, empty, or not a list
+- rules missing `when` or `action`, and `deny`/`warn` rules with no `reason`
+- invalid `mode`, malformed `vars`, and conditions that do not compile
+- vars that break the CEL a policy expands into, which no single condition
+  reveals, so a bundle that lints clean is one `deputy policy bundle` compiles
+- YAML anchors, aliases, merge keys, and tags that rewrite a scalar, which
+  bundles do not support (see
+  [policy-spec](../reference/policy-spec.md#yaml-anchors-and-rewriting-tags-are-not-supported))
+- YAML that does not parse, reported with the offending line rather than as an
+  unrecognized file, for any document that writes a top-level `policies` key,
+  bare or quoted (`policies:`, `"policies":`, `'policies':`)
+
+Every policy is checked, not just the first, and one run reports every
+independent defect so a file is fixed once instead of a lint at a time. Each
+policy is walked and expanded on its own, so nothing about one policy withholds
+another policy's diagnostics: a field only the decoder refuses, such as a rule
+`status` written as a string, and an anchor written anywhere in the document
+are both reported alongside the rest of the bundle, as are the bundle-level
+fields that belong to no single policy.
+
+What a defect suppresses is narrow. A policy the walk already reported is not
+expanded as a whole, since that failure would only restate the defect in
+generated CEL, but its vars are still compiled because they are wrong or right
+on their own. And a policy is skipped only where lint cannot read it: an alias
+or a merge key puts part of the policy somewhere else, while an anchor
+definition says what it says where it is written, so the policy around it is
+checked like any other.
+
+An optional field written as an explicit null (`mode:`, `mode: null`, `mode:
+~`) is read as unset, exactly as loading the bundle reads it.
+
+A compiled bundle and a raw CEL source are checked for more than their CEL. Each
+carries its `policy.mode` and `policy.entrypoints` as `//!` metadata comments,
+naming the same closed vocabularies an authored bundle names as fields, so a
+value the engine refuses when it loads the source is refused here. A misspelled
+`advsiory` is caught by lint rather than at load time in production, because a
+lint that passes an artifact the loader rejects is worse than no lint. Loading a
+bundle means the same thing in both formats, so `bundle` and `inspect` refuse
+the same value rather than repackaging or describing a policy that cannot run.
 
 ```
 deputy policy lint <policy.yaml> [policy2.yaml ...]
+```
+
+A path of `-` reads the policy from stdin. The format is chosen from the bytes,
+not from how they arrived, so a bundle piped in is validated exactly as the
+identical file is; raw CEL on stdin is still compiled as the one expression it
+is.
+
+```console
+$ deputy policy lint - < policies/deny-critical.yaml
+stdin OK
 ```
 
 ### Flags
@@ -81,6 +137,14 @@ deputy policy lint <policy.yaml> [policy2.yaml ...]
 $ deputy policy lint policies/*.yaml
 policies/deny-critical.yaml OK
 policies/require-license.yaml OK
+```
+
+Problems are reported one per line, anchored to the file, line, column, policy,
+and rule, and the command exits non-zero:
+
+```console
+$ deputy policy lint policies/typo.yaml
+policies/typo.yaml:5:17: error: policy "block-critical" rule[0]: invalid action "dney" (expected allow|deny|warn)
 ```
 
 The linter provides helpful diagnostics with caret pointers:

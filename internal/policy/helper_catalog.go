@@ -96,7 +96,7 @@ var helperFunctions = []HelperFunction{
 	// Both global function and method syntax are supported:
 	//   severityAtLeast(vulnerability, "HIGH")  // global function
 	//   vulnerability.severityAtLeast("HIGH")   // method syntax
-	{Name: "severityAtLeast", Signature: "severityAtLeast(v, level) / v.severityAtLeast(level)", Doc: "Check if severity >= level. Both syntaxes supported. Order: CRITICAL > HIGH > MEDIUM > LOW."},
+	{Name: "severityAtLeast", Signature: "severityAtLeast(v, level) / v.severityAtLeast(level)", Doc: "Check if severity >= level. Both syntaxes supported. Order: CRITICAL > HIGH > MEDIUM > LOW > UNSPECIFIED. An unknown level fails evaluation."},
 	{Name: "isCritical", Signature: "isCritical(v) / v.isCritical()", Doc: "Check if CRITICAL severity. Both global and method syntax supported."},
 	{Name: "isHighOrAbove", Signature: "isHighOrAbove(v) / v.isHighOrAbove()", Doc: "Check if HIGH or CRITICAL severity. Both global and method syntax supported."},
 

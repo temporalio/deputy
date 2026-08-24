@@ -94,9 +94,59 @@ Canonical entrypoints (snake_case):
 ### Validation
 - Empty `policies` or missing `rules` is invalid; each policy must have at least one rule.
 - Policy names must be unique within a bundle.
+- Policy names and var names are read with surrounding whitespace trimmed, so
+  `blocked` and `" blocked "` are one name and declaring both is a duplicate. A
+  var name is a CEL identifier, which is why the two spellings cannot differ.
 - String vars are CEL expressions; non-string values are treated as literals. Rules must include `action` and `when`.
+- `action` must be `allow`, `deny`, or `warn`.
 - `mode`, if set, must be `enforce` or `advisory`.
 - Canonical ecosystem strings used by built-in entrypoints: `go`, `npm`, `pypi`, `rubygems`, `oci`.
+- An optional field written as an explicit YAML null (`mode:`, `mode: null`, `mode: ~`) is unset, not a value to validate.
+- YAML anchors, aliases, merge keys, and tags that rewrite a scalar are rejected. See below.
+
+### YAML anchors and rewriting tags are not supported
+
+A bundle may not use YAML anchors (`&name`), aliases (`*name`), or merge keys
+(`<<:`). Both `deputy policy lint` and bundle loading refuse them, naming the
+line and the alternatives. That includes a bundle whose `policies` key is not
+written directly but arrives through a top-level merge key. A refused anchor
+does not stop the rest of the checks: lint reports it alongside any unrelated
+defect in the policies written plainly, including the CEL those policies expand
+into and the bundle-level fields around them. Removing the anchor is not a
+prerequisite for seeing the rest of the report.
+
+A bundle may also not use a YAML tag that makes a scalar's value differ from the
+text the document writes for it, such as `action: !!binary ZGVueQ==`, which
+reviews as base64 and denies. The refusal keys off that divergence rather than
+off a list of tags, so every plain spelling still loads: quoted, folded, and
+block scalars, an explicit null, and a tag that leaves the text alone
+(`!!str deny`) are all accepted.
+
+What lint does skip is only what it cannot read. An alias, and a mapping that
+merges another one in, say part of what they mean somewhere else, so lint has
+nothing at hand to describe and reports the construct alone. An anchor
+definition (`description: &text foo`) is not that: the value is written where a
+reader looks for it, so it is refused and everything around it is still
+checked.
+
+This is closed for now, not closed forever. Nothing prevents Deputy from
+resolving these constructs, and the decision can be revisited if a real need
+appears. Two reasons to say no today:
+
+- A policy bundle is a security control, and its job is to state plainly what it
+  blocks. An aliased policy means the text a reviewer reads is not the policy
+  that runs, and merge-key precedence adds a resolution rule the reviewer has to
+  know before they can tell what a policy does. A rewriting tag is the same
+  defect spelled shorter.
+- Every YAML feature the format allows has to be implemented identically by
+  every reader of a bundle, and several read the document as nodes rather than
+  decoding it. That divergence is not hypothetical: it once let an aliased
+  bundle compile fine and lint as broken, and a tagged action lint as invalid
+  and compile as `deny`.
+
+To share rules across bundles, pass a separate file with `--policy`, which is
+repeatable. To reuse an expression within a bundle, use `vars:`. To write a
+value the format would otherwise read as another type, quote it.
 
 ## Examples
 

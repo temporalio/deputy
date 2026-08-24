@@ -36,7 +36,7 @@ type compiledPolicy struct {
 	program     celProgram              // program is the compiled CEL executable.
 	entrypoints collections.Set[string] // entrypoints is the set of entrypoints this policy applies to.
 	commands    collections.Set[string] // commands is the set of commands this policy applies to.
-	mode        string                  // mode defines the execution mode (e.g., "enforce", "audit").
+	mode        string                  // mode is the canonical execution mode (see Modes), or empty for the enforce default.
 }
 
 // celProgram is the minimal interface we need from cel.Program for testing/abstraction.
@@ -55,13 +55,10 @@ func NewEngine(sources []Source) (*Engine, error) {
 		if err != nil {
 			return nil, err
 		}
-		meta := parsePolicyMetadata(src.Body)
-
-		// Validate entrypoints at load time - reject unknown entrypoints
-		if err := validateEntrypoints(meta.Entrypoints, src.Name); err != nil {
+		meta, err := sourceMetadata(src)
+		if err != nil {
 			return nil, err
 		}
-
 		compiled = append(compiled, compiledPolicy{
 			source:      src,
 			program:     prog,
@@ -71,6 +68,69 @@ func NewEngine(sources []Source) (*Engine, error) {
 		})
 	}
 	return &Engine{compiled: compiled}, nil
+}
+
+// sourceMetadata reads the `//!` metadata a policy source declares and refuses the
+// closed vocabularies it gets wrong. It is the load-time boundary of the engine:
+// evaluation reads the mode to decide whether to downgrade a denial and the
+// entrypoints to decide whether to run the policy at all, so a spelling Deputy does
+// not recognize would silently change what the policy does rather than fail.
+//
+// The mode it returns is canonical, so every later reader compares it without
+// repeating the normalization.
+func sourceMetadata(src Source) (policyMetadata, error) {
+	meta := parsePolicyMetadata(src.Body)
+	if err := validateEntrypoints(meta.Entrypoints, src.Name); err != nil {
+		return policyMetadata{}, err
+	}
+	mode, err := declaredMode(meta.Mode, src.Name)
+	if err != nil {
+		return policyMetadata{}, err
+	}
+	meta.Mode = mode
+	return meta, nil
+}
+
+// ValidateSourceMetadata reports the metadata a policy source declares that the
+// engine refuses when it loads the source, naming the policy and the offending
+// value. A source it accepts is one NewEngine will not reject over its metadata.
+//
+// It exists for a reader that has a source but is not about to run it: the loader,
+// which refuses a compiled bundle carrying metadata the engine will not load (see
+// LoadSourcesFromBytes), and lint, for the raw source it reads off stdin without a
+// loader. A compiled policy carries its metadata as `//!` comments, so compiling the
+// CEL was the only question either of them asked of one, and a bundle declaring
+// `advsiory` linted OK, repackaged, and then failed to load in production.
+//
+// Every reader goes through sourceMetadata rather than reading the metadata itself,
+// so a check added at the engine boundary is a check they all make.
+func ValidateSourceMetadata(src Source) error {
+	_, err := sourceMetadata(src)
+	return err
+}
+
+// declaredMode returns the canonical form of the mode a policy source declares,
+// refusing one Deputy does not recognize. Evaluation asks whether a policy's mode
+// is advisory and enforces when it is not, so an unrecognized spelling would turn
+// a policy the author meant to observe with into one that blocks, which is both
+// the opposite of what they asked for and silent. It is the load-time counterpart
+// of validateEntrypoints, and of the check the structured bundle format runs while
+// expanding a policy, so a mode is refused the same way whether it arrives as a
+// bundle field or as a comment on a raw CEL source.
+//
+// Canonicalizing here is what lets every reader of the mode compare it without
+// repeating the normalization: an authored " ADVISORY " is stored as advisory. An
+// empty mode is absent rather than unknown and means enforce, the default, so it
+// loads.
+func declaredMode(mode, policyName string) (string, error) {
+	if NormalizeMode(mode) == "" {
+		return "", nil
+	}
+	canonical, err := ValidateMode(mode)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", policyName, err)
+	}
+	return canonical, nil
 }
 
 // validateEntrypoints checks that all entrypoints are known canonical values.
@@ -176,7 +236,7 @@ func (e *Engine) EvaluateAll(ctx context.Context, input proto.Message, command, 
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", pol.source.Name, err)
 		}
-		if strings.EqualFold(pol.mode, "advisory") {
+		if strings.EqualFold(pol.mode, ModeAdvisory) {
 			normalized = downgradeAdvisory(normalized)
 		}
 		// Record individual policy result as span event
@@ -282,7 +342,7 @@ func (e *Engine) EvaluateAllMap(ctx context.Context, payload map[string]any, com
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", pol.source.Name, err)
 		}
-		if strings.EqualFold(pol.mode, "advisory") {
+		if strings.EqualFold(pol.mode, ModeAdvisory) {
 			normalized = downgradeAdvisory(normalized)
 		}
 		// Record individual policy result as span event
