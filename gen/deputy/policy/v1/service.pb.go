@@ -318,10 +318,11 @@ func (*PolicySource_Url) isPolicySource_Source() {}
 
 // EvaluateResponse contains all policy evaluation results.
 //
-// A response only ever describes a decision that every policy actually
-// produced, so there is no error list here to check before trusting it.
-// Callers that want policy problems reported as data, without evaluating,
-// should use Validate and read ValidateResponse.errors.
+// Evaluate fails closed: a policy that could not be loaded, compiled, or
+// evaluated comes back as an RPC error with no response at all, so a response
+// always describes a decision every policy produced and ALLOW never means "we
+// could not tell". For policy problems reported as data, use Validate and read
+// ValidateResponse.errors.
 type EvaluateResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Actions triggered by policy evaluation.
@@ -329,11 +330,6 @@ type EvaluateResponse struct {
 	// Overall outcome based on triggered actions.
 	// DENY if any deny action, WARN if any warn action, ALLOW if every policy
 	// ran and none of them denied or warned.
-	//
-	// Evaluate fails closed, so this is always a real decision: a policy that
-	// could not be loaded, compiled, or evaluated is reported as an RPC error
-	// and no response is returned at all. ALLOW therefore never means "we could
-	// not tell".
 	Outcome       ActionType `protobuf:"varint,2,opt,name=outcome,proto3,enum=deputy.policy.v1.ActionType" json:"outcome,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

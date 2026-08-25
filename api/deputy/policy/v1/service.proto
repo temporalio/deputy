@@ -80,10 +80,11 @@ message PolicySource {
 
 // EvaluateResponse contains all policy evaluation results.
 //
-// A response only ever describes a decision that every policy actually
-// produced, so there is no error list here to check before trusting it.
-// Callers that want policy problems reported as data, without evaluating,
-// should use Validate and read ValidateResponse.errors.
+// Evaluate fails closed: a policy that could not be loaded, compiled, or
+// evaluated comes back as an RPC error with no response at all, so a response
+// always describes a decision every policy produced and ALLOW never means "we
+// could not tell". For policy problems reported as data, use Validate and read
+// ValidateResponse.errors.
 message EvaluateResponse {
   // Actions triggered by policy evaluation.
   repeated Action actions = 1;
@@ -91,19 +92,10 @@ message EvaluateResponse {
   // Overall outcome based on triggered actions.
   // DENY if any deny action, WARN if any warn action, ALLOW if every policy
   // ran and none of them denied or warned.
-  //
-  // Evaluate fails closed, so this is always a real decision: a policy that
-  // could not be loaded, compiled, or evaluated is reported as an RPC error
-  // and no response is returned at all. ALLOW therefore never means "we could
-  // not tell".
   ActionType outcome = 2;
 
-  // Field 3 was an "errors" list that nothing ever populated. Evaluate reports
-  // load, compile, and runtime failures as RPC errors instead:
-  // INVALID_ARGUMENT for a source it could not load or compile, INTERNAL for
-  // an evaluation failure, and CANCELED or DEADLINE_EXCEEDED when the request
-  // context ended first. The number and the name are reserved so that neither
-  // can be reused later for something that means something else.
+  // Field 3 was an "errors" list that nothing populated. Reserved so neither
+  // the number nor the name is reused for something else.
   reserved 3;
   reserved "errors";
 }
