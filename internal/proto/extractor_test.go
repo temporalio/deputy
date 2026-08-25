@@ -600,6 +600,53 @@ func TestProtoRoundTripPreservesNpmVersionDirectness(t *testing.T) {
 	}
 }
 
+// TestProtoRoundTripPreservesScopedNpmDirectness pins the scoped npm name across
+// the round trip. OSV-SCALIBR attaches the leading "@" to a PURL's namespace, so
+// assembling "@" + namespace + "/" + name adds a second one and the versioned key
+// stops matching the one the lookup builds. The symptom is a declared
+// "@scope/name" arriving back transitive, and only a scoped package shows it.
+func TestProtoRoundTripPreservesScopedNpmDirectness(t *testing.T) {
+	const manifest = `{"name":"app","dependencies":{"@types/node":"^20.1.0"}}`
+	const lockfile = `{
+  "name": "app",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "app", "dependencies": {"@types/node": "^20.1.0"}},
+    "node_modules/@types/node": {"version": "20.1.0"}
+  }
+}`
+
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+	for name, contents := range map[string]string{"package.json": manifest, "package-lock.json": lockfile} {
+		if err := ws.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	direct := compare.CollectDirectDependenciesFromWorkspace(ws)
+
+	scanned := []*extractor.Package{{Name: "@types/node", Version: "20.1.0", PURLType: "npm"}}
+
+	// The direct path is the reference answer, asserted rather than assumed so a
+	// regression there cannot make the round trip look correct.
+	protos := ExtractorPackagesToProto(scanned, direct)
+	if len(protos) != 1 {
+		t.Fatalf("got %d protos, want 1", len(protos))
+	}
+	if !protos[0].GetDirect() {
+		t.Fatalf("direct path: @types/node@20.1.0 direct=false, want true")
+	}
+
+	rebuilt, rebuiltDirect := ExtractorPackagesFromProto(protos)
+	if len(rebuilt) != 1 {
+		t.Fatalf("got %d rebuilt packages, want 1", len(rebuilt))
+	}
+	if !ExtractorPackageIsDirect(rebuilt[0], rebuiltDirect) {
+		t.Errorf("after proto round trip: @types/node@20.1.0 direct=false, want true (rebuilt map %v)",
+			rebuiltDirect)
+	}
+}
+
 // TestProtoRoundTripKeepsUnresolvedNamesDirect pins the under-claiming guard
 // across the round trip. A project with no committed lockfile has no resolution,
 // so every copy of a declared name is direct; rebuilding the set from protos must

@@ -275,10 +275,7 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 	// response must not do once the versions are known. Every other ecosystem is
 	// keyed by name, so the name key is recorded for them as before.
 	if parsed.Type == "npm" && pkg.Version != "" {
-		npmName := parsed.Name
-		if parsed.Namespace != "" {
-			npmName = "@" + parsed.Namespace + "/" + parsed.Name
-		}
+		npmName := purlx.NPMPackageName(parsed.Namespace, parsed.Name)
 		recordDirectKey(direct, compare.DirectVersionKey(npmName, pkg.Version), isDirect)
 		return
 	}
