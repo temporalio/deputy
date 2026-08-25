@@ -1,6 +1,7 @@
 package osv
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -100,10 +101,13 @@ func (u UnresolvedAdvisory) Warning() string {
 	return fmt.Sprintf("osv: advisory %s reported for %s is missing from this report: %s", u.ID, u.Package, u.Reason)
 }
 
-// unresolvedWithdrawnReason is the reason recorded when OSV will not serve a
-// record it told us about. OSV drops a record when it is withdrawn, renamed, or
-// merged into an alias, and none of those reverse on a retry.
-const unresolvedWithdrawnReason = "OSV no longer serves the record and it could not be recovered through an alias"
+// unresolvedNotFoundReason is the reason recorded when OSV will not serve a
+// record it told us about. The usual cause is withdrawal, renaming, or a merge
+// into an alias, none of which reverse on a retry, but the wording stays with
+// what was observed: the classification comes from response text rather than a
+// typed status (see [IsNotFoundError]), so it cannot promise the record is gone
+// for good.
+const unresolvedNotFoundReason = "OSV returned not found for the record, and no alias it named resolved"
 
 // AdvisoryWarnings renders unresolved advisories as scan warnings, in the order
 // given. It returns nil for an empty input so callers can assign the result
@@ -661,7 +665,7 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 					localUnresolved = append(localUnresolved, UnresolvedAdvisory{
 						ID:      mv.GetId(),
 						Package: label,
-						Reason:  unresolvedWithdrawnReason,
+						Reason:  unresolvedNotFoundReason,
 					})
 					continue
 				}
@@ -788,17 +792,8 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 // packageLabel names a package for a human-readable diagnostic, preferring
 // name@version and falling back to the PURL when the input carried no name.
 func packageLabel(pkg PkgInput, version string) string {
-	if version == "" {
-		version = pkg.Version
-	}
-	name := pkg.Name
-	if name == "" {
-		name = pkg.PURL
-	}
-	if name == "" {
-		name = "unknown package"
-	}
-	if version == "" {
+	name := cmp.Or(pkg.Name, pkg.PURL, "unknown package")
+	if version = cmp.Or(version, pkg.Version); version == "" {
 		return name
 	}
 	return name + "@" + version

@@ -3,6 +3,7 @@ package osv
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -120,7 +121,7 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 			wantUnresolved: []UnresolvedAdvisory{{
 				ID:      withdrawn,
 				Package: buildkit + "@v0.30.0",
-				Reason:  unresolvedWithdrawnReason,
+				Reason:  unresolvedNotFoundReason,
 			}},
 		},
 		{
@@ -132,7 +133,7 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 			wantUnresolved: []UnresolvedAdvisory{{
 				ID:      withdrawn,
 				Package: buildkit + "@v0.30.0",
-				Reason:  unresolvedWithdrawnReason,
+				Reason:  unresolvedNotFoundReason,
 			}},
 		},
 		{
@@ -162,7 +163,7 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 			wantUnresolved: []UnresolvedAdvisory{{
 				ID:      withdrawn,
 				Package: buildkit + "@v0.30.0",
-				Reason:  unresolvedWithdrawnReason,
+				Reason:  unresolvedNotFoundReason,
 			}},
 		},
 		{
@@ -179,7 +180,7 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 			wantUnresolved: []UnresolvedAdvisory{{
 				ID:      withdrawn,
 				Package: buildkit + "@v0.30.0",
-				Reason:  unresolvedWithdrawnReason,
+				Reason:  unresolvedNotFoundReason,
 			}},
 		},
 		{
@@ -268,11 +269,11 @@ func TestUnresolvedAdvisoryWarning(t *testing.T) {
 			in: []UnresolvedAdvisory{{
 				ID:      "GO-2026-6255",
 				Package: "github.com/moby/buildkit@v0.30.0",
-				Reason:  unresolvedWithdrawnReason,
+				Reason:  unresolvedNotFoundReason,
 			}},
 			want: []string{
 				"osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is missing from this report: " +
-					"OSV no longer serves the record and it could not be recovered through an alias",
+					"OSV returned not found for the record, and no alias it named resolved",
 			},
 		},
 	}
@@ -290,14 +291,104 @@ func TestUnresolvedAdvisoryWarning(t *testing.T) {
 // two policies meet: cancellation surfaces through the same call as a 404, and
 // mistaking it for a withdrawn record would turn an abandoned scan into a
 // report that looks almost complete.
+//
+// The cases cover both shapes a cancellation actually arrives in. The osv.dev
+// client returns context.DeadlineExceeded bare but runs context.Canceled
+// through its retry path, which formats it into "max retries exceeded", so
+// asserting only on the bare value would leave the shape real callers see
+// untested.
 func TestQueryRaw_CancelledScanIsNotAWithdrawnAdvisory(t *testing.T) {
+	const (
+		buildkit  = "github.com/moby/buildkit"
+		withdrawn = "GO-2026-6255"
+	)
+
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "bare context error",
+			err:  context.Canceled,
+		},
+		{
+			name: "deadline exceeded",
+			err:  context.DeadlineExceeded,
+		},
+		{
+			// The shape the real client produces for a cancelled request.
+			name: "wrapped by the client's retry loop",
+			err:  fmt.Errorf(`max retries exceeded: attempt 1: request failed: Get "https://api.osv.dev/v1/vulns/%s": %w`, withdrawn, context.Canceled),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetDiskCache(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+
+			client := &scriptedClient{
+				batch:    map[string][]string{buildkit: {withdrawn}},
+				failures: map[string]error{withdrawn: tt.err},
+			}
+			_, unresolved, err := QueryRaw(ctx, client, []PkgInput{
+				{QueryKey: QueryKey{Name: buildkit, Version: "v0.30.0", Ecosystem: "Go"}},
+			})
+			if err == nil {
+				t.Fatalf("QueryRaw() error = nil, want a cancellation error (unresolved = %+v)", unresolved)
+			}
+			if len(unresolved) != 0 {
+				t.Fatalf("unresolved = %+v, want none: a cancelled scan is not a withdrawn advisory", unresolved)
+			}
+		})
+	}
+}
+
+// cancelDuringRecoveryClient 404s the requested advisory with a live alias, then
+// cancels the scan before the alias can be fetched. This is the one ordering
+// where the not-found classification is already settled and cancellation
+// arrives afterward, so only the context check inside the recovery loop keeps
+// the advisory from being filed as withdrawn.
+type cancelDuringRecoveryClient struct {
+	advisoryID string
+	alias      string
+	cancel     context.CancelFunc
+}
+
+func (c *cancelDuringRecoveryClient) QueryBatch(_ context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
+	results := make([]*api.VulnerabilityList, 0, len(queries))
+	for range queries {
+		results = append(results, &api.VulnerabilityList{
+			Vulns: []*osvschema.Vulnerability{{Id: c.advisoryID}},
+		})
+	}
+	return &api.BatchVulnerabilityList{Results: results}, nil
+}
+
+func (c *cancelDuringRecoveryClient) GetVulnByID(_ context.Context, id string) (*osvschema.Vulnerability, error) {
+	if id == c.advisoryID {
+		// The 404 lands first, then the scan is cancelled.
+		c.cancel()
+		return nil, notFoundErr(c.alias)
+	}
+	return nil, errors.New("alias lookup should not run on a cancelled scan")
+}
+
+// TestQueryRaw_CancelledDuringAliasRecoveryIsNotUnresolved pins the narrow race
+// the recovery loop's context check exists for: a 404 that names a live alias,
+// followed by cancellation. Without the check the alias fetch fails, the
+// original not-found error is returned, and an abandoned scan reports the
+// advisory as withdrawn instead of failing.
+func TestQueryRaw_CancelledDuringAliasRecoveryIsNotUnresolved(t *testing.T) {
 	resetDiskCache(t)
 	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
+	t.Cleanup(cancel)
 
-	client := &scriptedClient{
-		batch:    map[string][]string{"github.com/moby/buildkit": {"GO-2026-6255"}},
-		failures: map[string]error{"GO-2026-6255": context.Canceled},
+	client := &cancelDuringRecoveryClient{
+		advisoryID: "GO-2026-6255",
+		alias:      "GHSA-7236-3392-c5c6",
+		cancel:     cancel,
 	}
 	_, unresolved, err := QueryRaw(ctx, client, []PkgInput{
 		{QueryKey: QueryKey{Name: "github.com/moby/buildkit", Version: "v0.30.0", Ecosystem: "Go"}},
@@ -306,6 +397,6 @@ func TestQueryRaw_CancelledScanIsNotAWithdrawnAdvisory(t *testing.T) {
 		t.Fatalf("QueryRaw() error = nil, want a cancellation error (unresolved = %+v)", unresolved)
 	}
 	if len(unresolved) != 0 {
-		t.Fatalf("unresolved = %+v, want none: a cancelled scan is not a withdrawn advisory", unresolved)
+		t.Fatalf("unresolved = %+v, want none: cancellation mid-recovery is not a withdrawn advisory", unresolved)
 	}
 }

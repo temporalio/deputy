@@ -81,7 +81,7 @@ func TestOSVSourceReportsUnresolvedAdvisories(t *testing.T) {
 			client: &withdrawnAdvisoryClient{advisoryID: withdrawn},
 			wantWarnings: []string{
 				"osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is missing from this report: " +
-					"OSV no longer serves the record and it could not be recovered through an alias",
+					"OSV returned not found for the record, and no alias it named resolved",
 			},
 		},
 		{
