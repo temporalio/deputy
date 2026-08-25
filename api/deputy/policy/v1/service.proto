@@ -93,11 +93,6 @@ message EvaluateResponse {
   // DENY if any deny action, WARN if any warn action, ALLOW if every policy
   // ran and none of them denied or warned.
   ActionType outcome = 2;
-
-  // Field 3 was an "errors" list that nothing populated. Reserved so neither
-  // the number nor the name is reused for something else.
-  reserved 3;
-  reserved "errors";
 }
 
 // PolicyError describes an error encountered during policy processing.

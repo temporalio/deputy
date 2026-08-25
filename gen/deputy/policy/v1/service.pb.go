@@ -1007,10 +1007,10 @@ const file_deputy_policy_v1_service_proto_rawDesc = "" +
 	"\x06inline\x18\x01 \x01(\tH\x00R\x06inline\x12\x14\n" +
 	"\x04path\x18\x02 \x01(\tH\x00R\x04path\x12\x12\n" +
 	"\x03url\x18\x03 \x01(\tH\x00R\x03urlB\b\n" +
-	"\x06source\"\x8c\x01\n" +
+	"\x06source\"~\n" +
 	"\x10EvaluateResponse\x122\n" +
 	"\aactions\x18\x01 \x03(\v2\x18.deputy.policy.v1.ActionR\aactions\x126\n" +
-	"\aoutcome\x18\x02 \x01(\x0e2\x1c.deputy.policy.v1.ActionTypeR\aoutcomeJ\x04\b\x03\x10\x04R\x06errors\"\x91\x01\n" +
+	"\aoutcome\x18\x02 \x01(\x0e2\x1c.deputy.policy.v1.ActionTypeR\aoutcome\"\x91\x01\n" +
 	"\vPolicyError\x12\x1f\n" +
 	"\vpolicy_name\x18\x01 \x01(\tR\n" +
 	"policyName\x12\x1b\n" +
