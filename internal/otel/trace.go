@@ -79,16 +79,16 @@ var (
 	AttrTargetRemote = attribute.Key("deputy.target.remote")
 
 	// Scan attributes
-	AttrEcosystem               = attribute.Key("deputy.ecosystem")
-	AttrPackageCount            = attribute.Key("deputy.package.count")
-	AttrVulnerabilityCount      = attribute.Key("deputy.vulnerability.count")
-	AttrVulnerabilityCritical   = attribute.Key("deputy.vulnerability.critical")
-	AttrVulnerabilityHigh       = attribute.Key("deputy.vulnerability.high")
-	AttrVulnerabilityMedium     = attribute.Key("deputy.vulnerability.medium")
-	AttrVulnerabilityLow        = attribute.Key("deputy.vulnerability.low")
-	AttrDirectDepsOnly  = attribute.Key("deputy.direct_deps_only")
-	AttrPolicyEvaluated = attribute.Key("deputy.policy.evaluated")
-	AttrPolicyPassed    = attribute.Key("deputy.policy.passed")
+	AttrEcosystem             = attribute.Key("deputy.ecosystem")
+	AttrPackageCount          = attribute.Key("deputy.package.count")
+	AttrVulnerabilityCount    = attribute.Key("deputy.vulnerability.count")
+	AttrVulnerabilityCritical = attribute.Key("deputy.vulnerability.critical")
+	AttrVulnerabilityHigh     = attribute.Key("deputy.vulnerability.high")
+	AttrVulnerabilityMedium   = attribute.Key("deputy.vulnerability.medium")
+	AttrVulnerabilityLow      = attribute.Key("deputy.vulnerability.low")
+	AttrDirectDepsOnly        = attribute.Key("deputy.direct_deps_only")
+	AttrPolicyEvaluated       = attribute.Key("deputy.policy.evaluated")
+	AttrPolicyPassed          = attribute.Key("deputy.policy.passed")
 
 	// OSV attributes
 	AttrOSVBatchSize           = attribute.Key("deputy.osv.batch_size")
