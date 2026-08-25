@@ -79,9 +79,50 @@ func NewPkgInput(key QueryKey, ctx PackageContext) PkgInput {
 	return PkgInput{QueryKey: key, PackageContext: ctx}
 }
 
+// UnresolvedAdvisory records an advisory that a batch query attributed to a
+// package but whose full record could not be retrieved, so the finding is
+// absent from the results. It is returned alongside those results rather than
+// as an error: a scan that lost one record must still report the rest, and must
+// not be mistaken for a scan that found nothing.
+type UnresolvedAdvisory struct {
+	// ID is the advisory identifier the batch query returned.
+	ID string
+	// Package identifies the package the advisory was attributed to.
+	Package string
+	// Reason explains in one line why the record could not be retrieved.
+	Reason string
+}
+
+// Warning renders the unresolved advisory for the scan's warning list. It leads
+// with the omission rather than the cause, because the omission is what changes
+// the reader's picture of their risk.
+func (u UnresolvedAdvisory) Warning() string {
+	return fmt.Sprintf("osv: advisory %s reported for %s is missing from this report: %s", u.ID, u.Package, u.Reason)
+}
+
+// unresolvedWithdrawnReason is the reason recorded when OSV will not serve a
+// record it told us about. OSV drops a record when it is withdrawn, renamed, or
+// merged into an alias, and none of those reverse on a retry.
+const unresolvedWithdrawnReason = "OSV no longer serves the record and it could not be recovered through an alias"
+
+// AdvisoryWarnings renders unresolved advisories as scan warnings, in the order
+// given. It returns nil for an empty input so callers can assign the result
+// straight onto a warning list without adding an empty entry.
+func AdvisoryWarnings(unresolved []UnresolvedAdvisory) []string {
+	if len(unresolved) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(unresolved))
+	for _, u := range unresolved {
+		out = append(out, u.Warning())
+	}
+	return out
+}
+
 // getCachedVuln retrieves a vulnerability by ID using the provided client,
 // consulting a local on-disk cache when available to avoid redundant network
-// requests. Successful responses are cached for future lookups.
+// requests. Successful responses are cached for future lookups; failures are
+// not, so a record that reappears upstream resolves on the next run.
 func getCachedVuln(ctx context.Context, client Client, id string) (*osvschema.Vulnerability, error) {
 	var v osvschema.Vulnerability
 	if disk.ReadProto("osv", id, osvCacheTTL, &v) {
@@ -97,6 +138,57 @@ func getCachedVuln(ctx context.Context, client Client, id string) (*osvschema.Vu
 	return res, nil
 }
 
+// resolveAdvisory retrieves the full OSV record for an advisory ID that a batch
+// query reported.
+//
+// A not-found response is permanent: OSV withdrew, renamed, or merged the
+// record, and asking again for the same ID will keep failing. That response
+// names the IDs that do still exist, so resolveAdvisory retries against each of
+// them, preferring the reviewed databases first, and returns the first record
+// that is about pkg. The record it returns may therefore carry a different ID
+// than the one requested. Requiring the recovered record to name pkg is what
+// makes the recovery safe, because the alias list is read out of the response
+// text rather than from a typed field: a misread ID resolves to a record about
+// some other package and is rejected here.
+//
+// Whether pkg's installed version falls in the recovered record's affected
+// ranges is deliberately left to the caller, so an alias that says "not
+// affected" reads as the answer it is rather than as a failed recovery.
+//
+// Any other failure, including a cancelled context and a server error the
+// client already retried, is returned unchanged so callers can keep treating it
+// as fatal. Distinguishing the two rests on [IsNotFoundError].
+func resolveAdvisory(ctx context.Context, client Client, id string, pkg PkgInput) (*osvschema.Vulnerability, error) {
+	full, err := getCachedVuln(ctx, client, id)
+	if err == nil {
+		return full, nil
+	}
+	if !IsNotFoundError(err) {
+		return nil, err
+	}
+	for _, alias := range SeverityAliasOrder(NotFoundAliases(err)) {
+		if strings.EqualFold(alias, id) {
+			continue
+		}
+		// A cancelled scan must never be reported as a withdrawn advisory, so
+		// stop recovering instead of spending more lookups on a dead context.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		aliasVuln, aliasErr := getCachedVuln(ctx, client, alias)
+		if aliasErr != nil || aliasVuln == nil {
+			continue
+		}
+		if !slices.ContainsFunc(aliasVuln.GetAffected(), func(a *osvschema.Affected) bool {
+			return matchesPackage(a.GetPackage(), pkg)
+		}) {
+			continue
+		}
+		return aliasVuln, nil
+	}
+	return nil, err
+}
+
 const osvCacheTTL = 24 * time.Hour
 
 // osvConcurrencyLimit controls the maximum number of concurrent GetVulnByID
@@ -106,18 +198,27 @@ const osvConcurrencyLimit = 10
 
 // Query performs a batched OSV vulnerability lookup and returns domain types.
 // This is the primary API for scan operations that need findings and advisories.
-func Query(ctx context.Context, client Client, pkgs []PkgInput) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
-	vulns, err := QueryRaw(ctx, client, pkgs)
+// The third result lists advisories the batch query reported but whose records
+// could not be retrieved; it is not an error, but callers must surface it rather
+// than present the findings as the complete answer.
+func Query(ctx context.Context, client Client, pkgs []PkgInput) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, []UnresolvedAdvisory, error) {
+	vulns, unresolved, err := QueryRaw(ctx, client, pkgs)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return splitVulnerabilities(vulns)
+	findings, advisories, err := splitVulnerabilities(vulns)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return findings, advisories, unresolved, nil
 }
 
 // QueryRaw performs a batched OSV vulnerability lookup and returns flat Vulnerability records.
 // Use this when you need the raw OSV data format (e.g., for caching or policy evaluation maps).
 // For scan operations that need domain types, use Query instead.
-func QueryRaw(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, error) {
+// The second result lists advisories whose records could not be retrieved, as
+// described on [Query].
+func QueryRaw(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, []UnresolvedAdvisory, error) {
 	return queryBatch(ctx, client, pkgs)
 }
 
@@ -129,10 +230,14 @@ func QueryRaw(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerabil
 // Returns:
 //   - findings: slice of proto Finding messages
 //   - advisories: map of advisory IDs to proto Advisory messages
+//   - unresolved: advisories the batch query reported whose records could not be
+//     retrieved, so the corresponding findings are missing from findings. Not an
+//     error, but callers must surface it rather than present the result as
+//     complete.
 //   - error: any error encountered during the query
-func QueryProto(ctx context.Context, client Client, pkgs []*dependencyv1.Package) ([]*vulnerabilityv1.Finding, map[string]*vulnerabilityv1.Advisory, error) {
+func QueryProto(ctx context.Context, client Client, pkgs []*dependencyv1.Package) ([]*vulnerabilityv1.Finding, map[string]*vulnerabilityv1.Advisory, []UnresolvedAdvisory, error) {
 	if len(pkgs) == 0 {
-		return nil, map[string]*vulnerabilityv1.Advisory{}, nil
+		return nil, map[string]*vulnerabilityv1.Advisory{}, nil, nil
 	}
 
 	// Convert proto packages to PkgInput for the existing query infrastructure.
@@ -173,13 +278,17 @@ func QueryProto(ctx context.Context, client Client, pkgs []*dependencyv1.Package
 	}
 
 	// Query using existing infrastructure
-	vulns, err := queryBatch(ctx, client, inputs)
+	vulns, unresolved, err := queryBatch(ctx, client, inputs)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Convert to proto types
-	return splitVulnerabilitiesToProto(vulns)
+	findings, advisories, err := splitVulnerabilitiesToProto(vulns)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return findings, advisories, unresolved, nil
 }
 
 // splitVulnerabilitiesToProto converts flat Vulnerability records to proto types.
@@ -342,9 +451,11 @@ func splitVulnerability(v Vulnerability) (*vulnerabilityv1.Advisory, vulnerabili
 // queryBatch performs a batched OSV vulnerability lookup for the provided packages,
 // returning flat Vulnerability records. For each minimal vulnerability match it
 // expands full vulnerability details via GetVulnByID to populate rich fields.
-func queryBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, error) {
+// Advisories whose records OSV would not serve are returned separately so the
+// caller can report them; see [Query].
+func queryBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, []UnresolvedAdvisory, error) {
 	if len(pkgs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var ghaPkgs []PkgInput
 	var otherPkgs []PkgInput
@@ -373,27 +484,29 @@ func queryBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerab
 	}
 
 	var out []Vulnerability
+	var unresolved []UnresolvedAdvisory
 	if len(otherPkgs) > 0 {
-		vv, err := queryOSVAPIBatch(ctx, client, otherPkgs)
+		vv, uu, err := queryOSVAPIBatch(ctx, client, otherPkgs)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		out = append(out, vv...)
+		unresolved = append(unresolved, uu...)
 	}
 	if len(ghaPkgs) > 0 {
 		vv, err := queryOSVGHABucketBatch(ctx, client, ghaPkgs)
 		if err != nil {
 			if len(out) > 0 {
-				return out, err
+				return out, unresolved, err
 			}
-			return nil, err
+			return nil, unresolved, err
 		}
 		out = append(out, vv...)
 	}
 	if len(out) == 0 {
-		return nil, nil
+		return nil, unresolved, nil
 	}
-	return out, nil
+	return out, unresolved, nil
 }
 
 // osvAPIQueryable reports whether OSV's querybatch API can resolve this
@@ -435,10 +548,13 @@ func isGitHubActionsInput(p PkgInput) bool {
 	return false
 }
 
-// queryOSVAPIBatch performs the standard OSV v1/querybatch flow.
-func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, error) {
+// queryOSVAPIBatch performs the standard OSV v1/querybatch flow. Advisories the
+// batch reported whose records OSV would not serve are returned as unresolved
+// rather than failing the batch; see [resolveAdvisory] for which failures stay
+// fatal.
+func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, []UnresolvedAdvisory, error) {
 	if len(pkgs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	startTime := time.Now()
 	queries := make([]*api.Query, 0, len(pkgs))
@@ -493,13 +609,14 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 	}
 
 	if len(queries) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	resp, err := client.QueryBatch(ctx, queries)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query OSV API: %w", err)
+		return nil, nil, fmt.Errorf("failed to query OSV API: %w", err)
 	}
 	var out []Vulnerability
+	var unresolved []UnresolvedAdvisory
 	var mu sync.Mutex
 	var aliasGroup singleflight.Group
 	g, ctx := errgroup.WithContext(ctx)
@@ -516,10 +633,40 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 				displayVersion = ver
 			}
 			var local []Vulnerability
+			var localUnresolved []UnresolvedAdvisory
+			// Alias recovery can land on a record the batch query already named
+			// in its own right, since OSV lists a withdrawn ID alongside the
+			// live alias that replaced it. Track what this package resolved to
+			// so the same advisory is not reported against it twice.
+			resolvedIDs := collections.NewSet[string]()
 			for _, mv := range res.GetVulns() {
-				full, err := getCachedVuln(ctx, client, mv.GetId())
+				full, err := resolveAdvisory(ctx, client, mv.GetId(), pkgMeta)
 				if err != nil {
-					return fmt.Errorf("expand vulnerability %s: %w", mv.GetId(), err)
+					if !IsNotFoundError(err) {
+						// A transport failure, a server error the client already
+						// retried, or a cancelled scan means the expansion path
+						// is broken rather than one record having moved. Stay
+						// fatal: results missing advisories for a reason that
+						// will not reproduce must not be reported as complete.
+						return fmt.Errorf("expand vulnerability %s: %w", mv.GetId(), err)
+					}
+					// One withdrawn record must not cost the caller every other
+					// package's findings, so record the gap and keep going.
+					label := packageLabel(pkgMeta, displayVersion)
+					logs.Debug(ctx, "deputy.osv.advisory_unresolved",
+						"advisory", mv.GetId(),
+						"package", label,
+						"error", err,
+					)
+					localUnresolved = append(localUnresolved, UnresolvedAdvisory{
+						ID:      mv.GetId(),
+						Package: label,
+						Reason:  unresolvedWithdrawnReason,
+					})
+					continue
+				}
+				if !resolvedIDs.Add(full.GetId()) {
+					continue
 				}
 				if !isVersionAffected(full, pkgMeta) {
 					continue
@@ -601,9 +748,10 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 				base.DatabaseSpecific = dbSpecific
 				local = append(local, base)
 			}
-			if len(local) > 0 {
+			if len(local) > 0 || len(localUnresolved) > 0 {
 				mu.Lock()
 				out = append(out, local...)
+				unresolved = append(unresolved, localUnresolved...)
 				mu.Unlock()
 			}
 			return nil
@@ -611,10 +759,49 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 	}
 	if err := g.Wait(); err != nil {
 		otel.RecordOSVQuery(ctx, time.Since(startTime).Seconds(), "batch", false)
-		return nil, err
+		return nil, nil, err
 	}
 	otel.RecordOSVQuery(ctx, time.Since(startTime).Seconds(), "batch", true)
-	return out, nil
+	if len(unresolved) > 0 {
+		// Order by advisory then package so repeated scans of the same target
+		// produce the same warnings: expansion runs concurrently, so arrival
+		// order is not stable.
+		slices.SortFunc(unresolved, func(a, b UnresolvedAdvisory) int {
+			if c := strings.Compare(a.ID, b.ID); c != 0 {
+				return c
+			}
+			return strings.Compare(a.Package, b.Package)
+		})
+		// Debug, not warn: the caller already surfaces these in the report, and
+		// logging them again would say the same thing twice on one terminal.
+		logs.Debug(ctx, "deputy.osv.advisories_unresolved",
+			"unresolved", len(unresolved),
+			"resolved", len(out),
+		)
+		if span := otel.SpanFromContext(ctx); span != nil && span.IsRecording() {
+			span.SetAttributes(otel.AttrOSVUnresolvedAdvisories.Int(len(unresolved)))
+		}
+	}
+	return out, unresolved, nil
+}
+
+// packageLabel names a package for a human-readable diagnostic, preferring
+// name@version and falling back to the PURL when the input carried no name.
+func packageLabel(pkg PkgInput, version string) string {
+	if version == "" {
+		version = pkg.Version
+	}
+	name := pkg.Name
+	if name == "" {
+		name = pkg.PURL
+	}
+	if name == "" {
+		name = "unknown package"
+	}
+	if version == "" {
+		return name
+	}
+	return name + "@" + version
 }
 
 func normalizeQueryInput(p PkgInput) PkgInput {

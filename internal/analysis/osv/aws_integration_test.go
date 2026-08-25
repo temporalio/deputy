@@ -13,7 +13,7 @@ func TestAWSV1Integration(t *testing.T) {
 	t.Skip("network access required")
 	ctx := t.Context()
 	client := osvdev.DefaultClient()
-	vulns, err := QueryRaw(ctx, client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/aws/aws-sdk-go", Version: "1.55.6", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
+	vulns, _, err := QueryRaw(ctx, client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/aws/aws-sdk-go", Version: "1.55.6", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("query failed: %v", err)
 	}
@@ -21,7 +21,7 @@ func TestAWSV1Integration(t *testing.T) {
 		t.Fatalf("expected no vulns for fixed version, got %d", len(vulns))
 	}
 
-	vulns, err = QueryRaw(ctx, client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/aws/aws-sdk-go", Version: "1.33.0", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
+	vulns, _, err = QueryRaw(ctx, client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/aws/aws-sdk-go", Version: "1.33.0", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("query2 failed: %v", err)
 	}

@@ -1,0 +1,311 @@
+package osv
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"osv.dev/bindings/go/api"
+)
+
+// notFoundErr renders the error the osv.dev client returns for a withdrawn
+// record: formatted response text rather than a typed status, naming the
+// aliases that do still exist. Deputy only ever sees these IDs here, because the
+// querybatch stub that reported the missing ID carries just an id and a modified
+// timestamp.
+func notFoundErr(aliases ...string) error {
+	if len(aliases) == 0 {
+		return errors.New(`client error: status="404 Not Found" body={"code":5,"message":"Bug not found."}`)
+	}
+	return errors.New(`client error: status="404 Not Found" body={"code":5,"message":"Vulnerability not found, but the following aliases were: ` +
+		strings.Join(aliases, " ") + `"}`)
+}
+
+// affectedRecord builds an OSV record that reports pkgName as affected at every
+// version, so a test asserts on which advisory survived rather than on version
+// arithmetic.
+func affectedRecord(id, pkgName string) *osvschema.Vulnerability {
+	return &osvschema.Vulnerability{
+		Id:      id,
+		Summary: id + " summary",
+		Affected: []*osvschema.Affected{{
+			Package: &osvschema.Package{Name: pkgName, Ecosystem: "Go"},
+			Ranges: []*osvschema.Range{{
+				Type:   osvschema.Range_SEMVER,
+				Events: []*osvschema.Event{{Introduced: "0"}},
+			}},
+		}},
+	}
+}
+
+// scriptedClient answers a batch query from a per-package advisory list and
+// answers each expansion from a scripted table, so a test can make one advisory
+// fail the way OSV actually fails it while the rest keep resolving.
+type scriptedClient struct {
+	// batch maps a queried package name to the advisory IDs OSV reports for it.
+	batch map[string][]string
+	// records maps an advisory ID to the record GetVulnByID returns.
+	records map[string]*osvschema.Vulnerability
+	// failures maps an advisory ID to the error GetVulnByID returns instead.
+	failures map[string]error
+}
+
+func (c *scriptedClient) QueryBatch(_ context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
+	results := make([]*api.VulnerabilityList, 0, len(queries))
+	for _, q := range queries {
+		list := &api.VulnerabilityList{}
+		for _, id := range c.batch[q.GetPackage().GetName()] {
+			list.Vulns = append(list.Vulns, &osvschema.Vulnerability{Id: id})
+		}
+		results = append(results, list)
+	}
+	return &api.BatchVulnerabilityList{Results: results}, nil
+}
+
+func (c *scriptedClient) GetVulnByID(_ context.Context, id string) (*osvschema.Vulnerability, error) {
+	if err, ok := c.failures[id]; ok {
+		return nil, err
+	}
+	if rec, ok := c.records[id]; ok {
+		return rec, nil
+	}
+	return nil, notFoundErr()
+}
+
+// TestQueryRaw_UnresolvedAdvisories covers what happens when the second OSV call
+// disagrees with the first: the batch query attributes an advisory to a package,
+// and expanding it fails. A withdrawn record must cost only its own finding, a
+// transport failure must still fail the scan, and neither may leave the caller
+// with a result that reads as clean.
+func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
+	const (
+		buildkit = "github.com/moby/buildkit"
+		other    = "github.com/example/other"
+		// The real IDs from issue #320.
+		withdrawn = "GO-2026-6255"
+		ghsaAlias = "GHSA-7236-3392-c5c6"
+		cveAlias  = "CVE-2026-61711"
+	)
+
+	tests := []struct {
+		name string
+		// pkgs defaults to buildkit alone when empty.
+		pkgs           []PkgInput
+		client         *scriptedClient
+		wantErr        bool
+		wantAdvisories []string
+		wantUnresolved []UnresolvedAdvisory
+	}{
+		{
+			// The reported bug: one withdrawn record used to abort everything.
+			name: "withdrawn advisory does not cost other packages their findings",
+			pkgs: []PkgInput{
+				{QueryKey: QueryKey{Name: buildkit, Version: "v0.30.0", Ecosystem: "Go"}},
+				{QueryKey: QueryKey{Name: other, Version: "v1.0.0", Ecosystem: "Go"}},
+			},
+			client: &scriptedClient{
+				batch: map[string][]string{
+					buildkit: {withdrawn},
+					other:    {"GHSA-live-0000-0001"},
+				},
+				failures: map[string]error{withdrawn: notFoundErr()},
+				records: map[string]*osvschema.Vulnerability{
+					"GHSA-live-0000-0001": affectedRecord("GHSA-live-0000-0001", other),
+				},
+			},
+			wantAdvisories: []string{"GHSA-live-0000-0001"},
+			wantUnresolved: []UnresolvedAdvisory{{
+				ID:      withdrawn,
+				Package: buildkit + "@v0.30.0",
+				Reason:  unresolvedWithdrawnReason,
+			}},
+		},
+		{
+			name: "unresolved advisory is reported, not dropped",
+			client: &scriptedClient{
+				batch:    map[string][]string{buildkit: {withdrawn}},
+				failures: map[string]error{withdrawn: notFoundErr()},
+			},
+			wantUnresolved: []UnresolvedAdvisory{{
+				ID:      withdrawn,
+				Package: buildkit + "@v0.30.0",
+				Reason:  unresolvedWithdrawnReason,
+			}},
+		},
+		{
+			// The 404 body names live records, so the finding is recovered
+			// under the ID a reader can actually look up.
+			name: "alias named by the 404 recovers the record",
+			client: &scriptedClient{
+				batch:    map[string][]string{buildkit: {withdrawn}},
+				failures: map[string]error{withdrawn: notFoundErr(cveAlias, ghsaAlias)},
+				records: map[string]*osvschema.Vulnerability{
+					ghsaAlias: affectedRecord(ghsaAlias, buildkit),
+					cveAlias:  affectedRecord(cveAlias, buildkit),
+				},
+			},
+			// GHSA first: SeverityAliasOrder prefers the reviewed database.
+			wantAdvisories: []string{ghsaAlias},
+		},
+		{
+			name: "alias that also 404s leaves the advisory unresolved",
+			client: &scriptedClient{
+				batch: map[string][]string{buildkit: {withdrawn}},
+				failures: map[string]error{
+					withdrawn: notFoundErr(ghsaAlias),
+					ghsaAlias: notFoundErr(),
+				},
+			},
+			wantUnresolved: []UnresolvedAdvisory{{
+				ID:      withdrawn,
+				Package: buildkit + "@v0.30.0",
+				Reason:  unresolvedWithdrawnReason,
+			}},
+		},
+		{
+			// The alias list is read out of response text, so a record about
+			// some other package is a misread and must not be reported here.
+			name: "alias about a different package is not accepted",
+			client: &scriptedClient{
+				batch:    map[string][]string{buildkit: {withdrawn}},
+				failures: map[string]error{withdrawn: notFoundErr(ghsaAlias)},
+				records: map[string]*osvschema.Vulnerability{
+					ghsaAlias: affectedRecord(ghsaAlias, other),
+				},
+			},
+			wantUnresolved: []UnresolvedAdvisory{{
+				ID:      withdrawn,
+				Package: buildkit + "@v0.30.0",
+				Reason:  unresolvedWithdrawnReason,
+			}},
+		},
+		{
+			// OSV lists a withdrawn ID next to the live alias that replaced it,
+			// so recovery can land on a record the batch already named.
+			name: "recovered record already in the batch is not reported twice",
+			client: &scriptedClient{
+				batch:    map[string][]string{buildkit: {withdrawn, ghsaAlias}},
+				failures: map[string]error{withdrawn: notFoundErr(ghsaAlias)},
+				records: map[string]*osvschema.Vulnerability{
+					ghsaAlias: affectedRecord(ghsaAlias, buildkit),
+				},
+			},
+			wantAdvisories: []string{ghsaAlias},
+		},
+		{
+			// A network blip is not a withdrawn record: it will not reproduce,
+			// so a result missing advisories because of it must not be served.
+			name: "transport failure stays fatal",
+			client: &scriptedClient{
+				batch:    map[string][]string{buildkit: {withdrawn}},
+				failures: map[string]error{withdrawn: errors.New("max retries exceeded: attempt 4: request failed: dial tcp: i/o timeout")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "server error stays fatal",
+			client: &scriptedClient{
+				batch:    map[string][]string{buildkit: {withdrawn}},
+				failures: map[string]error{withdrawn: errors.New(`max retries exceeded: server error: status="503 Service Unavailable" body=busy`)},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetDiskCache(t)
+			pkgs := tt.pkgs
+			if len(pkgs) == 0 {
+				pkgs = []PkgInput{{QueryKey: QueryKey{Name: buildkit, Version: "v0.30.0", Ecosystem: "Go"}}}
+			}
+
+			vulns, unresolved, err := QueryRaw(t.Context(), tt.client, pkgs)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("QueryRaw() error = nil, want an error (findings = %d)", len(vulns))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("QueryRaw() error = %v, want nil", err)
+			}
+
+			gotAdvisories := make([]string, 0, len(vulns))
+			for _, v := range vulns {
+				gotAdvisories = append(gotAdvisories, v.ID)
+			}
+			slices.Sort(gotAdvisories)
+			want := slices.Clone(tt.wantAdvisories)
+			slices.Sort(want)
+			if !slices.Equal(gotAdvisories, want) {
+				t.Errorf("advisories in findings = %v, want %v", gotAdvisories, want)
+			}
+
+			if !slices.Equal(unresolved, tt.wantUnresolved) {
+				t.Errorf("unresolved = %+v, want %+v", unresolved, tt.wantUnresolved)
+			}
+		})
+	}
+}
+
+// TestUnresolvedAdvisoryWarning pins the text the scan report shows, because it
+// is the only thing that stops an incomplete scan from reading as a clean one.
+func TestUnresolvedAdvisoryWarning(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []UnresolvedAdvisory
+		want []string
+	}{
+		{
+			name: "no unresolved advisories adds no warning",
+		},
+		{
+			name: "warning names the advisory, the package, and the omission",
+			in: []UnresolvedAdvisory{{
+				ID:      "GO-2026-6255",
+				Package: "github.com/moby/buildkit@v0.30.0",
+				Reason:  unresolvedWithdrawnReason,
+			}},
+			want: []string{
+				"osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is missing from this report: " +
+					"OSV no longer serves the record and it could not be recovered through an alias",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := AdvisoryWarnings(tt.in); !slices.Equal(got, tt.want) {
+				t.Fatalf("AdvisoryWarnings() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestQueryRaw_CancelledScanIsNotAWithdrawnAdvisory guards the seam where the
+// two policies meet: cancellation surfaces through the same call as a 404, and
+// mistaking it for a withdrawn record would turn an abandoned scan into a
+// report that looks almost complete.
+func TestQueryRaw_CancelledScanIsNotAWithdrawnAdvisory(t *testing.T) {
+	resetDiskCache(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	client := &scriptedClient{
+		batch:    map[string][]string{"github.com/moby/buildkit": {"GO-2026-6255"}},
+		failures: map[string]error{"GO-2026-6255": context.Canceled},
+	}
+	_, unresolved, err := QueryRaw(ctx, client, []PkgInput{
+		{QueryKey: QueryKey{Name: "github.com/moby/buildkit", Version: "v0.30.0", Ecosystem: "Go"}},
+	})
+	if err == nil {
+		t.Fatalf("QueryRaw() error = nil, want a cancellation error (unresolved = %+v)", unresolved)
+	}
+	if len(unresolved) != 0 {
+		t.Fatalf("unresolved = %+v, want none: a cancelled scan is not a withdrawn advisory", unresolved)
+	}
+}

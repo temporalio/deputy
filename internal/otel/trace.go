@@ -98,6 +98,11 @@ var (
 	AttrOSVResponseLen         = attribute.Key("deputy.osv.response_len")
 	AttrOSVDroppedNoVersion    = attribute.Key("deputy.osv.dropped_no_version")
 	AttrOSVDroppedNoIdentifier = attribute.Key("deputy.osv.dropped_no_identifier")
+	// AttrOSVUnresolvedAdvisories counts advisories a batch query reported whose
+	// full records OSV would not serve, so their findings are missing from the
+	// results. A non-zero value means the answer is incomplete even though the
+	// query succeeded.
+	AttrOSVUnresolvedAdvisories = attribute.Key("deputy.osv.unresolved_advisories")
 
 	// Policy attributes
 	AttrPolicyName       = attribute.Key("deputy.policy.name")

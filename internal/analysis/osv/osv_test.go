@@ -96,7 +96,7 @@ func TestQueryRaw_SkipsOSVUnsupportedEcosystems(t *testing.T) {
 		{QueryKey: QueryKey{Name: "alpine", Version: "3.19", Ecosystem: "docker", PURL: "pkg:docker/library/alpine@3.19"}},
 		{QueryKey: QueryKey{Name: "node", Version: "20.0.0", Ecosystem: "mise"}},
 	}
-	if _, err := QueryRaw(t.Context(), client, pkgs); err != nil {
+	if _, _, err := QueryRaw(t.Context(), client, pkgs); err != nil {
 		t.Fatalf("QueryRaw() error = %v, want nil (unsupported ecosystems should be skipped, not fatal)", err)
 	}
 	if len(client.queries) != 1 {
@@ -110,7 +110,7 @@ func TestQueryRaw_SkipsOSVUnsupportedEcosystems(t *testing.T) {
 func Test_QueryRaw_ok(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClient{}
-	vulns, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
+	vulns, _, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -149,7 +149,7 @@ func Test_QueryRaw_usesNameEcosystemForPURLInputs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			resetDiskCache(t)
 			client := &captureQueryClient{}
-			if _, err := QueryRaw(t.Context(), client, []PkgInput{tt.in}); err != nil {
+			if _, _, err := QueryRaw(t.Context(), client, []PkgInput{tt.in}); err != nil {
 				t.Fatalf("QueryRaw() error = %v", err)
 			}
 			if len(client.queries) != 1 {
@@ -184,7 +184,7 @@ func (f *fakeClientQueryErr) GetVulnByID(ctx context.Context, id string) (*osvsc
 func Test_QueryRaw_query_error(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientQueryErr{}
-	_, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "n", Version: "1", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
+	_, _, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "n", Version: "1", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -202,7 +202,7 @@ func (f *fakeClientGetErr) GetVulnByID(ctx context.Context, id string) (*osvsche
 func Test_QueryRaw_getvuln_error(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientGetErr{}
-	_, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "n", Version: "1", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
+	_, _, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "n", Version: "1", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err == nil {
 		t.Fatalf("expected error when GetVulnByID fails")
 	}
@@ -230,7 +230,7 @@ func (f *fakeClientFixed) GetVulnByID(ctx context.Context, id string) (*osvschem
 func Test_QueryRaw_skips_fixed_version(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientFixed{}
-	vulns, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.55.6", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
+	vulns, _, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.55.6", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -273,7 +273,7 @@ func (f *fakeClientAWS) GetVulnByID(ctx context.Context, id string) (*osvschema.
 func Test_QueryRaw_awssdkv1(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientAWS{}
-	vulns, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/aws/aws-sdk-go", Version: "1.55.6", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
+	vulns, _, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/aws/aws-sdk-go", Version: "1.55.6", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -281,7 +281,7 @@ func Test_QueryRaw_awssdkv1(t *testing.T) {
 		t.Fatalf("expected no vulns for fixed version, got %d", len(vulns))
 	}
 
-	vulns, err = QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/aws/aws-sdk-go", Version: "1.33.0", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
+	vulns, _, err = QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/aws/aws-sdk-go", Version: "1.33.0", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -332,7 +332,7 @@ func (f *fakeClientAlias) GetVulnByID(ctx context.Context, id string) (*osvschem
 func Test_QueryRaw_aliasWithoutRange(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientAlias{}
-	vulns, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
+	vulns, _, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -375,7 +375,7 @@ func (f *fakeClientAliasUnmatchedPackage) GetVulnByID(ctx context.Context, id st
 func Test_QueryRaw_ignoresAliasWithoutPackageIdentity(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientAliasUnmatchedPackage{}
-	vulns, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
+	vulns, _, err := QueryRaw(t.Context(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -408,10 +408,10 @@ func Test_QueryRaw_cache(t *testing.T) {
 	resetDiskCache(t)
 	client := &countingClient{}
 	pkgs := []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.0.0", Ecosystem: "Go"}}}
-	if _, err := QueryRaw(t.Context(), client, pkgs); err != nil {
+	if _, _, err := QueryRaw(t.Context(), client, pkgs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := QueryRaw(t.Context(), client, pkgs); err != nil {
+	if _, _, err := QueryRaw(t.Context(), client, pkgs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if client.calls != 1 {

@@ -161,6 +161,16 @@ result is never mistaken for complete coverage:
   (e.g. `["osv"]`). Multiple entries mean independent corroboration.
 - **`advisories[].kind`**: distinguishes `FINDING_KIND_MALWARE` (e.g. OSV
   `MAL-` records) from ordinary vulnerabilities.
+- **`warnings`** (JSON/API, printed as `Warning:` lines in text output): gaps
+  that opened while the sources answered. OSV can withdraw, rename, or merge a
+  record between the batch query that reports it and the lookup that expands it,
+  so an advisory a source named can stop resolving mid-scan. Deputy first
+  retries the aliases the not-found response names, which recovers a record that
+  merely moved. An advisory that still does not resolve is named here and its
+  finding is absent from the report: the scan keeps every other package's
+  findings rather than failing outright, and the warning is what stops the
+  incomplete result from reading as clean. Transport and server failures remain
+  fatal, because unlike a withdrawn record they will not reproduce.
 
 ```console
 $ deputy scan --format json | jq '.coverage'
