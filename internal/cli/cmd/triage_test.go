@@ -401,7 +401,7 @@ func newMockTriageClients(t *testing.T, mock triageMockData) *services.Clients {
 func TestTriageCommandCarriesScanWarnings(t *testing.T) {
 	t.Parallel()
 
-	const unresolved = "osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is missing from this report: withdrawn"
+	const unresolved = "osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is absent from osv's findings: withdrawn"
 
 	vulnerable := []vulnerability.Finding{{
 		AdvisoryID: "GHSA-1234-5678-9012",

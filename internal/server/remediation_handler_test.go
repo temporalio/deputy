@@ -84,8 +84,8 @@ func TestGeneratePlanAcceptsEcosystemlessPackages(t *testing.T) {
 // no remediation is needed.
 func TestGeneratePlanCarriesScanWarnings(t *testing.T) {
 	const (
-		unresolved = "osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is missing from this report: withdrawn"
-		other      = "osv: advisory GHSA-7236-3392-c5c6 reported for github.com/example/other@v1.0.0 is missing from this report: withdrawn"
+		unresolved = "osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is absent from osv's findings: withdrawn"
+		other      = "osv: advisory GHSA-7236-3392-c5c6 reported for github.com/example/other@v1.0.0 is absent from osv's findings: withdrawn"
 	)
 
 	vulnerable := &dependencyv1.Package{

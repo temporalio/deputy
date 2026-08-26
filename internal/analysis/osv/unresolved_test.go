@@ -342,7 +342,7 @@ func TestUnresolvedAdvisoryWarning(t *testing.T) {
 				Reason:  unresolvedNotFoundReason,
 			}},
 			want: []string{
-				"osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is missing from this report: " +
+				"osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is absent from osv's findings: " +
 					"OSV returned not found for the record, and no alias it named resolved",
 			},
 		},

@@ -166,10 +166,13 @@ result is never mistaken for complete coverage:
   record between the batch query that reports it and the lookup that expands it,
   so an advisory a source named can stop resolving mid-scan. Deputy first
   retries the aliases the not-found response names, which recovers a record that
-  merely moved. An advisory that still does not resolve is named here and its
-  finding is absent from the report: the scan keeps every other package's
+  merely moved. An advisory that still does not resolve is named here, and that
+  source contributes no finding for it: the scan keeps every other package's
   findings rather than failing outright, and the warning is what stops the
-  incomplete result from reading as clean. Transport and server failures stay
+  incomplete result from reading as clean. Each warning names the source that
+  came back short rather than claiming the report is missing the finding,
+  because with several sources configured another one may have reported the
+  same advisory; `findings[].sources` says which ones did. Transport and server failures stay
   fatal on the two paths that decide whether a finding exists at all: fetching
   a record the batch query named, and the alias recovery that follows a
   not-found. Unlike a withdrawn record those will not reproduce, so a result

@@ -85,8 +85,8 @@ func TestBuildContainerDiffResponseFromScanningDeduplicatesAdvisoryAliases(t *te
 // indistinguishable from a clean one.
 func TestBuildContainerDiffResponseFromScanningCarriesScanWarnings(t *testing.T) {
 	const (
-		missingAdvisory = "osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is missing from this report: withdrawn"
-		otherAdvisory   = "osv: advisory GHSA-7236-3392-c5c6 reported for github.com/example/other@v1.0.0 is missing from this report: withdrawn"
+		missingAdvisory = "osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is absent from osv's findings: withdrawn"
+		otherAdvisory   = "osv: advisory GHSA-7236-3392-c5c6 reported for github.com/example/other@v1.0.0 is absent from osv's findings: withdrawn"
 	)
 
 	tests := []struct {

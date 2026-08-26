@@ -12,6 +12,7 @@ import (
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/cache/disk"
 )
 
@@ -80,7 +81,7 @@ func TestOSVSourceReportsUnresolvedAdvisories(t *testing.T) {
 			name:   "withdrawn advisory becomes a warning, not an error",
 			client: &withdrawnAdvisoryClient{advisoryID: withdrawn},
 			wantWarnings: []string{
-				"osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is missing from this report: " +
+				"osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is absent from osv's findings: " +
 					"OSV returned not found for the record, and no alias it named resolved",
 			},
 		},
@@ -161,5 +162,67 @@ func TestRegistryCollectsSourceWarnings(t *testing.T) {
 	}
 	if len(agg.Findings) != 1 {
 		t.Errorf("findings = %d, want 1: a warning must not cost the findings", len(agg.Findings))
+	}
+}
+
+// TestRegistryWarningIsHonestWhenAnotherSourceCovers pins the multi-source case
+// the warning's wording has to survive. Warnings union across sources
+// independently of the findings merge, so OSV's warning about an advisory it
+// could not expand rides along even when another configured source reported that
+// same advisory and package. The aggregate therefore holds the finding and the
+// warning at once, which is only truthful because the warning speaks about
+// OSV's own findings rather than about the report. NewDefaultRegistry pairs OSV
+// with plugin sources, so this is the shipped configuration, not a contrivance.
+func TestRegistryWarningIsHonestWhenAnotherSourceCovers(t *testing.T) {
+	const (
+		advisoryID = "CVE-2026-61711"
+		pkgName    = "github.com/moby/buildkit"
+		pkgVersion = "v0.30.0"
+	)
+
+	// The exact sentence the OSV source emits, built by the same code that
+	// builds it in production so this test cannot drift from it.
+	osvWarning := osv.UnresolvedAdvisory{
+		ID:      advisoryID,
+		Package: pkgName + "@" + pkgVersion,
+		Reason:  "OSV returned not found for the record, and no alias it named resolved",
+	}.Warning()
+
+	// OSV named the advisory and then could not expand it, so it contributes
+	// the warning and no finding.
+	osvSource := &fakeSource{
+		name:       "osv",
+		ecosystems: []string{"go"},
+		artifacts:  onlyPackage(),
+		warnings:   []string{osvWarning},
+	}
+	// A second source has the record OSV could not serve.
+	vendor := &fakeSource{
+		name:       "vendor-feed",
+		ecosystems: []string{"go"},
+		artifacts:  onlyPackage(),
+		findings:   []*vulnerabilityv1.Finding{goFinding(advisoryID, "vendor-feed", pkgName, pkgVersion)},
+		advisories: map[string]*vulnerabilityv1.Advisory{advisoryID: {Id: advisoryID}},
+	}
+
+	agg, err := NewRegistry(osvSource, vendor).Query(t.Context(), []*dependencyv1.Package{goPkg(pkgName, pkgVersion)})
+	if err != nil {
+		t.Fatalf("Registry.Query() error = %v, want nil", err)
+	}
+
+	// The finding is in the report, supplied by the source that could serve it.
+	if len(agg.Findings) != 1 || agg.Findings[0].GetAdvisoryId() != advisoryID {
+		t.Fatalf("findings = %+v, want one for %s", agg.Findings, advisoryID)
+	}
+	if got, want := agg.Findings[0].GetSources(), []string{"vendor-feed"}; !slices.Equal(got, want) {
+		t.Errorf("finding sources = %q, want %q", got, want)
+	}
+	// And OSV's warning still rides along, which is why it must not describe
+	// the report: here the report is not missing anything.
+	if want := []string{osvWarning}; !slices.Equal(agg.Warnings, want) {
+		t.Fatalf("warnings = %q, want %q", agg.Warnings, want)
+	}
+	if !strings.Contains(osvWarning, "absent from osv's findings") {
+		t.Errorf("warning = %q, want it scoped to osv's findings rather than to the report", osvWarning)
 	}
 }

@@ -81,10 +81,15 @@ func NewPkgInput(key QueryKey, ctx PackageContext) PkgInput {
 }
 
 // UnresolvedAdvisory records an advisory that a batch query attributed to a
-// package but whose full record could not be retrieved, so the finding is
-// absent from the results. It is returned alongside those results rather than
-// as an error: a scan that lost one record must still report the rest, and must
-// not be mistaken for a scan that found nothing.
+// package but whose full record could not be retrieved, so OSV contributes no
+// finding for it. It is returned alongside the findings that did resolve rather
+// than as an error: a scan that lost one record must still report the rest, and
+// must not be mistaken for a scan that found nothing.
+//
+// It says what OSV did and did not answer, not what the report ends up
+// containing. A deployment can configure several advisory sources, and another
+// one may report the very advisory OSV could not expand, so only the caller
+// merging the sources knows whether a finding exists.
 type UnresolvedAdvisory struct {
 	// ID is the advisory identifier the batch query returned.
 	ID string
@@ -97,8 +102,17 @@ type UnresolvedAdvisory struct {
 // Warning renders the unresolved advisory for the scan's warning list. It leads
 // with the omission rather than the cause, because the omission is what changes
 // the reader's picture of their risk.
+//
+// The omission is scoped to OSV's findings, not to the report, and that scope is
+// load-bearing. Warnings from every configured advisory source union into one
+// list, and another source may have reported the same advisory and package, in
+// which case the report does contain the finding. Claiming the report was short
+// would then be false. It names osv rather than saying "this source" for the
+// same reason: in a merged list, a deictic reference has nothing to point at.
+// Readers who want to know which sources backed a finding have
+// findings[].sources.
 func (u UnresolvedAdvisory) Warning() string {
-	return fmt.Sprintf("osv: advisory %s reported for %s is missing from this report: %s", u.ID, u.Package, u.Reason)
+	return fmt.Sprintf("osv: advisory %s reported for %s is absent from osv's findings: %s", u.ID, u.Package, u.Reason)
 }
 
 // unresolvedNotFoundReason is the reason recorded when OSV will not serve a
