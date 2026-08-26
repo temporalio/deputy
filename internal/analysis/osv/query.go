@@ -706,6 +706,14 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 				base.Affected = true
 				var extras []Vulnerability
 				skip := false
+				// Enrichment, not retrieval: the record is already in hand, and
+				// these lookups only add severity, fix, alias, and import data
+				// from the records it is aliased to. Every failure here is
+				// therefore swallowed rather than fatal, matching Hydrate: a
+				// network blip must not fail a scan over data we already have,
+				// even though it can leave this advisory thinner than a later
+				// run would show it. The paths that decide whether the finding
+				// exists at all stay fatal; see [resolveAdvisory].
 				for _, alias := range full.GetAliases() {
 					// Use singleflight to deduplicate concurrent requests for the same alias
 					result, err, _ := aliasGroup.Do(alias, func() (any, error) {

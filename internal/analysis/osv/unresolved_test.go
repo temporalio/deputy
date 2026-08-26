@@ -530,3 +530,88 @@ func TestQueryRaw_CancelledDuringLastAliasLookupIsNotUnresolved(t *testing.T) {
 		t.Fatalf("unresolved = %+v, want none: cancellation on the last alias lookup is not a withdrawal", unresolved)
 	}
 }
+
+// TestQueryRaw_AliasEnrichmentFailuresAreSilent pins the asymmetry the scan
+// reference documents. Once a record has been fetched, the further lookups that
+// enrich it from the records it is aliased to are best-effort: a blip there must
+// not fail a scan over data already in hand, so the finding still arrives, only
+// thinner. Fatality is reserved for the paths that decide whether the finding
+// exists at all, and neither kind of failure may be filed as an unresolved
+// advisory, because the record this one is about did resolve.
+func TestQueryRaw_AliasEnrichmentFailuresAreSilent(t *testing.T) {
+	const (
+		buildkit = "github.com/moby/buildkit"
+		primary  = "GO-2026-6255"
+		cveAlias = "CVE-2026-61711"
+	)
+
+	primaryRecord := affectedRecord(primary, buildkit)
+	primaryRecord.Aliases = []string{cveAlias}
+
+	// The Go vuln DB routinely leaves severity unrated and the CVE record
+	// carries it, which is exactly what enrichment is for.
+	ratedAlias := affectedRecord(cveAlias, buildkit)
+	ratedAlias.Severity = []*osvschema.Severity{{
+		Type:  osvschema.Severity_CVSS_V3,
+		Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+	}}
+
+	tests := []struct {
+		name string
+		// aliasErr, when set, is what the enrichment lookup returns instead of
+		// the alias record.
+		aliasErr error
+		// wantRated is whether the finding ends up carrying the alias's rating.
+		wantRated bool
+	}{
+		{
+			// Enrichment actually working is what makes the failure cases
+			// below mean something: without this the loop could be dead code.
+			name:      "resolved alias enriches the finding's severity",
+			wantRated: true,
+		},
+		{
+			name:     "transient enrichment failure leaves the finding thinner",
+			aliasErr: errors.New("max retries exceeded: attempt 4: request failed: dial tcp: i/o timeout"),
+		},
+		{
+			name:     "exhausted enrichment retry leaves the finding thinner",
+			aliasErr: errors.New(`max retries exceeded: server error: status="503 Service Unavailable" body=busy`),
+		},
+		{
+			name:     "not-found alias leaves the finding thinner",
+			aliasErr: notFoundErr(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetDiskCache(t)
+			client := &scriptedClient{
+				batch:   map[string][]string{buildkit: {primary}},
+				records: map[string]*osvschema.Vulnerability{primary: primaryRecord},
+			}
+			if tt.aliasErr != nil {
+				client.failures = map[string]error{cveAlias: tt.aliasErr}
+			} else {
+				client.records[cveAlias] = ratedAlias
+			}
+
+			vulns, unresolved, err := QueryRaw(t.Context(), client, []PkgInput{
+				{QueryKey: QueryKey{Name: buildkit, Version: "v0.30.0", Ecosystem: "Go"}},
+			})
+			if err != nil {
+				t.Fatalf("QueryRaw() error = %v, want nil: enrichment must not fail a scan", err)
+			}
+			if len(unresolved) != 0 {
+				t.Fatalf("unresolved = %+v, want none: the advisory's own record resolved", unresolved)
+			}
+			if len(vulns) != 1 || vulns[0].ID != primary {
+				t.Fatalf("findings = %+v, want exactly one for %s", vulns, primary)
+			}
+			if gotRated := vulns[0].Severity != ""; gotRated != tt.wantRated {
+				t.Fatalf("finding carries a severity = %t (%q), want %t", gotRated, vulns[0].Severity, tt.wantRated)
+			}
+		})
+	}
+}

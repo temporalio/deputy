@@ -169,8 +169,14 @@ result is never mistaken for complete coverage:
   merely moved. An advisory that still does not resolve is named here and its
   finding is absent from the report: the scan keeps every other package's
   findings rather than failing outright, and the warning is what stops the
-  incomplete result from reading as clean. Transport and server failures remain
-  fatal, because unlike a withdrawn record they will not reproduce.
+  incomplete result from reading as clean. Transport and server failures stay
+  fatal on the two paths that decide whether a finding exists at all: fetching
+  a record the batch query named, and the alias recovery that follows a
+  not-found. Unlike a withdrawn record those will not reproduce, so a result
+  missing findings because of one is never served. The further alias lookups
+  that enrich a record already fetched are best-effort, and their failures are
+  silent, so a scan can report an advisory with thinner severity, fix, or
+  alias data than a later run would show.
 
 ```console
 $ deputy scan --format json | jq '.coverage'
