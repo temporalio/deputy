@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -152,6 +153,12 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 			commit = scanResp.Target.CommitHash
 		}
 		triageResp = internalproto.BuildTriageResponse(displayPath, scanResult.Stats, cons, 10)
+		// Carry the scan's warnings so triage cannot present an incomplete
+		// scan as a complete summary. The report was produced by an earlier
+		// run, possibly on another machine, so this is the first time this
+		// reader hears about them: echo them too.
+		triageResp.Warnings = slices.Clone(scanResult.Warnings)
+		echoScanWarnings(cmd.ErrOrStderr(), triageResp.Warnings)
 		// Echo the scan's resolved target as-is so ref, effectiveRef, and
 		// commit survive into triage output, matching the MCP tool.
 		triageResp.Target = scanResp.Target
@@ -209,9 +216,7 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("scan returned empty result")
 		}
 
-		for _, warning := range scanResult.Warnings {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
-		}
+		echoScanWarnings(cmd.ErrOrStderr(), scanResult.Warnings)
 
 		repoPath = scanResult.Target.LocalPath
 		resultOut := applyTriageIgnoreRules(cmd, *scanResult, repoPath)
@@ -220,6 +225,10 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 		}
 		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
 		triageResp = internalproto.BuildTriageResponse(scanResult.Target.DisplayPath, resultOut.Stats, cons, 10)
+		// Carry the scan's warnings onto the response as well as stderr: the
+		// JSON output is a report of its own, and without them it presents an
+		// incomplete scan as a complete summary.
+		triageResp.Warnings = slices.Clone(scanResult.Warnings)
 		// Echo the scan's resolved target so ref, effectiveRef, and commit
 		// survive into triage output, matching the MCP tool.
 		triageResp.Target = internalproto.InventoryTargetToProto(scanResult.Target)
@@ -261,6 +270,16 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// echoScanWarnings repeats a scan's non-fatal warnings for a reader of the text
+// output, which renders the summary alone and would otherwise show an
+// incomplete scan as a complete one. They go to stderr so piping stdout to a
+// parser stays safe.
+func echoScanWarnings(errW io.Writer, warnings []string) {
+	for _, warning := range warnings {
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
+	}
 }
 
 // runTriagePoliciesProto evaluates policies against the proto triage response.
