@@ -161,7 +161,13 @@ func getCachedVuln(ctx context.Context, client Client, id string) (*osvschema.Vu
 //
 // Any other failure, including a cancelled context and a server error the
 // client already retried, is returned unchanged so callers can keep treating it
-// as fatal. Distinguishing the two rests on [IsNotFoundError].
+// as fatal. Distinguishing the two rests on [IsNotFoundError]. That split
+// applies to the alias lookups too: an alias that is itself not found simply
+// offers no recovery and the search moves on, but an alias that fails for any
+// other reason means the expansion path is broken and we never learned whether
+// the record moved. Returning the original not-found error in that case would
+// downgrade a transient failure into a permanent verdict, so the alias error
+// wins instead.
 func resolveAdvisory(ctx context.Context, client Client, id string, pkg PkgInput) (*osvschema.Vulnerability, error) {
 	full, err := getCachedVuln(ctx, client, id)
 	if err == nil {
@@ -170,6 +176,10 @@ func resolveAdvisory(ctx context.Context, client Client, id string, pkg PkgInput
 	if !IsNotFoundError(err) {
 		return nil, err
 	}
+	// The first alias failure that was not itself a not-found response. Kept
+	// rather than returned on the spot so a later alias can still recover the
+	// record: a working recovery is a better answer than any error.
+	var aliasErr error
 	for _, alias := range SeverityAliasOrder(NotFoundAliases(err)) {
 		if strings.EqualFold(alias, id) {
 			continue
@@ -179,8 +189,14 @@ func resolveAdvisory(ctx context.Context, client Client, id string, pkg PkgInput
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
-		aliasVuln, aliasErr := getCachedVuln(ctx, client, alias)
-		if aliasErr != nil || aliasVuln == nil {
+		aliasVuln, lookupErr := getCachedVuln(ctx, client, alias)
+		if lookupErr != nil {
+			if !IsNotFoundError(lookupErr) && aliasErr == nil {
+				aliasErr = fmt.Errorf("resolve alias %s of %s: %w", alias, id, lookupErr)
+			}
+			continue
+		}
+		if aliasVuln == nil {
 			continue
 		}
 		if !slices.ContainsFunc(aliasVuln.GetAffected(), func(a *osvschema.Affected) bool {
@@ -189,6 +205,16 @@ func resolveAdvisory(ctx context.Context, client Client, id string, pkg PkgInput
 			continue
 		}
 		return aliasVuln, nil
+	}
+	if aliasErr != nil {
+		return nil, aliasErr
+	}
+	// Cancellation can also arrive while the last alias lookup is in flight, in
+	// which case the loop's own check never sees it and the original not-found
+	// error would be handed back as a withdrawal. Recheck before that verdict is
+	// final.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
 	}
 	return nil, err
 }

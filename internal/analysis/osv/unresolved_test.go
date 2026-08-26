@@ -94,11 +94,15 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 	tests := []struct {
 		name string
 		// pkgs defaults to buildkit alone when empty.
-		pkgs           []PkgInput
-		client         *scriptedClient
-		wantErr        bool
-		wantAdvisories []string
-		wantUnresolved []UnresolvedAdvisory
+		pkgs   []PkgInput
+		client *scriptedClient
+		// wantErrContains, when set, implies wantErr and pins the substring that
+		// identifies which lookup failed. An expansion error that only says
+		// "not found" would be the bug this asserts against.
+		wantErrContains string
+		wantErr         bool
+		wantAdvisories  []string
+		wantUnresolved  []UnresolvedAdvisory
 	}{
 		{
 			// The reported bug: one withdrawn record used to abort everything.
@@ -167,6 +171,66 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 			}},
 		},
 		{
+			// A 404 on one alias says nothing about the next one, so the search
+			// keeps going and the finding survives under the ID that resolved.
+			name: "not-found alias is skipped and recovery continues",
+			client: &scriptedClient{
+				batch: map[string][]string{buildkit: {withdrawn}},
+				failures: map[string]error{
+					withdrawn: notFoundErr(cveAlias, ghsaAlias),
+					// Tried first, since SeverityAliasOrder prefers GHSA.
+					ghsaAlias: notFoundErr(),
+				},
+				records: map[string]*osvschema.Vulnerability{
+					cveAlias: affectedRecord(cveAlias, buildkit),
+				},
+			},
+			wantAdvisories: []string{cveAlias},
+		},
+		{
+			// The defect this pins: a network blip on the alias used to be
+			// discarded, the original 404 returned, and an expansion we never
+			// completed filed as a withdrawn record on a successful scan.
+			name: "transient alias failure stays fatal instead of reading as withdrawn",
+			client: &scriptedClient{
+				batch: map[string][]string{buildkit: {withdrawn}},
+				failures: map[string]error{
+					withdrawn: notFoundErr(ghsaAlias),
+					ghsaAlias: errors.New("max retries exceeded: attempt 4: request failed: dial tcp: i/o timeout"),
+				},
+			},
+			wantErrContains: "resolve alias " + ghsaAlias + " of " + withdrawn,
+		},
+		{
+			// An exhausted 5xx retry is the same class of ignorance as a
+			// timeout: OSV never told us whether the alias replaces the record.
+			name: "exhausted alias retry stays fatal",
+			client: &scriptedClient{
+				batch: map[string][]string{buildkit: {withdrawn}},
+				failures: map[string]error{
+					withdrawn: notFoundErr(ghsaAlias),
+					ghsaAlias: errors.New(`max retries exceeded: server error: status="503 Service Unavailable" body=busy`),
+				},
+			},
+			wantErrContains: "resolve alias " + ghsaAlias + " of " + withdrawn,
+		},
+		{
+			// A completed recovery answers the question the failed alias left
+			// open, so the kept error must not override it.
+			name: "later alias recovers despite an earlier transient failure",
+			client: &scriptedClient{
+				batch: map[string][]string{buildkit: {withdrawn}},
+				failures: map[string]error{
+					withdrawn: notFoundErr(cveAlias, ghsaAlias),
+					ghsaAlias: errors.New("max retries exceeded: attempt 4: request failed: dial tcp: i/o timeout"),
+				},
+				records: map[string]*osvschema.Vulnerability{
+					cveAlias: affectedRecord(cveAlias, buildkit),
+				},
+			},
+			wantAdvisories: []string{cveAlias},
+		},
+		{
 			// The alias list is read out of response text, so a record about
 			// some other package is a misread and must not be reported here.
 			name: "alias about a different package is not accepted",
@@ -225,9 +289,15 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 			}
 
 			vulns, unresolved, err := QueryRaw(t.Context(), tt.client, pkgs)
-			if tt.wantErr {
+			if tt.wantErr || tt.wantErrContains != "" {
 				if err == nil {
-					t.Fatalf("QueryRaw() error = nil, want an error (findings = %d)", len(vulns))
+					t.Fatalf("QueryRaw() error = nil, want an error (findings = %d, unresolved = %+v)", len(vulns), unresolved)
+				}
+				if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+					t.Fatalf("QueryRaw() error = %v, want it to mention %q", err, tt.wantErrContains)
+				}
+				if len(unresolved) != 0 {
+					t.Fatalf("unresolved = %+v, want none: a failed expansion is not a withdrawn advisory", unresolved)
 				}
 				return
 			}
@@ -398,5 +468,65 @@ func TestQueryRaw_CancelledDuringAliasRecoveryIsNotUnresolved(t *testing.T) {
 	}
 	if len(unresolved) != 0 {
 		t.Fatalf("unresolved = %+v, want none: cancellation mid-recovery is not a withdrawn advisory", unresolved)
+	}
+}
+
+// cancelInsideAliasLookupClient 404s the requested advisory with an alias, then
+// cancels the scan from inside the alias lookup and answers it with a 404 of its
+// own. The recovery loop's own context check has already run by then, and a
+// not-found alias is a normal dead end rather than an error worth keeping, so
+// nothing is left holding the cancellation except the recheck that runs before
+// the advisory is classified.
+type cancelInsideAliasLookupClient struct {
+	advisoryID string
+	alias      string
+	cancel     context.CancelFunc
+}
+
+func (c *cancelInsideAliasLookupClient) QueryBatch(_ context.Context, queries []*api.Query) (*api.BatchVulnerabilityList, error) {
+	results := make([]*api.VulnerabilityList, 0, len(queries))
+	for range queries {
+		results = append(results, &api.VulnerabilityList{
+			Vulns: []*osvschema.Vulnerability{{Id: c.advisoryID}},
+		})
+	}
+	return &api.BatchVulnerabilityList{Results: results}, nil
+}
+
+func (c *cancelInsideAliasLookupClient) GetVulnByID(_ context.Context, id string) (*osvschema.Vulnerability, error) {
+	if id == c.advisoryID {
+		return nil, notFoundErr(c.alias)
+	}
+	// The scan is abandoned while this last alias lookup is in flight.
+	c.cancel()
+	return nil, notFoundErr()
+}
+
+// TestQueryRaw_CancelledDuringLastAliasLookupIsNotUnresolved covers the other
+// half of the cancellation race: the alias lookup itself is what the
+// cancellation lands on. Every alias has been tried and none resolved, so the
+// original not-found error is about to be handed back, which would report an
+// abandoned scan as a withdrawn advisory on an otherwise successful run.
+func TestQueryRaw_CancelledDuringLastAliasLookupIsNotUnresolved(t *testing.T) {
+	resetDiskCache(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	client := &cancelInsideAliasLookupClient{
+		advisoryID: "GO-2026-6255",
+		alias:      "GHSA-7236-3392-c5c6",
+		cancel:     cancel,
+	}
+	_, unresolved, err := QueryRaw(ctx, client, []PkgInput{
+		{QueryKey: QueryKey{Name: "github.com/moby/buildkit", Version: "v0.30.0", Ecosystem: "Go"}},
+	})
+	if err == nil {
+		t.Fatalf("QueryRaw() error = nil, want a cancellation error (unresolved = %+v)", unresolved)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("QueryRaw() error = %v, want a context.Canceled", err)
+	}
+	if len(unresolved) != 0 {
+		t.Fatalf("unresolved = %+v, want none: cancellation on the last alias lookup is not a withdrawal", unresolved)
 	}
 }
