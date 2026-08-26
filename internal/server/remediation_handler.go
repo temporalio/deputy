@@ -22,6 +22,7 @@ import (
 	"github.com/temporalio/deputy/gen/deputy/agent/v1/agentv1connect"
 	remediationv1 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
 	"github.com/temporalio/deputy/gen/deputy/remediation/v1/remediationv1connect"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	"github.com/temporalio/deputy/internal/agent"
 	"github.com/temporalio/deputy/internal/logs"
 	internalproto "github.com/temporalio/deputy/internal/proto"
@@ -127,6 +128,7 @@ func (h *RemediationHandler) GeneratePlan(
 			Target:      scanResult.GetTarget(),
 			GeneratedAt: timestamppb.Now(),
 			Stats:       &remediationv1.PlanStats{},
+			Warnings:    planWarnings(scanResult),
 		}), nil
 	}
 
@@ -182,6 +184,7 @@ func (h *RemediationHandler) GeneratePlan(
 		GeneratedAt:                timestamppb.Now(),
 		Stats:                      planStats(steps, addressed, len(unaddressed)),
 		UnaddressedVulnerabilities: unaddressed,
+		Warnings:                   planWarnings(scanResult),
 	}
 
 	logs.Info(ctx, "remediation plan generated",
@@ -192,6 +195,17 @@ func (h *RemediationHandler) GeneratePlan(
 	)
 
 	return connect.NewResponse(response), nil
+}
+
+// planWarnings carries the scan's warnings onto the plan response. A plan is
+// only as trustworthy as the scan behind it: when an advisory could not be
+// expanded, the finding never reached planning, so no step addresses it and it
+// is missing from unaddressed_vulnerabilities too. The warning is the only thing
+// left telling a consumer that "nothing to remediate" may mean "we could not see
+// it", which matters most on the empty-plan path. Cloned so the response does
+// not share a slice with the request it was built from.
+func planWarnings(scanResult *scanv1.ScanResponse) []string {
+	return slices.Clone(scanResult.GetWarnings())
 }
 
 // guidanceContextFor maps the requested guidance profile onto the internal
