@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/google/osv-scalibr/extractor"
@@ -26,6 +27,7 @@ func BuildContainerDiffResponseFromScanning(baseResult, targetResult *scanning.R
 		GeneratedAt:   now,
 		BaseContext:   extractContainerContextFromScanning(baseResult),
 		TargetContext: extractContainerContextFromScanning(targetResult),
+		Warnings:      containerDiffWarnings(baseResult, targetResult),
 	}
 
 	// Compare packages
@@ -45,6 +47,55 @@ func BuildContainerDiffResponseFromScanning(baseResult, targetResult *scanning.R
 	response.Summary = calculateContainerDiffSummary(response)
 
 	return response
+}
+
+// Warning prefixes naming the side of the diff a scan warning came from. They
+// say "base image" rather than repeating the reference, which the response
+// already carries in base_image and target_image: a warning that inlined it
+// would be a second copy of the same fact, free to drift.
+const (
+	containerDiffBaseWarningPrefix   = "base image: "
+	containerDiffTargetWarningPrefix = "target image: "
+)
+
+// containerDiffWarnings carries both scans' warnings onto the diff. A diff is
+// only as complete as the two scans behind it, so a warning that an advisory
+// could not be expanded has to survive into the comparison: without it, a
+// vulnerability missing from one side reads as a vulnerability that image does
+// not have. Each warning is labelled with the side it came from, because the
+// same advisory usually fails to expand on both images and an unlabelled merge
+// would show one line twice with nothing to say which image was short.
+//
+// Base warnings come first, and within a side the scan's own order is kept,
+// which the OSV expansion has already made deterministic.
+func containerDiffWarnings(baseResult, targetResult *scanning.Result) []string {
+	return slices.Concat(
+		labelScanWarnings(containerDiffBaseWarningPrefix, baseResult),
+		labelScanWarnings(containerDiffTargetWarningPrefix, targetResult),
+	)
+}
+
+// labelScanWarnings prefixes one scan's warnings with the side of the diff they
+// describe, dropping blanks and exact repeats so a reader is not told the same
+// thing twice about the same image.
+func labelScanWarnings(prefix string, result *scanning.Result) []string {
+	if result == nil || len(result.Warnings) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(result.Warnings))
+	seen := make(map[string]struct{}, len(result.Warnings))
+	for _, warning := range result.Warnings {
+		warning = strings.TrimSpace(warning)
+		if warning == "" {
+			continue
+		}
+		if _, dup := seen[warning]; dup {
+			continue
+		}
+		seen[warning] = struct{}{}
+		out = append(out, prefix+warning)
+	}
+	return out
 }
 
 // Helper functions for scanning.Result (used by DiffHandler)
@@ -684,13 +735,13 @@ func ContainerDiffResponseToReport(resp *diffv1.DiffContainerImagesResponse) *co
 	// Convert package changes
 	for _, pc := range resp.PackageChanges {
 		report.PackageChanges = append(report.PackageChanges, compare.ImagePackageChange{
-			Name:          pc.Name,
-			Ecosystem:     pc.Ecosystem,
-			ChangeType:    protoChangeKindToCompare(pc.ChangeKind),
-			BaseVersion:   pc.BaseVersion,
-			TargetVersion: pc.TargetVersion,
-			OldName:       pc.OldName,
-			IsDirect:      pc.IsDirect,
+			Name:               pc.Name,
+			Ecosystem:          pc.Ecosystem,
+			ChangeType:         protoChangeKindToCompare(pc.ChangeKind),
+			BaseVersion:        pc.BaseVersion,
+			TargetVersion:      pc.TargetVersion,
+			OldName:            pc.OldName,
+			IsDirect:           pc.IsDirect,
 			BaseLayerDetails:   pc.BaseLayerDetails,
 			TargetLayerDetails: pc.TargetLayerDetails,
 		})
