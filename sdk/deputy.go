@@ -9,23 +9,6 @@
 //   - If DEPUTY_SERVER is set, uses remote mode
 //   - If a local daemon socket exists, uses daemon mode
 //   - Otherwise, uses in-process mode
-//
-// Basic usage:
-//
-//	import "github.com/temporalio/deputy/sdk"
-//
-//	client, err := sdk.NewClient(ctx)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer client.Close()
-//
-//	// Scan current directory
-//	result, err := client.Scan(ctx, ".")
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	fmt.Printf("Found %d findings\n", len(result.GetFindings()))
 package sdk
 
 import (
@@ -186,19 +169,11 @@ func NewClientWithOptions(ctx context.Context, opts Options) (*Client, error) {
 }
 
 // ConnectToServer creates a client connected to a remote Deputy server.
-//
-// Example:
-//
-//	client, err := sdk.ConnectToServer(ctx, "https://deputy.example.com:8090")
 func ConnectToServer(ctx context.Context, addr string) (*Client, error) {
 	return ConnectToServerWithAuth(ctx, addr, "")
 }
 
 // ConnectToServerWithAuth creates a client connected to a remote Deputy server with authentication.
-//
-// Example:
-//
-//	client, err := sdk.ConnectToServerWithAuth(ctx, "https://deputy.example.com:8090", "my-token")
 func ConnectToServerWithAuth(ctx context.Context, addr, authToken string) (*Client, error) {
 	var opts []connect.ClientOption
 	if authToken != "" {
@@ -217,11 +192,6 @@ func ConnectToServerWithAuth(ctx context.Context, addr, authToken string) (*Clie
 //   - Shared caching across multiple CLI invocations
 //   - Centralized OTel collection and observability
 //   - Running Deputy in a local Docker container
-//
-// Example:
-//
-//	client, err := sdk.ConnectToDaemon(ctx, "")  // default socket
-//	client, err := sdk.ConnectToDaemon(ctx, "/var/run/deputy.sock")
 func ConnectToDaemon(ctx context.Context, socket string) (*Client, error) {
 	if socket == "" {
 		socket = DefaultDaemonSocket
@@ -348,13 +318,6 @@ type BuildGraphOptions = graphv1.GraphOptions
 
 // BuildGraph constructs a dependency graph for a target.
 // The target can be a local directory, git repository, or container image.
-//
-// Example:
-//
-//	graph, err := client.BuildGraph(ctx, ".", nil)
-//	for _, node := range graph.GetNodes() {
-//	    fmt.Printf("%s@%s (depth: %d)\n", node.Name, node.Version, node.Depth)
-//	}
 func (c *Client) BuildGraph(ctx context.Context, target string, opts *BuildGraphOptions) (*graphv1.BuildGraphResponse, error) {
 	resp, err := c.clients.Graph.BuildGraph(ctx, connect.NewRequest(&graphv1.BuildGraphRequest{
 		Target:  target,
@@ -370,17 +333,6 @@ func (c *Client) BuildGraph(ctx context.Context, target string, opts *BuildGraph
 // Returns all paths from the project root to the specified dependency.
 //
 // The dependency parameter can be a PURL, package name, or name@version.
-//
-// Example:
-//
-//	why, err := client.WhyDependency(ctx, ".", "golang.org/x/crypto")
-//	for _, path := range why.GetPaths() {
-//	    fmt.Printf("Path (length %d): ", path.Length)
-//	    for _, node := range path.Nodes {
-//	        fmt.Printf("%s -> ", node.Name)
-//	    }
-//	    fmt.Println()
-//	}
 func (c *Client) WhyDependency(ctx context.Context, target, dependency string) (*graphv1.WhyDependencyResponse, error) {
 	resp, err := c.clients.Graph.WhyDependency(ctx, connect.NewRequest(&graphv1.WhyDependencyRequest{
 		Target:     target,
@@ -396,15 +348,6 @@ func (c *Client) WhyDependency(ctx context.Context, target, dependency string) (
 
 // DiffPackages compares package dependencies between two targets.
 // Targets can be git refs, container image tags, or directory paths.
-//
-// Example:
-//
-//	diff, err := client.DiffPackages(ctx, "main", "HEAD")
-//	for _, change := range diff.GetChanges() {
-//	    fmt.Printf("%s: %s %s -> %s\n",
-//	        change.ChangeKind, change.Package.Name,
-//	        change.BaseVersion, change.TargetVersion)
-//	}
 func (c *Client) DiffPackages(ctx context.Context, base, target string) (*diffv1.DiffPackagesResponse, error) {
 	resp, err := c.clients.Diff.DiffPackages(ctx, connect.NewRequest(&diffv1.DiffPackagesRequest{
 		BaseTarget:   base,
@@ -418,13 +361,6 @@ func (c *Client) DiffPackages(ctx context.Context, base, target string) (*diffv1
 
 // DiffVulnerabilities compares vulnerabilities between two targets.
 // This performs vulnerability scans on both targets and computes the difference.
-//
-// Example:
-//
-//	diff, err := client.DiffVulnerabilities(ctx, "v1.0.0", "v2.0.0")
-//	fmt.Printf("Added: %d, Fixed: %d\n",
-//	    len(diff.GetAddedVulnerabilities()),
-//	    len(diff.GetRemovedVulnerabilities()))
 func (c *Client) DiffVulnerabilities(ctx context.Context, base, target string) (*diffv1.DiffVulnerabilitiesResponse, error) {
 	resp, err := c.clients.Diff.DiffVulnerabilities(ctx, connect.NewRequest(&diffv1.DiffVulnerabilitiesRequest{
 		BaseTarget:   base,
@@ -438,14 +374,6 @@ func (c *Client) DiffVulnerabilities(ctx context.Context, base, target string) (
 
 // DiffContainerImages compares two container images comprehensively.
 // This includes package changes, vulnerability changes, layer analysis, and config changes.
-//
-// Example:
-//
-//	diff, err := client.DiffContainerImages(ctx, "nginx:1.24", "nginx:1.25")
-//	fmt.Printf("Package changes: %d\n", len(diff.GetPackageChanges()))
-//	if diff.Summary != nil {
-//	    fmt.Printf("Size delta: %d bytes\n", diff.Summary.SizeDelta)
-//	}
 func (c *Client) DiffContainerImages(ctx context.Context, base, target string) (*diffv1.DiffContainerImagesResponse, error) {
 	resp, err := c.clients.Diff.DiffContainerImages(ctx, connect.NewRequest(&diffv1.DiffContainerImagesRequest{
 		BaseImage:   base,
@@ -464,15 +392,6 @@ type ScanSecretsOptions = secretsv1.ScanOptions
 
 // ScanSecrets scans a target for secrets and sensitive data.
 // The target can be a directory, git repository, or container image.
-//
-// Example:
-//
-//	result, err := client.ScanSecrets(ctx, ".", nil)
-//	for _, finding := range result.GetFindings() {
-//	    fmt.Printf("%s: %s in %s:%d\n",
-//	        finding.DetectorId, finding.Description,
-//	        finding.Location.Path, finding.Location.Line)
-//	}
 func (c *Client) ScanSecrets(ctx context.Context, target string, opts *ScanSecretsOptions) (*secretsv1.ScanResponse, error) {
 	resp, err := c.clients.Secrets.Scan(ctx, connect.NewRequest(&secretsv1.ScanRequest{
 		Target:  target,
@@ -485,13 +404,6 @@ func (c *Client) ScanSecrets(ctx context.Context, target string, opts *ScanSecre
 }
 
 // ListDetectors returns available secret detectors.
-//
-// Example:
-//
-//	detectors, err := client.ListDetectors(ctx)
-//	for _, d := range detectors.GetDetectors() {
-//	    fmt.Printf("%s: %s\n", d.Id, d.Description)
-//	}
 func (c *Client) ListDetectors(ctx context.Context) (*secretsv1.ListDetectorsResponse, error) {
 	resp, err := c.clients.Secrets.ListDetectors(ctx, connect.NewRequest(&secretsv1.ListDetectorsRequest{}))
 	if err != nil {
@@ -526,19 +438,6 @@ const (
 //
 // The policies can be provided as inline YAML or file paths.
 // Use NewInlinePolicy or NewPolicyFromPath to create PolicySource values.
-//
-// Example:
-//
-//	policy := sdk.NewInlinePolicy(`
-//	  policies:
-//	    - name: block-critical
-//	      rules:
-//	        - action: deny
-//	          when: vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
-//	`)
-//	result, err := client.EvaluatePolicy(ctx, []*sdk.PolicySource{policy}, &policyv1.ScanReportPolicyInput{
-//	    Vulnerabilities: findings,
-//	})
 func (c *Client) EvaluatePolicy(ctx context.Context, policies []*PolicySource, input *policyv1.ScanReportPolicyInput) (*EvaluateResponse, error) {
 	req := &policyv1.EvaluateRequest{
 		Policies: policies,
@@ -553,15 +452,6 @@ func (c *Client) EvaluatePolicy(ctx context.Context, policies []*PolicySource, i
 
 // EvaluatePolicyForVulnerability evaluates policies for a single vulnerability.
 // This is useful for per-vulnerability policy checks.
-//
-// Example:
-//
-//	for _, finding := range scanResult.GetFindings() {
-//	    result, err := client.EvaluatePolicyForVulnerability(ctx, policies, finding)
-//	    if result.Outcome == sdk.ActionDeny {
-//	        // Handle policy violation
-//	    }
-//	}
 func (c *Client) EvaluatePolicyForVulnerability(ctx context.Context, policies []*PolicySource, vuln *vulnerabilityv1.Finding) (*EvaluateResponse, error) {
 	req := &policyv1.EvaluateRequest{
 		Policies: policies,
@@ -580,15 +470,6 @@ func (c *Client) EvaluatePolicyForVulnerability(ctx context.Context, policies []
 
 // ValidatePolicy validates policy syntax and CEL expressions without evaluating.
 // Use this to catch errors before deploying policies.
-//
-// Example:
-//
-//	result, err := client.ValidatePolicy(ctx, []*sdk.PolicySource{policy})
-//	if !result.Valid {
-//	    for _, err := range result.Errors {
-//	        fmt.Printf("Error in %s: %s\n", err.PolicyName, err.Message)
-//	    }
-//	}
 func (c *Client) ValidatePolicy(ctx context.Context, policies []*PolicySource) (*ValidateResponse, error) {
 	resp, err := c.clients.Policy.Validate(ctx, connect.NewRequest(&policyv1.ValidateRequest{
 		Policies: policies,
@@ -601,13 +482,6 @@ func (c *Client) ValidatePolicy(ctx context.Context, policies []*PolicySource) (
 
 // ListEntrypoints returns all available policy entrypoints and their bindings.
 // Useful for policy authoring tools and documentation generation.
-//
-// Example:
-//
-//	entrypoints, err := client.ListEntrypoints(ctx, "")
-//	for _, ep := range entrypoints.GetEntrypoints() {
-//	    fmt.Printf("%s (%s): %s\n", ep.Name, ep.Category, ep.Description)
-//	}
 func (c *Client) ListEntrypoints(ctx context.Context, category string) (*policyv1.ListEntrypointsResponse, error) {
 	resp, err := c.clients.Policy.ListEntrypoints(ctx, connect.NewRequest(&policyv1.ListEntrypointsRequest{
 		Category: category,
@@ -643,15 +517,8 @@ func NewPolicyFromURL(url string) *PolicySource {
 // --- Types ---
 
 // Options configures client creation.
-//
-// Zero value enables automatic mode detection (recommended default):
-//
-//	client, err := sdk.NewClient(ctx)
-//
-// For explicit control, use the convenience constructors or set fields directly:
-//
-//	client, err := sdk.ConnectToServer(ctx, "https://deputy.example.com:8090")
-//	client, err := sdk.ConnectToDaemon(ctx, "")  // default socket
+// Its zero value enables automatic mode detection (recommended default).
+// Set ForceMode to use Mode and its corresponding connection settings explicitly.
 type Options struct {
 	// Mode sets the connection mode. If zero and ForceMode is false,
 	// mode is auto-detected.
