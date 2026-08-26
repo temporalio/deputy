@@ -102,7 +102,11 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 		wantErrContains string
 		wantErr         bool
 		wantAdvisories  []string
-		wantUnresolved  []UnresolvedAdvisory
+		// wantAliases, when set, pins the aliases on the single reported
+		// finding. Recovery has to leave the record it recovered through
+		// discoverable here, and exactly once.
+		wantAliases    []string
+		wantUnresolved []UnresolvedAdvisory
 	}{
 		{
 			// The reported bug: one withdrawn record used to abort everything.
@@ -153,7 +157,10 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 				},
 			},
 			// GHSA first: SeverityAliasOrder prefers the reviewed database.
-			wantAdvisories: []string{ghsaAlias},
+			// The finding keeps the ID the batch reported, so a suppression
+			// naming it still matches, with the recovered ID as an alias.
+			wantAdvisories: []string{withdrawn},
+			wantAliases:    []string{ghsaAlias},
 		},
 		{
 			name: "alias that also 404s leaves the advisory unresolved",
@@ -185,7 +192,8 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 					cveAlias: affectedRecord(cveAlias, buildkit),
 				},
 			},
-			wantAdvisories: []string{cveAlias},
+			wantAdvisories: []string{withdrawn},
+			wantAliases:    []string{cveAlias},
 		},
 		{
 			// The defect this pins: a network blip on the alias used to be
@@ -228,7 +236,8 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 					cveAlias: affectedRecord(cveAlias, buildkit),
 				},
 			},
-			wantAdvisories: []string{cveAlias},
+			wantAdvisories: []string{withdrawn},
+			wantAliases:    []string{cveAlias},
 		},
 		{
 			// The alias list is read out of response text, so a record about
@@ -318,6 +327,15 @@ func TestQueryRaw_UnresolvedAdvisories(t *testing.T) {
 
 			if !slices.Equal(unresolved, tt.wantUnresolved) {
 				t.Errorf("unresolved = %+v, want %+v", unresolved, tt.wantUnresolved)
+			}
+
+			if tt.wantAliases != nil {
+				if len(vulns) != 1 {
+					t.Fatalf("findings = %d, want exactly 1 to check its aliases", len(vulns))
+				}
+				if got := vulns[0].Aliases; !slices.Equal(got, tt.wantAliases) {
+					t.Errorf("finding aliases = %q, want %q (recovered ID must appear exactly once)", got, tt.wantAliases)
+				}
 			}
 		})
 	}
@@ -611,6 +629,176 @@ func TestQueryRaw_AliasEnrichmentFailuresAreSilent(t *testing.T) {
 			}
 			if gotRated := vulns[0].Severity != ""; gotRated != tt.wantRated {
 				t.Fatalf("finding carries a severity = %t (%q), want %t", gotRated, vulns[0].Severity, tt.wantRated)
+			}
+		})
+	}
+}
+
+// TestSupersededByDoesNotMutateTheRecoveredRecord guards the cache hazard in
+// re-identifying a recovered record. getCachedVuln returns whatever the Client
+// hands back, and a client with its own cache returns the same pointer to every
+// caller, so writing Id or Aliases onto that pointer would corrupt the entry for
+// the alias and serve it wrong to the next lookup in the same scan. The two
+// packages here both recover through one shared record, which is the shape that
+// turns such a mutation into a visible wrong answer rather than a latent race.
+func TestSupersededByDoesNotMutateTheRecoveredRecord(t *testing.T) {
+	const (
+		buildkit   = "github.com/moby/buildkit"
+		containerd = "github.com/containerd/containerd"
+		withdrawnA = "GO-2026-6255"
+		withdrawnB = "GO-2026-9999"
+		liveAlias  = "GHSA-7236-3392-c5c6"
+		priorCVE   = "CVE-2026-61711"
+	)
+
+	// One record, one pointer, handed to every lookup: the shape a client with
+	// an internal cache produces.
+	shared := affectedRecord(liveAlias, buildkit)
+	shared.Aliases = []string{priorCVE}
+	shared.Affected = append(shared.Affected, &osvschema.Affected{
+		Package: &osvschema.Package{Name: containerd, Ecosystem: "Go"},
+		Ranges: []*osvschema.Range{{
+			Type:   osvschema.Range_SEMVER,
+			Events: []*osvschema.Event{{Introduced: "0"}},
+		}},
+	})
+
+	resetDiskCache(t)
+	client := &scriptedClient{
+		batch: map[string][]string{
+			buildkit:   {withdrawnA},
+			containerd: {withdrawnB},
+		},
+		failures: map[string]error{
+			withdrawnA: notFoundErr(liveAlias),
+			withdrawnB: notFoundErr(liveAlias),
+		},
+		records: map[string]*osvschema.Vulnerability{liveAlias: shared},
+	}
+
+	vulns, unresolved, err := QueryRaw(t.Context(), client, []PkgInput{
+		{QueryKey: QueryKey{Name: buildkit, Version: "v0.30.0", Ecosystem: "Go"}},
+		{QueryKey: QueryKey{Name: containerd, Version: "v1.7.0", Ecosystem: "Go"}},
+	})
+	if err != nil {
+		t.Fatalf("QueryRaw() error = %v, want nil", err)
+	}
+	if len(unresolved) != 0 {
+		t.Fatalf("unresolved = %+v, want none: both recovered", unresolved)
+	}
+
+	// Each package keeps the ID its own batch entry reported, which is only
+	// possible if neither re-identification disturbed the other's record.
+	gotIDs := make([]string, 0, len(vulns))
+	for _, v := range vulns {
+		gotIDs = append(gotIDs, v.ID)
+	}
+	slices.Sort(gotIDs)
+	wantIDs := []string{withdrawnA, withdrawnB}
+	slices.Sort(wantIDs)
+	if !slices.Equal(gotIDs, wantIDs) {
+		t.Errorf("advisory IDs = %q, want %q", gotIDs, wantIDs)
+	}
+
+	// The shared record itself is untouched, so a later lookup for the alias
+	// still gets the alias.
+	if got := shared.GetId(); got != liveAlias {
+		t.Errorf("shared record Id = %q, want %q: re-identification wrote through to the cached record", got, liveAlias)
+	}
+	if got := shared.GetAliases(); !slices.Equal(got, []string{priorCVE}) {
+		t.Errorf("shared record aliases = %q, want %q: re-identification wrote through to the cached record", got, []string{priorCVE})
+	}
+
+	// And a second read of the same alias is unaffected.
+	again, err := client.GetVulnByID(t.Context(), liveAlias)
+	if err != nil {
+		t.Fatalf("second GetVulnByID(%s) error = %v", liveAlias, err)
+	}
+	if got := again.GetId(); got != liveAlias {
+		t.Errorf("second read of %s has Id = %q, want %q", liveAlias, got, liveAlias)
+	}
+	if got := again.GetAliases(); !slices.Equal(got, []string{priorCVE}) {
+		t.Errorf("second read of %s has aliases = %q, want %q", liveAlias, got, []string{priorCVE})
+	}
+}
+
+// TestSupersededByRestoresIdentity covers re-identifying a recovered record:
+// the reported ID becomes the superseded one, the recovered ID stays reachable
+// through the aliases exactly once, and the record never lists itself. It also
+// pins that the argument is untouched, because the record comes from a client
+// that may hand the same pointer to a concurrent lookup, and removeEqualFold
+// rewrites its input slice in place.
+func TestSupersededByRestoresIdentity(t *testing.T) {
+	const (
+		liveAlias    = "GHSA-7236-3392-c5c6"
+		supersededID = "GO-2026-6255"
+		priorCVE     = "CVE-2026-61711"
+	)
+
+	tests := []struct {
+		name string
+		// aliases are the recovered record's aliases before re-identification.
+		aliases     []string
+		wantAliases []string
+	}{
+		{
+			name:        "no aliases gains the recovered ID",
+			wantAliases: []string{liveAlias},
+		},
+		{
+			// The usual shape: OSV records are mutually aliased, so the
+			// recovered record already names the ID that was withdrawn. It must
+			// not survive as an alias of itself.
+			name:        "superseded ID is dropped and the recovered ID added",
+			aliases:     []string{priorCVE, supersededID},
+			wantAliases: []string{priorCVE, liveAlias},
+		},
+		{
+			// A record that already lists its own ID must not gain a second
+			// copy of it.
+			name:        "recovered ID already present is not duplicated",
+			aliases:     []string{liveAlias, supersededID},
+			wantAliases: []string{liveAlias},
+		},
+		{
+			name:        "superseded ID is dropped case-insensitively",
+			aliases:     []string{strings.ToLower(supersededID), priorCVE},
+			wantAliases: []string{priorCVE, liveAlias},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original := affectedRecord(liveAlias, "github.com/moby/buildkit")
+			original.Aliases = slices.Clone(tt.aliases)
+			originalAliases := slices.Clone(tt.aliases)
+
+			out := supersededBy(original, supersededID)
+
+			if out == original {
+				t.Fatal("supersededBy returned its argument: the caller's record must not be reused")
+			}
+			if got := out.GetId(); got != supersededID {
+				t.Errorf("re-identified Id = %q, want %q", got, supersededID)
+			}
+			if got := out.GetAliases(); !slices.Equal(got, tt.wantAliases) {
+				t.Errorf("re-identified aliases = %q, want %q", got, tt.wantAliases)
+			}
+
+			// The argument is unchanged, so a concurrent lookup for the alias
+			// still sees the alias.
+			if got := original.GetId(); got != liveAlias {
+				t.Errorf("original Id = %q, want %q: supersededBy mutated its argument", got, liveAlias)
+			}
+			if got := original.GetAliases(); !slices.Equal(got, originalAliases) {
+				t.Errorf("original aliases = %q, want %q: supersededBy mutated its argument", got, originalAliases)
+			}
+			// Affected is nested structure a shallow copy would share.
+			if len(out.GetAffected()) == 0 || len(original.GetAffected()) == 0 {
+				t.Fatal("expected both records to carry affected entries")
+			}
+			if out.GetAffected()[0] == original.GetAffected()[0] {
+				t.Error("clone shares an Affected pointer with the original: the copy is not deep")
 			}
 		})
 	}

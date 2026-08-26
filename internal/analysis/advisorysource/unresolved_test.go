@@ -86,13 +86,17 @@ func TestOSVSourceReportsUnresolvedAdvisories(t *testing.T) {
 			},
 		},
 		{
-			name: "recovered advisory needs no warning",
+			// Recovery closes the gap, so there is nothing to warn about, and
+			// the finding keeps the ID the batch reported rather than the alias
+			// it was recovered through: a suppression naming the reported ID has
+			// to go on matching.
+			name: "recovered advisory needs no warning and keeps the reported ID",
 			client: &withdrawnAdvisoryClient{
 				advisoryID: withdrawn,
 				aliases:    []string{ghsaAlias},
 				records:    map[string]*osvschema.Vulnerability{ghsaAlias: buildkitRecord},
 			},
-			wantFindings: []string{ghsaAlias},
+			wantFindings: []string{withdrawn},
 		},
 	}
 

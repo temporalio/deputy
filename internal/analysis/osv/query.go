@@ -16,6 +16,7 @@ import (
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
+	"google.golang.org/protobuf/proto"
 	"osv.dev/bindings/go/api"
 
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
@@ -163,11 +164,16 @@ func getCachedVuln(ctx context.Context, client Client, id string) (*osvschema.Vu
 // record, and asking again for the same ID will keep failing. That response
 // names the IDs that do still exist, so resolveAdvisory retries against each of
 // them, preferring the reviewed databases first, and returns the first record
-// that is about pkg. The record it returns may therefore carry a different ID
-// than the one requested. Requiring the recovered record to name pkg is what
-// makes the recovery safe, because the alias list is read out of the response
-// text rather than from a typed field: a misread ID resolves to a record about
-// some other package and is rejected here.
+// that is about pkg. The record comes back under the requested id rather than
+// the alias it was recovered from; see [supersededBy]. Requiring the recovered
+// record to name pkg is what makes the recovery safe, because the alias list is
+// read out of the response text rather than from a typed field: a misread ID
+// resolves to a record about some other package and is rejected here.
+//
+// The second result is the ID whose record actually supplied the data: id
+// itself on a direct hit, or the alias recovery went through. Callers need it to
+// tell two batch entries that resolved to one record apart from two genuinely
+// distinct advisories, which the returned identity alone no longer reveals.
 //
 // Whether pkg's installed version falls in the recovered record's affected
 // ranges is deliberately left to the caller, so an alias that says "not
@@ -182,13 +188,13 @@ func getCachedVuln(ctx context.Context, client Client, id string) (*osvschema.Vu
 // the record moved. Returning the original not-found error in that case would
 // downgrade a transient failure into a permanent verdict, so the alias error
 // wins instead.
-func resolveAdvisory(ctx context.Context, client Client, id string, pkg PkgInput) (*osvschema.Vulnerability, error) {
+func resolveAdvisory(ctx context.Context, client Client, id string, pkg PkgInput) (*osvschema.Vulnerability, string, error) {
 	full, err := getCachedVuln(ctx, client, id)
 	if err == nil {
-		return full, nil
+		return full, id, nil
 	}
 	if !IsNotFoundError(err) {
-		return nil, err
+		return nil, "", err
 	}
 	// The first alias failure that was not itself a not-found response. Kept
 	// rather than returned on the spot so a later alias can still recover the
@@ -201,7 +207,7 @@ func resolveAdvisory(ctx context.Context, client Client, id string, pkg PkgInput
 		// A cancelled scan must never be reported as a withdrawn advisory, so
 		// stop recovering instead of spending more lookups on a dead context.
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+			return nil, "", ctxErr
 		}
 		aliasVuln, lookupErr := getCachedVuln(ctx, client, alias)
 		if lookupErr != nil {
@@ -218,19 +224,48 @@ func resolveAdvisory(ctx context.Context, client Client, id string, pkg PkgInput
 		}) {
 			continue
 		}
-		return aliasVuln, nil
+		return supersededBy(aliasVuln, id), alias, nil
 	}
 	if aliasErr != nil {
-		return nil, aliasErr
+		return nil, "", aliasErr
 	}
 	// Cancellation can also arrive while the last alias lookup is in flight, in
 	// which case the loop's own check never sees it and the original not-found
 	// error would be handed back as a withdrawal. Recheck before that verdict is
 	// final.
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
+		return nil, "", ctxErr
 	}
-	return nil, err
+	return nil, "", err
+}
+
+// supersededBy returns recovered's data under supersededID, the ID the batch
+// query named and could not expand, and keeps recovered's own ID among the
+// aliases so the record a reader can still look up stays discoverable.
+//
+// Identity has to follow the ID the caller asked about, because that is the ID
+// every downstream surface keys on: a suppression in .deputyignore.yaml, an
+// ignore rule, a policy that names the advisory. Handing back the recovered ID
+// instead retires all of them silently, which is worse than the gap the recovery
+// closed. This mirrors [HydrateSparseVulnerabilityAliases], which merges alias
+// records and then restores the queried identity the same way, for the same
+// reason.
+//
+// The record is cloned before anything is written to it. getCachedVuln can
+// return a pointer the Client owns and reuses across calls, resolveAdvisory runs
+// on up to osvConcurrencyLimit goroutines sharing one client, and removeEqualFold
+// rewrites its input slice in place, so mutating the argument could corrupt a
+// record another lookup in the same scan is about to read.
+func supersededBy(recovered *osvschema.Vulnerability, supersededID string) *osvschema.Vulnerability {
+	out := proto.CloneOf(recovered)
+	// OSV records are usually mutually aliased, so the recovered ID is normally
+	// already listed; mergeUniqueEqualFold adds it only when it is not, which
+	// keeps a duplicate entry from being this fix's own small defect.
+	out.Aliases = mergeUniqueEqualFold(out.GetAliases(), []string{out.GetId()})
+	// A record must not list itself as its own alias.
+	out.Aliases = removeEqualFold(out.GetAliases(), supersededID)
+	out.Id = supersededID
+	return out
 }
 
 const osvCacheTTL = 24 * time.Hour
@@ -680,11 +715,21 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 			var localUnresolved []UnresolvedAdvisory
 			// Alias recovery can land on a record the batch query already named
 			// in its own right, since OSV lists a withdrawn ID alongside the
-			// live alias that replaced it. Track what this package resolved to
-			// so the same advisory is not reported against it twice.
+			// live alias that replaced it. Track which record each entry
+			// resolved to, keyed on the ID that supplied the data rather than
+			// the ID now reported, so the same advisory is not reported against
+			// this package twice.
 			resolvedIDs := collections.NewSet[string]()
+			// The IDs the batch named for this package. When recovery lands on
+			// one of them, that entry's own lookup will report the finding
+			// directly, so the recovered duplicate is dropped instead of
+			// racing it for which ID the finding carries.
+			batchIDs := collections.NewSet[string]()
 			for _, mv := range res.GetVulns() {
-				full, err := resolveAdvisory(ctx, client, mv.GetId(), pkgMeta)
+				batchIDs.Add(mv.GetId())
+			}
+			for _, mv := range res.GetVulns() {
+				full, sourceID, err := resolveAdvisory(ctx, client, mv.GetId(), pkgMeta)
 				if err != nil {
 					if !IsNotFoundError(err) {
 						// A transport failure, a server error the client already
@@ -709,7 +754,14 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 					})
 					continue
 				}
-				if !resolvedIDs.Add(full.GetId()) {
+				// Recovery reached a record the batch also named on its own.
+				// That entry resolves it directly and keeps its own identity,
+				// so drop this redundant copy rather than letting response
+				// order decide which of the two IDs the finding carries.
+				if sourceID != mv.GetId() && batchIDs.Has(sourceID) {
+					continue
+				}
+				if !resolvedIDs.Add(sourceID) {
 					continue
 				}
 				if !isVersionAffected(full, pkgMeta) {
