@@ -20,16 +20,21 @@
 #
 # SECURITY CONSIDERATIONS:
 #
-# 1. Tenant Isolation: The tenant-isolation policy below uses path-based matching.
-#    For strict isolation, ensure your target naming convention includes the tenant
-#    as a distinct path component (e.g., "github.com/acme-corp/repo") rather than
-#    a substring. The policy uses matches() with word boundaries for safety.
+# 1. Tenant Isolation: The tenant-isolation policies below compare whole path
+#    components. For strict isolation, ensure your target naming convention
+#    includes the tenant as a distinct path component (e.g.,
+#    "github.com/acme-corp/repo") rather than a substring. Diffs are covered by
+#    a separate rule because they name two targets and both must be authorized.
 #
 # 2. Required Claims: Consider adding 'tenant' to auth.required_claims in your
 #    server config to ensure all authenticated requests have a tenant claim.
 #
-# 3. Admin Override: The admin-full-access policy allows admins to bypass tenant
-#    isolation. Audit log admin actions carefully in production.
+# 3. Allow Actions Do Not Override Denies: a deny from any policy is final at
+#    service entrypoints, so the admin-full-access rule below records that an
+#    admin was recognized without lifting the tenant rules. An admin who needs
+#    cross-tenant access needs the deny rules to exempt them, which is what the
+#    jwt.roles test in each rule would have to do. Audit admin actions carefully
+#    in production either way.
 
 policies:
   # Require tenant claim for authenticated users (defense in depth)
@@ -37,6 +42,7 @@ policies:
     description: Ensure all authenticated users have a tenant identifier
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
       - service_diff_request
       - service_secrets_request
@@ -50,28 +56,173 @@ policies:
         remediation: "Ensure your identity provider includes a 'tenant' claim in tokens"
 
   # Tenant isolation - users can only access their tenant's resources
-  # Uses path-based matching with word boundaries for security
+  # Compares whole path components literally, never as a substring or regex
   - name: tenant-isolation
     description: |
       Restricts users to resources within their tenant namespace.
-      Uses regex matching with word boundaries to prevent bypass via substring matching.
-      Example: tenant "acme" can access "github.com/acme/repo" but NOT "github.com/acme-competitor/repo"
+
+      The tenant must appear as a path component that owns something, so it is
+      matched as "/<tenant>/" against the target with a leading "/" added. That
+      requires the claim to name a namespace rather than any component:
+
+        github.com/acme/repo            allowed, acme owns the repo
+        git@github.com:acme/repo        allowed, the host separator is folded
+        ghcr.io/acme/app:v1             allowed, the tag stays inside "app:v1"
+        /srv/tenants/acme/project       allowed, a directory path reads the same
+        github.com/other/acme           denied, acme is only the repository name
+        ghcr.io/other/acme:v1           denied, a tag does not make acme an owner
+        ghcr.io/other/app:acme          denied, acme is only the tag
+        github.com/acme-corp-archive/r  denied, not a whole component
+
+      Exactly one ":" is folded into a separator, the one before the first "/",
+      and only because it is the one that separates a host from a path: in an
+      SCP-style git URL such as "git@github.com:acme/repo", in a scheme such as
+      "https://", and in a registry port such as "registry.local:5000/". Every
+      later ":" stays inside its component, because there it opens a tag or a
+      digest rather than a path.
+
+      Folding all of them was a bypass. "ghcr.io/other/acme:v1" became
+      "/ghcr.io/other/acme/v1", which contains "/acme/", so a repository named
+      after a tenant admitted that tenant whoever owned it, and the tag the
+      attacker chose supplied the trailing "/" that made the name look like a
+      namespace. The rule holds for every target form because none of them puts
+      an owner after a ":": a git reference, an image reference, and a directory
+      path all name their owner as a "/" separated component.
+
+      Matching is a literal contains, so nothing in the claim is interpreted:
+      a tenant such as "acme.com" cannot match "github.com/acmeXcom/repo" the
+      way interpolating it into a regex would.
+
+      The nonempty guard on request.target is required, not defensive: several
+      procedures this rule covers name no resource at all (SecretsService
+      Verify, ListDetectors, RegisterDetector, and SBOMService Diff), and
+      without it they would be denied unconditionally. Those procedures are
+      governed by require-tenant-claim and secrets-requires-security-team.
+
+      Graph requests belong here too. BuildGraph, WhyDependency, and QueryGraph
+      each name a resource and report its dependency structure, so omitting
+      them lets a tenant map another tenant's repository.
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
-      - service_diff_request
       - service_secrets_request
+      - service_graph_request
     rules:
       - action: deny
         when: |
           !jwt.anonymous &&
-          has(jwt.tenant) &&
-          jwt.tenant != "" &&
-          has(request.target) &&
-          request.target != "" &&
-          !request.target.matches("(^|[/:])" + jwt.tenant + "([/:]|$)")
+          jwt.?tenant.orValue("") != "" &&
+          request.?target.orValue("") != "" &&
+          !cel.bind(path, request.target,
+            "/" + (path.indexOf(":") < path.indexOf("/")
+              ? path.replace(":", "/", 1)
+              : path)
+          ).contains("/" + jwt.tenant + "/")
         reason: "Cross-tenant access denied - target does not belong to your tenant"
         remediation: "You can only access resources within your tenant namespace"
+
+  # Tenant isolation for diffs, which name two independent resources
+  - name: tenant-isolation-diff
+    description: |
+      A diff compares two targets, so both sides need authorizing. This rule is
+      separate from tenant-isolation because diff_base and diff_target exist
+      only on service_diff_request, and request.target reports the base side
+      alone, which would let an authorized base carry another tenant's target.
+
+      Unlike the single-target rule, an empty side denies here rather than
+      skipping the check: a diff always names two resources, so a missing side
+      is a malformed request, not a procedure without a target.
+
+      Each side is normalized the way tenant-isolation normalizes request.target,
+      and for the same reason: folding a tag into a separator turns a repository
+      name into an owner.
+    entrypoints:
+      - service_diff_request
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          jwt.?tenant.orValue("") != "" &&
+          ![diff_base, diff_target].all(t,
+            cel.bind(path, t.display_path,
+              "/" + (path.indexOf(":") < path.indexOf("/")
+                ? path.replace(":", "/", 1)
+                : path)
+            ).contains("/" + jwt.tenant + "/")
+          )
+        reason: "Cross-tenant diff denied - both sides must belong to your tenant"
+        remediation: "You can only diff resources within your tenant namespace"
+
+  # A target that does not name the resource it fetches cannot be authorized by
+  # matching its string, so refuse those rather than trying to match them.
+  #
+  # A trailing slash is the subtlest of them. The tenant rules require the tenant
+  # to own something, expressed as "/<tenant>/" appearing in the path, and a
+  # trailing slash makes the repository name look like an owner:
+  # "https://github.com/other/acme/" contains "/acme/" while Git fetches the
+  # repository acme owned by other.
+  #
+  # Git drops a URL fragment, so "https://github.com/other/repo.git#/acme/x"
+  # reads as belonging to acme and clones other/repo.git. A query does the same.
+  # A dot segment is resolved by whatever normalizes the path, so
+  # "https://github.com/acme/../other/repo" matches "/acme/" and fetches
+  # "/other/repo". And percent-encoding hides all of it from a string
+  # comparison: "%2e%2e" is a dot segment the predicate cannot see, and the
+  # policy has no business decoding what the fetch will decode differently.
+  #
+  # The dot-segment test compares whole components rather than searching for the
+  # characters, so "repo..archive" is a legitimate name and stays allowed. That
+  # distinction is the point: earlier revisions of these rules kept enumerating
+  # the positions a tenant name could hide in, and each new position was another
+  # bypass. Authorizing only targets whose string is what gets fetched is the
+  # shape that ends that. Parsing the target properly is the real answer, and it
+  # belongs in the engine rather than in a policy expression.
+  #
+  # These two rules fold every ":" before looking for a dot segment, while the
+  # tenant rules above fold only the host separator. The asymmetry is deliberate:
+  # a fold invents path components, which can only make a refusal catch more, and
+  # can only make an authorization admit more.
+  - name: reject-unauthorizable-targets
+    description: |
+      Deputy also rejects fragments during remote target validation. This rule
+      exists because a policy that authorizes a string has to see the same
+      string the fetch will use, and an operator copying the tenant rules above
+      into a deployment on an older build should not inherit the bypass.
+    entrypoints:
+      - service_scan_request
+      - service_list_request
+      - service_sbom_request
+      - service_secrets_request
+      - service_graph_request
+    rules:
+      - action: deny
+        when: |
+          request.?target.orValue("").contains("#") ||
+          request.?target.orValue("").contains("?") ||
+          request.?target.orValue("").contains("%") ||
+          request.?target.orValue("").endsWith("/") ||
+          ("/" + request.?target.orValue("").replace(":", "/"))
+            .split("/").exists(c, c == "..")
+        reason: "Target must name the resource it fetches, without a fragment, query, percent-encoding, or dot segment"
+        remediation: "Name the resource directly: no #fragment, no ?query, no %encoding, and no .. path component"
+
+  # Same rule for the two sides of a diff, which request.target does not report.
+  - name: reject-unauthorizable-diff-targets
+    entrypoints:
+      - service_diff_request
+    rules:
+      - action: deny
+        when: |
+          [diff_base, diff_target].exists(t,
+            t.display_path.contains("#") ||
+            t.display_path.contains("?") ||
+            t.display_path.contains("%") ||
+            t.display_path.endsWith("/") ||
+            ("/" + t.display_path.replace(":", "/")).split("/").exists(c, c == "..")
+          )
+        reason: "Both sides of a diff must name the resources they fetch"
+        remediation: "Name both resources directly: no #fragment, no ?query, no %encoding, and no .. path component"
 
   # Require authentication for all operations
   - name: require-authentication
@@ -117,6 +268,7 @@ policies:
   - name: service-account-scopes
     entrypoints:
       - service_scan_request
+      - service_list_request
       - service_sbom_request
       - service_diff_request
       - service_secrets_request
@@ -141,7 +293,8 @@ policies:
           !jwt.?scopes.orValue([]).exists(s, s == "secrets")
         reason: "Service account lacks 'secrets' scope"
 
-  # Admin override - admins can do everything
+  # Records that an admin was recognized. This does not override the deny rules
+  # above, because any deny is final; see the note at the top of this file.
   - name: admin-full-access
     entrypoints:
       - service_scan_request

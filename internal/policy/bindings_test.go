@@ -3,6 +3,10 @@ package policy
 import (
 	"slices"
 	"testing"
+
+	"google.golang.org/protobuf/proto"
+
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 )
 
 func TestAllEntrypointsHaveBindings(t *testing.T) {
@@ -214,5 +218,128 @@ func TestRequiredVariablesAreDeclared(t *testing.T) {
 			}
 			t.Errorf("entrypoint %q requires %q, which the CEL env does not declare", ep, name)
 		}
+	}
+}
+
+// serviceEntrypointInputs pairs each service authorization entrypoint with the
+// proto message the server actually evaluates at it. The payload is the ground
+// truth for what a policy can reference, because ProtoToMap keys the CEL
+// activation by the message's field names, so this is what the binding profile
+// has to agree with.
+var serviceEntrypointInputs = map[Entrypoint]proto.Message{
+	EntrypointServiceScanRequest:    &policyv1.ServiceScanRequestPolicyInput{},
+	EntrypointServiceListRequest:    &policyv1.ServiceListRequestPolicyInput{},
+	EntrypointServiceSBOMRequest:    &policyv1.ServiceSbomRequestPolicyInput{},
+	EntrypointServiceDiffRequest:    &policyv1.ServiceDiffRequestPolicyInput{},
+	EntrypointServiceSecretsRequest: &policyv1.ServiceSecretsRequestPolicyInput{},
+	EntrypointServiceGraphRequest:   &policyv1.ServiceGraphRequestPolicyInput{},
+}
+
+// messageFieldNames returns a message's field names in proto (snake_case) form,
+// which is the form ProtoToMap uses for CEL activation keys.
+func messageFieldNames(msg proto.Message) []string {
+	fields := msg.ProtoReflect().Descriptor().Fields()
+	names := make([]string, 0, fields.Len())
+	for i := range fields.Len() {
+		names = append(names, string(fields.Get(i).Name()))
+	}
+	slices.Sort(names)
+	return names
+}
+
+// TestServiceEntrypointBindingsMatchTheirPayloads derives the expected variable
+// set for each service entrypoint from its payload message instead of trusting
+// the hand-written binding profile, because the two drifted: the
+// service_diff_request profile advertised "target", which its payload has never
+// carried, while the diff_base and diff_target the payload does carry were
+// undeclared and so could not compile. The entrypoint's whole purpose is to
+// authorize a request against its target, and neither side was reachable.
+//
+// Both directions matter. A variable the profile advertises but the payload
+// omits is a documented control that silently has no value. A payload field the
+// profile omits cannot be referenced at all, which fails the request closed at
+// compile time and makes the field dead.
+func TestServiceEntrypointBindingsMatchTheirPayloads(t *testing.T) {
+	t.Parallel()
+
+	// Every service entrypoint must appear above, otherwise a new one could
+	// ship with a drifted profile and nothing would compare it to anything.
+	for _, ep := range EntrypointsService {
+		if _, ok := serviceEntrypointInputs[ep]; !ok {
+			t.Errorf("service entrypoint %q has no payload in serviceEntrypointInputs, so its binding profile is unchecked", ep)
+		}
+	}
+
+	for ep, msg := range serviceEntrypointInputs {
+		t.Run(string(ep), func(t *testing.T) {
+			profile := GetBindingProfile(ep)
+			if profile == nil {
+				t.Fatalf("entrypoint %q has no binding profile", ep)
+			}
+
+			want := messageFieldNames(msg)
+			if len(want) == 0 {
+				t.Fatalf("payload %T declares no fields; the comparison would be vacuous", msg)
+			}
+			got := profile.Variables()
+			slices.Sort(got)
+
+			for _, name := range got {
+				if !slices.Contains(want, name) {
+					t.Errorf("binding profile advertises %q, which %T does not carry, so a policy using it has nothing to match on", name, msg)
+				}
+			}
+			for _, name := range want {
+				if !slices.Contains(got, name) {
+					t.Errorf("%T carries %q, which the binding profile omits, so a policy referencing it cannot compile", msg, name)
+				}
+			}
+		})
+	}
+}
+
+// TestDiffProfilesMatchTheirInputMessages tests that a variable a diff binding
+// profile advertises is declared by the proto message that documents the same
+// entrypoint.
+//
+// The two contracts diverged in both directions on this branch. The report
+// message declared two Target fields no caller populated, and both diff
+// profiles advertised the refs while neither message declared them, so
+// schema-driven tooling and CEL disagreed about the same entrypoint. Deriving
+// the profile from the descriptor is the end state and needs an import cycle
+// resolved first, so until then this test keeps the two hand-written lists in
+// agreement.
+func TestDiffProfilesMatchTheirInputMessages(t *testing.T) {
+	tests := []struct {
+		entrypoint Entrypoint
+		message    proto.Message
+	}{
+		{EntrypointDiffReport, &policyv1.DiffReportPolicyInput{}},
+		{EntrypointDiffVulnerability, &policyv1.DiffVulnerabilityPolicyInput{}},
+		{EntrypointDiffDependencyChange, &policyv1.DiffDependencyChangePolicyInput{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.entrypoint), func(t *testing.T) {
+			declared := map[string]bool{}
+			fields := tt.message.ProtoReflect().Descriptor().Fields()
+			for i := range fields.Len() {
+				declared[string(fields.Get(i).Name())] = true
+			}
+
+			profile := GetBindingProfile(tt.entrypoint)
+			for _, name := range append(append([]string{}, profile.Required...), profile.Optional...) {
+				// pkg and dependency are aliases the payload adds for
+				// consistency with scan and fix entrypoints, so they have no
+				// field of their own.
+				if name == "pkg" || name == "dependency" {
+					continue
+				}
+				if !declared[name] {
+					t.Errorf("profile advertises %q, which %s does not declare: a policy derived from the proto sees a different surface than CEL binds",
+						name, tt.message.ProtoReflect().Descriptor().FullName())
+				}
+			}
+		})
 	}
 }

@@ -367,69 +367,19 @@ func registeredProcedures(t *testing.T, srv *Server) []string {
 	return procedures
 }
 
-// stalePolicyProcedures are procedureToEntrypoint keys that do not match any
-// procedure the server registers, meaning server policies for those
-// entrypoints are silently never evaluated (unknown procedures are allowed by
-// default). KNOWN DEFECT, pinned rather than hidden: DiffService's real
-// procedures are DiffPackages/DiffVulnerabilities/DiffContainerImages and
-// GraphService's are BuildGraph/WhyDependency/QueryGraph, so the
-// service_diff_request and service_graph_request entrypoints currently guard
-// nothing. Fixing the map (a behavior change: those RPCs become policy
-// enforced) must remove the entry here, which makes this list self-cleaning.
-var stalePolicyProcedures = map[string]bool{
-	"/deputy.diff.v1.DiffService/Diff":      true,
-	"/deputy.graph.v1.GraphService/Resolve": true,
-	"/deputy.graph.v1.GraphService/Why":     true,
-}
-
-// unenforcedProcedures are procedures of policy-bearing services that
-// procedureToEntrypoint does not map, so policyInterceptor waves them through
-// with no policy evaluation at all. KNOWN DEFECT, pinned rather than hidden:
-// twelve of the nineteen procedures that should be authorized are not, so a
-// service_diff_request, service_graph_request or service_secrets_request
-// policy covers far less than its name suggests. DiffService and GraphService
-// are unmapped entirely (the map still names their pre-rename procedures, see
-// stalePolicyProcedures) and SecretsService is mapped only for Scan.
-//
-// Mapping these is a behavior change, since they become policy enforced, so
-// it is deliberately left out of this test-only change; closing a gap must
-// remove the entry here, which makes the list self-cleaning. Note that
-// policyInterceptor is a connect.UnaryInterceptorFunc, whose
-// WrapStreamingHandler returns the next handler untouched, so mapping the
-// StreamScan entries alone would not enforce anything either.
-var unenforcedProcedures = map[string]bool{
-	"/deputy.diff.v1.DiffService/DiffContainerImages":    true,
-	"/deputy.diff.v1.DiffService/DiffPackages":           true,
-	"/deputy.diff.v1.DiffService/DiffVulnerabilities":    true,
-	"/deputy.graph.v1.GraphService/BuildGraph":           true,
-	"/deputy.graph.v1.GraphService/QueryGraph":           true,
-	"/deputy.graph.v1.GraphService/WhyDependency":        true,
-	"/deputy.secrets.v1.SecretsService/ListDetectors":    true,
-	"/deputy.secrets.v1.SecretsService/RegisterDetector": true,
-	"/deputy.secrets.v1.SecretsService/ScanDiff":         true,
-	"/deputy.secrets.v1.SecretsService/ScanHistory":      true,
-	"/deputy.secrets.v1.SecretsService/StreamScan":       true,
-	"/deputy.secrets.v1.SecretsService/Verify":           true,
-}
-
 // TestPolicyProcedureMapMatchesRegisteredProcedures checks procedureToEntrypoint
 // against the procedures the server registers, in both directions, because
 // each direction hides a different defect.
 //
 // Outward: a key that matches no registered procedure is dead weight and its
-// entrypoint is never evaluated. Known-stale keys are pinned in
-// stalePolicyProcedures.
+// entrypoint is never evaluated.
 //
 // Inward, and this is the security-relevant direction: unknown procedures are
 // allowed by default, so a procedure of a policy-bearing service that the map
 // omits is authorized by nothing. The expectation is derived rather than
 // hand-pinned, by crossing the registered services with the service
 // entrypoints in policy.EntrypointsService, so deleting or renaming a live
-// mapping fails here instead of silently disabling enforcement. Known gaps are
-// pinned in unenforcedProcedures.
-//
-// Both pin lists are checked for staleness, so closing a gap or fixing a key
-// without unpinning it fails too.
+// mapping fails here instead of silently disabling enforcement.
 func TestPolicyProcedureMapMatchesRegisteredProcedures(t *testing.T) {
 	srv, err := New(DefaultConfig())
 	if err != nil {
@@ -474,34 +424,17 @@ func TestPolicyProcedureMapMatchesRegisteredProcedures(t *testing.T) {
 	for procedure, entrypoint := range expected {
 		mapped, ok := procedureToEntrypoint[procedure]
 		switch {
-		case !ok && !unenforcedProcedures[procedure]:
+		case !ok:
 			t.Errorf("registered procedure %s has no procedureToEntrypoint mapping, so %s is never evaluated and the RPC is authorized by nothing", procedure, entrypoint)
-		case ok && unenforcedProcedures[procedure]:
-			t.Errorf("procedure %s is mapped now; remove it from unenforcedProcedures", procedure)
-		case ok && mapped != entrypoint:
+		case mapped != entrypoint:
 			t.Errorf("procedure %s maps to entrypoint %s, want %s derived from its service package", procedure, mapped, entrypoint)
 		}
 	}
 
 	// Outward: every key names a procedure the server registers.
 	for procedure := range procedureToEntrypoint {
-		switch {
-		case registered[procedure] && stalePolicyProcedures[procedure]:
-			t.Errorf("procedure %s is registered again; remove it from stalePolicyProcedures", procedure)
-		case !registered[procedure] && !stalePolicyProcedures[procedure]:
-			t.Errorf("procedureToEntrypoint key %s matches no registered procedure; its policy entrypoint is silently never evaluated", procedure)
-		}
-	}
-
-	for procedure := range stalePolicyProcedures {
-		if _, ok := procedureToEntrypoint[procedure]; !ok {
-			t.Errorf("stalePolicyProcedures entry %s is no longer in procedureToEntrypoint; remove it", procedure)
-		}
-	}
-
-	for procedure := range unenforcedProcedures {
 		if !registered[procedure] {
-			t.Errorf("unenforcedProcedures entry %s matches no registered procedure; remove it", procedure)
+			t.Errorf("procedureToEntrypoint key %s matches no registered procedure; its policy entrypoint is silently never evaluated", procedure)
 		}
 	}
 }
