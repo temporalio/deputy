@@ -249,6 +249,22 @@ func oidcIdentities() []oidcIdentity {
 			},
 		},
 		{
+			provider: "deputy-service-account",
+			// Deputy issues these itself, and the scopes claim is the only thing
+			// that says what the account may do. The subject shape says who is
+			// calling, so an account carrying no scope is the untrusted one here
+			// even though the file recognizes its subject.
+			trusted: &policyv1.JWTClaims{
+				Sub:          "sa:deputy-scanner",
+				Iss:          "https://deputy.acme-corp.internal",
+				CustomClaims: map[string]string{"scopes": "[scan list sbom diff graph secrets]"},
+			},
+			untrusted: &policyv1.JWTClaims{
+				Sub: "sa:deputy-scanner",
+				Iss: "https://deputy.acme-corp.internal",
+			},
+		},
+		{
 			provider: "kubernetes",
 			// A projected service account token carries the cluster issuer, and
 			// the fixture omitted it, so pinning the subject shape to its issuer
@@ -488,11 +504,69 @@ func TestShippedOIDCFederationTrustsWhatItsGatesAccept(t *testing.T) {
 			// Deputy's own service accounts are recognized by the human-only
 			// rules and were missing from the unified trusted list, so they were
 			// refused at every entrypoint.
-			name: "Deputy service account from the Deputy issuer",
+			name: "Deputy service account carrying the scope for the operation",
+			jwt: &policyv1.JWTClaims{
+				Sub:          "sa:deputy-scanner",
+				Iss:          "https://deputy.acme-corp.internal",
+				CustomClaims: map[string]string{"scopes": "[scan sbom]"},
+			},
+			wantDenied: false,
+		},
+		{
+			// Recognizing the subject shape is not authorization. The unified
+			// rule trusts "sa:" at every service entrypoint and deferred the
+			// scope test to a policy in another example file, which Deputy does
+			// not load on its behalf, so a scope-limited account reached
+			// everything.
+			name: "Deputy service account without the scope for the operation",
+			jwt: &policyv1.JWTClaims{
+				Sub:          "sa:deputy-lister",
+				Iss:          "https://deputy.acme-corp.internal",
+				CustomClaims: map[string]string{"scopes": "[list sbom]"},
+			},
+			wantDenied: true,
+		},
+		{
+			name: "Deputy service account with no scopes at all",
 			jwt: &policyv1.JWTClaims{
 				Sub: "sa:deputy-scanner",
 				Iss: "https://deputy.acme-corp.internal",
 			},
+			wantDenied: true,
+		},
+		{
+			// The scope claim only means something from the issuer that grants
+			// it, and the scopes rule is pinned to the Deputy issuer for that
+			// reason. Another issuer presenting an "sa:" subject is not a Deputy
+			// service account and the unified rule refuses it.
+			name: "service account subject minted by another issuer",
+			jwt: &policyv1.JWTClaims{
+				Sub:          "sa:deputy-scanner",
+				Iss:          "https://idp.attacker.example",
+				CustomClaims: map[string]string{"scopes": "[scan list sbom diff graph secrets]"},
+			},
+			wantDenied: true,
+		},
+		{
+			// A service account reaching secrets needs the secrets scope, not
+			// the scan scope it uses everywhere else.
+			name: "Deputy service account reaching secrets with only the scan scope",
+			jwt: &policyv1.JWTClaims{
+				Sub:          "sa:deputy-scanner",
+				Iss:          "https://deputy.acme-corp.internal",
+				CustomClaims: map[string]string{"scopes": "[scan]"},
+			},
+			entrypoint: EntrypointServiceSecretsRequest,
+			wantDenied: true,
+		},
+		{
+			name: "Deputy service account reaching secrets with the secrets scope",
+			jwt: &policyv1.JWTClaims{
+				Sub:          "sa:deputy-secrets",
+				Iss:          "https://deputy.acme-corp.internal",
+				CustomClaims: map[string]string{"scopes": "[scan secrets]"},
+			},
+			entrypoint: EntrypointServiceSecretsRequest,
 			wantDenied: false,
 		},
 		{

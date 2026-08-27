@@ -347,6 +347,59 @@ policies:
         reason: "Service account not authorized for secrets scanning"
 
   # =============================================================================
+  # Deputy Service Accounts
+  # =============================================================================
+  # Deputy issues tokens to machine callers that belong to no external provider.
+  # The subject names the account, "sa:<name>", and the scopes claim says what
+  # the account may do.
+
+  - name: deputy-service-account-scopes
+    description: |
+      Hold a Deputy service account to the scopes it was issued.
+
+      Recognizing the "sa:" subject shape is not authorization. It says who is
+      calling, not what they may do, and unified-identity-authorization below
+      trusts that shape at every service entrypoint, so without this rule a
+      scope-limited account reached every operation in the file. An earlier
+      version pointed at a service-account-scopes policy for the scope test, but
+      that policy lives in service-multi-tenant.yaml and Deputy does not compose
+      the files an operator did not load. An example has to be safe as loaded.
+
+      The required scope is looked up by entrypoint. An entrypoint absent from
+      the lookup resolves to "", which no scope equals, so a service entrypoint
+      added later refuses service accounts until someone names its scope.
+      Refusing is the safe direction for a lookup that has fallen behind. Both
+      hand-written lists here, the entrypoints this policy declares and the scope
+      for each, are checked by a test in internal/policy that runs a scoped and
+      an unscoped account against every entrypoint in EntrypointsService.
+
+      Which accounts exist is the issuer's decision, so this rule does not name
+      them. It decides only whether the account presenting the token carries the
+      scope this operation needs.
+    entrypoints:
+      - service_scan_request
+      - service_list_request
+      - service_sbom_request
+      - service_diff_request
+      - service_graph_request
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://deputy.acme-corp.internal" &&
+          jwt.?sub.orValue("").startsWith("sa:") &&
+          !jwt.?scopes.orValue([]).exists(s, s == {
+            "service_scan_request": "scan",
+            "service_list_request": "list",
+            "service_sbom_request": "sbom",
+            "service_diff_request": "diff",
+            "service_graph_request": "graph",
+            "service_secrets_request": "secrets"
+          }[?env.entrypoint].orValue(""))
+        reason: "Service account lacks the scope this operation requires"
+        remediation: "Issue the account the scope for this operation: scan, list, sbom, diff, graph, or secrets"
+
+  # =============================================================================
   # Human Identity Policies (Okta, Auth0, etc.)
   # =============================================================================
   # Human users typically authenticate through identity providers like Okta, Auth0,
@@ -516,9 +569,9 @@ policies:
             // carry custom claims could otherwise mint this subject.
             (jwt.?iss.orValue("") == "https://kubernetes.default.svc.cluster.local" &&
              jwt.?sub.orValue("").startsWith("system:serviceaccount:")) ||
-            // A Deputy-issued service account; service-account-scopes picks the
-            // scopes. The human-only rules already recognize this shape, and
-            // omitting it here denied it everywhere.
+            // A Deputy-issued service account; deputy-service-account-scopes,
+            // in this file, decides what it may do. The human-only rules already
+            // recognize this shape, and omitting it here denied it everywhere.
             (jwt.?iss.orValue("") == "https://deputy.acme-corp.internal" &&
              jwt.?sub.orValue("").startsWith("sa:")) ||
             // A human from the corporate identity provider, with an authorized
