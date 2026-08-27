@@ -66,11 +66,28 @@ policies:
       requires the claim to name a namespace rather than any component:
 
         github.com/acme/repo            allowed, acme owns the repo
-        git@github.com:acme/repo        allowed, ":" is folded to "/" first
-        ghcr.io/acme/app:v1             allowed, tag does not affect the owner
+        git@github.com:acme/repo        allowed, the host separator is folded
+        ghcr.io/acme/app:v1             allowed, the tag stays inside "app:v1"
+        /srv/tenants/acme/project       allowed, a directory path reads the same
         github.com/other/acme           denied, acme is only the repository name
+        ghcr.io/other/acme:v1           denied, a tag does not make acme an owner
         ghcr.io/other/app:acme          denied, acme is only the tag
         github.com/acme-corp-archive/r  denied, not a whole component
+
+      Exactly one ":" is folded into a separator, the one before the first "/",
+      and only because it is the one that separates a host from a path: in an
+      SCP-style git URL such as "git@github.com:acme/repo", in a scheme such as
+      "https://", and in a registry port such as "registry.local:5000/". Every
+      later ":" stays inside its component, because there it opens a tag or a
+      digest rather than a path.
+
+      Folding all of them was a bypass. "ghcr.io/other/acme:v1" became
+      "/ghcr.io/other/acme/v1", which contains "/acme/", so a repository named
+      after a tenant admitted that tenant whoever owned it, and the tag the
+      attacker chose supplied the trailing "/" that made the name look like a
+      namespace. The rule holds for every target form because none of them puts
+      an owner after a ":": a git reference, an image reference, and a directory
+      path all name their owner as a "/" separated component.
 
       Matching is a literal contains, so nothing in the claim is interpreted:
       a tenant such as "acme.com" cannot match "github.com/acmeXcom/repo" the
@@ -97,7 +114,11 @@ policies:
           !jwt.anonymous &&
           jwt.?tenant.orValue("") != "" &&
           request.?target.orValue("") != "" &&
-          !("/" + request.target.replace(":", "/")).contains("/" + jwt.tenant + "/")
+          !cel.bind(path, request.target,
+            "/" + (path.indexOf(":") < path.indexOf("/")
+              ? path.replace(":", "/", 1)
+              : path)
+          ).contains("/" + jwt.tenant + "/")
         reason: "Cross-tenant access denied - target does not belong to your tenant"
         remediation: "You can only access resources within your tenant namespace"
 
@@ -112,6 +133,10 @@ policies:
       Unlike the single-target rule, an empty side denies here rather than
       skipping the check: a diff always names two resources, so a missing side
       is a malformed request, not a procedure without a target.
+
+      Each side is normalized the way tenant-isolation normalizes request.target,
+      and for the same reason: folding a tag into a separator turns a repository
+      name into an owner.
     entrypoints:
       - service_diff_request
     rules:
@@ -120,7 +145,11 @@ policies:
           !jwt.anonymous &&
           jwt.?tenant.orValue("") != "" &&
           ![diff_base, diff_target].all(t,
-            ("/" + t.display_path.replace(":", "/")).contains("/" + jwt.tenant + "/")
+            cel.bind(path, t.display_path,
+              "/" + (path.indexOf(":") < path.indexOf("/")
+                ? path.replace(":", "/", 1)
+                : path)
+            ).contains("/" + jwt.tenant + "/")
           )
         reason: "Cross-tenant diff denied - both sides must belong to your tenant"
         remediation: "You can only diff resources within your tenant namespace"
@@ -149,6 +178,11 @@ policies:
   # bypass. Authorizing only targets whose string is what gets fetched is the
   # shape that ends that. Parsing the target properly is the real answer, and it
   # belongs in the engine rather than in a policy expression.
+  #
+  # These two rules fold every ":" before looking for a dot segment, while the
+  # tenant rules above fold only the host separator. The asymmetry is deliberate:
+  # a fold invents path components, which can only make a refusal catch more, and
+  # can only make an authorization admit more.
   - name: reject-unauthorizable-targets
     description: |
       Deputy also rejects fragments during remote target validation. This rule

@@ -158,6 +158,160 @@ func TestShippedTenantIsolationSkipsTargetlessProcedures(t *testing.T) {
 	}
 }
 
+// TestShippedTenantIsolationNamesTheOwnerNotTheTag tests the bypass that folding
+// ":" into a path separator opened in both tenant rules.
+//
+// The rules authorize a target when the tenant owns a path component, written as
+// "/<tenant>/". Folding every ":" turned a tag into a component of its own, so
+// "ghcr.io/other/acme:v1" read as "/ghcr.io/other/acme/v1", which contains
+// "/acme/". Any image whose repository was named after a tenant passed that
+// tenant's gate whoever owned it, and the attacker chose the tag that supplied
+// the trailing "/". Only the separator before the first "/" is folded now.
+//
+// A target is a git reference, an image reference, or a directory path, and the
+// deny direction is worth nothing if the fix refuses the forms the deployment
+// runs on, so every form appears here in both directions. Each case runs at every
+// service entrypoint, since a rule that holds at one and not another is how this
+// example has failed before.
+func TestShippedTenantIsolationNamesTheOwnerNotTheTag(t *testing.T) {
+	sources, err := LoadSources([]string{findExample(t, "service-multi-tenant.yaml")})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	engine, err := NewEngine(sources)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		target     string
+		wantDenied bool
+	}{
+		{
+			// The bypass: the repository is named after the tenant and the tag
+			// makes that name look like the namespace that owns it.
+			name:       "another owner's image named after the tenant",
+			target:     "ghcr.io/other/acme:v1",
+			wantDenied: true,
+		},
+		{
+			name:       "the tenant's own tagged image",
+			target:     "ghcr.io/acme/app:v1",
+			wantDenied: false,
+		},
+		{
+			name:       "another owner's image behind a scheme",
+			target:     "docker://ghcr.io/other/acme:v1",
+			wantDenied: true,
+		},
+		{
+			name:       "the tenant's own image behind a scheme",
+			target:     "docker://ghcr.io/acme/app:v1",
+			wantDenied: false,
+		},
+		{
+			// A registry port is a ":" before the first "/", so it is folded,
+			// and the tag in the same target still is not.
+			name:       "another owner's image on a registry with a port",
+			target:     "registry.local:5000/other/acme:v1",
+			wantDenied: true,
+		},
+		{
+			name:       "the tenant's own image on a registry with a port",
+			target:     "registry.local:5000/acme/app:v1",
+			wantDenied: false,
+		},
+		{
+			name:       "another owner's image pinned by digest",
+			target:     "ghcr.io/other/acme@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+			wantDenied: true,
+		},
+		{
+			name:       "the tenant's own image pinned by digest",
+			target:     "ghcr.io/acme/app@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+			wantDenied: false,
+		},
+		{
+			// The fold exists for this form: without it the host and the owner
+			// are one component and the tenant reaches nothing it owns.
+			name:       "the tenant's own SCP-style repository",
+			target:     "git@github.com:acme/repo",
+			wantDenied: false,
+		},
+		{
+			name:       "another owner's SCP-style repository named after the tenant",
+			target:     "git@github.com:other/acme",
+			wantDenied: true,
+		},
+		{
+			name:       "the tenant's own repository over https",
+			target:     "https://github.com/acme/repo",
+			wantDenied: false,
+		},
+		{
+			name:       "another owner's repository over https",
+			target:     "https://github.com/other/acme",
+			wantDenied: true,
+		},
+		{
+			name:       "a directory the tenant owns",
+			target:     "/srv/tenants/acme/project",
+			wantDenied: false,
+		},
+		{
+			name:       "a directory another tenant owns",
+			target:     "/srv/tenants/other/acme",
+			wantDenied: true,
+		},
+		{
+			// The tenant owning a repository named after itself must stay
+			// allowed: the owner position is what matters, not the name.
+			name:       "the tenant's own repository named after the tenant",
+			target:     "github.com/acme/acme",
+			wantDenied: false,
+		},
+	}
+
+	for _, ep := range EntrypointsService {
+		build, ok := serviceRequestInput[ep]
+		if !ok {
+			continue // reported by TestServiceRequestInputCoversEveryServiceEntrypoint
+		}
+		for _, tt := range tests {
+			t.Run(string(ep)+"/"+tt.name, func(t *testing.T) {
+				// A caller who satisfies every other rule in the file, so only
+				// the tenant boundary is under test.
+				jwt := &policyv1.JWTClaims{
+					Sub: "user@example.com",
+					CustomClaims: map[string]string{
+						"tenant": "acme",
+						"roles":  "[scanner security]",
+						"teams":  "[security platform]",
+						"scopes": "[scan sbom secrets]",
+					},
+				}
+				input := build(jwt, "/deputy.test.v1.TestService/Probe", tt.target)
+
+				actions, err := engine.EvaluateAll(t.Context(), input, "server", string(ep))
+				if err != nil {
+					t.Fatalf("EvaluateAll: %v", err)
+				}
+
+				denied, by := false, ""
+				for _, action := range actions {
+					if ActionTypeIs(action.Type, ActionDeny) {
+						denied, by = true, action.Source+": "+action.Reason
+					}
+				}
+				if denied != tt.wantDenied {
+					t.Errorf("target %q at %s: denied = %v (%s), want %v", tt.target, ep, denied, by, tt.wantDenied)
+				}
+			})
+		}
+	}
+}
+
 // TestShippedTenantIsolationAuthorizesBothDiffSides tests the security property
 // of the shipped multi-tenant example, which operators are invited to copy.
 //
@@ -277,6 +431,30 @@ func TestShippedTenantIsolationAuthorizesBothDiffSides(t *testing.T) {
 			base:       "ghcr.io/acme/app:v1",
 			target:     "ghcr.io/acme/app:v2",
 			wantDenied: false,
+		},
+		{
+			// The tag fold again, on the side request.target does not report:
+			// "ghcr.io/other/acme:v1" read as "/ghcr.io/other/acme/v1", so the
+			// repository name passed for the namespace that owns it.
+			name:       "another owner's image whose repository is named after the tenant",
+			tenant:     "acme",
+			base:       "ghcr.io/acme/app:v1",
+			target:     "ghcr.io/other/acme:v1",
+			wantDenied: true,
+		},
+		{
+			name:       "SCP-style repository named after the tenant, with a ref-like suffix",
+			tenant:     "acme",
+			base:       "git@github.com:acme/repo",
+			target:     "git@github.com:other/acme:v1",
+			wantDenied: true,
+		},
+		{
+			name:       "a directory another tenant owns, named after the tenant",
+			tenant:     "acme",
+			base:       "/srv/tenants/acme/project",
+			target:     "/srv/tenants/other/acme:v1",
+			wantDenied: true,
 		},
 		{
 			name:       "nested namespace the tenant owns",

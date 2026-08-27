@@ -241,7 +241,11 @@ policies:
         when: |
           jwt.?tenant.orValue("") != "" &&
           ![diff_base, diff_target].all(t,
-            ("/" + t.display_path.replace(":", "/")).contains("/" + jwt.tenant + "/")
+            cel.bind(path, t.display_path,
+              "/" + (path.indexOf(":") < path.indexOf("/")
+                ? path.replace(":", "/", 1)
+                : path)
+            ).contains("/" + jwt.tenant + "/")
           )
         reason: "Cross-tenant diff denied"
 ```
@@ -251,17 +255,27 @@ instead of repeating the test per side, and `jwt.?tenant.orValue("")` replaces
 `has(jwt.tenant) && jwt.tenant != ""` with the optional selector.
 
 The tenant has to own the resource, so it is matched as `/<tenant>/` against the
-target with a leading `/` prepended, and `:` is folded to `/` first so SCP-style
-git targets and tagged image references normalize the same way:
+target with a leading `/` prepended. Exactly one `:` is folded to `/` first, the
+one before the first `/`, because that is the separator between a host and a
+path: in an SCP-style git target, in a scheme, and in a registry port. Every
+later `:` opens a tag or a digest and stays inside its component:
 
 | target | tenant `acme` |
 | --- | --- |
 | `github.com/acme/repo` | allowed |
 | `git@github.com:acme/repo` | allowed |
 | `ghcr.io/acme/app:v1` | allowed |
+| `/srv/tenants/acme/project` | allowed |
 | `github.com/other/acme` | denied, `acme` is only the repository name |
+| `ghcr.io/other/acme:v1` | denied, a tag does not make `acme` an owner |
 | `ghcr.io/other/app:acme` | denied, `acme` is only the tag |
 | `github.com/acme-corp-archive/repo` | denied, not a whole component |
+
+Folding every `:` is the mistake to avoid here. It reads
+`ghcr.io/other/acme:v1` as `/ghcr.io/other/acme/v1`, which contains `/acme/`, so
+an image whose repository is named after a tenant passes that tenant's gate
+whoever owns it, with the attacker supplying the tag that makes the repository
+name look like a namespace.
 
 Three shortcuts all fail, and each one looks reasonable until it does not:
 
@@ -302,7 +316,11 @@ policies:
         when: |
           jwt.?tenant.orValue("") != "" &&
           request.?target.orValue("") != "" &&
-          !("/" + request.target.replace(":", "/")).contains("/" + jwt.tenant + "/")
+          !cel.bind(path, request.target,
+            "/" + (path.indexOf(":") < path.indexOf("/")
+              ? path.replace(":", "/", 1)
+              : path)
+          ).contains("/" + jwt.tenant + "/")
         reason: "Cross-tenant access denied"
 ```
 
