@@ -530,7 +530,7 @@ func TestRootRunsWithoutConfigFile(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	root := newRoot(nil)
+	root := newRoot(nil, nil)
 	root.SetArgs([]string{"list", "."})
 	root.SetOut(io.Discard)
 	root.SetErr(&stderr)
@@ -547,7 +547,7 @@ func TestRootRunsWithoutConfigFile(t *testing.T) {
 // ones that must not. A one-sided test would pass just as well if the predicate
 // started returning true for everything.
 func TestRunsWithoutConfig(t *testing.T) {
-	root := newRoot(nil)
+	root := newRoot(nil, nil)
 	// The help and completion commands are attached lazily at Execute time, so
 	// materialize them before looking commands up by name.
 	root.InitDefaultHelpCmd()
@@ -797,7 +797,7 @@ func TestRootConfigGateByCommand(t *testing.T) {
 // pending config error, and executes args against it with output discarded.
 func executeRootWithConfigErr(t *testing.T, ctx context.Context, configErr error, args ...string) error {
 	t.Helper()
-	root := newRoot(configErr)
+	root := newRoot(nil, configErr)
 	root.SetArgs(args)
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)

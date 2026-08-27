@@ -64,7 +64,7 @@ func Run(ctx context.Context) error {
 		}
 	}()
 
-	return fang.Execute(ctx, newRoot(cfgErr), fang.WithErrorHandler(silentErrorHandler), fang.WithVersion(version.Value))
+	return fang.Execute(ctx, newRoot(cfg, cfgErr), fang.WithErrorHandler(silentErrorHandler), fang.WithVersion(version.Value))
 }
 
 // loadRuntimeConfig loads configuration from the environment and the
@@ -243,12 +243,14 @@ func silentErrorHandler(w io.Writer, styles fang.Styles, err error) {
 	}
 }
 
-// newRoot returns the root command with all subcommands attached. configErr
-// carries a configuration failure detected before command construction; when it
+// newRoot returns the root command with all subcommands attached. cfg is the
+// configuration merged before command construction, handed to the commands that
+// need it so none of them loads its own and reaches a different answer.
+// configErr carries a configuration failure detected during that load; when it
 // is non-nil every command outside commandsRunnableWithoutConfig refuses to
 // run, so a config file that cannot be honored never masquerades as an absent
 // one.
-func newRoot(configErr error) *cobra.Command {
+func newRoot(cfg *config.Config, configErr error) *cobra.Command {
 	logLevel := defaultLogLevel()
 	logFormat := defaultLogFormat()
 	var serverAddr string
@@ -359,7 +361,7 @@ CONNECTION MODES:
 	// Commands are registered before cobra parses the persistent flags, so the
 	// connection settings resolve from the environment here and are re-resolved
 	// in PersistentPreRunE once the flag values are known.
-	deps := &cmd.Dependencies{}
+	deps := &cmd.Dependencies{Config: cfg}
 	cmd.RegisterCommands(rootCmd, deps)
 
 	rootCmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
