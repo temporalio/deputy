@@ -41,7 +41,7 @@ Having no config file is normal: Deputy runs on built-in defaults without commen
 
 Dropping them is not a safe fallback. `advisory_sources` is the one with real security weight: a deployment that pinned its vulnerability data to an internal mirror would silently query the public defaults instead. The `otel` block goes the same way, so a deployment that believes it is exporting traces exports nothing. The `egress` block is a list of relaxations (hosts and CIDRs permitted to resolve to private addresses), so losing it does not loosen anything, it makes allowlisted internal hosts unreachable and breaks the deployment in a way that is hard to trace back to the config file.
 
-Precedence still applies to this check: a value is only invalid if nothing higher in the order replaces it, so `--log-level=debug` corrects an invalid `DEPUTY_LOG_LEVEL` rather than being rejected by it.
+Precedence still applies to this check: a value is only invalid if nothing higher in the order replaces it, so `--log-level=debug` corrects an invalid `DEPUTY_LOG_LEVEL` rather than being rejected by it. The rule covers a command's own flags too, because the check runs after the command line is parsed: `deputy server --egress-allow-cidr 10.0.0.0/8` starts on a config file whose `server.egress.allowed_cidrs` the flag replaces.
 
 The command exits non-zero, and the diagnostic points at the source that can actually be at fault. A file that cannot be read or parsed is the file's problem:
 

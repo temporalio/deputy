@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -234,17 +235,17 @@ policy:
 	}
 }
 
-func TestLoadWithOverrides(t *testing.T) {
-	loader := NewLoader("")
-	overrides := map[string]string{
-		"log-level":  "error",
-		"log-format": "json",
-		"log-color":  "false",
-	}
-
-	cfg, err := loader.LoadWithOverrides(overrides)
+func TestApplyOverrides(t *testing.T) {
+	cfg, err := NewLoader("").LoadMerged()
 	if err != nil {
-		t.Fatalf("LoadWithOverrides failed: %v", err)
+		t.Fatalf("LoadMerged failed: %v", err)
+	}
+	ApplyOverrides(cfg, Overrides{
+		"log-level":  {"error"},
+		"log-format": {"json"},
+	})
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate failed: %v", err)
 	}
 
 	if cfg.Logging.Level != "error" {
@@ -252,9 +253,6 @@ func TestLoadWithOverrides(t *testing.T) {
 	}
 	if cfg.Logging.Format != "json" {
 		t.Errorf("expected log format 'json', got %q", cfg.Logging.Format)
-	}
-	if cfg.Logging.Color != false {
-		t.Errorf("expected log color false, got true")
 	}
 }
 
@@ -286,10 +284,13 @@ logging:
 	}
 
 	// Test flag overrides env
-	overrides := map[string]string{"log-level": "debug"}
-	cfg, err = loader.LoadWithOverrides(overrides)
+	cfg, err = loader.LoadMerged()
 	if err != nil {
-		t.Fatalf("LoadWithOverrides failed: %v", err)
+		t.Fatalf("LoadMerged failed: %v", err)
+	}
+	ApplyOverrides(cfg, Overrides{"log-level": {"debug"}})
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate failed: %v", err)
 	}
 	if cfg.Logging.Level != "debug" {
 		t.Errorf("expected flag to override env: got level %q", cfg.Logging.Level)
@@ -800,31 +801,38 @@ performance:
 	}
 }
 
-// TestLoadWithOverridesBeforeValidation pins the precedence the reference
-// documents: a flag outranks the environment, so an explicit flag has to be
-// able to correct an invalid environment value rather than being rejected by
-// it. Applying overrides after validation, as this used to, made the highest
-// precedence source unable to fix the one below it.
-func TestLoadWithOverridesBeforeValidation(t *testing.T) {
+// TestApplyOverridesBeforeValidation pins the precedence the reference
+// documents: a flag outranks the environment and the file, so an explicit flag
+// has to be able to correct an invalid lower-precedence value rather than being
+// rejected by it. Validating before the overrides land, as this used to, made
+// the highest precedence source unable to fix the ones below it, and it did so
+// for every override-capable flag, not just the logging ones.
+func TestApplyOverridesBeforeValidation(t *testing.T) {
+	// badCIDRFile carries a server egress allowlist the loader cannot parse,
+	// which is the shape the server command's --egress-allow-cidr replaces.
+	badCIDRFile := "server:\n  egress:\n    allowed_cidrs:\n      - \"not-a-cidr\"\n"
+
 	tests := []struct {
 		name      string
+		file      string
 		env       map[string]string
-		overrides map[string]string
+		overrides Overrides
 		wantErr   bool
 		wantLevel string
 		wantFmt   string
+		wantCIDRs []string
 	}{
 		{
 			name:      "flag corrects an invalid environment level",
 			env:       map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
-			overrides: map[string]string{"log-level": "debug"},
+			overrides: Overrides{"log-level": {"debug"}},
 			wantLevel: "debug",
 			wantFmt:   "text",
 		},
 		{
 			name:      "flag corrects an invalid environment format",
 			env:       map[string]string{"DEPUTY_LOG_FORMAT": "bogus"},
-			overrides: map[string]string{"log-format": "json"},
+			overrides: Overrides{"log-format": {"json"}},
 			wantLevel: "info",
 			wantFmt:   "json",
 		},
@@ -836,20 +844,39 @@ func TestLoadWithOverridesBeforeValidation(t *testing.T) {
 		{
 			name:      "an override for a different field does not rescue it",
 			env:       map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
-			overrides: map[string]string{"log-format": "json"},
+			overrides: Overrides{"log-format": {"json"}},
 			wantErr:   true,
 		},
 		{
 			name:      "an invalid override is itself rejected",
-			overrides: map[string]string{"log-level": "nope"},
+			overrides: Overrides{"log-level": {"nope"}},
 			wantErr:   true,
 		},
 		{
 			name:      "an empty override leaves the lower source in place",
 			env:       map[string]string{"DEPUTY_LOG_LEVEL": "error"},
-			overrides: map[string]string{"log-level": ""},
+			overrides: Overrides{"log-level": {""}},
 			wantLevel: "error",
 			wantFmt:   "text",
+		},
+		{
+			name:      "a repeatable flag corrects an invalid file CIDR",
+			file:      badCIDRFile,
+			overrides: Overrides{"egress-allow-cidr": {"10.0.0.0/8", "192.168.0.0/16"}},
+			wantLevel: "info",
+			wantFmt:   "text",
+			wantCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"},
+		},
+		{
+			name:    "an invalid file CIDR stands without the flag",
+			file:    badCIDRFile,
+			wantErr: true,
+		},
+		{
+			name:      "an invalid repeatable flag is itself rejected",
+			file:      badCIDRFile,
+			overrides: Overrides{"egress-allow-cidr": {"also-not-a-cidr"}},
+			wantErr:   true,
 		},
 	}
 
@@ -861,22 +888,41 @@ func TestLoadWithOverridesBeforeValidation(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			cfg, err := NewLoader("").LoadWithOverrides(test.overrides)
+			path := ""
+			if test.file != "" {
+				path = filepath.Join(t.TempDir(), "deputy.yaml")
+				if err := os.WriteFile(path, []byte(test.file), 0o644); err != nil {
+					t.Fatalf("write config file: %v", err)
+				}
+			}
+
+			cfg, err := NewLoader(path).LoadMerged()
+			if err != nil {
+				t.Fatalf("LoadMerged() error = %v, want nil", err)
+			}
+			ApplyOverrides(cfg, test.overrides)
+			err = cfg.Validate()
 
 			if test.wantErr {
 				if err == nil {
-					t.Fatalf("LoadWithOverrides() error = nil, want an error; cfg = %+v", cfg)
+					t.Fatalf("Validate() error = nil, want an error; cfg = %+v", cfg)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("LoadWithOverrides() error = %v, want nil", err)
+				t.Fatalf("Validate() error = %v, want nil", err)
 			}
 			if cfg.Logging.Level != test.wantLevel {
 				t.Errorf("Logging.Level = %q, want %q", cfg.Logging.Level, test.wantLevel)
 			}
 			if cfg.Logging.Format != test.wantFmt {
 				t.Errorf("Logging.Format = %q, want %q", cfg.Logging.Format, test.wantFmt)
+			}
+			if test.wantCIDRs != nil {
+				got := serverEgressCIDRs(cfg.Server.Egress)
+				if !slices.Equal(got, test.wantCIDRs) {
+					t.Errorf("Server.Egress.AllowedCIDRs = %v, want %v", got, test.wantCIDRs)
+				}
 			}
 		})
 	}

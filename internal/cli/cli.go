@@ -38,19 +38,30 @@ func Run(ctx context.Context) error {
 	// The failure is carried into the root command instead of being returned
 	// here, because main only maps a Run error to an exit code; reporting it
 	// from PersistentPreRunE routes it through fang so the user sees the same
-	// diagnostic 'deputy config show' prints.
-	cfg, cfgErr := loadRuntimeConfig()
+	// diagnostic 'deputy config show' prints. The merged settings travel with
+	// it, so the commands that need configuration read this one rather than
+	// loading their own and reaching a different answer.
+	rc := loadRuntimeConfig()
 
 	// Apply local egress allowlists before services are initialized.
-	applyLocalEgressConfig(cfg)
+	//
+	// These three consumers run on the merged settings, before validation,
+	// which cannot happen until the command line is parsed. So a config file
+	// with one bad field now wires up whatever else it carries, where before it
+	// would have wired up nothing: the egress relaxations get installed and an
+	// OTel exporter gets built, and only then is the command refused. That is
+	// deliberate. Each consumer already rejects what it cannot use on its own
+	// (egress skips an unparseable CIDR, OTel falls back to its defaults), the
+	// refusal follows immediately, and no command body runs in between.
+	applyLocalEgressConfig(rc.Config)
 
 	// Declare configured advisory sources; they are materialized lazily when a
 	// scan builds its source registry, so non-scanning commands pay nothing.
-	applyAdvisorySourceConfig(cfg)
+	applyAdvisorySourceConfig(rc.Config)
 
 	otelCfg := otel.DefaultConfig()
-	if cfg != nil {
-		otelCfg = cfg.OTel
+	if rc.Config != nil {
+		otelCfg = rc.Config.OTel
 	}
 
 	// Initialize OpenTelemetry (graceful no-op if disabled)
@@ -64,35 +75,106 @@ func Run(ctx context.Context) error {
 		}
 	}()
 
-	return fang.Execute(ctx, newRoot(cfg, cfgErr), fang.WithErrorHandler(silentErrorHandler), fang.WithVersion(version.Value))
+	return fang.Execute(ctx, newRoot(rc), fang.WithErrorHandler(silentErrorHandler), fang.WithVersion(version.Value))
 }
 
-// loadRuntimeConfig loads configuration from the environment and the
-// auto-discovered config file. A non-nil error means a configuration source was
-// present but unusable (unreadable or malformed file, or a value that fails
-// validation), which callers must treat as fatal: continuing would silently
+// runtimeConfig is what the CLI knows about configuration before cobra has
+// parsed anything: the file and environment settings merged together, the file
+// they came from, and any failure to get that far.
+//
+// Validation is deliberately not part of it. The merged value is not the
+// effective one until the command line is parsed, because flags outrank both
+// sources, so the gate in newRoot validates instead, once, with the flags
+// applied.
+type runtimeConfig struct {
+	// Config is the merged file and environment settings. It is nil only when
+	// Err is non-nil.
+	Config *config.Config
+
+	// Path is the config file the settings were read from, empty when no file
+	// was found. It is what the diagnostic names.
+	Path string
+
+	// Err reports a configuration source that was named but could not be read
+	// or parsed. No flag corrects that, so it is fatal on its own.
+	Err error
+}
+
+// loadRuntimeConfig merges configuration from the environment and the
+// auto-discovered config file. A non-nil Err means a configuration source was
+// present but unusable (missing when named explicitly, or unreadable or
+// malformed), which callers must treat as fatal: continuing would silently
 // substitute defaults for whatever the file configured. That means querying the
 // public advisory sources in place of a pinned internal mirror, exporting no
 // telemetry, and dropping the egress relaxations that let allowlisted internal
 // hosts resolve to private addresses. Finding no config file at all is not an
-// error, it yields the defaults with a nil error.
-func loadRuntimeConfig() (*config.Config, error) {
+// error, it yields the defaults with a nil Err.
+func loadRuntimeConfig() runtimeConfig {
 	configPath, err := config.ResolveConfigFile()
 	if err != nil {
 		// An explicitly requested file that is not there is the same downgrade
 		// this function exists to prevent: without this, discovery would fall
 		// back to some other file, or to none, and the command would run on
 		// settings the operator did not ask for.
-		return nil, deputyerrors.Suggest(
+		return runtimeConfig{Err: deputyerrors.Suggest(
 			fmt.Errorf("failed to load config: %w", err),
 			"Point DEPUTY_CONFIG at a readable config file, or unset it to use auto-discovery",
-		)
+		)}
 	}
-	cfg, err := config.NewLoader(configPath).LoadWithOverrides(loggingFlagOverrides(os.Args[1:]))
+	cfg, err := config.NewLoader(configPath).LoadMerged()
 	if err != nil {
-		return nil, configLoadError(configPath, err)
+		return runtimeConfig{Path: configPath, Err: configLoadError(configPath, err)}
 	}
-	return cfg, nil
+	return runtimeConfig{Config: cfg, Path: configPath}
+}
+
+// configGateError reports the configuration failure that must stop cmd, or nil
+// when the invocation is usable. It runs from PersistentPreRunE rather than
+// from the load, because that is the first moment the effective configuration
+// exists: cobra has parsed the command line by then, so a flag the user set can
+// correct a value the environment or the file got wrong, which is the
+// precedence the reference documents. Validating earlier rejected values the
+// invocation had already replaced, and it did so for every override-capable
+// flag, one finding at a time.
+//
+// The overrides land on the shared configuration rather than on a copy, so the
+// commands handed that configuration see the corrected values too.
+func configGateError(rc runtimeConfig, cmd *cobra.Command) error {
+	if rc.Err != nil {
+		return rc.Err
+	}
+	if rc.Config == nil {
+		return nil
+	}
+	config.ApplyOverrides(rc.Config, flagOverrides(cmd))
+	if err := rc.Config.Validate(); err != nil {
+		return configLoadError(rc.Path, err)
+	}
+	return nil
+}
+
+// flagOverrides collects the flags the invocation set explicitly, keyed by flag
+// name, for config.ApplyOverrides to pick from. It reports every changed flag
+// rather than a chosen few: which flags configuration cares about is the
+// config package's business, and a list kept here would have to be extended
+// for each new override-capable flag, which is how command-specific flags came
+// to be missing from the validated merge in the first place.
+//
+// cmd is the command cobra resolved, so its flag set already carries the
+// persistent flags inherited from the root alongside its own. Arguments after
+// "--" are not flags to pflag, so a passthrough such as
+// 'deputy proxy npm -- npm install --log-level=silly' cannot contribute one.
+func flagOverrides(cmd *cobra.Command) config.Overrides {
+	flags := cmd.Flags()
+	overrides := make(config.Overrides, flags.NFlag())
+	flags.Visit(func(f *pflag.Flag) {
+		if slice, ok := f.Value.(pflag.SliceValue); ok {
+			overrides[f.Name] = slice.GetSlice()
+			return
+		}
+		overrides[f.Name] = []string{f.Value.String()}
+	})
+	return overrides
 }
 
 // configLoadError turns a load failure into a diagnostic that points at a
@@ -120,42 +202,6 @@ func configLoadError(configPath string, err error) error {
 		fmt.Errorf("invalid configuration: %w", err),
 		fmt.Sprintf("The value can come from %s or from a DEPUTY_* environment variable, which overrides the file; check both", configPath),
 	)
-}
-
-// loggingFlagOverrides scrapes the logging flags out of the raw arguments,
-// before cobra has parsed anything. Configuration has to be loaded this early
-// (egress allowlists and advisory sources must be applied before any client is
-// built), but flags outrank the environment, so validating the merged config
-// without them would reject a value the user already corrected on the command
-// line, contradicting the documented precedence.
-//
-// Only explicitly set flags are returned. Unknown flags are tolerated rather
-// than treated as errors, since the real parse happens later and reports them;
-// arguments after "--" are left alone, so a passthrough command such as
-// 'deputy proxy npm -- npm install --log-level=silly' cannot be mistaken for a
-// Deputy flag. A flag this pre-parse fails to spot simply leaves the
-// environment value standing, which fails closed.
-func loggingFlagOverrides(args []string) map[string]string {
-	fs := pflag.NewFlagSet("logging-precedence", pflag.ContinueOnError)
-	fs.ParseErrorsWhitelist.UnknownFlags = true
-	fs.SetOutput(io.Discard)
-	fs.Usage = func() {}
-
-	var level, format string
-	fs.StringVar(&level, "log-level", "", "")
-	fs.StringVar(&format, "log-format", "", "")
-	// A parse failure here is not actionable: cobra parses these arguments
-	// again, properly, and reports anything wrong with them.
-	_ = fs.Parse(args)
-
-	overrides := make(map[string]string, 2)
-	if fs.Changed("log-level") {
-		overrides["log-level"] = level
-	}
-	if fs.Changed("log-format") {
-		overrides["log-format"] = format
-	}
-	return overrides
 }
 
 // applyAdvisorySourceConfig hands the config file's advisory_sources entries to
@@ -243,14 +289,14 @@ func silentErrorHandler(w io.Writer, styles fang.Styles, err error) {
 	}
 }
 
-// newRoot returns the root command with all subcommands attached. cfg is the
-// configuration merged before command construction, handed to the commands that
-// need it so none of them loads its own and reaches a different answer.
-// configErr carries a configuration failure detected during that load; when it
-// is non-nil every command outside commandsRunnableWithoutConfig refuses to
-// run, so a config file that cannot be honored never masquerades as an absent
-// one.
-func newRoot(cfg *config.Config, configErr error) *cobra.Command {
+// newRoot returns the root command with all subcommands attached. rc carries
+// the configuration merged before command construction, handed to the commands
+// that need it so none of them loads its own and reaches a different answer.
+// Whatever cannot be honored in it, either because the file would not load or
+// because the merged result fails validation once the flags are in, stops every
+// command outside commandsRunnableWithoutConfig, so a config file that cannot
+// be honored never masquerades as an absent one.
+func newRoot(rc runtimeConfig) *cobra.Command {
 	logLevel := defaultLogLevel()
 	logFormat := defaultLogFormat()
 	var serverAddr string
@@ -361,11 +407,11 @@ CONNECTION MODES:
 	// Commands are registered before cobra parses the persistent flags, so the
 	// connection settings resolve from the environment here and are re-resolved
 	// in PersistentPreRunE once the flag values are known.
-	deps := &cmd.Dependencies{Config: cfg}
+	deps := &cmd.Dependencies{Config: rc.Config}
 	cmd.RegisterCommands(rootCmd, deps)
 
 	rootCmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
-		// Refuse to run on a configuration that could not be loaded. This is
+		// Refuse to run on a configuration that cannot be honored. This is
 		// checked first: a command that proceeds here would query the default
 		// advisory sources instead of the configured ones, export no
 		// telemetry, and lose the egress relaxations the file granted, none of
@@ -373,7 +419,7 @@ CONNECTION MODES:
 		// act on configuration stays runnable, so the failure can be diagnosed
 		// and reported.
 		exempt := runsWithoutConfig(c)
-		if configErr != nil && !exempt {
+		if configErr := configGateError(rc, c); configErr != nil && !exempt {
 			return configErr
 		}
 

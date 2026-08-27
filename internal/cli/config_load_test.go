@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -52,10 +53,14 @@ func writeConfigFile(t *testing.T, contents string) {
 
 // TestLoadRuntimeConfig pins the distinction the CLI depends on: no config file
 // is normal and yields usable defaults, while a config file that exists but
-// cannot be parsed or validated is an error the caller must treat as fatal. The
+// cannot be read or parsed is an error the caller must treat as fatal. The
 // silent-nil behavior this replaces let a broken file silently swap the
 // configured advisory sources, OTel settings, and egress relaxations for the
 // defaults, with no diagnostic at all.
+//
+// A value that merges cleanly but fails validation is deliberately not an error
+// here. It cannot be judged yet, because a flag may replace it; the gate does
+// that once the command line is parsed, and TestConfigGate covers it.
 func TestLoadRuntimeConfig(t *testing.T) {
 	tests := []struct {
 		name string
@@ -74,9 +79,6 @@ func TestLoadRuntimeConfig(t *testing.T) {
 			name:      "no config file loads defaults without error",
 			writeFile: false,
 			checkConfig: func(t *testing.T, cfg *config.Config) {
-				if cfg == nil {
-					t.Fatal("cfg is nil; an absent config file must still yield defaults")
-				}
 				if cfg.Logging.Level == "" {
 					t.Error("expected default logging level to be populated")
 				}
@@ -93,24 +95,27 @@ func TestLoadRuntimeConfig(t *testing.T) {
 			wantSuggestionHas: "deputy config validate",
 		},
 		{
-			name:      "valid yaml with an invalid value is an error",
+			// The value is carried, not judged. Judging it here would judge it
+			// without the flags, which is the ordering this split exists to
+			// fix.
+			name:      "valid yaml with an invalid value merges and waits for the gate",
 			writeFile: true,
 			contents:  "logging:\n  level: shouty\n",
-			wantErr:   true,
-			// A merged-config validation failure must not be blamed on the
-			// file: the offending value may have come from the environment.
-			wantErrHas:        []string{"invalid configuration", "validation failed for logging.level"},
-			wantSuggestionHas: "check both",
+			checkConfig: func(t *testing.T, cfg *config.Config) {
+				if cfg.Logging.Level != "shouty" {
+					t.Errorf("Logging.Level = %q, want the file's value carried through", cfg.Logging.Level)
+				}
+			},
 		},
 		{
-			// With no file to blame, the error must not point at
-			// 'config validate', which only reads files.
-			name:              "invalid environment value is an error without a file",
-			writeFile:         false,
-			env:               map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
-			wantErr:           true,
-			wantErrHas:        []string{"invalid configuration", "validation failed for logging.level"},
-			wantSuggestionHas: "DEPUTY_* environment variables",
+			name:      "invalid environment value merges and waits for the gate",
+			writeFile: false,
+			env:       map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			checkConfig: func(t *testing.T, cfg *config.Config) {
+				if cfg.Logging.Level != "shouty" {
+					t.Errorf("Logging.Level = %q, want the environment's value carried through", cfg.Logging.Level)
+				}
+			},
 		},
 		{
 			name:      "valid config is loaded and honored",
@@ -118,9 +123,6 @@ func TestLoadRuntimeConfig(t *testing.T) {
 			contents: "logging:\n  level: debug\negress:\n  allow_loopback: true\n" +
 				"advisory_sources:\n  - url: \"https://advisories.example.com\"\n",
 			checkConfig: func(t *testing.T, cfg *config.Config) {
-				if cfg == nil {
-					t.Fatal("cfg is nil for a valid config file")
-				}
 				if cfg.Logging.Level != "debug" {
 					t.Errorf("Logging.Level = %q, want %q", cfg.Logging.Level, "debug")
 				}
@@ -144,32 +146,33 @@ func TestLoadRuntimeConfig(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			cfg, err := loadRuntimeConfig()
+			rc := loadRuntimeConfig()
 
 			if test.wantErr {
-				if err == nil {
-					t.Fatalf("loadRuntimeConfig() error = nil, want an error; cfg = %+v", cfg)
+				if rc.Err == nil {
+					t.Fatalf("loadRuntimeConfig() Err = nil, want an error; Config = %+v", rc.Config)
 				}
-				if cfg != nil {
-					t.Errorf("loadRuntimeConfig() returned a config alongside an error: %+v", cfg)
+				if rc.Config != nil {
+					t.Errorf("loadRuntimeConfig() returned a config alongside an error: %+v", rc.Config)
 				}
 				for _, want := range test.wantErrHas {
-					if !strings.Contains(err.Error(), want) {
-						t.Errorf("error %q does not contain %q", err.Error(), want)
+					if !strings.Contains(rc.Err.Error(), want) {
+						t.Errorf("error %q does not contain %q", rc.Err.Error(), want)
 					}
 				}
-				if got := deputyerrors.GetSuggestion(err); !strings.Contains(got, test.wantSuggestionHas) {
+				if got := deputyerrors.GetSuggestion(rc.Err); !strings.Contains(got, test.wantSuggestionHas) {
 					t.Errorf("suggestion = %q, want it to contain %q", got, test.wantSuggestionHas)
 				}
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("loadRuntimeConfig() error = %v, want nil", err)
+			if rc.Err != nil {
+				t.Fatalf("loadRuntimeConfig() Err = %v, want nil", rc.Err)
 			}
-			if test.checkConfig != nil {
-				test.checkConfig(t, cfg)
+			if rc.Config == nil {
+				t.Fatal("loadRuntimeConfig() returned neither a config nor an error")
 			}
+			test.checkConfig(t, rc.Config)
 		})
 	}
 }
@@ -294,158 +297,303 @@ func TestLoadRuntimeConfigExplicitPath(t *testing.T) {
 			}
 			t.Setenv("DEPUTY_CONFIG", explicitPath)
 
-			cfg, err := loadRuntimeConfig()
+			rc := loadRuntimeConfig()
 
 			if test.wantErr {
-				if err == nil {
-					t.Fatalf("loadRuntimeConfig() error = nil, want an error; cfg = %+v", cfg)
+				if rc.Err == nil {
+					t.Fatalf("loadRuntimeConfig() Err = nil, want an error; Config = %+v", rc.Config)
 				}
-				if !strings.Contains(err.Error(), test.wantErrHas) {
-					t.Errorf("error %q does not contain %q", err.Error(), test.wantErrHas)
+				if !strings.Contains(rc.Err.Error(), test.wantErrHas) {
+					t.Errorf("error %q does not contain %q", rc.Err.Error(), test.wantErrHas)
 				}
-				if got := deputyerrors.GetSuggestion(err); !strings.Contains(got, "DEPUTY_CONFIG") {
+				if got := deputyerrors.GetSuggestion(rc.Err); !strings.Contains(got, "DEPUTY_CONFIG") {
 					t.Errorf("suggestion = %q, want it to mention DEPUTY_CONFIG", got)
 				}
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("loadRuntimeConfig() error = %v, want nil", err)
+			if rc.Err != nil {
+				t.Fatalf("loadRuntimeConfig() Err = %v, want nil", rc.Err)
 			}
-			if len(cfg.AdvisorySources) != 1 || cfg.AdvisorySources[0].URL != pinnedSource {
-				t.Errorf("AdvisorySources = %+v, want the source pinned by the explicit file", cfg.AdvisorySources)
+			if len(rc.Config.AdvisorySources) != 1 || rc.Config.AdvisorySources[0].URL != pinnedSource {
+				t.Errorf("AdvisorySources = %+v, want the source pinned by the explicit file", rc.Config.AdvisorySources)
 			}
 		})
 	}
 }
 
-// TestLoggingFlagOverrides pins the early scrape of the logging flags. It has
-// to find a flag in every form cobra accepts, or configuration is validated
-// against an environment value the user already overrode; it has to ignore
-// everything after "--", or a passthrough command's own flags would be read as
-// Deputy's.
-func TestLoggingFlagOverrides(t *testing.T) {
+// TestFlagOverrides pins what the gate hands to configuration: every flag the
+// invocation set, by name, and nothing it did not set. Reporting a chosen few
+// is what left command-specific flags out of the validated merge, so the test
+// covers a repeatable flag from a subcommand alongside the root's own.
+func TestFlagOverrides(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
-		want map[string]string
+		want config.Overrides
 	}{
 		{
-			name: "no logging flags",
+			name: "no flags",
 			args: []string{"list", "."},
-			want: map[string]string{},
+			want: config.Overrides{},
 		},
 		{
 			name: "equals form",
 			args: []string{"list", ".", "--log-level=debug"},
-			want: map[string]string{"log-level": "debug"},
+			want: config.Overrides{"log-level": {"debug"}},
 		},
 		{
 			name: "space form",
 			args: []string{"list", ".", "--log-level", "debug"},
-			want: map[string]string{"log-level": "debug"},
+			want: config.Overrides{"log-level": {"debug"}},
 		},
 		{
 			name: "before the subcommand",
 			args: []string{"--log-level", "debug", "list", "."},
-			want: map[string]string{"log-level": "debug"},
+			want: config.Overrides{"log-level": {"debug"}},
 		},
 		{
-			name: "alongside an unknown flag that takes a value",
-			args: []string{"--server", "https://x.example.com", "--log-level", "debug", "list"},
-			want: map[string]string{"log-level": "debug"},
-		},
-		{
-			name: "both flags",
+			name: "both logging flags",
 			args: []string{"scan", "--log-level=warn", "--log-format=json"},
-			want: map[string]string{"log-level": "warn", "log-format": "json"},
+			want: config.Overrides{"log-level": {"warn"}, "log-format": {"json"}},
+		},
+		{
+			// A repeatable flag on a subcommand: the one shape the old scrape
+			// could not see, and the one that made an invalid config file
+			// unstartable even when the command line replaced the bad value.
+			name: "repeatable subcommand flag keeps every value",
+			args: []string{"server", "--egress-allow-cidr", "10.0.0.0/8", "--egress-allow-cidr", "192.168.0.0/16"},
+			want: config.Overrides{"egress-allow-cidr": {"10.0.0.0/8", "192.168.0.0/16"}},
 		},
 		{
 			// The inner flag belongs to npm, not to Deputy. Reading it would
 			// let an unrelated argument satisfy Deputy's config validation.
-			name: "not scraped from a passthrough after the terminator",
+			name: "nothing after the terminator is a flag",
 			args: []string{"proxy", "npm", "--", "npm", "install", "--log-level=silly"},
-			want: map[string]string{},
+			want: config.Overrides{},
 		},
 		{
-			name: "explicitly empty flag is recorded but means no choice",
+			name: "an explicitly empty flag is reported as set",
 			args: []string{"list", "--log-level="},
-			want: map[string]string{"log-level": ""},
+			want: config.Overrides{"log-level": {""}},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := loggingFlagOverrides(test.args)
-			if !maps.Equal(got, test.want) {
-				t.Errorf("loggingFlagOverrides(%v) = %v, want %v", test.args, got, test.want)
+			got := flagOverrides(resolveCommand(t, runtimeConfig{}, test.args...))
+			if !maps.EqualFunc(got, test.want, slices.Equal) {
+				t.Errorf("flagOverrides(%v) = %v, want %v", test.args, got, test.want)
 			}
 		})
 	}
 }
 
-// TestLoadRuntimeConfigHonorsFlagPrecedence proves the scrape is actually wired
-// into the load, end to end: an invalid DEPUTY_LOG_LEVEL that the command line
-// overrides must not make the command fatal, because flags outrank the
-// environment. This regressed once already.
-func TestLoadRuntimeConfigHonorsFlagPrecedence(t *testing.T) {
+// TestOverrideFlagNamesAreRealFlags checks the override registry against the
+// commands the CLI actually ships. An override keyed on a flag that was renamed
+// or removed stops applying without a word, and the config file value it existed
+// to correct starts winning again, which is the defect this whole gate is about
+// arriving by a different route.
+func TestOverrideFlagNamesAreRealFlags(t *testing.T) {
+	names := config.OverrideFlagNames()
+	if len(names) == 0 {
+		t.Fatal("config.OverrideFlagNames() is empty; the checks below would pass vacuously")
+	}
+
+	root := newRoot(runtimeConfig{})
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			if !declaresFlag(root, name) {
+				t.Errorf("configuration overrides --%s, which no command declares, so the override can never apply", name)
+			}
+		})
+	}
+}
+
+// declaresFlag reports whether cmd or any command beneath it declares a flag of
+// this name, local or persistent.
+func declaresFlag(cmd *cobra.Command, name string) bool {
+	if cmd.Flags().Lookup(name) != nil || cmd.PersistentFlags().Lookup(name) != nil {
+		return true
+	}
+	return slices.ContainsFunc(cmd.Commands(), func(child *cobra.Command) bool {
+		return declaresFlag(child, name)
+	})
+}
+
+// TestConfigGate pins the ordering the three round-two findings all came from:
+// configuration is judged against the values the command will use, so a flag
+// can correct what the environment or the file got wrong, and cannot rescue
+// what it does not replace. Validating before the command line was parsed made
+// every override-capable flag a separate defect, one per flag.
+func TestConfigGate(t *testing.T) {
+	// badCIDRFile is the finding that command-specific flags exposed: only the
+	// server command can replace this value, so only the server command's flags
+	// can tell whether it is the effective one.
+	const badCIDRFile = "server:\n  egress:\n    allowed_cidrs:\n      - \"not-a-cidr\"\n"
+	const badLevelFile = "logging:\n  level: shouty\n"
+
 	tests := []struct {
-		name    string
-		argv    []string
-		wantErr bool
+		name        string
+		file        string
+		env         map[string]string
+		args        []string
+		wantRefused bool
+		wantErrHas  string
 	}{
 		{
-			name:    "flag overrides the invalid environment value",
-			argv:    []string{"deputy", "list", ".", "--log-level=debug"},
-			wantErr: false,
+			name:        "an invalid file CIDR stops the server",
+			file:        badCIDRFile,
+			args:        []string{"server"},
+			wantRefused: true,
+			wantErrHas:  "server.egress.allowed_cidrs",
 		},
 		{
-			name:    "no override leaves the invalid value fatal",
-			argv:    []string{"deputy", "list", "."},
-			wantErr: true,
+			name: "a valid egress flag corrects an invalid file CIDR",
+			file: badCIDRFile,
+			args: []string{"server", "--egress-allow-cidr", "10.0.0.0/8"},
+		},
+		{
+			name:        "an invalid egress flag is rejected on its own terms",
+			file:        badCIDRFile,
+			args:        []string{"server", "--egress-allow-cidr", "also-not-a-cidr"},
+			wantRefused: true,
+			wantErrHas:  "server.egress.allowed_cidrs",
+		},
+		{
+			name:        "an invalid environment level stops a gated command",
+			env:         map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			args:        []string{"list", "."},
+			wantRefused: true,
+			wantErrHas:  "logging.level",
+		},
+		{
+			name: "a logging flag corrects an invalid environment level",
+			env:  map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			args: []string{"list", ".", "--log-level=debug"},
+		},
+		{
+			// The server command reached its own second load here, which had
+			// none of the overrides, and rejected a flag the root accepted.
+			name: "a logging flag corrects an invalid environment level for the server too",
+			env:  map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			args: []string{"server", "--log-level=debug"},
+		},
+		{
+			name: "a logging flag placed before the subcommand still corrects it",
+			env:  map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			args: []string{"--log-level", "debug", "list", "."},
+		},
+		{
+			name: "a logging flag corrects an invalid file level",
+			file: badLevelFile,
+			args: []string{"scan", ".", "--log-level=debug"},
+		},
+		{
+			name:        "an explicitly empty flag chooses nothing and does not correct",
+			env:         map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			args:        []string{"list", ".", "--log-level="},
+			wantRefused: true,
+			wantErrHas:  "logging.level",
+		},
+		{
+			name:        "a flag for a different field does not correct",
+			env:         map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			args:        []string{"list", ".", "--log-format=json"},
+			wantRefused: true,
+			wantErrHas:  "logging.level",
+		},
+		{
+			name:        "a passthrough argument cannot pose as a correcting flag",
+			env:         map[string]string{"DEPUTY_LOG_LEVEL": "shouty"},
+			args:        []string{"proxy", "npm", "--", "npm", "install", "--log-level=debug"},
+			wantRefused: true,
+			wantErrHas:  "logging.level",
+		},
+		{
+			// No flag can correct a file the loader never read.
+			name:        "an unparseable file is refused whatever the flags say",
+			file:        "logging:\n  level: \"unclosed\n   bogus: [1, 2\n",
+			args:        []string{"list", ".", "--log-level=debug"},
+			wantRefused: true,
+			wantErrHas:  "failed to parse config file",
+		},
+		{
+			name: "a valid configuration passes",
+			file: "logging:\n  level: debug\n",
+			args: []string{"list", "."},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			isolatedConfigDir(t)
-			t.Setenv("DEPUTY_LOG_LEVEL", "shouty")
+			if test.file != "" {
+				writeConfigFile(t, test.file)
+			}
+			for k, v := range test.env {
+				t.Setenv(k, v)
+			}
 
-			// loadRuntimeConfig reads the real argv, since it runs before
-			// cobra parses anything.
-			original := os.Args
-			t.Cleanup(func() { os.Args = original })
-			os.Args = test.argv
+			rc := loadRuntimeConfig()
+			err := configGateError(rc, resolveCommand(t, rc, test.args...))
 
-			cfg, err := loadRuntimeConfig()
-
-			if test.wantErr {
+			if test.wantRefused {
 				if err == nil {
-					t.Fatalf("loadRuntimeConfig() error = nil, want an error; cfg = %+v", cfg)
+					t.Fatalf("configGateError(%v) = nil, want a refusal", test.args)
+				}
+				if !strings.Contains(err.Error(), test.wantErrHas) {
+					t.Errorf("error %q does not contain %q", err.Error(), test.wantErrHas)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("loadRuntimeConfig() error = %v, want nil: the flag outranks DEPUTY_LOG_LEVEL", err)
-			}
-			if cfg.Logging.Level != "debug" {
-				t.Errorf("Logging.Level = %q, want %q", cfg.Logging.Level, "debug")
+				t.Errorf("configGateError(%v) = %v, want nil: the invocation replaced the offending value", test.args, err)
 			}
 		})
 	}
 }
 
+// resolveCommand builds the real root command and resolves args the way cobra
+// does before it calls PersistentPreRunE, so a test sees the command that would
+// run with the flag set it would have.
+func resolveCommand(t *testing.T, rc runtimeConfig, args ...string) *cobra.Command {
+	t.Helper()
+	root := newRoot(rc)
+	// Help and completion are attached lazily at Execute time.
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+
+	cmd, flagArgs, err := root.Find(args)
+	if err != nil {
+		t.Fatalf("Find(%v): %v", args, err)
+	}
+	if err := cmd.ParseFlags(flagArgs); err != nil {
+		t.Fatalf("ParseFlags(%v): %v", flagArgs, err)
+	}
+	return cmd
+}
+
 // TestRootRefusesUnloadableConfig proves the load failure reaches command
 // execution rather than stopping at loadRuntimeConfig: a command must fail
 // instead of running on defaults. It drives the root command the way Run does,
-// with the error loadRuntimeConfig produced for a real broken file.
+// against a real broken file.
 func TestRootRefusesUnloadableConfig(t *testing.T) {
 	tests := []struct {
-		name     string
-		contents string
+		name       string
+		contents   string
+		wantErrHas string
 	}{
-		{name: "unparseable yaml", contents: "logging:\n  level: \"unclosed\n   bogus: [1, 2\n"},
-		{name: "invalid value", contents: "logging:\n  level: shouty\n"},
+		{
+			name:       "unparseable yaml",
+			contents:   "logging:\n  level: \"unclosed\n   bogus: [1, 2\n",
+			wantErrHas: "failed to parse config file",
+		},
+		{
+			name:       "invalid value",
+			contents:   "logging:\n  level: shouty\n",
+			wantErrHas: "validation failed for logging.level",
+		},
 	}
 
 	for _, test := range tests {
@@ -453,24 +601,19 @@ func TestRootRefusesUnloadableConfig(t *testing.T) {
 			isolatedConfigDir(t)
 			writeConfigFile(t, test.contents)
 
-			cfg, cfgErr := loadRuntimeConfig()
-			if cfgErr == nil {
-				t.Fatalf("loadRuntimeConfig() error = nil for %q; the rest of this test is meaningless", test.contents)
-			}
-			if cfg != nil {
-				t.Errorf("cfg = %+v, want nil", cfg)
-			}
-
 			// "list" is gated (it honors egress and advisory sources), and
 			// it is pointed at a directory with nothing to enumerate so the
 			// only thing that can fail it is the config gate. Deliberately
 			// not "version", which the allowlist exempts.
-			err := executeRootWithConfigErr(t, context.Background(), cfgErr, "list", ".")
+			err := executeRootFromEnvironment(t, context.Background(), "list", ".")
 			if err == nil {
 				t.Fatal("command succeeded with an unloadable config; it ran on defaults instead of failing")
 			}
-			if !errors.Is(err, cfgErr) {
-				t.Errorf("command error = %v, want the config load error %v", err, cfgErr)
+			if !isConfigGateError(err) {
+				t.Errorf("command error = %v, want the config gate refusal; an incidental error would hide a gate that stopped firing", err)
+			}
+			if !strings.Contains(err.Error(), test.wantErrHas) {
+				t.Errorf("error %q does not contain %q", err.Error(), test.wantErrHas)
 			}
 		})
 	}
@@ -483,12 +626,7 @@ func TestRootAllowsConfigCommandsWithUnloadableConfig(t *testing.T) {
 	isolatedConfigDir(t)
 	writeConfigFile(t, "logging:\n  level: shouty\n")
 
-	_, cfgErr := loadRuntimeConfig()
-	if cfgErr == nil {
-		t.Fatal("loadRuntimeConfig() error = nil; fixture is not broken")
-	}
-
-	if err := executeRootWithConfigErr(t, context.Background(), cfgErr, "config", "path"); err != nil {
+	if err := executeRootFromEnvironment(t, context.Background(), "config", "path"); err != nil {
 		t.Errorf("'config path' failed with an unloadable config: %v", err)
 	}
 }
@@ -501,15 +639,7 @@ func TestRootRunsWithValidConfig(t *testing.T) {
 	writeGoModFixture(t, dir)
 	writeConfigFile(t, "logging:\n  level: debug\n")
 
-	cfg, cfgErr := loadRuntimeConfig()
-	if cfgErr != nil {
-		t.Fatalf("loadRuntimeConfig() error = %v, want nil", cfgErr)
-	}
-	if cfg == nil {
-		t.Fatal("cfg is nil for a valid config file")
-	}
-
-	if err := executeRootWithConfigErr(t, context.Background(), nil, "list", "."); err != nil {
+	if err := executeRootFromEnvironment(t, context.Background(), "list", "."); err != nil {
 		t.Errorf("'list' failed with a valid config: %v", err)
 	}
 }
@@ -521,16 +651,16 @@ func TestRootRunsWithoutConfigFile(t *testing.T) {
 	dir := isolatedConfigDir(t)
 	writeGoModFixture(t, dir)
 
-	cfg, cfgErr := loadRuntimeConfig()
-	if cfgErr != nil {
-		t.Fatalf("loadRuntimeConfig() error = %v, want nil for an absent config file", cfgErr)
+	rc := loadRuntimeConfig()
+	if rc.Err != nil {
+		t.Fatalf("loadRuntimeConfig() Err = %v, want nil for an absent config file", rc.Err)
 	}
-	if cfg == nil {
-		t.Fatal("cfg is nil for an absent config file")
+	if rc.Config == nil {
+		t.Fatal("Config is nil for an absent config file")
 	}
 
 	var stderr bytes.Buffer
-	root := newRoot(nil, nil)
+	root := newRoot(rc)
 	root.SetArgs([]string{"list", "."})
 	root.SetOut(io.Discard)
 	root.SetErr(&stderr)
@@ -547,7 +677,7 @@ func TestRootRunsWithoutConfigFile(t *testing.T) {
 // ones that must not. A one-sided test would pass just as well if the predicate
 // started returning true for everything.
 func TestRunsWithoutConfig(t *testing.T) {
-	root := newRoot(nil, nil)
+	root := newRoot(runtimeConfig{})
 	// The help and completion commands are attached lazily at Execute time, so
 	// materialize them before looking commands up by name.
 	root.InitDefaultHelpCmd()
@@ -713,18 +843,13 @@ func TestRootConfigGateBySource(t *testing.T) {
 				isolatedConfigDir(t)
 				source.apply(t)
 
-				cfg, cfgErr := loadRuntimeConfig()
-				if cfgErr == nil && cfg == nil {
-					t.Fatal("loadRuntimeConfig returned neither a config nor an error")
-				}
-
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				err := executeRootWithConfigErr(t, ctx, cfgErr, command.args...)
+				err := executeRootFromEnvironment(t, ctx, command.args...)
 
 				if command.wantRefused {
-					if err == nil {
-						t.Errorf("%v succeeded with a broken configuration; it ran on defaults instead of being refused", command.args)
+					if !isConfigGateError(err) {
+						t.Errorf("%v error = %v, want the config gate refusal; it ran on defaults instead of being refused", command.args, err)
 					}
 					return
 				}
@@ -744,11 +869,6 @@ func TestRootConfigGateBySource(t *testing.T) {
 func TestRootConfigGateByCommand(t *testing.T) {
 	isolatedConfigDir(t)
 	writeConfigFile(t, "logging:\n  level: shouty\n")
-
-	_, cfgErr := loadRuntimeConfig()
-	if cfgErr == nil {
-		t.Fatal("loadRuntimeConfig() error = nil; fixture is not broken")
-	}
 
 	tests := []struct {
 		name string
@@ -778,11 +898,11 @@ func TestRootConfigGateByCommand(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			err := executeRootWithConfigErr(t, ctx, cfgErr, test.args...)
+			err := executeRootFromEnvironment(t, ctx, test.args...)
 
 			if test.wantRefused {
-				if !errors.Is(err, cfgErr) {
-					t.Errorf("%v error = %v, want the config load error; the command ran on defaults instead of being refused", test.args, err)
+				if !isConfigGateError(err) {
+					t.Errorf("%v error = %v, want the config gate refusal; the command ran on defaults instead of being refused", test.args, err)
 				}
 				return
 			}
@@ -793,13 +913,34 @@ func TestRootConfigGateByCommand(t *testing.T) {
 	}
 }
 
-// executeRootWithConfigErr builds the root command the way Run does, with a
-// pending config error, and executes args against it with output discarded.
-func executeRootWithConfigErr(t *testing.T, ctx context.Context, configErr error, args ...string) error {
+// executeRootFromEnvironment builds the root command the way Run does, from
+// whatever configuration the surrounding test fixture provides, and executes
+// args against it with output discarded.
+//
+// It loads for real rather than being handed a prepared error, because the
+// configuration a command is judged against is not settled until that command's
+// flags are parsed. A test that supplied its own error would decide the outcome
+// it was meant to observe.
+func executeRootFromEnvironment(t *testing.T, ctx context.Context, args ...string) error {
 	t.Helper()
-	root := newRoot(nil, configErr)
+	root := newRoot(loadRuntimeConfig())
 	root.SetArgs(args)
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
 	return root.ExecuteContext(ctx)
+}
+
+// isConfigGateError reports whether err is the configuration gate refusing to
+// run, rather than an incidental failure from a command that was wrongly let
+// through. The gate always wraps the configuration fault it found, so the
+// wrapped type is what distinguishes the two.
+func isConfigGateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if _, ok := errors.AsType[*deputyerrors.ConfigError](err); ok {
+		return true
+	}
+	_, ok := errors.AsType[*deputyerrors.ValidationError](err)
+	return ok
 }
