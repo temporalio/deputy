@@ -44,7 +44,7 @@ func TestParseLogLevel(t *testing.T) {
 // internal/cli/cmd/register.go fails this test instead of silently shrinking
 // the CLI surface.
 func TestNewRoot(t *testing.T) {
-	cmd := newRoot()
+	cmd := newRoot(runtimeConfig{})
 	if cmd.Use != "deputy" {
 		t.Errorf("expected Use to be 'deputy', got %q", cmd.Use)
 	}

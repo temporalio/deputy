@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -607,9 +608,28 @@ func NewLoader(configPath string) *Loader {
 	}
 }
 
-// Load reads configuration from all sources and applies precedence rules.
-// Precedence: explicit flags > environment variables > config file > defaults.
+// Load reads configuration from all sources and validates the merged result.
+// It is for callers that have no flags to contribute; a caller that does must
+// use LoadMerged, apply its overrides, and validate, so that a flag can correct
+// a value the environment or the file got wrong.
 func (l *Loader) Load() (*Config, error) {
+	cfg, err := l.LoadMerged()
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// LoadMerged reads the config file and the environment and returns the merged
+// result without validating it. Validation is left to the caller because the
+// merged value is not yet the effective one: flags outrank both sources, and
+// validating before they are known rejects values the invocation has already
+// replaced. The error it does return covers the sources it can judge on its
+// own, a file that cannot be read or parsed, which no flag can correct.
+func (l *Loader) LoadMerged() (*Config, error) {
 	cfg := defaultConfig()
 
 	// 1. Load from config file if provided
@@ -622,33 +642,101 @@ func (l *Loader) Load() (*Config, error) {
 	// 2. Override with environment variables
 	l.loadFromEnv(cfg)
 
-	// 3. Validate the final configuration
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-
 	return cfg, nil
 }
 
-// LoadWithOverrides loads config and applies explicit flag overrides.
-func (l *Loader) LoadWithOverrides(overrides map[string]string) (*Config, error) {
-	cfg, err := l.Load()
-	if err != nil {
-		return nil, err
-	}
+// Overrides carries the values an invocation set explicitly on the command
+// line, keyed by the flag name the CLI declares. Values are slices because a
+// repeatable flag such as --egress-allow-cidr carries several; a scalar flag
+// contributes a single element.
+//
+// The map is deliberately untyped and open: the CLI hands over every flag the
+// user changed without knowing which ones configuration cares about, and
+// ApplyOverrides picks out the ones it understands. That keeps the list of
+// override-capable flags in one place, next to the fields it writes, instead of
+// spread across the command tree where it drifts.
+type Overrides map[string][]string
 
-	// Apply explicit flag overrides (highest precedence)
-	if level, ok := overrides["log-level"]; ok && level != "" {
-		cfg.Logging.Level = level
-	}
-	if format, ok := overrides["log-format"]; ok && format != "" {
-		cfg.Logging.Format = format
-	}
-	if color, ok := overrides["log-color"]; ok {
-		cfg.Logging.Color = color == "true" || color == "1"
-	}
+// overrideAppliers maps a CLI flag name to the configuration it replaces. It is
+// the one list of override-capable flags, and it lives next to the fields it
+// writes rather than in the command tree, so it can be checked in one place.
+//
+// A field that Config.Validate can reject and a flag can replace has to appear
+// here. Leaving one out means validation judges a value the invocation already
+// corrected, which is how a valid --egress-allow-cidr came to be rejected by
+// the config file it was replacing.
+//
+// Each applier writes a different field, so the order they run in does not
+// matter.
+var overrideAppliers = map[string]func(cfg *Config, values []string){
+	"log-level": func(cfg *Config, values []string) {
+		if level := scalar(values); level != "" {
+			cfg.Logging.Level = level
+		}
+	},
+	"log-format": func(cfg *Config, values []string) {
+		if format := scalar(values); format != "" {
+			cfg.Logging.Format = format
+		}
+	},
+	// The server command replaces the configured egress allowlists wholesale
+	// rather than adding to them, so the flag decides whether the merged value
+	// is valid.
+	"egress-allow-cidr": func(cfg *Config, values []string) {
+		serverEgress(cfg).AllowedCIDRs = values
+	},
+	"egress-allow-host": func(cfg *Config, values []string) {
+		serverEgress(cfg).AllowedHosts = values
+	},
+}
 
-	return cfg, nil
+// scalar returns the value of a scalar flag override, empty when it carried
+// none.
+func scalar(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+// ApplyOverrides copies explicit flag values over the merged configuration, so
+// that validation and every later reader see what the invocation actually asked
+// for. It must run before Config.Validate: an override sits at the top of the
+// precedence order, so a flag the user passed has to be able to correct an
+// invalid value coming from the environment or the file rather than being
+// rejected by the value it replaces.
+//
+// A scalar override that is present but empty is ignored: an empty flag value
+// means the user did not choose a setting, so the lower-precedence source
+// stands. Flag names with no applier are ignored, since most flags configure a
+// command rather than the configuration.
+func ApplyOverrides(cfg *Config, overrides Overrides) {
+	if cfg == nil || len(overrides) == 0 {
+		return
+	}
+	for name, apply := range overrideAppliers {
+		if values, ok := overrides[name]; ok {
+			apply(cfg, values)
+		}
+	}
+}
+
+// OverrideFlagNames returns the flag names ApplyOverrides acts on, sorted. It
+// exists so a test can check each one against the flags the CLI declares: an
+// override keyed on a flag that was renamed or removed stops applying without a
+// word, and the lower-precedence value it existed to correct starts winning
+// again.
+func OverrideFlagNames() []string {
+	return slices.Sorted(maps.Keys(overrideAppliers))
+}
+
+// serverEgress returns the server egress block, allocating it when the merged
+// configuration did not carry one, so an override has somewhere to land.
+func serverEgress(cfg *Config) *ServerEgressConfig {
+	if cfg.Server.Egress == nil {
+		cfg.Server.Egress = &ServerEgressConfig{}
+	}
+	return cfg.Server.Egress
 }
 
 // loadFromFile reads configuration from a YAML file.
@@ -1393,8 +1481,33 @@ func (lc LogConfig) ToSlogLevel() slog.Level {
 	}
 }
 
+// ResolveConfigFile reports which config file to load, and fails when one was
+// explicitly requested but cannot be used. DEPUTY_CONFIG names a specific file,
+// so a path that cannot be stated is an error rather than a cue to look
+// elsewhere: discarding it silently hands the caller an auto-discovered file,
+// or no configuration at all, in place of the one it asked for. An empty path
+// with a nil error means no config file was requested and none was discovered,
+// which is normal.
+//
+// FindConfigFile keeps the lenient behavior for callers that are reporting on
+// configuration rather than acting on it.
+func ResolveConfigFile() (string, error) {
+	if path := os.Getenv("DEPUTY_CONFIG"); path != "" {
+		if _, err := os.Stat(path); err != nil {
+			return "", &errors.ConfigError{
+				Path:    path,
+				Message: "config file named by DEPUTY_CONFIG is unavailable",
+				Cause:   err,
+			}
+		}
+		return path, nil
+	}
+	return FindConfigFile(), nil
+}
+
 // FindConfigFile searches for a config file in standard locations.
-// Returns the path if found, empty string otherwise.
+// Returns the path if found, empty string otherwise. An unusable DEPUTY_CONFIG
+// is ignored here; use [ResolveConfigFile] when that must be an error.
 func FindConfigFile() string {
 	// Check explicit DEPUTY_CONFIG env var first
 	if path := os.Getenv("DEPUTY_CONFIG"); path != "" {
