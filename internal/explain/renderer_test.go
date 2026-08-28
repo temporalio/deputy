@@ -312,6 +312,53 @@ func TestRender_AbsentDatesRenderAsAbsent(t *testing.T) {
 	}
 }
 
+// TestRenderJSONWeaknessURL pins how the JSON output links a CWE to MITRE. The
+// link is derived by parsing the identifier, so a malformed one yields no link
+// rather than a URL that resolves to nothing.
+func TestRenderJSONWeaknessURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		cweID   string
+		wantURL string
+	}{
+		{"well formed", "CWE-89", "https://cwe.mitre.org/data/definitions/89.html"},
+		{"bare number is normalized", "89", "https://cwe.mitre.org/data/definitions/89.html"},
+		{"non-numeric suffix yields no link", "CWE-abc", ""},
+		{"zero is not a CWE", "CWE-0", ""},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewRenderer(Config{})
+			data := &VulnData{
+				Vuln: &osvschema.Vulnerability{Id: "GHSA-test"},
+				CWEs: []CWEInfo{{ID: tt.cweID, Name: "name"}},
+			}
+
+			var buf bytes.Buffer
+			if err := r.renderJSON(&buf, data); err != nil {
+				t.Fatalf("renderJSON: %v", err)
+			}
+
+			var got struct {
+				Weaknesses []struct {
+					ID  string `json:"id"`
+					URL string `json:"url"`
+				} `json:"weaknesses"`
+			}
+			if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+				t.Fatalf("unmarshal %s: %v", buf.String(), err)
+			}
+			if len(got.Weaknesses) != 1 {
+				t.Fatalf("got %d weaknesses, want 1", len(got.Weaknesses))
+			}
+			if got.Weaknesses[0].URL != tt.wantURL {
+				t.Errorf("url for %q = %q, want %q", tt.cweID, got.Weaknesses[0].URL, tt.wantURL)
+			}
+		})
+	}
+}
+
 // TestRenderJSON_AbsentDatesOmitTimeline is [TestRender_AbsentDatesRenderAsAbsent]
 // for the JSON surface: an absent date must not produce a timeline key at all,
 // because a consumer cannot tell an epoch date from a missing one.

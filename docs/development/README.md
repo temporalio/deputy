@@ -10,6 +10,7 @@ This section is for contributors and maintainers.
 | [Architecture](architecture.md) | System design, package structure |
 | [Adding ecosystems](adding-ecosystems.md) | How to add support for a new package ecosystem |
 | [Docs style](docs-style.md) | Documentation conventions |
+| [Surface audit](surface-audit.md) | Measuring the internal API surface with go/types |
 
 ## Quick Commands
 
@@ -26,4 +27,7 @@ go build -o deputy .
 
 # Run specific test
 go test -v -run TestName ./internal/pkg/...
+
+# Audit the internal API surface
+go run ./internal/surface/cmd
 ```

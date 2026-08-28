@@ -659,18 +659,19 @@ func (r *Renderer) renderJSON(out io.Writer, data *VulnData) error {
 	if len(data.CWEs) > 0 {
 		cwes := make([]map[string]any, 0, len(data.CWEs))
 		for _, c := range data.CWEs {
-			cwe := map[string]any{
+			entry := map[string]any{
 				"id":          c.ID,
 				"name":        c.Name,
 				"description": c.Description,
 				"category":    c.Category,
 			}
-			// Add link to CWE database
-			if after, ok := strings.CutPrefix(c.ID, "CWE-"); ok {
-				cweNum := after
-				cwe["url"] = "https://cwe.mitre.org/data/definitions/" + cweNum + ".html"
+			// Add link to CWE database. Parsing first rejects malformed
+			// identifiers that a prefix check would happily turn into a dead
+			// MITRE link.
+			if url := cwe.Parse(c.ID).URL(); url != "" {
+				entry["url"] = url
 			}
-			cwes = append(cwes, cwe)
+			cwes = append(cwes, entry)
 		}
 		result["weaknesses"] = cwes
 	}
