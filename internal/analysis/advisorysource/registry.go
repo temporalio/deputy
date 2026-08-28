@@ -56,6 +56,10 @@ type AggregateResult struct {
 	Findings   []*vulnerabilityv1.Finding
 	Advisories map[string]*vulnerabilityv1.Advisory
 	Coverage   *vulnerabilityv1.ScanCoverage
+	// Warnings collects the per-source warnings, in source order. Coverage says
+	// which combinations a source claimed; these say where a source that
+	// claimed one still came back incomplete.
+	Warnings []string
 }
 
 // Query routes pkgs to covering sources, runs them concurrently, and merges.
@@ -113,25 +117,29 @@ func (r *Registry) Query(ctx context.Context, pkgs []*dependencyv1.Package) (*Ag
 		return nil, err
 	}
 
-	findings, advisories := mergeResults(results)
+	findings, advisories, warnings := mergeResults(results)
 	return &AggregateResult{
 		Findings:   findings,
 		Advisories: advisories,
 		Coverage:   buildCoverage(coverageAcc),
+		Warnings:   warnings,
 	}, nil
 }
 
 // mergeResults unions findings across sources, accumulating provenance in
-// Finding.Sources, and merges advisory records by ID.
-func mergeResults(results []*Result) ([]*vulnerabilityv1.Finding, map[string]*vulnerabilityv1.Advisory) {
+// Finding.Sources, and merges advisory records by ID. Warnings union in source
+// order, so two sources reporting the same gap say it once.
+func mergeResults(results []*Result) ([]*vulnerabilityv1.Finding, map[string]*vulnerabilityv1.Advisory, []string) {
 	advisories := map[string]*vulnerabilityv1.Advisory{}
 	byKey := map[string]*vulnerabilityv1.Finding{}
 	var findings []*vulnerabilityv1.Finding
+	var warnings []string
 
 	for _, res := range results {
 		if res == nil {
 			continue
 		}
+		warnings = unionStrings(warnings, res.Warnings)
 		for id, adv := range res.Advisories {
 			if _, ok := advisories[id]; !ok && adv != nil {
 				advisories[id] = adv
@@ -150,7 +158,7 @@ func mergeResults(results []*Result) ([]*vulnerabilityv1.Finding, map[string]*vu
 			findings = append(findings, f)
 		}
 	}
-	return findings, advisories
+	return findings, advisories, warnings
 }
 
 // findingKey identifies a finding for dedup: advisory ID + package identity.

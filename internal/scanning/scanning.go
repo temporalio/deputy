@@ -174,14 +174,14 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 	}
 
 	// Query vulnerabilities
-	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
 	}
 
-	cons, stats := consolidateAndResolve(ctx, findings, advisories, opts)
+	cons, stats := consolidateAndResolve(ctx, vulns.Findings, vulns.Advisories, opts)
 
 	return &Execution{
 		Result: Result{
@@ -189,11 +189,12 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 			Packages:        invExec.Result.Packages,
 			PackagesScanned: len(invExec.Result.Packages),
 			Direct:          invExec.Result.Direct,
-			Findings:        findings,
+			Findings:        vulns.Findings,
 			Consolidated:    cons,
-			Advisories:      advisories,
+			Advisories:      vulns.Advisories,
 			Stats:           stats,
-			Coverage:        coverage,
+			Coverage:        vulns.Coverage,
+			Warnings:        vulns.Warnings,
 			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
@@ -227,14 +228,14 @@ func ScanContainerImage(ctx context.Context, target string, targetOpts map[strin
 	}
 
 	// Query vulnerabilities
-	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
 	}
 
-	cons, stats := consolidateAndResolve(ctx, findings, advisories, opts)
+	cons, stats := consolidateAndResolve(ctx, vulns.Findings, vulns.Advisories, opts)
 
 	return &Execution{
 		Result: Result{
@@ -242,11 +243,12 @@ func ScanContainerImage(ctx context.Context, target string, targetOpts map[strin
 			Packages:        invExec.Result.Packages,
 			PackagesScanned: len(invExec.Result.Packages),
 			Direct:          invExec.Result.Direct,
-			Findings:        findings,
+			Findings:        vulns.Findings,
 			Consolidated:    cons,
-			Advisories:      advisories,
+			Advisories:      vulns.Advisories,
 			Stats:           stats,
-			Coverage:        coverage,
+			Coverage:        vulns.Coverage,
+			Warnings:        vulns.Warnings,
 			ImageInfo:       invExec.Result.ImageInfo,
 			GeneratedAt:     time.Now().UTC(),
 		},
@@ -277,14 +279,14 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 	}
 
 	// Query vulnerabilities
-	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
 	}
 
-	cons, stats := consolidateAndResolve(ctx, findings, advisories, opts)
+	cons, stats := consolidateAndResolve(ctx, vulns.Findings, vulns.Advisories, opts)
 
 	return &Execution{
 		Result: Result{
@@ -292,11 +294,12 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 			Packages:        invExec.Result.Packages,
 			PackagesScanned: len(invExec.Result.Packages),
 			Direct:          invExec.Result.Direct,
-			Findings:        findings,
+			Findings:        vulns.Findings,
 			Consolidated:    cons,
-			Advisories:      advisories,
+			Advisories:      vulns.Advisories,
 			Stats:           stats,
-			Coverage:        coverage,
+			Coverage:        vulns.Coverage,
+			Warnings:        vulns.Warnings,
 			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
@@ -327,14 +330,14 @@ func ScanVMImage(ctx context.Context, target string, targetOpts map[string]strin
 	}
 
 	// Query vulnerabilities
-	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
 	}
 
-	cons, stats := consolidateAndResolve(ctx, findings, advisories, opts)
+	cons, stats := consolidateAndResolve(ctx, vulns.Findings, vulns.Advisories, opts)
 
 	return &Execution{
 		Result: Result{
@@ -342,11 +345,12 @@ func ScanVMImage(ctx context.Context, target string, targetOpts map[string]strin
 			Packages:        invExec.Result.Packages,
 			PackagesScanned: len(invExec.Result.Packages),
 			Direct:          invExec.Result.Direct,
-			Findings:        findings,
+			Findings:        vulns.Findings,
 			Consolidated:    cons,
-			Advisories:      advisories,
+			Advisories:      vulns.Advisories,
 			Stats:           stats,
-			Coverage:        coverage,
+			Coverage:        vulns.Coverage,
+			Warnings:        vulns.Warnings,
 			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
@@ -465,6 +469,7 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 			Advisories:      advisories,
 			Stats:           stats,
 			Coverage:        coverage,
+			Warnings:        agg.Warnings,
 			GeneratedAt:     time.Now().UTC(),
 		},
 	}, nil
@@ -562,9 +567,21 @@ func persistFixVerdicts(cons []vulnerability.Consolidated, advisories map[string
 	}
 }
 
+// advisoryQuery is what querying the advisory sources produced for a target:
+// the findings, the advisory records they reference, the source-coverage report,
+// and the non-fatal warnings the sources raised. Warnings travel with the
+// findings because a source that could not retrieve a record it knows about
+// leaves a gap the report has to admit to.
+type advisoryQuery struct {
+	Findings   []vulnerability.Finding
+	Advisories map[string]*vulnerabilityv1.Advisory
+	Coverage   *vulnerabilityv1.ScanCoverage
+	Warnings   []string
+}
+
 // queryVulnerabilities queries OSV for vulnerabilities and checks for
 // supply-chain risks (e.g., unpinned GitHub Actions references).
-func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, originURL string) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, *vulnerabilityv1.ScanCoverage, error) {
+func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, originURL string) (advisoryQuery, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.scanning.query_vulnerabilities",
 		trace.WithAttributes(
 			attribute.Int("deputy.package.count", len(pkgs)),
@@ -581,7 +598,7 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	agg, err := advisorysource.NewDefaultRegistry(ctx, osv.NewClient()).Query(ctx, inputs)
 	if err != nil {
 		otel.SetSpanError(span, err)
-		return nil, nil, nil, err
+		return advisoryQuery{}, err
 	}
 	// Convert proto findings to domain at the consolidation boundary; supply-chain
 	// findings below are already domain and append cleanly.
@@ -598,7 +615,12 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	}
 
 	span.SetAttributes(attribute.Int("deputy.finding.count", len(findings)))
-	return findings, advisories, agg.Coverage, nil
+	return advisoryQuery{
+		Findings:   findings,
+		Advisories: advisories,
+		Coverage:   agg.Coverage,
+		Warnings:   agg.Warnings,
+	}, nil
 }
 
 // packagesToProto converts extractor packages to the proto packages the

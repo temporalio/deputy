@@ -79,16 +79,16 @@ var (
 	AttrTargetRemote = attribute.Key("deputy.target.remote")
 
 	// Scan attributes
-	AttrEcosystem               = attribute.Key("deputy.ecosystem")
-	AttrPackageCount            = attribute.Key("deputy.package.count")
-	AttrVulnerabilityCount      = attribute.Key("deputy.vulnerability.count")
-	AttrVulnerabilityCritical   = attribute.Key("deputy.vulnerability.critical")
-	AttrVulnerabilityHigh       = attribute.Key("deputy.vulnerability.high")
-	AttrVulnerabilityMedium     = attribute.Key("deputy.vulnerability.medium")
-	AttrVulnerabilityLow        = attribute.Key("deputy.vulnerability.low")
-	AttrDirectDepsOnly  = attribute.Key("deputy.direct_deps_only")
-	AttrPolicyEvaluated = attribute.Key("deputy.policy.evaluated")
-	AttrPolicyPassed    = attribute.Key("deputy.policy.passed")
+	AttrEcosystem             = attribute.Key("deputy.ecosystem")
+	AttrPackageCount          = attribute.Key("deputy.package.count")
+	AttrVulnerabilityCount    = attribute.Key("deputy.vulnerability.count")
+	AttrVulnerabilityCritical = attribute.Key("deputy.vulnerability.critical")
+	AttrVulnerabilityHigh     = attribute.Key("deputy.vulnerability.high")
+	AttrVulnerabilityMedium   = attribute.Key("deputy.vulnerability.medium")
+	AttrVulnerabilityLow      = attribute.Key("deputy.vulnerability.low")
+	AttrDirectDepsOnly        = attribute.Key("deputy.direct_deps_only")
+	AttrPolicyEvaluated       = attribute.Key("deputy.policy.evaluated")
+	AttrPolicyPassed          = attribute.Key("deputy.policy.passed")
 
 	// OSV attributes
 	AttrOSVBatchSize           = attribute.Key("deputy.osv.batch_size")
@@ -98,6 +98,11 @@ var (
 	AttrOSVResponseLen         = attribute.Key("deputy.osv.response_len")
 	AttrOSVDroppedNoVersion    = attribute.Key("deputy.osv.dropped_no_version")
 	AttrOSVDroppedNoIdentifier = attribute.Key("deputy.osv.dropped_no_identifier")
+	// AttrOSVUnresolvedAdvisories counts advisories a batch query reported whose
+	// full records OSV would not serve, so their findings are missing from the
+	// results. A non-zero value means the answer is incomplete even though the
+	// query succeeded.
+	AttrOSVUnresolvedAdvisories = attribute.Key("deputy.osv.unresolved_advisories")
 
 	// Policy attributes
 	AttrPolicyName       = attribute.Key("deputy.policy.name")
