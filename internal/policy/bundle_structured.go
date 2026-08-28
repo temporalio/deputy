@@ -3,8 +3,10 @@ package policy
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	yaml "gopkg.in/yaml.v3"
@@ -214,7 +216,8 @@ func ParseStructuredSources(data []byte, virtualPath string) ([]Source, error) {
 
 // metadata validates what the policy declares about itself and returns it in
 // canonical form: entrypoints must be known, commands must be known and are
-// normalized and deduplicated, and the mode must be one Deputy can apply.
+// normalized and deduplicated, ecosystems are canonicalized to one spelling,
+// and the mode must be one Deputy can apply.
 //
 // The result travels to the engine as typed data on [Source], so nothing about
 // a policy's identity or scoping is encoded into, or recovered from, its CEL
@@ -223,7 +226,6 @@ func (p structuredPolicy) metadata() (Metadata, error) {
 	meta := Metadata{
 		Name:        p.Name,
 		Description: p.Description,
-		Ecosystems:  slices.Clone(p.Ecosystems),
 	}
 	for _, ep := range p.Entrypoints {
 		if !IsAllowedEntrypoint(ep) {
@@ -243,6 +245,23 @@ func (p structuredPolicy) metadata() (Metadata, error) {
 		seenCommands[normalized] = struct{}{}
 		meta.Commands = append(meta.Commands, normalized)
 	}
+	normalizedEcosystems, unrecognizedEcosystems, err := validateEcosystems(p.Ecosystems)
+	if err != nil {
+		return Metadata{}, err
+	}
+	// Reported rather than refused: the value may be an ecosystem a scanner
+	// produces and Deputy holds no registration for, such as an OS package
+	// ecosystem, or it may be a typo. Neither can be told from the other by
+	// looking at the string, and only one of them is worth failing a load over.
+	// See [validateEcosystems].
+	if len(unrecognizedEcosystems) > 0 {
+		slog.Warn("policy names ecosystems deputy does not recognize; each will match only if a scanner reports exactly that value",
+			"policy", p.Name,
+			"ecosystems", unrecognizedEcosystems,
+			"known", AllowedEcosystems(),
+		)
+	}
+	meta.Ecosystems = normalizedEcosystems
 	if p.Mode != "" {
 		mode := normalizeMode(Mode(p.Mode))
 		if mode == "" || !mode.IsValid() {
@@ -260,10 +279,19 @@ func (p structuredPolicy) toCELSource() (string, error) {
 	if len(p.Rules) == 0 {
 		return "", fmt.Errorf("policy must contain at least one rule")
 	}
+	// Scope guards are generated from canonical tokens, because the payload a
+	// rule is evaluated against has already been canonicalized (see
+	// [canonicalizeEcosystemPayload]); an authored display spelling would
+	// compile into a guard that never matches. An unrecognized value is folded
+	// and kept here too, and reported once by [structuredPolicy.metadata].
+	ecosystems, _, err := validateEcosystems(p.Ecosystems)
+	if err != nil {
+		return "", err
+	}
 	var builder strings.Builder
 	builder.WriteString("[]")
 	for _, rule := range p.Rules {
-		expr, err := rule.toRuleExpr(p.Ecosystems)
+		expr, err := rule.toRuleExpr(ecosystems)
 		if err != nil {
 			return "", err
 		}
@@ -302,7 +330,7 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 	if len(ecosystems) > 0 {
 		quoted := make([]string, len(ecosystems))
 		for i, eco := range ecosystems {
-			quoted[i] = fmt.Sprintf("\"%s\"", eco)
+			quoted[i] = celString(eco)
 		}
 		guard := fmt.Sprintf("(request.?ecosystem.orValue(\"\") in [%s]) || (pkg.ecosystem in [%s])", strings.Join(quoted, ","), strings.Join(quoted, ","))
 		when = fmt.Sprintf("((%s) && (%s))", guard, when)
@@ -331,4 +359,19 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 		return "", fmt.Errorf("marshal action: %w", err)
 	}
 	return fmt.Sprintf("((%s) ? [%s] : [])", when, string(actionJSON)), nil
+}
+
+// celString renders s as a CEL string literal, escaping whatever it contains.
+//
+// CEL takes the same escape sequences in a string literal that Go does, so
+// [strconv.Quote] produces a literal that parses back to exactly s: a quote ends
+// the literal early without it, and a backslash is read as the start of an escape,
+// so "acme\registry" silently became "acme" and a carriage return rather than
+// failing to compile.
+//
+// Every authored value interpolated into generated CEL has to come through here.
+// Doing it at the one call site that took an unregistered value would leave the
+// next one to rediscover why.
+func celString(s string) string {
+	return strconv.Quote(s)
 }

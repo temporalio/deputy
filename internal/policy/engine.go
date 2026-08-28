@@ -135,6 +135,10 @@ func (e *Engine) EvaluateAll(ctx context.Context, input proto.Message, command, 
 	// Flatten JWT custom claims to allow jwt.roles instead of jwt.custom_claims.roles
 	flattenJWTCustomClaims(payload)
 
+	// Rewrite ecosystem values to their canonical tokens so policies compare
+	// against one spelling regardless of the scanner's display casing.
+	canonicalizeEcosystemPayload(payload)
+
 	// Inject constants for cleaner policy authoring
 	seedConstants(payload)
 
@@ -240,6 +244,10 @@ func (e *Engine) EvaluateAllMap(ctx context.Context, payload map[string]any, com
 	// Convert any proto messages in the payload to native maps for CEL evaluation.
 	// This allows callers to pass proto objects directly in the input map.
 	payload = convertProtosInMap(payload)
+
+	// Rewrite ecosystem values to their canonical tokens so policies compare
+	// against one spelling regardless of the scanner's display casing.
+	canonicalizeEcosystemPayload(payload)
 
 	// Inject constants for cleaner policy authoring
 	seedConstants(payload)

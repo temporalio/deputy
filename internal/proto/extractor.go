@@ -10,32 +10,51 @@ import (
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/purlx"
 )
 
-// ecosystemFromPURLType returns an OSV ecosystem name for PURL types that
+// ecosystemFromPURLType returns the ecosystem display name for PURL types that
 // OSV-SCALIBR doesn't handle (returns empty string). This fills gaps for
 // ecosystems like GitHub Actions that Deputy supports but SCALIBR doesn't.
+// The names come from the ecosystem registry rather than literals here, so the
+// spelling this emits is the one every other surface resolves.
 func ecosystemFromPURLType(purlType string) string {
+	var eco ecosystem.Ecosystem
 	switch purlType {
 	case purlx.TypeGitHubActions:
-		return "GitHub Actions"
+		eco = ecosystem.GitHubActions
 	case purlx.TypeMise:
-		return "mise"
+		eco = ecosystem.Mise
 	case purlx.TypeAsdf:
-		return "asdf"
+		eco = ecosystem.Asdf
 	case "docker":
 		// Dockerfile base images; matches the coverage report's vocabulary.
-		return "docker"
+		eco = ecosystem.Docker
 	case "oci":
-		return "oci"
+		eco = ecosystem.OCI
 	default:
 		return ""
 	}
+	return ecosystem.Display(eco)
 }
 
 // ExtractorPackageIsDirect reports whether pkg should be treated as a direct
 // dependency using the same rules as ExtractorPackageToProto.
+//
+// The key it builds from the scanned package comes from
+// [ecosystem.Ecosystem.NameEquivalenceKey], the same call
+// compare.CollectDirectDependenciesFromWorkspace makes when it reads the
+// manifest. Both sides run one rule, so a Cargo crate a manifest spells
+// "serde-json" and a lockfile spells "serde_json" is one key, not two. The key
+// decides the lookup only; the package keeps the name it reported.
+//
+// npm resolves by name and version through [compare.LookupDirect], because a
+// declaration there names a range and a lockfile can hold several copies of the
+// name it resolves to. Cargo can hold several versions of one crate too, and its
+// lookup is still name-only, so a crate the manifest declares marks every copy of
+// that name direct. Resolving it needs Cargo.lock read against the root crate's
+// requirement, which no parser here does yet.
 func ExtractorPackageIsDirect(pkg *extractor.Package, direct map[string]bool) bool {
 	if pkg == nil {
 		return false
@@ -81,20 +100,26 @@ func ExtractorPackageIsDirect(pkg *extractor.Package, direct map[string]bool) bo
 		return direct[moduleRoot]
 	case "npm":
 		// npm: check package name (may include scope like @types/node).
-		return direct[purlx.NPMPackageName(purl.Namespace, purl.Name)]
+		// The version matters here, because one npm lockfile routinely carries
+		// two copies of a declared name and only one of them is the copy the
+		// declaration resolved to. See [compare.LookupDirect].
+		return compare.LookupDirect(direct, purlx.NPMPackageName(purl.Namespace, purl.Name), pkg.Version)
 	case "cargo":
-		return direct[purl.Name]
+		return direct[ecosystem.Cargo.NameEquivalenceKey(purl.Name)]
 	case "pypi":
-		return direct[normalizePyPIName(purl.Name)]
+		return direct[ecosystem.PyPI.NameEquivalenceKey(purl.Name)]
 	default:
 		return direct[purl.String()]
 	}
 }
 
 // ExtractorPackageToProto converts an OSV-SCALIBR extractor.Package to proto Package.
-// The direct map indicates which packages are direct dependencies. For Go packages,
-// the map keys are module roots (e.g., "github.com/google/osv-scalibr"). For other
-// ecosystems, keys are PURL strings.
+// The direct map indicates which packages are direct dependencies, keyed by the
+// name a package goes by in its own ecosystem: a module root for Go (e.g.
+// "github.com/google/osv-scalibr"), a scoped package name for npm, a crate name
+// for Cargo, and a normalized distribution name for PyPI. Ecosystems with no
+// rule of their own are keyed by PURL string. ExtractorPackageIsDirect builds
+// the key, and compare.CollectDirectDependenciesFromWorkspace produces the map.
 func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *dependencyv1.Package {
 	if pkg == nil {
 		return nil
@@ -142,6 +167,11 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 // The direct map indicates which packages are direct dependencies. For Go packages,
 // the map keys are module roots (e.g., "github.com/google/osv-scalibr"). For other
 // ecosystems, keys are PURL strings.
+//
+// A package of an ecosystem no collector reads converts to is_direct = false,
+// which the output contract cannot tell from a package declared transitive. That
+// limit is real and reported nowhere; see issue #246, which moves it into the
+// contract instead of leaving a caller to infer it.
 func ExtractorPackagesToProto(pkgs []*extractor.Package, direct map[string]bool) []*dependencyv1.Package {
 	if len(pkgs) == 0 {
 		return nil
@@ -213,6 +243,12 @@ func ExtractorPackagesFromProto(pkgs []*dependencyv1.Package) ([]*extractor.Pack
 	return out, direct
 }
 
+// recordProtoPackageDirectness records every key a package's directness can be
+// looked up under when the reconstructed extractor.Package is converted back.
+// [ExtractorPackageIsDirect] performs that lookup, so the ecosystem-specific
+// keys built here are the ones it builds: an equivalence key for Cargo and
+// PyPI, whose two spellings of a name have to meet on one key, and the reported
+// name elsewhere.
 func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Package) {
 	if pkg == nil {
 		return
@@ -220,10 +256,10 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 	isDirect := pkg.Direct
 
 	recordDirectKey(direct, pkg.Purl, isDirect)
-	recordDirectKey(direct, pkg.Name, isDirect)
 
 	parsed, err := purlx.ParseLoose(pkg.Purl)
 	if err != nil {
+		recordDirectKey(direct, pkg.Name, isDirect)
 		return
 	}
 	recordDirectKey(direct, parsed.String(), isDirect)
@@ -232,6 +268,18 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 	if parsed.Namespace != "" {
 		packageName = parsed.Namespace + "/" + parsed.Name
 	}
+
+	// An npm package carries its own version here, so its versioned key is the
+	// whole answer and no bare name is recorded beside it: a bare name is the key
+	// that answers for every copy of the name, which is exactly what a decoded
+	// response must not do once the versions are known. Every other ecosystem is
+	// keyed by name, so the name key is recorded for them as before.
+	if parsed.Type == "npm" && pkg.Version != "" {
+		npmName := purlx.NPMPackageName(parsed.Namespace, parsed.Name)
+		recordDirectKey(direct, compare.DirectVersionKey(npmName, pkg.Version), isDirect)
+		return
+	}
+	recordDirectKey(direct, pkg.Name, isDirect)
 
 	switch parsed.Type {
 	case "golang":
@@ -242,11 +290,12 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 			}
 		}
 	case "npm":
-		recordDirectKey(direct, purlx.NPMPackageName(parsed.Namespace, parsed.Name), isDirect)
+		npmName := purlx.NPMPackageName(parsed.Namespace, parsed.Name)
+		recordDirectKey(direct, npmName, isDirect)
 	case "cargo":
-		recordDirectKey(direct, parsed.Name, isDirect)
+		recordDirectKey(direct, ecosystem.Cargo.NameEquivalenceKey(parsed.Name), isDirect)
 	case "pypi":
-		recordDirectKey(direct, normalizePyPIName(parsed.Name), isDirect)
+		recordDirectKey(direct, ecosystem.PyPI.NameEquivalenceKey(parsed.Name), isDirect)
 	default:
 		recordDirectKey(direct, packageName, isDirect)
 	}
@@ -261,16 +310,6 @@ func recordDirectKey(direct map[string]bool, key string, isDirect bool) {
 		return
 	}
 	direct[key] = isDirect
-}
-
-// normalizePyPIName normalizes a PyPI package name per PEP 503:
-// lowercase and replace all runs of [-_.] with a single underscore.
-// This ensures consistent matching between manifest files and PURLs.
-func normalizePyPIName(name string) string {
-	name = strings.ToLower(name)
-	name = strings.ReplaceAll(name, "-", "_")
-	name = strings.ReplaceAll(name, ".", "_")
-	return name
 }
 
 // FilterOptions configures which packages to exclude from output.

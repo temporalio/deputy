@@ -126,7 +126,7 @@ policies:
         when: |
           pkg.ecosystem == "docker" &&
           pkg.name == "scratch" &&
-          !vulnerabilities.exists(v, v.package.ecosystem == "Go")
+          !vulnerabilities.exists(v, v.package.ecosystem == "go")
         reason: "Using scratch base image without Go dependencies detected"
         remediation: "Ensure application is statically compiled for scratch images"
 

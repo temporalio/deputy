@@ -896,14 +896,10 @@ func (s *Server) excludePaths(paths []string) []string {
 // below, which differ only in that fallback).
 func canonicalMCPEcosystem(name string) (canonical string, ok bool) {
 	name = strings.TrimSpace(name)
-	switch strings.ToLower(strings.ReplaceAll(name, "_", "-")) {
-	case "github", "github action", "github actions", "github-action", "github-actions", "githubaction", "githubactions", "gha":
-		// GitHub Actions is not a core SCA ecosystem, so ecosystem.Parse does
-		// not recognize it; keep the alias set here.
-		return "github-actions", true
-	}
-	if eco := ecosystem.Parse(name); eco != ecosystem.Unknown {
-		return eco.String(), true
+	// The alias table lives in internal/ecosystem so tools, policies, and the
+	// CLI resolve names identically instead of drifting apart.
+	if token, known := ecosystem.Canonical(name); known {
+		return token, true
 	}
 	return name, false
 }
@@ -924,29 +920,28 @@ func mcpOutputEcosystem(name string) string {
 	return canonical
 }
 
+// mcpPURLType returns the purl type an agent-supplied ecosystem name belongs
+// in. The name is canonicalized first so every alias ("gha", "conan", a display
+// name) lands on one ecosystem, and the type then comes from that ecosystem's
+// registry projection rather than from the token: the two differ often enough
+// ("go" is pkg:golang, "conancenter" is pkg:conan) that echoing the token
+// builds a target nothing can route. Names Deputy does not recognize fall back
+// to their lowercased form, which is the best a caller-invented ecosystem can
+// do.
 func mcpPURLType(ecosystemName string) string {
-	// Canonicalize first so every ecosystem alias (including github-actions
-	// spellings like "gha") maps consistently to a purl type.
-	canonical, _ := canonicalMCPEcosystem(ecosystemName)
-	if canonical == "github-actions" {
-		return purlx.TypeGitHubActions
+	canonical, known := canonicalMCPEcosystem(ecosystemName)
+	if known {
+		if purlType := ecosystem.PURLType(ecosystem.Ecosystem(canonical)); purlType != "" {
+			return purlType
+		}
 	}
-	switch ecosystem.Parse(canonical) {
-	case ecosystem.Go:
-		return "golang"
-	case ecosystem.RubyGems:
-		return "gem"
-	case ecosystem.Packagist:
-		return "composer"
-	default:
-		return strings.ToLower(strings.TrimSpace(canonical))
-	}
+	return strings.ToLower(strings.TrimSpace(canonical))
 }
 
 func mcpEcosystemFromPURLType(purlType string) string {
 	purlType = strings.TrimSpace(purlType)
 	if purlx.IsGitHubActionsType(purlType) {
-		return "github-actions"
+		return ecosystem.GitHubActions.String()
 	}
 	return normalizeMCPPackageEcosystem(purlType)
 }

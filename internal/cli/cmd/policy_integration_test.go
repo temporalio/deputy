@@ -8,9 +8,13 @@ import (
 	"testing"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	fixv1 "github.com/temporalio/deputy/gen/deputy/fix/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/policy"
+	internalproto "github.com/temporalio/deputy/internal/proto"
+	remediation "github.com/temporalio/deputy/internal/remediation"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // End-to-end style check: load the composed example bundle and execute the sbom entrypoint payload path.
@@ -94,37 +98,47 @@ func TestPolicyIntegration_NewDependencyReview_Deny(t *testing.T) {
 	}
 }
 
+// TestPolicyIntegration_PypiPrefixAllowlist runs the shipped allowlist over the
+// payload the proxy actually builds: buildPolicyInput synthesizes pkg from the
+// request and always sets pkg.ecosystem, which is what makes the name reach the
+// policy in canonical PEP 503 form. Every spelling PyPI accepts for an approved
+// distribution must therefore be allowed.
 func TestPolicyIntegration_PypiPrefixAllowlist(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "pypi-prefix-allowlist.yaml"))
-	// Policy expects pkg.name to be synthesized from request.package
-	denyPayload := map[string]any{
-		"request": map[string]any{
-			"ecosystem": "pypi",
-			"package":   "randompkg",
-		},
-		"pkg": map[string]any{
-			"name": "randompkg",
-		},
-	}
-	if _, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, denyPayload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{}); err == nil {
-		t.Fatalf("expected denial error for unapproved pypi package")
+
+	tests := []struct {
+		name     string
+		pkgName  string
+		wantDeny bool
+	}{
+		{name: "unapproved prefix", pkgName: "randompkg", wantDeny: true},
+		{name: "approved prefix underscore spelling", pkgName: "acme_toolkit"},
+		{name: "approved prefix hyphen spelling", pkgName: "acme-toolkit"},
+		{name: "approved prefix dot spelling", pkgName: "acme.toolkit"},
 	}
 
-	allowPayload := map[string]any{
-		"request": map[string]any{
-			"ecosystem": "pypi",
-			"package":   "acme_toolkit",
-		},
-		"pkg": map[string]any{
-			"name": "acme_toolkit",
-		},
-	}
-	if actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, allowPayload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{}); err != nil {
-		t.Fatalf("unexpected error for approved pypi package: %v", err)
-	} else if len(actions) != 0 {
-		// The policy's only rule is the prefix deny; an approved prefix must
-		// produce zero actions.
-		t.Fatalf("expected no actions for approved prefix, got %+v", actions)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := map[string]any{
+				"request": &policyv1.ProxyRequest{Ecosystem: "pypi", Package: tt.pkgName},
+				"pkg":     &dependencyv1.Package{Name: tt.pkgName, Ecosystem: "pypi"},
+			}
+			actions, err := evaluatePoliciesForCommand(t.Context(), []string{pol}, payload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{})
+			if tt.wantDeny {
+				if err == nil {
+					t.Fatalf("expected denial for %q, got actions %+v", tt.pkgName, actions)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for approved package %q: %v", tt.pkgName, err)
+			}
+			for _, a := range actions {
+				if a.Type == "deny" {
+					t.Fatalf("did not expect deny for %q: %+v", tt.pkgName, actions)
+				}
+			}
+		})
 	}
 }
 
@@ -695,4 +709,131 @@ policies:
 	if len(actions) != 0 {
 		t.Fatalf("expected no actions for Medium severity + high EPSS, got %+v", actions)
 	}
+}
+
+// TestFixPlanStepPolicyReadsCanonicalIdentity drives the fix command's own
+// policy path (consolidated findings -> remediation plan -> proto ->
+// runFixPoliciesProto) and pins the canonical identity contract for a
+// remediation step.
+//
+// A step declares no ecosystem and holds no nested package: it names a package
+// manager, the package it remediates, that package's URL, and the versions on
+// either side of the fix. The ecosystem walk therefore had nothing to resolve
+// for it, identity normalization never ran, and a Go step reached policies as
+// "1.44.0" while a PyPI step reached them under whatever spelling the manifest
+// used. A deny written against the documented canonical identity did not fire,
+// which is the fail-open this pins shut.
+func TestFixPlanStepPolicyReadsCanonicalIdentity(t *testing.T) {
+	goFinding := vulnerability.Consolidated{
+		PrimaryID:     "GHSA-go-aws",
+		Package:       "github.com/aws/aws-sdk-go",
+		Version:       "1.44.0",
+		PURL:          "pkg:golang/github.com/aws/aws-sdk-go@1.44.0",
+		FixedVersions: []string{"1.44.1"},
+		IsDirect:      true,
+		ManifestRefs:  []dependencyv1.ManifestRef{{Manager: "go", Path: "go.mod"}},
+	}
+	pypiFinding := vulnerability.Consolidated{
+		PrimaryID:     "GHSA-pypi-flask",
+		Package:       "Flask-SQLAlchemy",
+		Version:       "2.5.1",
+		PURL:          "pkg:pypi/Flask-SQLAlchemy@2.5.1",
+		FixedVersions: []string{"3.0.3"},
+		IsDirect:      true,
+		ManifestRefs:  []dependencyv1.ManifestRef{{Manager: "pip", Path: "requirements.txt"}},
+	}
+
+	tests := []struct {
+		name     string
+		finding  vulnerability.Consolidated
+		when     string
+		rawField func(*testing.T, *fixv1.RemediationCommand)
+	}{
+		{
+			name:    "a go version reaches the policy with its prefix",
+			finding: goFinding,
+			when:    `step.version == "v1.44.0"`,
+			rawField: func(t *testing.T, cmd *fixv1.RemediationCommand) {
+				if got := cmd.GetVersion(); got != "1.44.0" {
+					t.Fatalf("fixture precondition: raw version = %q, want the unprefixed form %q", got, "1.44.0")
+				}
+			},
+		},
+		{
+			// The two versions of one step disagreed with each other:
+			// remediation prefixes the version it puts in "go get pkg@v1.44.1"
+			// and reports the vulnerable version as the scanner spelled it, so a
+			// rule reading both sides of the fix read two conventions.
+			name:    "the versions on both sides of a go fix agree",
+			finding: goFinding,
+			when:    `step.version == "v1.44.0" && step.target_version == "v1.44.1"`,
+			rawField: func(t *testing.T, cmd *fixv1.RemediationCommand) {
+				if got, want := cmd.GetVersion(), cmd.GetTargetVersion(); got == want {
+					t.Fatalf("fixture precondition: version %q and target version %q already share a convention", got, want)
+				}
+			},
+		},
+		{
+			name:    "a go purl spells the version its own fields do",
+			finding: goFinding,
+			when:    `step.purl == "pkg:golang/github.com/aws/aws-sdk-go@v1.44.0"`,
+			rawField: func(t *testing.T, cmd *fixv1.RemediationCommand) {
+				if got := cmd.GetPurl(); got != "pkg:golang/github.com/aws/aws-sdk-go@1.44.0" {
+					t.Fatalf("fixture precondition: raw purl = %q, want the unprefixed form", got)
+				}
+			},
+		},
+		{
+			name:    "a pypi package name reaches the policy folded",
+			finding: pypiFinding,
+			when:    `step.package == "flask-sqlalchemy"`,
+			rawField: func(t *testing.T, cmd *fixv1.RemediationCommand) {
+				if got := cmd.GetPackage(); got != "Flask-SQLAlchemy" {
+					t.Fatalf("fixture precondition: raw package = %q, want the manifest spelling", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			commands, stdlib := remediation.CommandsFromConsolidated([]vulnerability.Consolidated{tt.finding})
+			resp := internalproto.BuildFixResponse(nil, stdlib, commands)
+			step := findRemediationStep(t, resp, tt.finding.Package)
+			tt.rawField(t, step)
+
+			bundle := []byte(`policies:
+  - name: canonical-fix-identity
+    entrypoints: ["fix_plan_step"]
+    rules:
+      - action: deny
+        when: ` + tt.when + `
+        reason: canonical identity reached the policy
+`)
+			path := filepath.Join(t.TempDir(), "canonical-fix-identity.yaml")
+			if err := os.WriteFile(path, bundle, 0o600); err != nil {
+				t.Fatalf("write policy: %v", err)
+			}
+
+			err := runFixPoliciesProto(t.Context(), []string{path}, resp, &bytes.Buffer{})
+			if err == nil {
+				t.Fatalf("deny on %s did not fire for step package=%q version=%q target_version=%q purl=%q",
+					tt.when, step.GetPackage(), step.GetVersion(), step.GetTargetVersion(), step.GetPurl())
+			}
+		})
+	}
+}
+
+// findRemediationStep returns the plan's command for a package, so a test can
+// assert against the step that carries an identity rather than against a
+// lockfile refresh step that carries none.
+func findRemediationStep(t *testing.T, resp *fixv1.FixResponse, pkg string) *fixv1.RemediationCommand {
+	t.Helper()
+	for _, cmd := range resp.GetCommands() {
+		if cmd.GetPackage() == pkg {
+			return cmd
+		}
+	}
+	t.Fatalf("remediation plan has no command for %q (commands: %v)", pkg, resp.GetCommands())
+	return nil
 }

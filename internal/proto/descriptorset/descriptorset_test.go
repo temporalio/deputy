@@ -33,3 +33,30 @@ func TestCommentLookup(t *testing.T) {
 		t.Fatalf("unknown element should return empty, got %q", got)
 	}
 }
+
+// TestScalarMapFields pins the derived view of map fields: opaque key/value
+// maps are recognized, maps whose values are messages are not, and neither are
+// plain repeated or singular fields.
+func TestScalarMapFields(t *testing.T) {
+	tests := []struct {
+		field string
+		want  bool
+	}{
+		{field: "custom_claims", want: true},     // policy.v1.JWTClaims, map<string, string>
+		{field: "labels", want: true},            // container.v1.ImageConfig, map<string, string>
+		{field: "database_specific", want: true}, // vulnerability.v1.Advisory, map<string, string>
+		{field: "provenance", want: true},        // target.v1.Target, map<string, string>
+		{field: "ecosystems", want: true},        // count map, map<string, int32>
+		{field: "advisories", want: false},       // map<string, Advisory>
+		{field: "fixed_versions", want: false},   // repeated string
+		{field: "ecosystem", want: false},        // string
+		{field: "made_up_field", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.field, func(t *testing.T) {
+			if got := IsScalarMapField(tt.field); got != tt.want {
+				t.Errorf("IsScalarMapField(%q) = %t, want %t (set: %v)", tt.field, got, tt.want, ScalarMapFieldNames())
+			}
+		})
+	}
+}

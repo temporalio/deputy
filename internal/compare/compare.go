@@ -577,9 +577,9 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 	normalizedEcos := normalizeEcosystemForComparison(ecos)
 	switch {
 	case isPyPIEcosystem(normalizedEcos):
-		name = normalizePyPIName(name)
+		name = pypiComparisonKey(name)
 	case isCargoEcosystem(normalizedEcos):
-		name = normalizeCargoName(name)
+		name = cargoComparisonKey(name)
 	}
 	meta.canonical = name
 	if ecos == "" {
@@ -617,47 +617,22 @@ func isCargoEcosystem(eco string) bool {
 	return false
 }
 
-// normalizePyPIName normalizes a PyPI package name according to PEP 503.
-// Per PEP 503, valid package names must be lowercase and consecutive runs of
-// underscores, hyphens, and periods are replaced with a single hyphen.
-// This ensures that "My_Package", "my-package", and "my.package" all match.
-func normalizePyPIName(name string) string {
-	if name == "" {
-		return name
-	}
-	// Already lowercased by caller, but ensure it
-	name = strings.ToLower(name)
-	// Replace consecutive runs of [-_.] with a single hyphen
-	var result strings.Builder
-	result.Grow(len(name))
-	inSeparator := false
-	for _, r := range name {
-		if r == '-' || r == '_' || r == '.' {
-			if !inSeparator {
-				result.WriteByte('-')
-				inSeparator = true
-			}
-			// Skip additional separators in a run
-		} else {
-			result.WriteRune(r)
-			inSeparator = false
-		}
-	}
-	return result.String()
+// pypiComparisonKey returns the key two spellings of one PyPI distribution
+// share. The rule lives in [ecosystem.Ecosystem.NameEquivalenceKey] so the
+// comparison key here and the one the directness lookup builds are produced by
+// the same code.
+func pypiComparisonKey(name string) string {
+	return ecosystem.PyPI.NameEquivalenceKey(name)
 }
 
-// normalizeCargoName normalizes a Cargo/crates.io package name per RFC 940.
-// On crates.io, hyphens and underscores are equivalent: "serde-json" and
-// "serde_json" refer to the same crate. We normalize to underscores to match
-// Rust's internal convention (crate names in code use underscores).
-func normalizeCargoName(name string) string {
-	if name == "" {
-		return name
-	}
-	// Crate names are case-insensitive on crates.io
-	name = strings.ToLower(name)
-	// Replace hyphens with underscores (Rust convention)
-	return strings.ReplaceAll(name, "-", "_")
+// cargoComparisonKey returns the key two spellings of one crate share, folded
+// the way crates.io folds a name to resolve it. It keys the comparison only:
+// every name this package reports comes from the package itself, so a crate
+// published as "async-trait" is still reported with its hyphen. The rule lives
+// in [ecosystem.Ecosystem.NameEquivalenceKey] for the same reason as
+// [pypiComparisonKey].
+func cargoComparisonKey(name string) string {
+	return ecosystem.Cargo.NameEquivalenceKey(name)
 }
 
 // CompareOptions configures package comparison behavior.
