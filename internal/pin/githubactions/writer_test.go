@@ -1,6 +1,8 @@
 package githubactions
 
 import (
+	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -277,5 +279,38 @@ func TestRewriteWorkflow_ValidatesInput(t *testing.T) {
 				t.Errorf("error %q does not contain %q", err.Error(), tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestRewriteWorkflow_CanceledContextLeavesFileUntouched pins the
+// Strategy.Rewrite contract: once the caller's context is done, the workflow
+// is not written, even when the rewrite would have changed it.
+func TestRewriteWorkflow_CanceledContextLeavesFileUntouched(t *testing.T) {
+	const content = "steps:\n  - uses: actions/checkout@v4\n"
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "workflow.yml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err = RewriteWorkflow(ctx, root, "workflow.yml", []pin.Update{{
+		Name: "actions/checkout", VersionTag: "v4", PinnedValue: strings.Repeat("a", 40),
+	}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	got, readErr := os.ReadFile(filepath.Join(dir, "workflow.yml"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != content {
+		t.Fatalf("file was rewritten under a canceled context:\n%s", got)
 	}
 }

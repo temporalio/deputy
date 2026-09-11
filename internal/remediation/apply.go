@@ -547,7 +547,7 @@ func ApplyDeputyCommand(ctx context.Context, repoDir, cmd string) error {
 		tool := parts[2]
 		newVersion := parts[3]
 		currentVersions := parts[4:]
-		if err := applyMiseUpdate(repoDir, configRel, tool, currentVersions, newVersion); err != nil {
+		if err := applyMiseUpdate(ctx, repoDir, configRel, tool, currentVersions, newVersion); err != nil {
 			return err
 		}
 		if err := ctx.Err(); err != nil {
@@ -937,14 +937,19 @@ func planDockerfileUpdate(filePath string, content []byte, image, newVersion str
 // symlink. Containment comes from the os.Root, which refuses to traverse a
 // link that leaves the repository. currentVersions may be empty when unknown
 // (array declarations then fail closed rather than guess).
-func applyMiseUpdate(repoDir, configRel, tool string, currentVersions []string, newVersion string) error {
+func applyMiseUpdate(ctx context.Context, repoDir, configRel, tool string, currentVersions []string, newVersion string) error {
 	root, err := os.OpenRoot(repoDir)
 	if err != nil {
 		return fmt.Errorf("opening repo root: %w", err)
 	}
 	defer root.Close()
 
-	if err := pinmise.RewriteToolVersion(root, configRel, tool, currentVersions, newVersion); err != nil {
+	// The config edit and the lock edit below are one fix. Cancellation is
+	// honored before and after the pair (in ApplyDeputyCommand), not between
+	// its halves, so a deadline that expires mid-edit cannot leave the config
+	// rewritten and the lock stale. The writer therefore gets a context that
+	// carries the caller's values but not its cancellation.
+	if err := pinmise.RewriteToolVersion(context.WithoutCancel(ctx), root, configRel, tool, currentVersions, newVersion); err != nil {
 		return fmt.Errorf("updating mise config: %w", err)
 	}
 	if err := pruneStaleMiseLock(root, configRel, tool, currentVersions, newVersion); err != nil {

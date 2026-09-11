@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -420,7 +421,7 @@ func TestRewriteContainerRefs_Golden(t *testing.T) {
 
 			root := writerTestRoot(t, tc.relPath, input)
 
-			if err := rewriteContainerRefs(root, tc.relPath, tc.updates); err != nil {
+			if err := rewriteContainerRefs(t.Context(), root, tc.relPath, tc.updates); err != nil {
 				t.Fatal(err)
 			}
 
@@ -437,7 +438,7 @@ func TestRewriteContainerRefs_Golden(t *testing.T) {
 
 func TestRewriteContainerRefs_InvalidDigest(t *testing.T) {
 	root := writerTestRoot(t, "Dockerfile", "FROM alpine:3.19\n")
-	err := rewriteContainerRefs(root, "Dockerfile", []pin.Update{
+	err := rewriteContainerRefs(t.Context(), root, "Dockerfile", []pin.Update{
 		{Name: "alpine", PinnedValue: "not-a-digest", VersionTag: "3.19"},
 	})
 	if err == nil {
@@ -546,5 +547,30 @@ func TestStrategy_Verify_ReturnsNil(t *testing.T) {
 	}
 	if v != nil {
 		t.Error("expected nil Verification for containers")
+	}
+}
+
+// TestRewriteContainerRefs_CanceledContextLeavesFileUntouched pins the
+// Strategy.Rewrite contract: once the caller's context is done, nothing is
+// written, even when the rewrite would otherwise have changed the file.
+func TestRewriteContainerRefs_CanceledContextLeavesFileUntouched(t *testing.T) {
+	const content = "FROM nginx:1.25\n"
+	root := writerTestRoot(t, "Dockerfile", content)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := rewriteContainerRefs(ctx, root, "Dockerfile", []pin.Update{{
+		Name: "nginx", VersionTag: "1.25", PinnedValue: "sha256:" + strings.Repeat("a", 64),
+	}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	got, readErr := fs.ReadFile(root.FS(), "Dockerfile")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != content {
+		t.Fatalf("file was rewritten under a canceled context:\n%s", got)
 	}
 }
