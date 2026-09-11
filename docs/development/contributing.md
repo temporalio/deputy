@@ -5,6 +5,7 @@
 - Go 1.21+ (uses `toolchain` directive)
 - Git
 - Make (optional, for convenience targets)
+- GitHub CLI (`gh`) with the `github/gh-stack` extension, for landing PRs: `gh extension install github/gh-stack`
 
 ## Local Setup
 
@@ -247,7 +248,7 @@ Every PR lands on `main` as one squash commit. GitHub builds that commit from th
 gh pr merge <number> --squash
 ```
 
-A stacked PR (github/gh-stack) cannot be merged with `gh pr merge`. Merge it by number, which lands everything up to and including that PR, then resync the stack:
+A stacked PR cannot be merged with `gh pr merge`. It needs the `gh-stack` extension from the prerequisites. Merge it by number, which lands everything up to and including that PR, then resync the stack:
 
 ```bash
 gh stack merge <number> --squash --yes
