@@ -1,12 +1,13 @@
 package proto
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
 
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
-	"github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/scanning"
 	"github.com/temporalio/deputy/internal/vulnerability"
@@ -73,6 +74,98 @@ func TestBuildContainerDiffResponseFromScanningDeduplicatesAdvisoryAliases(t *te
 	}
 	if resp.Advisories["CVE-2024-1234"] == nil {
 		t.Fatalf("expected advisory keyed by primary ID")
+	}
+}
+
+// TestBuildContainerDiffResponseFromScanningCarriesScanWarnings pins the
+// guarantee a diff has to inherit from its two scans: if either scan could not
+// expand an advisory, the diff is not a complete comparison, and a vulnerability
+// missing from one side must not read as one that image does not have. Warnings
+// are the only thing carrying that, so losing them here makes an incomplete diff
+// indistinguishable from a clean one.
+func TestBuildContainerDiffResponseFromScanningCarriesScanWarnings(t *testing.T) {
+	const (
+		missingAdvisory = "osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is absent from osv's findings: withdrawn"
+		otherAdvisory   = "osv: advisory GHSA-7236-3392-c5c6 reported for github.com/example/other@v1.0.0 is absent from osv's findings: withdrawn"
+	)
+
+	tests := []struct {
+		name          string
+		baseWarnings  []string
+		otherWarnings []string
+		// nilBase and nilTarget exercise the callers that hand in no result at
+		// all, which must stay a diff with no warnings rather than a panic.
+		nilBase   bool
+		nilTarget bool
+		want      []string
+	}{
+		{
+			name: "clean scans add no warnings",
+		},
+		{
+			name:      "nil results add no warnings",
+			nilBase:   true,
+			nilTarget: true,
+		},
+		{
+			name:         "base-only warning names the base image",
+			baseWarnings: []string{missingAdvisory},
+			want:         []string{"base image: " + missingAdvisory},
+		},
+		{
+			name:          "target-only warning names the target image",
+			otherWarnings: []string{missingAdvisory},
+			want:          []string{"target image: " + missingAdvisory},
+		},
+		{
+			// The common case: the advisory is withdrawn upstream, so both
+			// scans hit it. Two lines, each saying which image it is about,
+			// beats one line that leaves the reader guessing.
+			name:          "warning on both sides is reported once per image",
+			baseWarnings:  []string{missingAdvisory},
+			otherWarnings: []string{missingAdvisory},
+			want: []string{
+				"base image: " + missingAdvisory,
+				"target image: " + missingAdvisory,
+			},
+		},
+		{
+			name:          "base warnings precede target warnings",
+			baseWarnings:  []string{otherAdvisory},
+			otherWarnings: []string{missingAdvisory},
+			want: []string{
+				"base image: " + otherAdvisory,
+				"target image: " + missingAdvisory,
+			},
+		},
+		{
+			name:         "repeat within one scan is not shown twice",
+			baseWarnings: []string{missingAdvisory, missingAdvisory},
+			want:         []string{"base image: " + missingAdvisory},
+		},
+		{
+			name:         "blank warnings are dropped",
+			baseWarnings: []string{"", "   ", missingAdvisory},
+			want:         []string{"base image: " + missingAdvisory},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := &scanning.Result{Warnings: tt.baseWarnings}
+			if tt.nilBase {
+				base = nil
+			}
+			target := &scanning.Result{Warnings: tt.otherWarnings}
+			if tt.nilTarget {
+				target = nil
+			}
+
+			resp := BuildContainerDiffResponseFromScanning(base, target)
+			if !slices.Equal(resp.GetWarnings(), tt.want) {
+				t.Fatalf("warnings = %q, want %q", resp.GetWarnings(), tt.want)
+			}
+		})
 	}
 }
 

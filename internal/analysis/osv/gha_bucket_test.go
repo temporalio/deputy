@@ -631,7 +631,7 @@ func TestQueryRaw_GitHubActionsPURLOnlySHAResolutionAvoidsFalsePositive(t *testi
 	}
 	t.Cleanup(func() { ghaListRemoteRefsWithHashes = origListWithHashes })
 
-	got, err := QueryRaw(t.Context(), nil, []PkgInput{
+	got, _, err := QueryRaw(t.Context(), nil, []PkgInput{
 		{QueryKey: QueryKey{PURL: "pkg:githubactions/anthropics/claude-code-action@" + sha + "#sub/action.yml"}},
 	})
 	if err != nil {

@@ -74,8 +74,12 @@ func (s *osvSource) Info() *pluginv1.AdvisorySourceInfo {
 // Query runs the OSV lookup and tags each result with OSV provenance and the
 // advisory's finding kind (malware vs vulnerability). It consumes and returns
 // proto types directly (osv.QueryProto), so there is no conversion at this seam.
+//
+// Advisories OSV reported but would not serve records for are reported as
+// warnings rather than errors, so one withdrawn record cannot cost the caller
+// every other package's findings.
 func (s *osvSource) Query(ctx context.Context, pkgs []*dependencyv1.Package) (*Result, error) {
-	findings, advisories, err := osv.QueryProto(ctx, s.client, pkgs)
+	findings, advisories, unresolved, err := osv.QueryProto(ctx, s.client, pkgs)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +94,7 @@ func (s *osvSource) Query(ctx context.Context, pkgs []*dependencyv1.Package) (*R
 		}
 		adv.Kind = AdvisoryKind(adv)
 	}
-	return &Result{Findings: findings, Advisories: advisories}, nil
+	return &Result{Findings: findings, Advisories: advisories, Warnings: osv.AdvisoryWarnings(unresolved)}, nil
 }
 
 // AdvisoryKind classifies an advisory as malware or vulnerability. OSV publishes

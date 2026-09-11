@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -336,6 +337,9 @@ func newTriageTestCommand(t *testing.T) *cobra.Command {
 type triageMockData struct {
 	Findings   []vulnerability.Finding
 	Advisories map[string]*vulnerabilityv1.Advisory
+	// Warnings are the scan's non-fatal warnings, such as an advisory whose
+	// record could not be expanded.
+	Warnings []string
 }
 
 // mockTriageScanHandler is a mock ScanServiceHandler for testing.
@@ -359,6 +363,7 @@ func (m *mockTriageScanHandler) Scan(ctx context.Context, req *connect.Request[s
 		Findings:   m.data.Findings,
 		Advisories: m.data.Advisories,
 		Stats:      stats,
+		Warnings:   m.data.Warnings,
 	}
 
 	// Convert to proto
@@ -385,4 +390,149 @@ func newMockTriageClients(t *testing.T, mock triageMockData) *services.Clients {
 	return &services.Clients{
 		Vulns: scanv1connect.NewScanServiceClient(httpClient, ""),
 	}
+}
+
+// TestTriageCommandCarriesScanWarnings pins the guarantee triage inherits from
+// the scan it summarizes. An advisory whose record could not be expanded is
+// absent from the findings, so the summary looks like the whole picture; the
+// warning is the only thing saying otherwise, and it has to reach both the JSON
+// output and a text reader's terminal. The zero-finding cases matter most: those
+// are the runs that read as clean.
+func TestTriageCommandCarriesScanWarnings(t *testing.T) {
+	t.Parallel()
+
+	const unresolved = "osv: advisory GO-2026-6255 reported for github.com/moby/buildkit@v0.30.0 is absent from osv's findings: withdrawn"
+
+	vulnerable := []vulnerability.Finding{{
+		AdvisoryID: "GHSA-1234-5678-9012",
+		Dependency: dependency.ID{Name: "github.com/acme/lib", Ecosystem: "Go"},
+		Version:    "v1.0.0",
+		Affected:   true,
+	}}
+	advisories := map[string]*vulnerabilityv1.Advisory{
+		"GHSA-1234-5678-9012": {
+			Id:       "GHSA-1234-5678-9012",
+			Severity: vulnerability.NewSeverity("HIGH", "GHSA"),
+		},
+	}
+
+	tests := []struct {
+		name string
+		// fromReport routes through --report instead of a live scan.
+		fromReport bool
+		findings   []vulnerability.Finding
+		advisories map[string]*vulnerabilityv1.Advisory
+		warnings   []string
+		want       []string
+	}{
+		{
+			// The run that used to read as clean: nothing found, and no sign
+			// that a record went missing on the way.
+			name:     "live scan with no findings still reports the warning",
+			warnings: []string{unresolved},
+			want:     []string{unresolved},
+		},
+		{
+			name:       "live scan with findings reports the warning",
+			findings:   vulnerable,
+			advisories: advisories,
+			warnings:   []string{unresolved},
+			want:       []string{unresolved},
+		},
+		{
+			name:       "clean live scan reports no warning",
+			findings:   vulnerable,
+			advisories: advisories,
+		},
+		{
+			name:       "report with no findings still reports the warning",
+			fromReport: true,
+			warnings:   []string{unresolved},
+			want:       []string{unresolved},
+		},
+		{
+			name:       "report with findings reports the warning",
+			fromReport: true,
+			findings:   vulnerable,
+			advisories: advisories,
+			warnings:   []string{unresolved},
+			want:       []string{unresolved},
+		},
+		{
+			name:       "clean report reports no warning",
+			fromReport: true,
+			findings:   vulnerable,
+			advisories: advisories,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tmpDir := t.TempDir()
+			mock := triageMockData{Findings: tt.findings, Advisories: tt.advisories, Warnings: tt.warnings}
+			cmd := newTriageTestCommand(t)
+			mustSetFlag(t, cmd, "format", "json")
+			var stdout, stderr bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+
+			var args []string
+			if tt.fromReport {
+				mustSetFlag(t, cmd, "report", writeTriageReport(t, tmpDir, mock))
+			} else {
+				writeGoModule(t, tmpDir)
+				initGitRepo(t, tmpDir)
+				args = []string{tmpDir}
+			}
+
+			if err := runTriage(newMockTriageClients(t, mock), cmd, args); err != nil {
+				t.Fatalf("runTriage: %v", err)
+			}
+
+			var got triagev1.TriageResponse
+			if err := protojson.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatalf("parse JSON output: %v (output = %s)", err, stdout.String())
+			}
+			if !slices.Equal(got.GetWarnings(), tt.want) {
+				t.Fatalf("triage response warnings = %q, want %q", got.GetWarnings(), tt.want)
+			}
+			// The text reader never sees the JSON, so the same fact has to
+			// reach stderr on every path that produces it.
+			for _, warning := range tt.want {
+				if !strings.Contains(stderr.String(), warning) {
+					t.Errorf("stderr = %q, want it to mention %q", stderr.String(), warning)
+				}
+			}
+		})
+	}
+}
+
+// writeTriageReport marshals mock scan data the way "deputy scan --format json"
+// does and returns the path, so a --report test consumes the real wire format
+// rather than a hand-built stand-in.
+func writeTriageReport(t *testing.T, dir string, mock triageMockData) string {
+	t.Helper()
+	cons := vulnerability.Consolidate(mock.Findings, mock.Advisories)
+	scanResp := internalproto.ScanningResultToProto(&scanning.Result{
+		Target: inventory.Target{
+			Kind:        targets.KindDir,
+			LocalPath:   dir,
+			DisplayPath: "github.com/test/repo",
+		},
+		Findings:   mock.Findings,
+		Advisories: mock.Advisories,
+		Stats:      vulnerability.StatsFromConsolidated(cons, len(mock.Findings)),
+		Warnings:   mock.Warnings,
+	})
+	data, err := internalproto.CLIJSONMarshalOptions().Marshal(scanResp)
+	if err != nil {
+		t.Fatalf("marshal scan report: %v", err)
+	}
+	path := filepath.Join(dir, "report.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write scan report: %v", err)
+	}
+	return path
 }
