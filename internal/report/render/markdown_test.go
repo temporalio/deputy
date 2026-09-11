@@ -61,18 +61,20 @@ func diffMarkdownFixture() *diffv1.DiffVulnerabilitiesResponse {
 		Stats: &diffv1.VulnerabilityDiffStats{AddedCount: 1, UnchangedCount: 1},
 		PolicyActions: []*policyv1.Action{
 			{
-				Type:       policyv1.ActionType_ACTION_TYPE_WARN,
-				PolicyName: "policy/ci/pr-review.yaml",
-				RuleName:   "pr-license-check",
-				Reason:     "No license information detected",
-				Subject:    &policyv1.Subject{Package: "example.com/evil|pipe", Version: "1.0.0"},
+				Type:        policyv1.ActionType_ACTION_TYPE_WARN,
+				PolicyName:  "policy/ci/pr-review.yaml",
+				RuleName:    "pr-license-check",
+				Reason:      "No license information detected",
+				Remediation: "Verify the dependency's license manually",
+				Subject:     &policyv1.Subject{Package: "example.com/evil|pipe", Version: "1.0.0"},
 			},
 			{
-				Type:       policyv1.ActionType_ACTION_TYPE_WARN,
-				PolicyName: "policy/ci/pr-review.yaml",
-				RuleName:   "pr-license-check",
-				Reason:     "No license information detected",
-				Subject:    &policyv1.Subject{Package: "example.com/gone", Version: "2.0.0"},
+				Type:        policyv1.ActionType_ACTION_TYPE_WARN,
+				PolicyName:  "policy/ci/pr-review.yaml",
+				RuleName:    "pr-license-check",
+				Reason:      "No license information detected",
+				Remediation: "Verify the dependency's license manually",
+				Subject:     &policyv1.Subject{Package: "example.com/gone", Version: "2.0.0"},
 			},
 		},
 		PolicyFilesEvaluated: 1,
@@ -97,11 +99,25 @@ func TestDiffMarkdown(t *testing.T) {
 		"1.0.1",
 		"<details><summary>1 pre-existing vulnerability not introduced by this change</summary>",
 		"### Policy evaluation",
-		"⚠️ WARN **pr-license-check** (`policy/ci/pr-review.yaml`): No license information detected — 2 packages",
+		"⚠️ WARN **pr-license-check** (`policy/ci/pr-review.yaml`): No license information detected (2 packages)",
+		"  </details>\n\n  _Remediation: Verify the dependency's license manually_\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("markdown missing %q\n---\n%s", want, out)
 		}
+	}
+
+	// A remediation line written directly after </details> sits inside the
+	// HTML block CommonMark opened for the closing tag, so GitHub shows the
+	// underscores literally instead of italics. Pin the blank line that ends
+	// the block.
+	if strings.Contains(out, "</details>\n  _Remediation") {
+		t.Errorf("remediation line must be separated from </details> by a blank line\n---\n%s", out)
+	}
+
+	// Generated prose uses commas, colons, and parentheses, never dashes.
+	if strings.ContainsAny(out, "\u2014\u2013") {
+		t.Errorf("markdown contains an em or en dash\n---\n%s", out)
 	}
 
 	// Pipe characters in package names must never survive unescaped inside a

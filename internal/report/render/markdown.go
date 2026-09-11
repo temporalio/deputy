@@ -234,7 +234,7 @@ func writeMarkdownPolicy(b *strings.Builder, resp *diffv1.DiffVulnerabilitiesRes
 		}
 		fmt.Fprintf(b, "- %s **%s** (`%s`): %s", marker, mdCell(g.ruleName), mdCode(g.policyName), mdCell(g.reason))
 		if g.count > 1 {
-			fmt.Fprintf(b, " — %d %s", g.count, policySubjectNoun(g))
+			fmt.Fprintf(b, " (%d %s)", g.count, policySubjectNoun(g))
 		}
 		b.WriteString("\n")
 		if len(g.subjects) > 0 {
@@ -245,7 +245,12 @@ func writeMarkdownPolicy(b *strings.Builder, resp *diffv1.DiffVulnerabilitiesRes
 			b.WriteString("\n  </details>\n")
 		}
 		if rem := strings.TrimSpace(g.remediation); rem != "" {
-			fmt.Fprintf(b, "  _Remediation: %s_\n", mdCell(rem))
+			// The blank line is load-bearing. A closing </details> tag opens a
+			// CommonMark HTML block that only a blank line ends, so a remediation
+			// line written directly after it is swallowed as raw HTML and its
+			// italics never render. Without a details block the blank line still
+			// gives the remediation its own paragraph inside the list item.
+			fmt.Fprintf(b, "\n  _Remediation: %s_\n", mdCell(rem))
 		}
 	}
 }
