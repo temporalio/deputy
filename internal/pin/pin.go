@@ -216,8 +216,8 @@ type Strategy interface {
 
 	// Rewrite applies pin updates to files within the given root directory.
 	// Path is root-relative. Implementations must preserve file formatting,
-	// comments, and unrelated content.
-	Rewrite(root *os.Root, path string, updates []Update) error
+	// comments, and unrelated content, and must not write once ctx is done.
+	Rewrite(ctx context.Context, root *os.Root, path string, updates []Update) error
 
 	// ResolveUpdate re-resolves an already-pinned ref to check for newer
 	// versions. Returns the new pinned value, new version tag, and current
@@ -302,7 +302,7 @@ func Pin(ctx context.Context, root *os.Root, opts Options, strategies ...Strateg
 
 		// Write updates unless dry-run.
 		if !opts.DryRun {
-			if err := writeStrategyUpdates(strategy, root, results, tracker); err != nil {
+			if err := writeStrategyUpdates(ctx, strategy, root, results, tracker); err != nil {
 				return report, fmt.Errorf("writing %s updates: %w", strategy.Ecosystem(), err)
 			}
 		}
@@ -466,7 +466,7 @@ func appendReason(existing, add string) string {
 // Rewrite method. The tracker captures only the files Deputy intentionally
 // rewrites, so downstream patch consumers do not need to diff the whole
 // worktree and accidentally include unrelated checkout churn.
-func writeStrategyUpdates(strategy Strategy, root *os.Root, results []Result, tracker *mutationTracker) error {
+func writeStrategyUpdates(ctx context.Context, strategy Strategy, root *os.Root, results []Result, tracker *mutationTracker) error {
 	fileUpdates := map[string][]Update{}
 	for _, r := range results {
 		if r.Status != StatusPinned && r.Status != StatusUpdated {
@@ -484,7 +484,7 @@ func writeStrategyUpdates(strategy Strategy, root *os.Root, results []Result, tr
 		if err := tracker.capture(file); err != nil {
 			return fmt.Errorf("capturing %s: %w", file, err)
 		}
-		if err := strategy.Rewrite(root, file, updates); err != nil {
+		if err := strategy.Rewrite(ctx, root, file, updates); err != nil {
 			return fmt.Errorf("rewriting %s: %w", file, err)
 		}
 	}
@@ -691,7 +691,7 @@ func PinUpdate(ctx context.Context, root *os.Root, opts Options, strategies ...S
 		report.Results = append(report.Results, results...)
 
 		if !opts.DryRun {
-			if err := writeStrategyUpdates(strategy, root, results, tracker); err != nil {
+			if err := writeStrategyUpdates(ctx, strategy, root, results, tracker); err != nil {
 				return report, fmt.Errorf("writing %s updates: %w", strategy.Ecosystem(), err)
 			}
 		}

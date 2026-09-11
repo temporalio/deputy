@@ -1,6 +1,7 @@
 package mise
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -20,7 +21,7 @@ var scalarTrailRe = regexp.MustCompile(`^\s*(?:#.*)?$`)
 // rewriteMiseVersions rewrites tool version values in a mise.toml [tools] table
 // to the pinned exact versions, preserving comments, key quoting, and unrelated
 // content. Only entries in the [tools] table are touched.
-func rewriteMiseVersions(root *os.Root, relPath string, updates []pin.Update) error {
+func rewriteMiseVersions(ctx context.Context, root *os.Root, relPath string, updates []pin.Update) error {
 	if len(updates) == 0 {
 		return nil
 	}
@@ -31,7 +32,7 @@ func rewriteMiseVersions(root *os.Root, relPath string, updates []pin.Update) er
 		}
 		want[u.Name] = u.PinnedValue
 	}
-	return rewriteToolsTable(root, relPath, want, replaceVersionInValue)
+	return rewriteToolsTable(ctx, root, relPath, want, replaceVersionInValue)
 }
 
 // RewriteToolVersion rewrites the declared version of a single tool in a
@@ -52,14 +53,14 @@ func rewriteMiseVersions(root *os.Root, relPath string, updates []pin.Update) er
 // prunes the sibling lockfile), and without this a failure in that later work
 // would be unrecoverable: the config edit is already committed, so a retry
 // would report "no tool entry applied" and stop before redoing the rest.
-func RewriteToolVersion(root *os.Root, relPath, tool string, currentVersions []string, newVersion string) error {
+func RewriteToolVersion(ctx context.Context, root *os.Root, relPath, tool string, currentVersions []string, newVersion string) error {
 	if err := validateMiseUpdate(pin.Update{Name: tool, PinnedValue: newVersion}); err != nil {
 		return err
 	}
 	replace := func(toolKey, value, pinned string, sole bool) (string, bool) {
 		return replaceEntryVersion(toolKey, value, currentVersions, pinned, sole)
 	}
-	err := rewriteToolsTable(root, relPath, map[string]string{tool: newVersion}, replace)
+	err := rewriteToolsTable(ctx, root, relPath, map[string]string{tool: newVersion}, replace)
 	if err == nil {
 		return nil
 	}
@@ -137,7 +138,7 @@ func declaresVersion(toolKey string, versions []string, want string) bool {
 // whether this value is the tool's sole declaration, and reports the new value
 // text and whether it changed. Entries in want that no replace call rewrote
 // produce an error so callers never silently skip a tool.
-func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, replace func(toolKey, value, pinned string, sole bool) (string, bool)) error {
+func rewriteToolsTable(ctx context.Context, root *os.Root, relPath string, want map[string]string, replace func(toolKey, value, pinned string, sole bool) (string, bool)) error {
 	applied := make(map[string]bool, len(want))
 
 	rootFS := root.FS()
@@ -288,7 +289,7 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 		return nil
 	}
 
-	return publishConfig(root, relPath, strings.Join(lines, "\n"), info.Mode().Perm())
+	return publishConfig(ctx, root, relPath, strings.Join(lines, "\n"), info.Mode().Perm())
 }
 
 // publishConfig writes the rewritten config back, replacing the file rather
@@ -301,7 +302,12 @@ func rewriteToolsTable(root *os.Root, relPath string, want map[string]string, re
 //
 // It is [mise.ReplaceFileAtomically], the same publication the sibling lockfile
 // pruning uses, so both halves of one fix are equally safe to interrupt.
-func publishConfig(root *os.Root, relPath, content string, perm os.FileMode) error {
+func publishConfig(ctx context.Context, root *os.Root, relPath, content string, perm os.FileMode) error {
+	// Past this point the file is replaced, so a caller whose context expired
+	// during the read must not find the rewrite done.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("not writing %s: %w", relPath, err)
+	}
 	if err := mise.ReplaceFileAtomically(root, relPath, []byte(content), perm); err != nil {
 		return fmt.Errorf("writing %s: %w", relPath, err)
 	}
@@ -1066,7 +1072,7 @@ var toolVersionsLineRe = regexp.MustCompile(`^(\s*)(\S+)(\s+)(\S+)(.*)$`)
 // rewriteToolVersions rewrites tool versions in an asdf .tool-versions file to
 // the pinned exact versions, preserving comments and layout. Lines declaring
 // multiple versions for a tool are left untouched (the strategy skips them).
-func rewriteToolVersions(root *os.Root, relPath string, updates []pin.Update) error {
+func rewriteToolVersions(ctx context.Context, root *os.Root, relPath string, updates []pin.Update) error {
 	if len(updates) == 0 {
 		return nil
 	}
@@ -1121,7 +1127,7 @@ func rewriteToolVersions(root *os.Root, relPath string, updates []pin.Update) er
 		return nil
 	}
 
-	return publishConfig(root, relPath, strings.Join(lines, "\n"), info.Mode().Perm())
+	return publishConfig(ctx, root, relPath, strings.Join(lines, "\n"), info.Mode().Perm())
 }
 
 // tomlHeader parses a TOML table header line into its key-path segments, with

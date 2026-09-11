@@ -1,6 +1,8 @@
 package mise
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -71,7 +73,7 @@ node_thing = "20"
 		{Name: "go", PinnedValue: "1.20.1"},
 		{Name: "cargo:ripgrep", PinnedValue: "14.1.1"},
 	}
-	if err := rewriteMiseVersions(root, "mise.toml", updates); err != nil {
+	if err := rewriteMiseVersions(t.Context(), root, "mise.toml", updates); err != nil {
 		t.Fatalf("rewrite: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
@@ -97,7 +99,7 @@ node = ["20", "22"]
 	}
 	defer root.Close()
 
-	err = rewriteMiseVersions(root, "mise.toml", []pin.Update{{Name: "node", PinnedValue: "20.11.0"}})
+	err = rewriteMiseVersions(t.Context(), root, "mise.toml", []pin.Update{{Name: "node", PinnedValue: "20.11.0"}})
 	if err == nil {
 		t.Fatal("expected rewrite error")
 	}
@@ -132,7 +134,7 @@ python 3.11 3.12
 	updates := []pin.Update{
 		{Name: "golang", PinnedValue: "1.27.0"},
 	}
-	if err := rewriteToolVersions(root, ".tool-versions", updates); err != nil {
+	if err := rewriteToolVersions(t.Context(), root, ".tool-versions", updates); err != nil {
 		t.Fatalf("rewrite: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, ".tool-versions"))
@@ -157,7 +159,7 @@ func TestRewriteToolVersionsErrorsWhenUpdateNotApplied(t *testing.T) {
 	}
 	defer root.Close()
 
-	err = rewriteToolVersions(root, ".tool-versions", []pin.Update{{Name: "python", PinnedValue: "3.11.9"}})
+	err = rewriteToolVersions(t.Context(), root, ".tool-versions", []pin.Update{{Name: "python", PinnedValue: "3.11.9"}})
 	if err == nil {
 		t.Fatal("expected rewrite error")
 	}
@@ -995,7 +997,7 @@ go = "1.22.12"
 			}
 			defer root.Close()
 
-			err = RewriteToolVersion(root, "mise.toml", tt.tool, tt.currents, tt.version)
+			err = RewriteToolVersion(t.Context(), root, "mise.toml", tt.tool, tt.currents, tt.version)
 			if tt.wantErr && err == nil {
 				t.Fatal("expected rewrite error")
 			}
@@ -1117,7 +1119,7 @@ node = "20.11.1"
 			}
 			defer root.Close()
 
-			err = RewriteToolVersion(root, "mise.toml", tt.tool, tt.currents, tt.version)
+			err = RewriteToolVersion(t.Context(), root, "mise.toml", tt.tool, tt.currents, tt.version)
 			if tt.wantErr && err == nil {
 				t.Fatal("expected rewrite error")
 			}
@@ -1336,7 +1338,7 @@ go = "1.24.3" # don't touch the rest
 			}
 			defer root.Close()
 
-			if err := RewriteToolVersion(root, "mise.toml", tt.tool, []string{tt.current}, tt.pinned); err != nil {
+			if err := RewriteToolVersion(t.Context(), root, "mise.toml", tt.tool, []string{tt.current}, tt.pinned); err != nil {
 				t.Fatalf("rewrite: %v", err)
 			}
 			got, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
@@ -1485,7 +1487,7 @@ func TestRewriteArrayOfTableDeclarations(t *testing.T) {
 			}
 			defer root.Close()
 
-			err = RewriteToolVersion(root, "mise.toml", tt.tool, tt.currents, tt.pinned)
+			err = RewriteToolVersion(t.Context(), root, "mise.toml", tt.tool, tt.currents, tt.pinned)
 			got, readErr := os.ReadFile(path)
 			if readErr != nil {
 				t.Fatal(readErr)
@@ -1572,7 +1574,7 @@ func TestPinArrayOfTableDeclarations(t *testing.T) {
 			}
 			defer root.Close()
 
-			err = rewriteMiseVersions(root, "mise.toml", tt.updates)
+			err = rewriteMiseVersions(t.Context(), root, "mise.toml", tt.updates)
 			got, readErr := os.ReadFile(path)
 			if readErr != nil {
 				t.Fatal(readErr)
@@ -1692,7 +1694,7 @@ func TestRewriteLineSpanningVersionToken(t *testing.T) {
 			}
 			defer root.Close()
 
-			rewriteErr := RewriteToolVersion(root, "mise.toml", "go", tt.currents, "1.24.3")
+			rewriteErr := RewriteToolVersion(t.Context(), root, "mise.toml", "go", tt.currents, "1.24.3")
 			got, err := os.ReadFile(configPath)
 			if err != nil {
 				t.Fatal(err)
@@ -1810,7 +1812,7 @@ func TestRewriteConfigIsPublishedAtomically(t *testing.T) {
 
 	versions := []string{second, first}
 	for i := range 200 {
-		if err := rewriteMiseVersions(root, "mise.toml", []pin.Update{{Name: "go", PinnedValue: versions[i%2]}}); err != nil {
+		if err := rewriteMiseVersions(t.Context(), root, "mise.toml", []pin.Update{{Name: "go", PinnedValue: versions[i%2]}}); err != nil {
 			t.Fatalf("rewrite %d: %v", i, err)
 		}
 	}
@@ -1844,7 +1846,7 @@ func TestRewriteConfigFailureLeavesTheOriginal(t *testing.T) {
 	defer root.Close()
 	makeDirUnwritable(t, dir)
 
-	if err := RewriteToolVersion(root, "mise.toml", "go", []string{"1.22.12"}, "1.24.3"); err == nil {
+	if err := RewriteToolVersion(t.Context(), root, "mise.toml", "go", []string{"1.22.12"}, "1.24.3"); err == nil {
 		t.Fatal("expected the blocked publication to fail the rewrite")
 	}
 	got, err := os.ReadFile(configPath)
@@ -2011,7 +2013,7 @@ go = "1.22.12"
 			}
 			defer root.Close()
 
-			if err := RewriteToolVersion(root, "mise.toml", "go", tt.currents, tt.version); err != nil {
+			if err := RewriteToolVersion(t.Context(), root, "mise.toml", "go", tt.currents, tt.version); err != nil {
 				t.Fatalf("RewriteToolVersion: %v", err)
 			}
 			got, err := os.ReadFile(path)
@@ -2126,7 +2128,7 @@ go = "go1.24.10"
 			}
 			defer root.Close()
 
-			err = RewriteToolVersion(root, "mise.toml", tt.tool, tt.currents, tt.version)
+			err = RewriteToolVersion(t.Context(), root, "mise.toml", tt.tool, tt.currents, tt.version)
 			if tt.wantErr && err == nil {
 				t.Error("the rewrite reported success without writing the requested version")
 			}
@@ -2224,7 +2226,7 @@ func TestRewriteToolVersionReadsBareNumberDeclarations(t *testing.T) {
 			}
 			defer root.Close()
 
-			if err := RewriteToolVersion(root, "mise.toml", tt.tool, []string{tt.current}, tt.version); err != nil {
+			if err := RewriteToolVersion(t.Context(), root, "mise.toml", tt.tool, []string{tt.current}, tt.version); err != nil {
 				t.Fatalf("RewriteToolVersion: %v", err)
 			}
 			got, err := os.ReadFile(path)
@@ -2333,7 +2335,7 @@ func TestRewriteRefusesToWriteAnOlderVersion(t *testing.T) {
 			}
 			defer root.Close()
 
-			err = RewriteToolVersion(root, "mise.toml", "go", tt.currents, tt.pinned)
+			err = RewriteToolVersion(t.Context(), root, "mise.toml", "go", tt.currents, tt.pinned)
 			if tt.wantErr && err == nil {
 				t.Error("expected an unapplied update to be reported")
 			}
@@ -2346,6 +2348,49 @@ func TestRewriteRefusesToWriteAnOlderVersion(t *testing.T) {
 			}
 			if string(got) != tt.want {
 				t.Errorf("config mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRewrite_CanceledContextLeavesFileUntouched pins the Strategy.Rewrite
+// contract for both mise formats: once the caller's context is done, the
+// config is not replaced, even when the rewrite would have changed it.
+func TestRewrite_CanceledContextLeavesFileUntouched(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    string
+		content string
+		rewrite func(context.Context, *os.Root, string, []pin.Update) error
+	}{
+		{name: "mise.toml", file: "mise.toml", content: "[tools]\nnode = \"20\"\n", rewrite: rewriteMiseVersions},
+		{name: ".tool-versions", file: ".tool-versions", content: "node 20\n", rewrite: rewriteToolVersions},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, tt.file), []byte(tt.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+
+			err = tt.rewrite(ctx, root, tt.file, []pin.Update{{Name: "node", PinnedValue: "20.11.0"}})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("err = %v, want context.Canceled", err)
+			}
+			got, readErr := os.ReadFile(filepath.Join(dir, tt.file))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if string(got) != tt.content {
+				t.Fatalf("file was rewritten under a canceled context:\n%s", got)
 			}
 		})
 	}

@@ -480,7 +480,7 @@ func applyRemediationCommands(ctx context.Context, repoDir string, commands []re
 		// Handle deputy-internal commands (file modifications for Actions/Dockerfiles)
 		if remediation.IsDeputyInternalCommand(rec.Command) {
 			fmt.Fprintf(out, "%s %s\n", ui.StyleUpgraded.Render("↻"), rec.Command)
-			if err := remediation.ApplyDeputyCommand(repoDir, rec.Command); err != nil {
+			if err := remediation.ApplyDeputyCommand(ctx, repoDir, rec.Command); err != nil {
 				return fmt.Errorf("deputy command %q failed: %w", rec.Command, err)
 			}
 			ran++

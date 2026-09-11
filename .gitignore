@@ -33,8 +33,10 @@ go.work.sum
 # env file
 .env
 
-# Local agent tooling. Shared config under .claude/ stays tracked; these two are
-# per-machine. Worktrees in particular hold full checkouts and reach hundreds of
-# megabytes.
+# Local agent tooling. Shared config under .claude/ stays tracked; these three
+# are per-machine. Worktrees in particular hold full checkouts and reach
+# hundreds of megabytes, and the lock file is runtime state written while a
+# session runs.
 .claude/worktrees/
 .claude/settings.local.json
+.claude/scheduled_tasks.lock

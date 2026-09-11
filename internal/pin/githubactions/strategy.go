@@ -399,8 +399,8 @@ func (s *Strategy) ResolveUpdate(ctx context.Context, ref pin.Ref) (string, stri
 }
 
 // Rewrite implements pin.Strategy. It rewrites workflow/action YAML files with SHA pins.
-func (s *Strategy) Rewrite(root *os.Root, relPath string, updates []pin.Update) error {
-	return RewriteWorkflow(root, relPath, updates)
+func (s *Strategy) Rewrite(ctx context.Context, root *os.Root, relPath string, updates []pin.Update) error {
+	return RewriteWorkflow(ctx, root, relPath, updates)
 }
 
 // packageToRef converts an extractor.Package from the actionsx extractor into

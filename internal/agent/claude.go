@@ -47,6 +47,9 @@ func (h *ClaudeHandler) GetInfo(ctx context.Context, req *connect.Request[agentv
 			Agentic:           true,
 			SessionResumption: true,
 			MaxContextTokens:  200000,
+			// Claude handles approvals inside its own CLI and never emits
+			// approval-required events, so callers cannot gate its steps.
+			ApprovalWorkflows: false,
 		},
 	}), nil
 }
