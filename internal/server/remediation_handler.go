@@ -65,36 +65,34 @@ type RemediationHandler struct {
 type agentSession struct {
 	handler    agentv1connect.AgentPluginHandler
 	cancelFunc context.CancelFunc
-	approvals  chan *pendingApproval
-	// done is closed when the execution this session belongs to has returned.
-	// A decision submitted for an operation the agent never asks about would
-	// otherwise sit in the channel with nobody left to read it, and the caller
-	// waiting for the agent's answer would wait for the life of its own
-	// context; the session's end is the answer.
+	// approvals carries ApproveStep requests to the execution loop, which
+	// forwards each one to the agent.
+	approvals chan *pendingApproval
+	// done is closed when the execution returns, so an ApproveStep call still
+	// waiting for an answer learns that nothing will read its approval instead
+	// of waiting until its own context expires.
 	done chan struct{}
 }
 
-// pendingApproval carries one caller's decision to the execution loop and the
-// agent's answer back to the RPC that submitted it. Handing over the request
-// alone let ApproveStep answer from the fact of the handover, which is not the
-// same fact as the agent having taken the decision.
+// pendingApproval is one ApproveStep call in flight: the approval the caller
+// submitted, and the channel the agent's answer comes back on.
 type pendingApproval struct {
 	req *agentv1.ApproveRequest
-	// answer receives the agent's verdict exactly once. It is buffered so the
+	// answer receives the agent's answer exactly once. It is buffered so the
 	// execution loop never blocks on a caller that has already given up.
 	answer chan approvalAnswer
 }
 
-// approvalAnswer is what the agent said about a decision: whether it took it,
-// and what it said if it did not.
+// approvalAnswer is the agent's answer to an approval: whether it accepted the
+// approval, and its message when it did not.
 type approvalAnswer struct {
 	accepted bool
 	message  string
 }
 
-// reply hands the agent's verdict to the waiting caller. It is called once per
-// pending approval, and the buffer of one is what keeps that send from blocking
-// when the caller has gone.
+// reply sends the agent's answer to the waiting caller. It is called once per
+// pending approval; the buffer of one keeps the send from blocking when the
+// caller has gone.
 func (p *pendingApproval) reply(answer approvalAnswer) {
 	p.answer <- answer
 }
@@ -1343,7 +1341,7 @@ func (h *RemediationHandler) ExecuteWithAgent(
 
 		// Handle approval required events
 		if event.GetApprovalRequired() != nil {
-			// Wait for a decision the agent actually takes, via ApproveStep.
+			// Wait for an approval the agent accepts, submitted via ApproveStep.
 			if err := deliverApproval(execCtx, session); err != nil {
 				return err
 			}
@@ -1364,21 +1362,19 @@ func (h *RemediationHandler) ExecuteWithAgent(
 	return nil
 }
 
-// deliverApproval waits for a caller's decision, hands it to the agent, and
-// keeps waiting until the agent takes one, answering every submitter with what
+// deliverApproval waits for a caller's approval, hands it to the agent, and
+// keeps waiting until the agent accepts one, answering every caller with what
 // the agent said about theirs.
 //
-// A decision the agent refused is not a decision it was told: approval-capable
-// plugins refuse one that names an operation they have already finished or never
-// asked about, and a delivery that failed outright never arrived. Going on from
-// either would let the step proceed as though it had been approved, so the wait
-// resumes instead, and the caller is told its decision was not accepted so it
-// can send a corrected one. The agent is still running either way, which is why
-// an undelivered decision does not fail the stream.
+// The agent refuses an approval that names an operation it has already
+// finished or never asked about, and a delivery can fail outright. Neither
+// approves anything, so the wait resumes and the caller is told its approval
+// was not accepted, so it can send a corrected one. The agent is still running
+// either way, which is why a refused approval does not fail the stream.
 //
-// A decision the agent takes ends the wait whichever way it went. A delivered
-// denial is an answer, and what the agent does with a denial is the agent's to
-// decide; this loop is about whether the answer arrived.
+// An accepted approval ends the wait whether it approved or denied the step.
+// What the agent does with a denial is the agent's business; this loop only
+// cares that the answer arrived.
 func deliverApproval(ctx context.Context, session *agentSession) error {
 	for {
 		select {
@@ -1389,13 +1385,13 @@ func deliverApproval(ctx context.Context, session *agentSession) error {
 				logs.Warn(ctx, "agent approval delivery failed",
 					"operation_id", pending.req.GetOperationId(), "error", err)
 				pending.reply(approvalAnswer{
-					message: fmt.Sprintf("the agent could not take this decision: %v", err),
+					message: fmt.Sprintf("the agent could not receive this approval: %v", err),
 				})
 			case !resp.Msg.GetAccepted():
-				logs.Warn(ctx, "agent refused an approval decision",
+				logs.Warn(ctx, "agent refused an approval",
 					"operation_id", pending.req.GetOperationId(), "message", resp.Msg.GetMessage())
 				pending.reply(approvalAnswer{
-					message: cmp.Or(resp.Msg.GetMessage(), "the agent did not accept this decision"),
+					message: cmp.Or(resp.Msg.GetMessage(), "the agent did not accept this approval"),
 				})
 			default:
 				pending.reply(approvalAnswer{accepted: true, message: resp.Msg.GetMessage()})
@@ -1608,18 +1604,13 @@ func (h *RemediationHandler) ApproveStep(
 		}), nil
 	}
 
-	// Handing the decision over is not the same as the agent taking it, and only
-	// the second is something to report as accepted. An approval-capable plugin
-	// refuses a decision naming an operation it has already finished or never
-	// asked about, and a delivery can fail outright; answering from the handover
-	// told the caller its decision had been acted on when it had not, and the
-	// execution loop went on as though the step were approved.
+	// Report accepted from the agent's answer, not from the handover. The agent
+	// refuses an approval for an operation it has already finished or never
+	// asked about, and delivery can fail; answering from the handover alone told
+	// the caller its approval had taken effect when it had not.
 	//
-	// This is a different question from can_proceed on a delivered denial. There
-	// the agent took the decision and the answer was "no": accepted is true
-	// because the decision was acted on, can_proceed is false because the step
-	// must not continue. Here there is no answer yet, so there is nothing to
-	// call accepted.
+	// can_proceed is a separate question: a delivered denial is accepted (the
+	// agent took it) with can_proceed false (the step must not continue).
 	answer, err := awaitApprovalAnswer(ctx, pending, session.done)
 	switch {
 	case errors.Is(err, errApprovalSessionEnded):
@@ -1633,64 +1624,39 @@ func (h *RemediationHandler) ApproveStep(
 		return connect.NewResponse(&remediationv1.ApproveStepResponse{
 			Accepted: answer.accepted,
 			Message:  answer.message,
-			// A decision the agent did not take approves nothing, so it cannot
-			// let the step proceed either; one it took proceeds only when the
-			// caller approved.
+			// The step proceeds only when the agent accepted the approval and
+			// the caller approved.
 			CanProceed: answer.accepted && req.Msg.GetApproved(),
 		}), nil
 	}
 }
 
-// errApprovalSessionEnded reports that an agent execution returned before the
-// agent read a submitted decision, which is what becomes of a decision naming
-// an operation the agent never asks about. Its text is what the RPC reports, so
-// the reason the caller reads and the reason the handler branches on are one
-// thing.
-var errApprovalSessionEnded = errors.New("The agent execution ended before this decision reached the agent")
+// errApprovalSessionEnded reports that the agent execution returned before the
+// agent read a submitted approval, which is what happens to an approval for an
+// operation the agent never asks about. Its text is what the RPC reports.
+var errApprovalSessionEnded = errors.New("The agent execution ended before it read this approval")
 
-// awaitApprovalAnswer waits for the agent's verdict on a submitted decision,
-// returning errApprovalSessionEnded when the execution ended without reading it
-// and the context's error when the caller gave up first.
+// awaitApprovalAnswer waits for the agent's answer to a submitted approval. It
+// returns errApprovalSessionEnded when the execution ended without reading the
+// approval, and the context's error when the caller gave up first.
 //
-// The verdict is looked for on its own first, because an agent that takes a
-// decision and then finishes leaves two facts true at once and only one of them
-// describes what happened to the decision. A single select over all three cases
-// chooses pseudo-randomly among the ready ones, so it would sometimes report
-// that a decision the agent took never reached it: wrong, and wrong only
-// sometimes, which is worse. The same applies to a caller's context that expired
-// in that window, since a verdict already given is worth reporting to a caller
-// that may still be listening.
-//
-// Finding it is possible because [pendingApproval.answer] is buffered for one
-// answer and written once, so a verdict handed over before this call runs is
-// sitting in the buffer rather than waiting for a receiver.
-//
-// The priority is over answers already given, not a claim about which of two
-// concurrent events wins. Once there is nothing buffered, an answer and the
-// session's end racing each other may go either way, and at that moment either
-// report is true.
+// It checks the buffer before selecting. An agent that answers and then
+// finishes leaves both the answer and done ready at once, and select picks
+// among ready cases at random, so a plain select would sometimes report an
+// answered approval as unread. The answer channel is buffered for one and
+// written once, so an answer given before this call is already in the buffer.
 func awaitApprovalAnswer(ctx context.Context, pending *pendingApproval, done <-chan struct{}) (approvalAnswer, error) {
 	if answer, ok := bufferedApprovalAnswer(pending); ok {
 		return answer, nil
 	}
-	return awaitApprovalVerdict(ctx, pending, done)
+	return selectApprovalAnswer(ctx, pending, done)
 }
 
-// awaitApprovalVerdict waits for whichever comes first once nothing is
-// buffered, and asks the buffer again before reporting either ending.
-//
-// The leading probe in awaitApprovalAnswer only covers verdicts handed over
-// before it ran. An agent that takes a decision and finishes in the moment
-// between that probe and this select leaves both cases ready here, and a select
-// over ready cases chooses among them pseudo-randomly, so the wait would
-// sometimes report that a decision the agent took never reached it. The
-// verdict is written to the buffer before the session ends, so asking the
-// buffer again on the way out turns that coin flip back into the fact: an
-// answer that exists is reported, and only its absence is an ending.
-//
-// Reaching the recheck costs nothing when there is no answer: the buffer holds
-// at most one, is written once, and is probed without blocking.
-func awaitApprovalVerdict(ctx context.Context, pending *pendingApproval, done <-chan struct{}) (approvalAnswer, error) {
+// selectApprovalAnswer waits for the answer, the session's end, or the caller's
+// context, whichever comes first. It rechecks the buffer before reporting
+// either ending, because an answer written between the caller's probe and this
+// select would otherwise be lost to the same random choice.
+func selectApprovalAnswer(ctx context.Context, pending *pendingApproval, done <-chan struct{}) (approvalAnswer, error) {
 	select {
 	case answer := <-pending.answer:
 		return answer, nil
@@ -1707,11 +1673,8 @@ func awaitApprovalVerdict(ctx context.Context, pending *pendingApproval, done <-
 	}
 }
 
-// bufferedApprovalAnswer takes the verdict already handed over, reporting
-// whether there was one. It never blocks: [pendingApproval.answer] is buffered
-// for a single answer and written once, so a verdict given before the ask is
-// sitting in the buffer rather than waiting for a receiver, and one that has
-// not been given yet is simply absent.
+// bufferedApprovalAnswer returns the answer already in the buffer, if any. It
+// never blocks: the channel holds one answer and is written once.
 func bufferedApprovalAnswer(pending *pendingApproval) (approvalAnswer, bool) {
 	select {
 	case answer := <-pending.answer:

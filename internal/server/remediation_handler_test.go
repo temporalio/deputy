@@ -1970,7 +1970,7 @@ func TestApproveStepWaitsForAgentAcceptance(t *testing.T) {
 			select {
 			case <-fake.delivered:
 			case <-time.After(2 * time.Second):
-				t.Fatal("the decision never reached the agent")
+				t.Fatal("the approval never reached the agent")
 			}
 			// And the step stayed where it was: the agent cannot reach its next
 			// event until the execution loop stops waiting for approval.
@@ -2194,7 +2194,7 @@ func TestAwaitApprovalVerdictPrefersABufferedAnswer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for i := range tt.repeat {
 				ctx, pending, done := tt.setup(t)
-				answer, err := awaitApprovalVerdict(ctx, pending, done)
+				answer, err := selectApprovalAnswer(ctx, pending, done)
 				if tt.wantErr != nil {
 					if !errors.Is(err, tt.wantErr) {
 						t.Fatalf("attempt %d: error = %v, want %v", i, err, tt.wantErr)
@@ -2202,7 +2202,7 @@ func TestAwaitApprovalVerdictPrefersABufferedAnswer(t *testing.T) {
 					continue
 				}
 				if err != nil {
-					t.Fatalf("attempt %d: awaitApprovalVerdict failed: %v", i, err)
+					t.Fatalf("attempt %d: selectApprovalAnswer failed: %v", i, err)
 				}
 				if answer != tt.wantAnswer {
 					t.Fatalf("attempt %d: answer = %+v, want %+v", i, answer, tt.wantAnswer)
