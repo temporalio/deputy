@@ -79,6 +79,7 @@ go build -o deputy .
 - Prefer table-driven tests.
 - Wrap errors with context: `fmt.Errorf("context: %w", err)`.
 - Avoid emojis in CLI output, use strategically in docs/PRs.
+- PRs land as one squash commit built from the PR title and description, so write the description as the commit message. See [Landing a Pull Request](docs/development/contributing.md#landing-a-pull-request).
 - Keep code idiomatic and production-ready: validate inputs, respect `context` timeouts/cancellation, avoid panics, and prefer the standard library or well-established packages.
 - Prefer modern Go APIs (`slices`, `maps`, `cmp`, `log/slog`) and avoid deprecated packages.
 - Design for coherence and composability: keep features congruent across CLI/API/plugins, favor clear interfaces, and build from first principles with production-grade security and reliability.
