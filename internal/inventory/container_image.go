@@ -11,6 +11,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	scalibrfs "github.com/google/osv-scalibr/fs"
 	"github.com/google/osv-scalibr/plugin"
+	pluginconfig "github.com/google/osv-scalibr/plugin/config"
 )
 
 // ScanPackagesContainerImage scans a container image using OSV-Scalibr's image pipeline.
@@ -30,7 +31,7 @@ func ScanPackagesContainerImage(ctx context.Context, img scalibrimage.Image, opt
 	// Add baseimage enricher when base image detection is enabled.
 	// This enricher queries deps.dev to determine if layers belong to known base images.
 	if opts.DetectBaseImage {
-		baseImageEnricher, err := baseimage.New(baseimage.DefaultConfig())
+		baseImageEnricher, err := baseimage.New(pluginconfig.DefaultPluginConfig())
 		if err != nil {
 			slog.WarnContext(ctx, "failed to create baseimage enricher, base image detection disabled", "error", err)
 		} else {

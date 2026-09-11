@@ -55,6 +55,14 @@ func (d *ContainerImageData) CleanUp() error {
 	return d.Image.CleanUp()
 }
 
+// Labels implements the scalibrimage.Image interface.
+func (d *ContainerImageData) Labels() map[string]string {
+	if d == nil || d.Image == nil {
+		return nil
+	}
+	return d.Image.Labels()
+}
+
 // Layers implements the scalibrimage.Image interface.
 func (d *ContainerImageData) Layers() ([]scalibrimage.Layer, error) {
 	if d == nil || d.Image == nil {
@@ -70,6 +78,11 @@ func (d *ContainerImageData) ChainLayers() ([]scalibrimage.ChainLayer, error) {
 	}
 	return d.Image.ChainLayers()
 }
+
+// ContainerImageData must satisfy the SCALIBR image interface: callers reach it
+// through a type assertion, so a missing method would silently turn every image
+// scan into "not a container image" instead of failing to build.
+var _ scalibrimage.Image = (*ContainerImageData)(nil)
 
 // V1 returns the underlying go-containerregistry v1.Image, if available.
 // This method allows inventory.collector to access image configuration

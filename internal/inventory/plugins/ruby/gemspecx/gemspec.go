@@ -58,8 +58,8 @@ func (Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (inve
 		if pkg == nil {
 			continue
 		}
-		if len(pkg.Locations) == 0 {
-			pkg.Locations = []string{input.Path}
+		if pkg.Location.PathOrEmpty() == "" {
+			pkg.Location = extractor.LocationFromPath(input.Path)
 		}
 	}
 	return inventory.Inventory{Packages: pkgs}, nil
@@ -131,9 +131,7 @@ func extractPackages(input *filesystem.ScanInput) ([]*extractor.Package, error) 
 			Name:     gemName,
 			Version:  gemVersion,
 			PURLType: purl.TypeGem,
-			Locations: []string{
-				input.Path,
-			},
+			Location: extractor.LocationFromPath(input.Path),
 		},
 	}
 	pkgs = append(pkgs, parseGemDependencies(data, input.Path)...)
@@ -293,10 +291,10 @@ func dependencyFromLine(line, gemspecPath string) *extractor.Package {
 		version = normalizeGemConstraint(matches[0][1])
 	}
 	return &extractor.Package{
-		Name:      name,
-		Version:   version,
-		PURLType:  purl.TypeGem,
-		Locations: []string{gemspecPath},
+		Name:     name,
+		Version:  version,
+		PURLType: purl.TypeGem,
+		Location: extractor.LocationFromPath(gemspecPath),
 	}
 }
 

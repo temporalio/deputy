@@ -4,10 +4,12 @@ import (
 	"strings"
 
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/opencontainers/go-digest"
 
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/purlx"
 )
 
@@ -79,11 +81,7 @@ func ExtractorPackageIsDirect(pkg *extractor.Package, direct map[string]bool) bo
 		return direct[moduleRoot]
 	case "npm":
 		// npm: check package name (may include scope like @types/node).
-		pkgName := purl.Name
-		if purl.Namespace != "" {
-			pkgName = "@" + purl.Namespace + "/" + purl.Name
-		}
-		return direct[pkgName]
+		return direct[purlx.NPMPackageName(purl.Namespace, purl.Name)]
 	case "cargo":
 		return direct[purl.Name]
 	case "pypi":
@@ -111,13 +109,13 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 	isDirect := ExtractorPackageIsDirect(pkg, direct)
 
 	var layerDetails *containerv1.LayerDetails
-	if pkg.LayerDetails != nil {
+	if pkg.LayerMetadata != nil {
 		layerDetails = &containerv1.LayerDetails{
-			Index:       int32(pkg.LayerDetails.Index),
-			DiffId:      pkg.LayerDetails.DiffID,
-			ChainId:     pkg.LayerDetails.ChainID,
-			Command:     pkg.LayerDetails.Command,
-			InBaseImage: pkg.LayerDetails.InBaseImage,
+			Index:       int32(pkg.LayerMetadata.Index),
+			DiffId:      pkg.LayerMetadata.DiffID.String(),
+			ChainId:     pkg.LayerMetadata.ChainID.String(),
+			Command:     pkg.LayerMetadata.Command,
+			InBaseImage: pkg.LayerMetadata.BaseImageIndex > 0,
 		}
 	}
 
@@ -134,7 +132,7 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 		Version:      pkg.Version,
 		Purl:         purlStr,
 		Direct:       isDirect,
-		Locations:    pkg.Locations,
+		Locations:    dependency.PackagePaths(pkg),
 		Licenses:     pkg.Licenses,
 		LayerDetails: layerDetails,
 	}
@@ -173,14 +171,21 @@ func ExtractorPackagesFromProto(pkgs []*dependencyv1.Package) ([]*extractor.Pack
 			continue
 		}
 
-		var layerDetails *extractor.LayerDetails
+		// SCALIBR records base image membership as an index into the image's base
+		// image matches rather than a boolean, and the proto only carries the
+		// boolean, so a member round-trips to index 1: "matched some base image".
+		var layerMetadata *extractor.LayerMetadata
 		if pkg.LayerDetails != nil {
-			layerDetails = &extractor.LayerDetails{
-				Index:       int(pkg.LayerDetails.Index),
-				DiffID:      pkg.LayerDetails.DiffId,
-				ChainID:     pkg.LayerDetails.ChainId,
-				Command:     pkg.LayerDetails.Command,
-				InBaseImage: pkg.LayerDetails.InBaseImage,
+			baseImageIndex := 0
+			if pkg.LayerDetails.InBaseImage {
+				baseImageIndex = 1
+			}
+			layerMetadata = &extractor.LayerMetadata{
+				Index:          int(pkg.LayerDetails.Index),
+				DiffID:         digest.Digest(pkg.LayerDetails.DiffId),
+				ChainID:        digest.Digest(pkg.LayerDetails.ChainId),
+				Command:        pkg.LayerDetails.Command,
+				BaseImageIndex: baseImageIndex,
 			}
 		}
 
@@ -192,16 +197,16 @@ func ExtractorPackagesFromProto(pkgs []*dependencyv1.Package) ([]*extractor.Pack
 		}
 
 		out[i] = &extractor.Package{
-			Name:         pkg.Name,
-			Version:      pkg.Version,
-			Locations:    pkg.Locations,
-			PURLType:     purlType,
-			Licenses:     pkg.Licenses,
-			LayerDetails: layerDetails,
+			Name:          pkg.Name,
+			Version:       pkg.Version,
+			PURLType:      purlType,
+			Licenses:      pkg.Licenses,
+			LayerMetadata: layerMetadata,
 			// Note: PURL metadata and other fields cannot be reliably reconstructed
 			// from the proto representation. Type-specific PURL formatting may still
 			// be lossy for ecosystems whose identity depends on metadata.
 		}
+		dependency.SetPackagePaths(out[i], pkg.Locations)
 
 		recordProtoPackageDirectness(direct, pkg)
 	}
@@ -237,11 +242,7 @@ func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Pack
 			}
 		}
 	case "npm":
-		if parsed.Namespace != "" {
-			recordDirectKey(direct, "@"+parsed.Namespace+"/"+parsed.Name, isDirect)
-		} else {
-			recordDirectKey(direct, parsed.Name, isDirect)
-		}
+		recordDirectKey(direct, purlx.NPMPackageName(parsed.Namespace, parsed.Name), isDirect)
 	case "cargo":
 		recordDirectKey(direct, parsed.Name, isDirect)
 	case "pypi":
@@ -365,11 +366,11 @@ func FilterPackages(pkgs []*extractor.Package, opts FilterOptions) []*extractor.
 	if opts.DeduplicateStdlib && bestStdlib != nil {
 		// Normalize to "stdlib" name for consistency
 		stdlibPkg := &extractor.Package{
-			Name:      "stdlib",
-			Version:   bestStdlibVersion,
-			PURLType:  "golang",
-			Locations: bestStdlib.Locations,
-			Licenses:  bestStdlib.Licenses,
+			Name:     "stdlib",
+			Version:  bestStdlibVersion,
+			PURLType: "golang",
+			Location: bestStdlib.Location,
+			Licenses: bestStdlib.Licenses,
 		}
 		out = append(out, stdlibPkg)
 	}

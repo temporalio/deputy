@@ -214,9 +214,95 @@ Service-level policy entrypoints enable authorization based on JWT claims:
 | `service_scan_request` | Scan, StreamScan |
 | `service_list_request` | ListPackages, ListEcosystems |
 | `service_sbom_request` | Generate, Diff |
-| `service_diff_request` | Diff |
-| `service_secrets_request` | Scan |
-| `service_graph_request` | Resolve, Why |
+| `service_diff_request` | DiffPackages, DiffVulnerabilities, DiffContainerImages |
+| `service_secrets_request` | Scan, StreamScan, ScanHistory, ScanDiff, Verify, ListDetectors, RegisterDetector |
+| `service_graph_request` | BuildGraph, WhyDependency, QueryGraph |
+
+Streaming operations (`StreamScan`) are listed for completeness but are not
+enforced as of August 2026.
+
+A diff compares two independent resources, so `service_diff_request` binds
+`diff_base` and `diff_target` instead of the single `target` the other
+service entrypoints bind. Authorize both sides: a policy that checks only one
+lets a caller pair an authorized base with a target they should not reach.
+`request.target` reports the base side for these requests, so it is not a
+substitute for checking `diff_target`.
+
+Both sides are always bound, so neither needs a null guard. A side the caller
+omitted reads as an empty `display_path`, which fails an allowlist check and so
+denies rather than passing:
+
+```yaml
+policies:
+  - name: diff-tenant-isolation
+    entrypoints: ["service_diff_request"]
+    rules:
+      - action: deny
+        when: |
+          jwt.?tenant.orValue("") != "" &&
+          ![diff_base, diff_target].all(t,
+            cel.bind(path, t.display_path,
+              "/" + (path.indexOf(":") < path.indexOf("/")
+                ? path.replace(":", "/", 1)
+                : path)
+            ).contains("/" + jwt.tenant + "/")
+          )
+        reason: "Cross-tenant diff denied"
+```
+
+`[diff_base, diff_target].all(t, ...)` states the both-sides requirement once
+instead of repeating the test per side, and `jwt.?tenant.orValue("")` replaces
+`has(jwt.tenant) && jwt.tenant != ""` with the optional selector.
+
+The tenant has to own the resource, so it is matched as `/<tenant>/` against the
+target with a leading `/` prepended. Exactly one `:` is folded to `/` first, the
+one before the first `/`, because that is the separator between a host and a
+path: in an SCP-style git target, in a scheme, and in a registry port. Every
+later `:` opens a tag or a digest and stays inside its component:
+
+| target | tenant `acme` |
+| --- | --- |
+| `github.com/acme/repo` | allowed |
+| `git@github.com:acme/repo` | allowed |
+| `ghcr.io/acme/app:v1` | allowed |
+| `/srv/tenants/acme/project` | allowed |
+| `github.com/other/acme` | denied, `acme` is only the repository name |
+| `ghcr.io/other/acme:v1` | denied, a tag does not make `acme` an owner |
+| `ghcr.io/other/app:acme` | denied, `acme` is only the tag |
+| `github.com/acme-corp-archive/repo` | denied, not a whole component |
+
+Folding every `:` is the mistake to avoid here. It reads
+`ghcr.io/other/acme:v1` as `/ghcr.io/other/acme/v1`, which contains `/acme/`, so
+an image whose repository is named after a tenant passes that tenant's gate
+whoever owns it, with the attacker supplying the tag that makes the repository
+name look like a namespace.
+
+Three shortcuts all fail, and each one looks reasonable until it does not:
+
+- `display_path.contains(jwt.tenant)` accepts the tenant anywhere in the path,
+  so tenant `acme` reaches `github.com/acme-corp-archive/...`, and an empty
+  claim makes it true for every path, causing an unintended allow effect.
+- Interpolating the claim into a regex, as in
+  `matches("(^|[/:])" + jwt.tenant + "([/:]|$)")`, fixes the substring case but
+  lets the claim change the pattern. Tenant `acme.com` then matches
+  `github.com/acmeXcom/repo`, because `.` is a wildcard.
+- Accepting the tenant as any path component fixes both of those and still
+  authorizes a resource someone else owns whenever the tenant name happens to
+  appear later in the path, such as a repository or an image tag named `acme`.
+
+Requiring `/<tenant>/` avoids all three: the claim is compared literally, so
+nothing in it is interpreted, and it has to sit in a position that owns
+something rather than merely appear. Keep the explicit `jwt.tenant != ""`
+regardless: requests that should carry a tenant but do not are better rejected
+outright, either by a separate rule or by listing `tenant` in
+`auth.required_claims`.
+
+A policy runs on an operation when it declares that operation's entrypoint, or
+when it declares no `entrypoints` at all. A policy scoped to
+`service_scan_request` does not run on diff or list requests, and a policy
+written for a CLI entrypoint such as `scan_vulnerability` does not run on server
+requests. Policies can also read `env.command`, which is `server` for every
+request the server evaluates.
 
 Example authorization policy:
 
@@ -228,11 +314,20 @@ policies:
     rules:
       - action: deny
         when: |
-          has(jwt.tenant) &&
-          has(request.target) &&
-          !request.target.contains(jwt.tenant)
+          jwt.?tenant.orValue("") != "" &&
+          request.?target.orValue("") != "" &&
+          !cel.bind(path, request.target,
+            "/" + (path.indexOf(":") < path.indexOf("/")
+              ? path.replace(":", "/", 1)
+              : path)
+          ).contains("/" + jwt.tenant + "/")
         reason: "Cross-tenant access denied"
 ```
+
+This is the same namespace-ownership test described above. Keep the non-empty
+check on `request.target`: some procedures name no resource at all
+(`SecretsService` `Verify`, `ListDetectors`, `RegisterDetector`, and
+`SBOMService` `Diff`), and without it this rule denies them unconditionally.
 
 See [AGENTS.md](../../AGENTS.md#server-authentication--multi-tenancy) for comprehensive multi-tenant configuration.
 

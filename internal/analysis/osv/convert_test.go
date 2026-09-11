@@ -6,6 +6,9 @@ import (
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	"github.com/temporalio/deputy/internal/vulnerability"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func tTime(tstr string) time.Time { tm, _ := time.Parse(time.RFC3339, tstr); return tm }
@@ -15,16 +18,16 @@ func tTime(tstr string) time.Time { tm, _ := time.Parse(time.RFC3339, tstr); ret
 // PackageFixes even though the queried module's own path has no fix. This is
 // the data the fix resolver uses to recommend a migration.
 func Test_ProcessOSVVulnerability_PackageFixes(t *testing.T) {
-	vuln := osvschema.Vulnerability{
-		ID: "GHSA-test",
-		Affected: []osvschema.Affected{
+	vuln := &osvschema.Vulnerability{
+		Id: "GHSA-test",
+		Affected: []*osvschema.Affected{
 			{
-				Package: osvschema.Package{Name: "github.com/docker/docker", Ecosystem: "Go"},
-				Ranges:  []osvschema.Range{{Events: []osvschema.Event{{Introduced: "0"}, {LastAffected: "28.5.2"}}}},
+				Package: &osvschema.Package{Name: "github.com/docker/docker", Ecosystem: "Go"},
+				Ranges:  []*osvschema.Range{{Events: []*osvschema.Event{{Introduced: "0"}, {LastAffected: "28.5.2"}}}},
 			},
 			{
-				Package: osvschema.Package{Name: "github.com/moby/moby/v2", Ecosystem: "Go"},
-				Ranges:  []osvschema.Range{{Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "2.0.0-beta.8"}}}},
+				Package: &osvschema.Package{Name: "github.com/moby/moby/v2", Ecosystem: "Go"},
+				Ranges:  []*osvschema.Range{{Events: []*osvschema.Event{{Introduced: "0"}, {Fixed: "2.0.0-beta.8"}}}},
 			},
 		},
 	}
@@ -56,17 +59,17 @@ func Test_ProcessOSVVulnerability_PackageFixes(t *testing.T) {
 }
 
 func Test_ProcessOSVVulnerability_basic_fields(t *testing.T) {
-	vuln := osvschema.Vulnerability{
-		ID:               "GHSA-xxxx",
+	vuln := &osvschema.Vulnerability{
+		Id:               "GHSA-xxxx",
 		Summary:          "Test summary",
 		Details:          "Detailed info",
-		Published:        tTime("2020-01-02T15:04:05Z"),
-		Modified:         tTime("2020-02-03T12:00:00Z"),
+		Published:        timestamppb.New(tTime("2020-01-02T15:04:05Z")),
+		Modified:         timestamppb.New(tTime("2020-02-03T12:00:00Z")),
 		Aliases:          []string{"CVE-2020-1", "GO-2020-1"},
-		Severity:         []osvschema.Severity{{Type: "CVSS_V3", Score: "7.8"}},
-		DatabaseSpecific: map[string]any{"severity": "HIGH"},
-		References:       []osvschema.Reference{{URL: "https://example.com"}},
-		Affected:         []osvschema.Affected{{Ranges: []osvschema.Range{{Events: []osvschema.Event{{Fixed: "v1.2.3"}}}}}},
+		Severity:         []*osvschema.Severity{{Type: osvschema.Severity_CVSS_V3, Score: "7.8"}},
+		DatabaseSpecific: osvStruct(map[string]any{"severity": "HIGH"}),
+		References:       []*osvschema.Reference{{Url: "https://example.com"}},
+		Affected:         []*osvschema.Affected{{Ranges: []*osvschema.Range{{Events: []*osvschema.Event{{Fixed: "v1.2.3"}}}}}},
 	}
 	out := ProcessOSVVulnerability(vuln, PkgInput{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "v1.0.0", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}})
 	if out.ID != "GHSA-xxxx" {
@@ -90,7 +93,7 @@ func Test_ProcessOSVVulnerability_basic_fields(t *testing.T) {
 }
 
 func Test_ProcessOSVVulnerability_no_aliases_severity(t *testing.T) {
-	vuln := osvschema.Vulnerability{ID: "V-1"}
+	vuln := &osvschema.Vulnerability{Id: "V-1"}
 	out := ProcessOSVVulnerability(vuln, PkgInput{QueryKey: QueryKey{Name: "pkg"}})
 	if out.CVE != "" {
 		t.Fatalf("unexpected CVE: %q", out.CVE)
@@ -100,69 +103,69 @@ func Test_ProcessOSVVulnerability_no_aliases_severity(t *testing.T) {
 func Test_resolveSeverity(t *testing.T) {
 	tests := []struct {
 		name      string
-		vuln      osvschema.Vulnerability
+		vuln      *osvschema.Vulnerability
 		wantScore string
 		wantType  string
 	}{
 		{
 			name: "CVSS_V3 takes priority for non-GHSA",
-			vuln: osvschema.Vulnerability{
-				ID:               "CVE-2020-1234",
-				Severity:         []osvschema.Severity{{Type: "CVSS_V3", Score: "9.8"}},
-				DatabaseSpecific: map[string]any{"severity": "MEDIUM"},
+			vuln: &osvschema.Vulnerability{
+				Id:               "CVE-2020-1234",
+				Severity:         []*osvschema.Severity{{Type: osvschema.Severity_CVSS_V3, Score: "9.8"}},
+				DatabaseSpecific: osvStruct(map[string]any{"severity": "MEDIUM"}),
 			},
 			wantScore: "9.8",
 			wantType:  "CVSS_V3",
 		},
 		{
 			name: "GHSA overrides CVSS for GHSA advisory with HIGH/CRITICAL",
-			vuln: osvschema.Vulnerability{
-				ID:               "GHSA-xxxx",
-				Severity:         []osvschema.Severity{{Type: "CVSS_V3", Score: "9.8"}},
-				DatabaseSpecific: map[string]any{"severity": "CRITICAL"},
+			vuln: &osvschema.Vulnerability{
+				Id:               "GHSA-xxxx",
+				Severity:         []*osvschema.Severity{{Type: osvschema.Severity_CVSS_V3, Score: "9.8"}},
+				DatabaseSpecific: osvStruct(map[string]any{"severity": "CRITICAL"}),
 			},
 			wantScore: "CRITICAL",
 			wantType:  "GHSA",
 		},
 		{
 			name: "CVSS_V2 fallback",
-			vuln: osvschema.Vulnerability{
-				ID:       "CVE-2020-1234",
-				Severity: []osvschema.Severity{{Type: "CVSS_V2", Score: "7.5"}},
+			vuln: &osvschema.Vulnerability{
+				Id:       "CVE-2020-1234",
+				Severity: []*osvschema.Severity{{Type: osvschema.Severity_CVSS_V2, Score: "7.5"}},
 			},
 			wantScore: "7.5",
 			wantType:  "CVSS_V2",
 		},
 		{
 			name: "GHSA database_specific when no CVSS",
-			vuln: osvschema.Vulnerability{
-				ID:               "GHSA-xxxx",
-				DatabaseSpecific: map[string]any{"severity": "HIGH"},
+			vuln: &osvschema.Vulnerability{
+				Id:               "GHSA-xxxx",
+				DatabaseSpecific: osvStruct(map[string]any{"severity": "HIGH"}),
 			},
 			wantScore: "HIGH",
 			wantType:  "GHSA",
 		},
 		{
 			name: "non-GHSA database_specific high severity",
-			vuln: osvschema.Vulnerability{
-				ID:               "CVE-2020-1234",
-				DatabaseSpecific: map[string]any{"severity": "CRITICAL"},
+			vuln: &osvschema.Vulnerability{
+				Id:               "CVE-2020-1234",
+				DatabaseSpecific: osvStruct(map[string]any{"severity": "CRITICAL"}),
 			},
 			wantScore: "CRITICAL",
 			wantType:  "GHSA",
 		},
 		{
 			name: "non-GHSA database_specific low severity",
-			vuln: osvschema.Vulnerability{
-				ID:               "CVE-2020-1234",
-				DatabaseSpecific: map[string]any{"severity": "LOW"},
+			vuln: &osvschema.Vulnerability{
+				Id:               "CVE-2020-1234",
+				DatabaseSpecific: osvStruct(map[string]any{"severity": "LOW"}),
 			},
 			wantScore: "LOW",
 			wantType:  "database_specific",
 		},
 		{
 			name:      "no severity info",
-			vuln:      osvschema.Vulnerability{ID: "V-1"},
+			vuln:      &osvschema.Vulnerability{Id: "V-1"},
 			wantScore: "",
 			wantType:  "",
 		},
@@ -206,8 +209,8 @@ func Test_isHighOrCritical(t *testing.T) {
 }
 
 func Test_ProcessOSVVulnerability_LayerDetails(t *testing.T) {
-	vuln := osvschema.Vulnerability{
-		ID:      "CVE-2024-1234",
+	vuln := &osvschema.Vulnerability{
+		Id:      "CVE-2024-1234",
 		Summary: "Test vulnerability with layer details",
 	}
 	input := PkgInput{
@@ -251,8 +254,8 @@ func Test_ProcessOSVVulnerability_LayerDetails(t *testing.T) {
 }
 
 func Test_ProcessOSVVulnerability_NilLayerDetails(t *testing.T) {
-	vuln := osvschema.Vulnerability{
-		ID:      "CVE-2024-5678",
+	vuln := &osvschema.Vulnerability{
+		Id:      "CVE-2024-5678",
 		Summary: "Test vulnerability without layer details",
 	}
 	input := PkgInput{
@@ -276,44 +279,44 @@ func Test_ProcessOSVVulnerability_NilLayerDetails(t *testing.T) {
 func Test_ProcessOSVVulnerabilityDomain_ExtractsCWEs(t *testing.T) {
 	tests := []struct {
 		name     string
-		vuln     osvschema.Vulnerability
+		vuln     *osvschema.Vulnerability
 		wantCWEs []string
 	}{
 		{
 			name: "GHSA with CWEs",
-			vuln: osvschema.Vulnerability{
-				ID:      "GHSA-1234-5678-abcd",
+			vuln: &osvschema.Vulnerability{
+				Id:      "GHSA-1234-5678-abcd",
 				Summary: "XSS vulnerability",
-				DatabaseSpecific: map[string]any{
+				DatabaseSpecific: osvStruct(map[string]any{
 					"cwe_ids":  []any{"CWE-79", "CWE-80"},
 					"severity": "HIGH",
-				},
+				}),
 			},
 			wantCWEs: []string{"CWE-79", "CWE-80"},
 		},
 		{
 			name: "no CWEs",
-			vuln: osvschema.Vulnerability{
-				ID:      "CVE-2024-1234",
+			vuln: &osvschema.Vulnerability{
+				Id:      "CVE-2024-1234",
 				Summary: "Some vulnerability",
 			},
 			wantCWEs: nil,
 		},
 		{
 			name: "empty CWE array",
-			vuln: osvschema.Vulnerability{
-				ID:               "GHSA-xxxx-yyyy-zzzz",
-				DatabaseSpecific: map[string]any{"cwe_ids": []any{}},
+			vuln: &osvschema.Vulnerability{
+				Id:               "GHSA-xxxx-yyyy-zzzz",
+				DatabaseSpecific: osvStruct(map[string]any{"cwe_ids": []any{}}),
 			},
 			wantCWEs: nil,
 		},
 		{
 			name: "CWEs with invalid entries filtered",
-			vuln: osvschema.Vulnerability{
-				ID: "GHSA-abcd-1234-efgh",
-				DatabaseSpecific: map[string]any{
+			vuln: &osvschema.Vulnerability{
+				Id: "GHSA-abcd-1234-efgh",
+				DatabaseSpecific: osvStruct(map[string]any{
 					"cwe_ids": []any{"CWE-89", "invalid", "CWE-79"},
-				},
+				}),
 			},
 			wantCWEs: []string{"CWE-79", "CWE-89"}, // sorted by ID
 		},
@@ -339,6 +342,59 @@ func Test_ProcessOSVVulnerabilityDomain_ExtractsCWEs(t *testing.T) {
 				if string(advisory.Cwes[i]) != want {
 					t.Errorf("CWEs[%d] = %q, want %q", i, advisory.Cwes[i], want)
 				}
+			}
+		})
+	}
+}
+
+// osvStruct builds the protobuf Struct an OSV record carries in its
+// database_specific and ecosystem_specific fields. A value the Struct cannot
+// represent is a bug in the fixture, so it panics rather than returning an error.
+func osvStruct(fields map[string]any) *structpb.Struct {
+	s, err := structpb.NewStruct(fields)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
+// Test_ProcessOSVVulnerabilityDomain_AbsentDates pins the nil handling the
+// osv-schema protobuf migration forced: an OSV record omits published/modified
+// rather than sending a zero value, and the advisory must keep them absent.
+// Timestamp.AsTime would turn nil into the Unix epoch, so reading the fields
+// directly would invent a 1970 disclosure date.
+func Test_ProcessOSVVulnerabilityDomain_AbsentDates(t *testing.T) {
+	published := timestamppb.New(tTime("2021-12-10T00:00:00Z"))
+	tests := []struct {
+		name          string
+		published     *timestamppb.Timestamp
+		modified      *timestamppb.Timestamp
+		wantPublished bool
+		wantModified  bool
+	}{
+		{name: "both absent"},
+		{name: "published only", published: published, wantPublished: true},
+		{name: "modified only", modified: published, wantModified: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			advisory, _ := ProcessOSVVulnerabilityDomain(&osvschema.Vulnerability{
+				Id:        "GHSA-nodate",
+				Published: tt.published,
+				Modified:  tt.modified,
+			}, PkgInput{QueryKey: QueryKey{Name: "lodash", Version: "4.17.15", Ecosystem: "npm"}})
+			if got := advisory.GetPublished() != nil; got != tt.wantPublished {
+				t.Errorf("advisory published present = %v, want %v", got, tt.wantPublished)
+			}
+			if got := advisory.GetModified() != nil; got != tt.wantModified {
+				t.Errorf("advisory modified present = %v, want %v", got, tt.wantModified)
+			}
+			flat := flattenAdvisoryFinding(advisory, vulnerability.Finding{})
+			if (flat.Published != "") != tt.wantPublished {
+				t.Errorf("flattened published = %q, want present = %v", flat.Published, tt.wantPublished)
+			}
+			if (flat.Modified != "") != tt.wantModified {
+				t.Errorf("flattened modified = %q, want present = %v", flat.Modified, tt.wantModified)
 			}
 		})
 	}

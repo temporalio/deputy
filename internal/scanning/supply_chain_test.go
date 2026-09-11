@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/inventory/plugins/docker/dockerfilex"
 )
 
@@ -226,10 +227,10 @@ func TestCheckSupplyChain_EmptyPackages(t *testing.T) {
 func TestCheckSupplyChain_LocationsPreserved(t *testing.T) {
 	pkgs := []*extractor.Package{
 		{
-			Name:      "actions/checkout",
-			Version:   "v4",
-			PURLType:  "githubactions",
-			Locations: []string{".github/workflows/ci.yml"},
+			Name:     "actions/checkout",
+			Version:  "v4",
+			PURLType: "githubactions",
+			Location: extractor.LocationFromPath(".github/workflows/ci.yml"),
 		},
 	}
 
@@ -243,7 +244,7 @@ func TestCheckSupplyChain_LocationsPreserved(t *testing.T) {
 	}
 
 	// Verify it's a copy, not a shared reference.
-	pkgs[0].Locations[0] = "mutated"
+	dependency.SetPackagePaths(pkgs[0], []string{"mutated"})
 	if findings[0].Locations[0] == "mutated" {
 		t.Error("finding Locations should be a copy, not a shared reference")
 	}

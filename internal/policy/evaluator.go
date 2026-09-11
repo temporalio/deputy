@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/ext"
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
@@ -49,6 +48,11 @@ var (
 		"top_packages", // Triage package summaries, most urgent first
 		"base_ref",     // Diff base reference
 		"target_ref",   // Diff target reference
+		// Service diff request targets. A diff authorizes two independent
+		// resources, so service_diff_request binds a target per side instead
+		// of the single "target" the other service entrypoints bind.
+		"diff_base",
+		"diff_target",
 		// Container diff specific variables
 		"base_image",
 		"target_image",
@@ -265,8 +269,11 @@ func envWithNames(extra []string) (*cel.Env, error) {
 	slices.Sort(names)
 	names = slices.Compact(names)
 
-	opts := []cel.EnvOption{
-		cel.OptionalTypes(),
+	// Pinned cel-go libraries come first so that they, and not an unpinned
+	// registration of the same library, define the available functions. See
+	// celextensions.go for the pinned versions and why they are pinned.
+	opts := celExtensionOptions()
+	opts = append(opts,
 		// Register proto types for native proto support in CEL expressions.
 		// This enables policies to work directly with proto messages, providing:
 		// - Type-safe field access (e.g., finding.advisory.severity.level)
@@ -362,16 +369,7 @@ func envWithNames(extra []string) (*cel.Env, error) {
 			&policyv1.SecretFinding{},
 			&policyv1.SecretStats{},
 		),
-		// Standard extensions
-		ext.Strings(),
-		ext.Lists(),
-		ext.Sets(),
-		ext.Regex(),
-		// Additional extensions for richer policy expressions
-		ext.Bindings(), // cel.bind() for local variables
-		ext.Encoders(), // base64.encode/decode
-		ext.Math(),     // math functions (abs, ceil, floor, etc.)
-	}
+	)
 	// Register each input variable as a dynamically-typed CEL variable.
 	for _, name := range names {
 		if name = strings.TrimSpace(name); name != "" {

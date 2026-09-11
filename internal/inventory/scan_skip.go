@@ -13,6 +13,7 @@ import (
 	"github.com/gobwas/glob"
 	"github.com/google/osv-scalibr/extractor"
 
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
@@ -135,21 +136,26 @@ func filterGitignoredPackageLocations(ws workspace.FS, pkgs []*extractor.Package
 
 	out := make([]*extractor.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
-		if pkg == nil || len(pkg.Locations) == 0 {
+		if pkg == nil {
+			out = append(out, pkg)
+			continue
+		}
+		locations := dependency.PackagePaths(pkg)
+		if len(locations) == 0 {
 			out = append(out, pkg)
 			continue
 		}
 
-		keptLocations := slices.DeleteFunc(slices.Clone(pkg.Locations), func(loc string) bool {
+		keptLocations := slices.DeleteFunc(slices.Clone(locations), func(loc string) bool {
 			rel := scanRootRelativePath(ws.RootPath(), loc)
 			return rel != "" && ignored.Match(strings.Split(rel, "/"), false)
 		})
 		if len(keptLocations) == 0 {
 			continue
 		}
-		if len(keptLocations) != len(pkg.Locations) {
+		if len(keptLocations) != len(locations) {
 			pkgCopy := *pkg
-			pkgCopy.Locations = keptLocations
+			dependency.SetPackagePaths(&pkgCopy, keptLocations)
 			pkg = &pkgCopy
 		}
 		out = append(out, pkg)

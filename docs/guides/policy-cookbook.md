@@ -653,7 +653,7 @@ $ deputy policy lint policy/examples/*.yaml
 
 # Bundle for deployment
 $ deputy policy bundle \
-    --out production-bundle.json \
+    --output production-bundle.json \
     policy/examples/severity-guardrail.yaml \
     policy/examples/license-allowlist.yaml \
     policy/examples/block-package.yaml

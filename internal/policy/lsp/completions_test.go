@@ -16,6 +16,22 @@ func TestCELCompletionIncludesHelpers(t *testing.T) {
 	}
 }
 
+// TestModeCompletionsOfferEveryCanonicalMode pins the modes editors offer. The
+// completion derives them from the policy package rather than repeating a list
+// here, so a new execution mode reaches editors without a second edit.
+func TestModeCompletionsOfferEveryCanonicalMode(t *testing.T) {
+	line := "    mode: "
+	items := completionItems(line, len(line))
+	got := make([]string, 0, len(items))
+	for _, it := range items {
+		got = append(got, it.Label)
+	}
+	want := []string{"enforce", "advisory"}
+	if !slices.Equal(want, got) {
+		t.Errorf("completionItems(%q) labels = %v, want %v", line, got, want)
+	}
+}
+
 func TestCELCompletionFieldAfterEnvDot(t *testing.T) {
 	line := "when: env."
 	items := celCompletion(line, len(line))

@@ -14,6 +14,7 @@ import (
 	"github.com/google/osv-scalibr/extractor/filesystem"
 	scalibrfs "github.com/google/osv-scalibr/fs"
 	"github.com/google/osv-scalibr/inventory"
+	"github.com/google/osv-scalibr/inventory/location"
 	"github.com/google/osv-scalibr/plugin"
 	"github.com/google/osv-scalibr/purl"
 	"github.com/temporalio/deputy/internal/purlx"
@@ -258,10 +259,10 @@ func (s *parseState) handleUses(ctx context.Context, parentPath string, usesStr 
 		return nil, nil
 	}
 	pkg := &extractor.Package{
-		Name:      repo,
-		Version:   ref,
-		PURLType:  purlx.TypeGitHubActions,
-		Locations: []string{parentPath},
+		Name:     repo,
+		Version:  ref,
+		PURLType: purlx.TypeGitHubActions,
+		Location: extractor.LocationFromPath(parentPath),
 		Metadata: &UsesMetadata{
 			Raw:     usesStr,
 			Subpath: subpath,
@@ -275,6 +276,11 @@ type UsesMetadata struct {
 	Raw     string
 	Subpath string
 }
+
+// IsProtoable marks UsesMetadata as OSV-SCALIBR package metadata. Deputy attaches it to
+// an extractor.Package but never converts it to a proto message, so the marker
+// only satisfies the upstream metadata.Protoable interface.
+func (*UsesMetadata) IsProtoable() {}
 
 // usesSubpath returns the action subpath recorded in a package's metadata, or
 // "" when there is none. Used to keep same-repo subpath actions distinct.
@@ -315,10 +321,10 @@ func dockerPackageFromRef(ref, parentPath string) *extractor.Package {
 		purlType = purl.TypeOCI
 	}
 	return &extractor.Package{
-		Name:      name,
-		Version:   version,
-		PURLType:  purlType,
-		Locations: []string{parentPath},
+		Name:     name,
+		Version:  version,
+		PURLType: purlType,
+		Location: extractor.LocationFromPath(parentPath),
 		Metadata: &UsesMetadata{
 			Raw: "docker://" + ref,
 		},
@@ -477,7 +483,7 @@ func dedupPackages(in []*extractor.Package) []*extractor.Package {
 			seen[key] = p
 			continue
 		}
-		existing.Locations = appendUnique(existing.Locations, p.Locations...)
+		mergeLocation(existing, p)
 	}
 	out := make([]*extractor.Package, 0, len(seen))
 	for _, p := range seen {
@@ -486,24 +492,19 @@ func dedupPackages(in []*extractor.Package) []*extractor.Package {
 	return out
 }
 
-// appendUnique appends non-empty, non-duplicate strings to dst.
-func appendUnique(dst []string, src ...string) []string {
-	if len(src) == 0 {
-		return dst
+// mergeLocation folds src's file into dst's location set. Every parsed uses
+// entry carries exactly one descriptor path, so dst keeps its own descriptor
+// and the additional workflow file becomes a related location, which is how
+// PackageLocation models one package declared in several files.
+func mergeLocation(dst, src *extractor.Package) {
+	path := src.Location.PathOrEmpty()
+	if path == "" || path == dst.Location.PathOrEmpty() {
+		return
 	}
-	seen := map[string]struct{}{}
-	for _, d := range dst {
-		seen[d] = struct{}{}
-	}
-	for _, s := range src {
-		if s == "" {
-			continue
+	for _, related := range dst.Location.Related {
+		if related.PathOrEmpty() == path {
+			return
 		}
-		if _, ok := seen[s]; ok {
-			continue
-		}
-		seen[s] = struct{}{}
-		dst = append(dst, s)
 	}
-	return dst
+	dst.Location.Related = append(dst.Location.Related, location.FromPath(path))
 }

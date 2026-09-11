@@ -169,3 +169,68 @@ func TestRunDiffPolicies_LicenseDataReachesPolicies(t *testing.T) {
 		t.Errorf("warn subject = %q, want example.com/unlicensed", got)
 	}
 }
+
+// TestRunDiffPolicies_BindsRefsAtEveryDiffEntrypoint tests that the refs a diff
+// compares are readable from every diff entrypoint, under the snake_case names
+// the policy engine declares.
+//
+// They were not. The per-change payload bound base_ref and target_ref, while
+// the report and per-vulnerability payloads bound baseRef and targetRef, which
+// no policy can read: the CEL environment declares only the snake_case names,
+// so the camelCase keys were unreachable and the declared names were missing
+// from the activation. Reading a declared but unbound variable is an evaluation
+// error rather than an absent value, so a diff_report policy mentioning
+// base_ref failed the whole run instead of enforcing anything.
+func TestRunDiffPolicies_BindsRefsAtEveryDiffEntrypoint(t *testing.T) {
+	bundle := `policies:
+  - name: report-refs
+    entrypoints: [diff_report]
+    rules:
+      - action: warn
+        when: base_ref == "main" && target_ref == "feature" && repo == "example.com/repo"
+        reason: report sees both refs
+  - name: change-refs
+    entrypoints: [diff_dependency_change]
+    rules:
+      - action: warn
+        when: base_ref == "main" && target_ref == "feature"
+        reason: change sees both refs
+  - name: vulnerability-refs
+    entrypoints: [diff_vulnerability]
+    rules:
+      - action: warn
+        when: base_ref == "main" && target_ref == "feature"
+        reason: vulnerability sees both refs
+`
+	path := filepath.Join(t.TempDir(), "refs.yaml")
+	if err := os.WriteFile(path, []byte(bundle), 0o600); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+
+	diffReport := DiffPolicyReport{
+		Repo:      "example.com/repo",
+		BaseRef:   "main",
+		TargetRef: "feature",
+		Changes: []*diffv1.PackageChange{
+			{Package: &dependencyv1.Package{Name: "golang.org/x/text", Version: "0.39.0", Ecosystem: "go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_UPGRADED, BaseVersion: "0.37.0", TargetVersion: "0.39.0", IsDirect: true},
+		},
+	}
+
+	results, err := runDiffPolicies(t.Context(), []string{path}, diffReport)
+	if err != nil {
+		t.Fatalf("runDiffPolicies: %v", err)
+	}
+
+	// One warning per entrypoint that carries the refs. The vulnerability rule
+	// has nothing to evaluate over, since this report has no findings, so the
+	// report and per-change rules are what must fire.
+	fired := make(map[string]bool, len(results))
+	for _, r := range results {
+		fired[r.GetRuleName()] = true
+	}
+	for _, rule := range []string{"report-refs", "change-refs"} {
+		if !fired[rule] {
+			t.Errorf("rule %q did not fire: the refs are not readable at its entrypoint (results: %v)", rule, results)
+		}
+	}
+}

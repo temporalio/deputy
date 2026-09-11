@@ -150,11 +150,11 @@ func (e *Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (i
 				pkgVersion = md.LockedVersion
 			}
 			pkgs = append(pkgs, &extractor.Package{
-				Name:      tool.Key,
-				Version:   pkgVersion,
-				PURLType:  purlx.TypeMise,
-				Locations: []string{input.Path},
-				Metadata:  md,
+				Name:     tool.Key,
+				Version:  pkgVersion,
+				PURLType: purlx.TypeMise,
+				Location: extractor.LocationFromPath(input.Path),
+				Metadata: md,
 			})
 		}
 	}

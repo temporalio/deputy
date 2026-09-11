@@ -136,15 +136,12 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			}
 
 			// Set up output writer
-			var outW io.Writer = cmd.OutOrStdout()
-			if outPath != "" && outPath != "-" {
-				f, err := os.Create(outPath)
-				if err != nil {
-					return fmt.Errorf("failed to create output file: %w", err)
-				}
-				defer f.Close()
-				outW = f
+			out, err := openOutputWriter(cmd, outPath)
+			if err != nil {
+				return err
 			}
+			defer out.Close()
+			outW := out.Writer
 
 			// Render-only mode: re-render a previously saved structured output
 			// without re-running analysis. CI uses this to derive both counts
@@ -1142,8 +1139,8 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 	// Report-level evaluation: no single subject applies.
 	payload := map[string]any{
 		"repo":            diffReport.Repo,
-		"baseRef":         diffReport.BaseRef,
-		"targetRef":       diffReport.TargetRef,
+		"base_ref":        diffReport.BaseRef,
+		"target_ref":      diffReport.TargetRef,
 		"changes":         protoChanges,
 		"vulnerabilities": protoFindings,
 	}
@@ -1174,8 +1171,8 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 	for _, finding := range protoFindings {
 		vulnPayload := map[string]any{
 			"repo":          diffReport.Repo,
-			"baseRef":       diffReport.BaseRef,
-			"targetRef":     diffReport.TargetRef,
+			"base_ref":      diffReport.BaseRef,
+			"target_ref":    diffReport.TargetRef,
 			"vulnerability": finding,
 			"pkg":           finding.Package, // Alias for consistency with scan entrypoints
 		}

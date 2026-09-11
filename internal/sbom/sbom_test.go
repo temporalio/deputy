@@ -1093,7 +1093,7 @@ func Test_buildProtobomDocument_dedupesBaseImageNodes(t *testing.T) {
 		t.Fatalf("write Dockerfile: %v", err)
 	}
 	pkgs := []*extractor.Package{
-		{Name: "library/python", Version: "3.10", PURLType: "docker", Locations: []string{"Dockerfile"}},
+		{Name: "library/python", Version: "3.10", PURLType: "docker", Location: extractor.LocationFromPath("Dockerfile")},
 	}
 
 	doc, err := buildProtobomDocument(t.Context(), ws, "https://example.com/repo", "HEAD", "test", pkgs, nil, nil)

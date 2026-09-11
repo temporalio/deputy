@@ -219,10 +219,10 @@ func baseImageToPackage(imageRef, dockerfilePath string, stage dockerfile.Stage)
 	}
 
 	return &extractor.Package{
-		Name:      imageName,
-		Version:   version,
-		PURLType:  purlType,
-		Locations: []string{dockerfilePath},
+		Name:     imageName,
+		Version:  version,
+		PURLType: purlType,
+		Location: extractor.LocationFromPath(dockerfilePath),
 		Metadata: &BaseImageMetadata{
 			Raw:          rawRef,
 			IsExpression: strings.Contains(stage.BaseImage, "${"),
@@ -249,6 +249,11 @@ type BaseImageMetadata struct {
 	// IsBuilder indicates if this stage is only used as a build stage.
 	IsBuilder bool
 }
+
+// IsProtoable marks BaseImageMetadata as OSV-SCALIBR package metadata. Deputy
+// attaches it to an extractor.Package but never converts it to a proto message,
+// so the marker only satisfies the upstream metadata.Protoable interface.
+func (*BaseImageMetadata) IsProtoable() {}
 
 // splitImageRef parses a container image reference into name and version/tag or digest.
 // It reports hasDigest=true for @sha256:... style references.

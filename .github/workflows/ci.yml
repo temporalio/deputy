@@ -7,8 +7,12 @@ name: CI
 on:
   push:
     branches: [main]
+  # No branch filter. A stacked pull request targets its parent branch rather
+  # than main, and a filter of [main] gives those pull requests no checks at
+  # all, silently: the workflow does not appear as pending or skipped, it
+  # simply never exists. Reviewing an unverified stack is worse than reviewing
+  # one large verified branch, so this stays unfiltered.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read

@@ -36,6 +36,7 @@ import (
 	inv "github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/license"
 	"github.com/temporalio/deputy/internal/logs"
+	"github.com/temporalio/deputy/internal/purlx"
 	"github.com/temporalio/deputy/internal/repository"
 	"github.com/temporalio/deputy/internal/repository/workspace"
 	"golang.org/x/mod/module"
@@ -1719,7 +1720,7 @@ func depsDevKeyFromPackage(pkg *extractor.Package, eco string, module string) (p
 		case "npm":
 			name := pu.Name
 			if pu.Namespace != "" {
-				name = "@" + pu.Namespace + "/" + pu.Name
+				name = purlx.NPMPackageName(pu.Namespace, pu.Name)
 			}
 			return pb.System_NPM, name
 		case "pypi":

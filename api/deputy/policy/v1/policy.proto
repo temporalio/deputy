@@ -277,15 +277,34 @@ message SbomComponentPolicyInput {
 
 // DiffReportPolicyInput is the input for the diff_report entrypoint.
 // Evaluated once after a git diff completes.
+//
+// A diff at this entrypoint names two refs within one repository, not two
+// independent resources, which is why it carries refs rather than targets. The
+// two targets a service-side diff compares live on ServiceDiffRequestPolicyInput
+// instead.
 message DiffReportPolicyInput {
-  // Changes lists all dependency changes between refs.
+  // Fields 2 and 3 held diff_base and diff_target, two Target messages that no
+  // caller ever populated. A CLI diff has refs, not targets.
+  reserved 2, 3;
+  reserved "diff_base", "diff_target";
+
+  // Changes lists all dependency changes between the refs.
+  //
+  // The runtime binds deputy.diff.v1.PackageChange values here. This message
+  // cannot declare that type, because deputy.diff.v1 imports this file and
+  // naming it would close an import cycle, which is why the shape is restated
+  // locally. Unifying the two is tracked in the diff_report binding issue.
   repeated DependencyChange changes = 1;
-  // BaseTarget is the baseline (older) target.
-  deputy.target.v1.Target base_target = 2;
-  // TargetTarget is the target (newer) being compared.
-  deputy.target.v1.Target target_target = 3;
   // Env provides execution environment context.
   Environment env = 4;
+  // Repo is the repository the diff was taken in.
+  string repo = 5;
+  // BaseRef is the git ref the comparison starts from.
+  string base_ref = 6;
+  // TargetRef is the git ref compared against the base.
+  string target_ref = 7;
+  // Vulnerabilities lists the findings the diff reported.
+  repeated deputy.vulnerability.v1.Finding vulnerabilities = 8;
 }
 
 // DependencyChange represents a single dependency change for diff policies.
@@ -309,6 +328,12 @@ message DiffDependencyChangePolicyInput {
   DependencyChange change = 1;
   // Env provides execution environment context.
   Environment env = 2;
+  // Repo is the repository the diff was taken in.
+  string repo = 3;
+  // BaseRef is the git ref the comparison starts from.
+  string base_ref = 4;
+  // TargetRef is the git ref compared against the base.
+  string target_ref = 5;
 }
 
 // DiffVulnerabilityPolicyInput is the input for the diff_vulnerability entrypoint.
@@ -320,6 +345,12 @@ message DiffVulnerabilityPolicyInput {
   string change_kind = 2;
   // Env provides execution environment context.
   Environment env = 3;
+  // Repo is the repository the diff was taken in.
+  string repo = 4;
+  // BaseRef is the git ref the comparison starts from.
+  string base_ref = 5;
+  // TargetRef is the git ref compared against the base.
+  string target_ref = 6;
 }
 
 // -----------------------------------------------------------------------------
@@ -717,8 +748,8 @@ message ServiceSbomRequestPolicyInput {
 message ServiceDiffRequestPolicyInput {
   JWTClaims jwt = 1;
   ServiceRequest request = 2;
-  deputy.target.v1.Target base_target = 3;
-  deputy.target.v1.Target target_target = 4;
+  deputy.target.v1.Target diff_base = 3;
+  deputy.target.v1.Target diff_target = 4;
   Environment env = 5;
 }
 

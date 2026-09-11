@@ -285,7 +285,7 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 			Ecosystem: ecosystem,
 			Direct:    isDirect,
 			Depth:     depth,
-			Locations: pkg.Locations,
+			Locations: dependency.PackagePaths(pkg),
 		}
 
 		g.nodes[purl] = node

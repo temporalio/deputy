@@ -349,3 +349,49 @@ func TestGenerateExample_JSONRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// nilExampleVariables names the profile variables that generateVariableValue
+// still has no case for, so `deputy policy examples <entrypoint>` emits them as
+// null. Entries should only ever be removed: adding one means shipping a fixture
+// that contradicts the contract it documents, which is what
+// TestEveryProfileVariableGeneratesAValue exists to prevent.
+//
+// The sandbox entrypoints are the bulk of it, and every one of their variables
+// is missing, so their generated examples are entirely null today. Tracked as
+// its own issue rather than fixed here.
+var nilExampleVariables = map[string]bool{
+	"command":          true,
+	"context":          true,
+	"host":             true,
+	"port":             true,
+	"protocol":         true,
+	"requested_config": true,
+	"sandbox_config":   true,
+	"source":           true,
+	"top_packages":     true,
+	"workspace_dir":    true,
+}
+
+// TestEveryProfileVariableGeneratesAValue tests that a variable a binding
+// profile advertises can actually be generated.
+//
+// A profile is what `deputy policy examples` iterates, and generateVariableValue
+// returns nil for any name its switch does not handle, so advertising a variable
+// without adding a case emits `null` into a fixture policy authors copy. That
+// happened twice: the two diff sides generated null after being added to the
+// service profile, and the diff refs generated null the whole time they sat in
+// the diff_dependency_change profile.
+func TestEveryProfileVariableGeneratesAValue(t *testing.T) {
+	for ep, profile := range BindingProfiles {
+		names := append(append([]string{}, profile.Required...), profile.Optional...)
+		for _, name := range names {
+			if nilExampleVariables[name] {
+				continue
+			}
+			value, _ := generateVariableValue(ep, name, ExampleLevelComprehensive, false)
+			if value == nil {
+				t.Errorf("%s advertises %q and generateVariableValue has no case for it, so the generated example carries null; add a case rather than recording it as a known gap", ep, name)
+			}
+		}
+	}
+}

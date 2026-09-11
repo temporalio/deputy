@@ -13,7 +13,7 @@ import (
 	"github.com/temporalio/deputy/internal/vulnerability"
 	"github.com/temporalio/deputy/internal/vulnerability/severity"
 	"github.com/temporalio/deputy/internal/vulnerability/weakness/cwe"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // ProcessOSVVulnerability converts a raw OSV schema vulnerability into the
@@ -22,7 +22,7 @@ import (
 // normalizes timestamp formatting, extracts reference URLs, severity score/type
 // preference (favoring CVSS metrics unless GHSA severity is authoritative),
 // and aggregates fixed version markers relevant to the matched package.
-func ProcessOSVVulnerability(vuln osvschema.Vulnerability, input PkgInput) Vulnerability {
+func ProcessOSVVulnerability(vuln *osvschema.Vulnerability, input PkgInput) Vulnerability {
 	advisory, finding := ProcessOSVVulnerabilityDomain(vuln, input)
 	return flattenAdvisoryFinding(advisory, finding)
 }
@@ -53,14 +53,14 @@ func VulnerabilitiesFromProto(findings []*vulnerabilityv1.Finding, advisories ma
 // ProcessOSVVulnerabilityDomain converts a raw OSV vulnerability into the
 // domain Advisory + Finding pair, keeping the advisory metadata separate from
 // scan-time occurrence details.
-func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput) (*vulnerabilityv1.Advisory, vulnerability.Finding) {
+func ProcessOSVVulnerabilityDomain(vuln *osvschema.Vulnerability, input PkgInput) (*vulnerabilityv1.Advisory, vulnerability.Finding) {
 	advisory := &vulnerabilityv1.Advisory{
-		Id:      vuln.ID,
-		Summary: vuln.Summary,
-		Details: vuln.Details,
+		Id:      vuln.GetId(),
+		Summary: vuln.GetSummary(),
+		Details: vuln.GetDetails(),
 	}
 	finding := vulnerability.Finding{
-		AdvisoryID: vuln.ID,
+		AdvisoryID: vuln.GetId(),
 		Dependency: dependency.ID{
 			Name:      input.Name,
 			Ecosystem: input.Ecosystem,
@@ -73,14 +73,10 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 		LayerDetails: dependency.CloneLayerDetails(input.LayerDetails),
 	}
 
-	if !vuln.Published.IsZero() {
-		advisory.Published = timestamppb.New(vuln.Published)
-	}
-	if !vuln.Modified.IsZero() {
-		advisory.Modified = timestamppb.New(vuln.Modified)
-	}
-	if vuln.Aliases != nil {
-		advisory.Aliases = slices.Clone(vuln.Aliases)
+	vulnerability.SetAdvisoryPublished(advisory, vulnerability.OSVTime(vuln.GetPublished()))
+	vulnerability.SetAdvisoryModified(advisory, vulnerability.OSVTime(vuln.GetModified()))
+	if vuln.GetAliases() != nil {
+		advisory.Aliases = slices.Clone(vuln.GetAliases())
 	}
 
 	// Prefer CVE alias; fallback to GO- or GHSA-
@@ -95,11 +91,9 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 	advisory.Severity = vulnerability.NewSeverity(sev, sevType)
 
 	// References
-	if vuln.References != nil {
-		for _, ref := range vuln.References {
-			if ref.URL != "" {
-				advisory.References = append(advisory.References, ref.URL)
-			}
+	for _, ref := range vuln.GetReferences() {
+		if ref.GetUrl() != "" {
+			advisory.References = append(advisory.References, ref.GetUrl())
 		}
 	}
 
@@ -108,50 +102,49 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 	// (e.g., a Go major-version migration github.com/foo -> github.com/foo/v2)
 	// so remediation can recommend a migration instead of an impossible in-place
 	// upgrade. See [vulnerability.Consolidated.PackageFixes].
-	if vuln.Affected != nil {
-		byModule := map[string]*vulnerabilityv1.PackageFix{}
-		var moduleOrder []string
-		for _, a := range vuln.Affected {
-			var fixes []string
-			for _, r := range a.Ranges {
-				for _, e := range r.Events {
-					if e.Fixed != "" {
-						fixes = append(fixes, e.Fixed)
-					}
+	byModule := map[string]*vulnerabilityv1.PackageFix{}
+	var moduleOrder []string
+	for _, a := range vuln.GetAffected() {
+		var fixes []string
+		for _, r := range a.GetRanges() {
+			for _, e := range r.GetEvents() {
+				if e.GetFixed() != "" {
+					fixes = append(fixes, e.GetFixed())
 				}
 			}
-			if len(fixes) == 0 {
-				continue
-			}
-			// Fixes on this dependency's own module path drive in-place upgrades.
-			if a.Package.Name == "" || strings.EqualFold(a.Package.Name, input.Name) {
-				advisory.FixedVersions = append(advisory.FixedVersions, fixes...)
-			}
-			// Record fixes per module path (including sibling modules) so the
-			// resolver can discover migration targets.
-			if a.Package.Name == "" {
-				continue
-			}
-			pf, ok := byModule[a.Package.Name]
-			if !ok {
-				pf = &vulnerabilityv1.PackageFix{Module: a.Package.Name, Ecosystem: string(a.Package.Ecosystem)}
-				byModule[a.Package.Name] = pf
-				moduleOrder = append(moduleOrder, a.Package.Name)
-			}
-			pf.FixedVersions = append(pf.FixedVersions, fixes...)
 		}
-		for _, m := range moduleOrder {
-			advisory.PackageFixes = append(advisory.PackageFixes, byModule[m])
+		if len(fixes) == 0 {
+			continue
 		}
+		name := a.GetPackage().GetName()
+		// Fixes on this dependency's own module path drive in-place upgrades.
+		if name == "" || strings.EqualFold(name, input.Name) {
+			advisory.FixedVersions = append(advisory.FixedVersions, fixes...)
+		}
+		// Record fixes per module path (including sibling modules) so the
+		// resolver can discover migration targets.
+		if name == "" {
+			continue
+		}
+		pf, ok := byModule[name]
+		if !ok {
+			pf = &vulnerabilityv1.PackageFix{Module: name, Ecosystem: a.GetPackage().GetEcosystem()}
+			byModule[name] = pf
+			moduleOrder = append(moduleOrder, name)
+		}
+		pf.FixedVersions = append(pf.FixedVersions, fixes...)
 	}
-	if imports := extractGoImports(vuln.Affected, input); len(imports) > 0 {
+	for _, m := range moduleOrder {
+		advisory.PackageFixes = append(advisory.PackageFixes, byModule[m])
+	}
+	if imports := extractGoImports(vuln.GetAffected(), input); len(imports) > 0 {
 		finding.AffectedImports = vulnerability.CloneAffectedImports(imports)
 	}
-	if ds := extractDatabaseSpecificStrings(vuln.DatabaseSpecific); len(ds) > 0 {
+	if ds := extractDatabaseSpecificStrings(vuln.GetDatabaseSpecific()); len(ds) > 0 {
 		advisory.DatabaseSpecific = ds
 	}
 	// Extract CWEs from database_specific.cwe_ids (GHSA records)
-	if cwes := cwe.ExtractFromDatabaseSpecific(vuln.DatabaseSpecific); len(cwes) > 0 {
+	if cwes := cwe.ExtractFromDatabaseSpecific(vuln.GetDatabaseSpecific().AsMap()); len(cwes) > 0 {
 		vulnerability.SetAdvisoryCWEs(advisory, cwes)
 	}
 	return advisory, finding
@@ -173,9 +166,9 @@ func findAliasPrefix(aliases []string, prefix string) string {
 //  4. Any database_specific severity as final fallback
 //
 // Returns the severity score/label and its type indicator.
-func resolveSeverity(vuln osvschema.Vulnerability) (score, severityType string) {
-	isGHSA := strings.HasPrefix(vuln.ID, "GHSA-")
-	ghsaSev := extractDatabaseSeverity(vuln.DatabaseSpecific)
+func resolveSeverity(vuln *osvschema.Vulnerability) (score, severityType string) {
+	isGHSA := strings.HasPrefix(vuln.GetId(), "GHSA-")
+	ghsaSev := extractDatabaseSeverity(vuln.GetDatabaseSpecific())
 
 	// For GHSA advisories with HIGH/CRITICAL severity, GHSA is authoritative
 	if isGHSA && ghsaSev != "" && isHighOrCritical(ghsaSev) {
@@ -183,8 +176,8 @@ func resolveSeverity(vuln osvschema.Vulnerability) (score, severityType string) 
 	}
 
 	// For non-GHSA advisories or low-severity GHSA, prefer CVSS scores
-	if cvss := findCVSSSeverity(vuln.Severity); cvss != nil {
-		return cvss.Score, string(cvss.Type)
+	if cvss := findCVSSSeverity(vuln.GetSeverity()); cvss != nil {
+		return cvss.GetScore(), cvss.GetType().String()
 	}
 
 	// Fallback to database_specific severity
@@ -199,10 +192,9 @@ func resolveSeverity(vuln osvschema.Vulnerability) (score, severityType string) 
 }
 
 // findCVSSSeverity returns the first CVSS severity entry (preferring V3 over V2).
-func findCVSSSeverity(severities []osvschema.Severity) *osvschema.Severity {
-	for i := range severities {
-		s := &severities[i]
-		if s.Type == "CVSS_V3" || s.Type == "CVSS_V2" {
+func findCVSSSeverity(severities []*osvschema.Severity) *osvschema.Severity {
+	for _, s := range severities {
+		if s.GetType() == osvschema.Severity_CVSS_V3 || s.GetType() == osvschema.Severity_CVSS_V2 {
 			return s
 		}
 	}
@@ -210,19 +202,9 @@ func findCVSSSeverity(severities []osvschema.Severity) *osvschema.Severity {
 }
 
 // extractDatabaseSeverity extracts the severity string from database_specific metadata.
-func extractDatabaseSeverity(dbSpecific map[string]any) string {
-	if dbSpecific == nil {
-		return ""
-	}
-	sevVal, ok := dbSpecific["severity"]
-	if !ok {
-		return ""
-	}
-	sevStr, ok := sevVal.(string)
-	if !ok || sevStr == "" {
-		return ""
-	}
-	return sevStr
+// Non-string severity values are ignored, matching the schema's expectation.
+func extractDatabaseSeverity(dbSpecific *structpb.Struct) string {
+	return dbSpecific.GetFields()["severity"].GetStringValue()
 }
 
 // isHighOrCritical returns true if the severity string indicates HIGH or CRITICAL level.
@@ -232,13 +214,13 @@ func isHighOrCritical(severity string) bool {
 }
 
 // extractGoImports pulls Go ecosystem-specific import/symbol metadata from OSV records.
-func extractGoImports(affected []osvschema.Affected, input PkgInput) []vulnerabilityv1.AffectedImport {
+func extractGoImports(affected []*osvschema.Affected, input PkgInput) []vulnerabilityv1.AffectedImport {
 	var imports []vulnerabilityv1.AffectedImport
 	for _, a := range affected {
-		if !matchesPackage(a.Package, input) {
+		if !matchesPackage(a.GetPackage(), input) {
 			continue
 		}
-		raw, ok := a.EcosystemSpecific["imports"]
+		raw, ok := a.GetEcosystemSpecific().AsMap()["imports"]
 		if !ok {
 			continue
 		}
@@ -298,17 +280,17 @@ func parseImportArray(items []any) []vulnerabilityv1.AffectedImport {
 
 // extractDatabaseSpecificStrings normalizes database_specific entries that are plain strings.
 // Non-string values are ignored.
-func extractDatabaseSpecificStrings(raw map[string]any) map[string]string {
-	if len(raw) == 0 {
+func extractDatabaseSpecificStrings(raw *structpb.Struct) map[string]string {
+	fields := raw.GetFields()
+	if len(fields) == 0 {
 		return nil
 	}
 	out := make(map[string]string)
-	for k, v := range raw {
-		str, ok := v.(string)
-		if !ok {
+	for k, v := range fields {
+		if _, ok := v.GetKind().(*structpb.Value_StringValue); !ok {
 			continue
 		}
-		str = strings.TrimSpace(str)
+		str := strings.TrimSpace(v.GetStringValue())
 		if str == "" {
 			continue
 		}

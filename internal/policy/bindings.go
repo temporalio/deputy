@@ -55,6 +55,12 @@ var (
 	// targetVars provide target/provenance information
 	targetVars = []string{"target"}
 
+	// diffTargetVars provide the two sides of a diff request. A diff compares
+	// independent resources, so each side is bound separately and a policy can
+	// authorize them separately. The diff_ prefix keeps them distinct from the
+	// single "target" that other entrypoints bind in the same flat namespace.
+	diffTargetVars = []string{"diff_base", "diff_target"}
+
 	// dockerfileVars provide Dockerfile analysis
 	dockerfileVars = []string{"dockerfile", "dockerfile_analysis"}
 
@@ -117,9 +123,14 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 
 	// Diff entrypoints (git repository)
 	EntrypointDiffReport: {
-		Entrypoint:  EntrypointDiffReport,
-		Required:    append([]string{"changes", "vulnerabilities"}, envVars...),
-		Optional:    targetVars,
+		Entrypoint: EntrypointDiffReport,
+		Required:   append([]string{"changes", "vulnerabilities"}, envVars...),
+		// A diff names refs within one repository, so it binds those rather
+		// than a target. The list has to match what the payload actually
+		// carries: the CEL environment declares every variable globally, so
+		// reading one the payload omits is an evaluation error rather than an
+		// absent value, and advertising it here invites exactly that.
+		Optional:    []string{"repo", "base_ref", "target_ref"},
 		Description: "Triggers after a dependency diff completes",
 	},
 	EntrypointDiffDependencyChange: {
@@ -131,7 +142,7 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 	EntrypointDiffVulnerability: {
 		Entrypoint:  EntrypointDiffVulnerability,
 		Required:    append(singleVulnerabilityVars, envVars...),
-		Optional:    targetVars,
+		Optional:    []string{"repo", "base_ref", "target_ref"},
 		Description: "Triggers for each vulnerability found in a diff",
 	},
 
@@ -279,9 +290,13 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 		Description: "Triggers before SBOM generation via the API",
 	},
 	EntrypointServiceDiffRequest: {
-		Entrypoint:  EntrypointServiceDiffRequest,
-		Required:    append([]string{"request"}, envVars...),
-		Optional:    append(targetVars, jwtVars...),
+		Entrypoint: EntrypointServiceDiffRequest,
+		// A diff names two independent resources, so its payload carries a
+		// target per side and no single "target". Advertising "target" here
+		// pointed authors at a variable the payload never sets. Both sides are
+		// always bound, so neither needs a null guard.
+		Required:    append(append([]string{"request"}, diffTargetVars...), envVars...),
+		Optional:    jwtVars,
 		Description: "Triggers before a diff operation via the API",
 	},
 	EntrypointServiceSecretsRequest: {

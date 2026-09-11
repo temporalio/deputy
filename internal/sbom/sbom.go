@@ -41,6 +41,7 @@ import (
 	"github.com/temporalio/deputy/internal/auth"
 	"github.com/temporalio/deputy/internal/collections"
 	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/dockerfile"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
 	"github.com/temporalio/deputy/internal/inventory"
@@ -502,7 +503,7 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		// Protobom's Node struct does not currently have a dedicated "Evidence" or
 		// "Occurrences" field that maps to CycloneDX's component.evidence.occurrences.
 		// We use "deputy:location" to preserve this context for remediation commands.
-		for _, loc := range p.Locations {
+		for _, loc := range dependency.PackagePaths(p) {
 			n.Properties = append(n.Properties, &sbom.Property{
 				Name: "deputy:location",
 				Data: loc,
@@ -512,31 +513,33 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		// Persist container image layer details for round-trip SBOM scanning.
 		// These properties enable layer-aware vulnerability analysis and policy
 		// evaluation when scanning SBOMs generated from container images.
-		// Note: p.LayerDetails is extractor.LayerDetails (SCALIBR type) which uses DiffID/ChainID.
-		if p.LayerDetails != nil {
+		// Note: p.LayerMetadata is extractor.LayerMetadata (SCALIBR type) which
+		// uses DiffID/ChainID and reports base image membership as an index into
+		// the image's base image matches, where 0 means "no match".
+		if p.LayerMetadata != nil {
 			n.Properties = append(n.Properties, &sbom.Property{
 				Name: "deputy:layer-index",
-				Data: fmt.Sprintf("%d", p.LayerDetails.Index),
+				Data: fmt.Sprintf("%d", p.LayerMetadata.Index),
 			})
-			if p.LayerDetails.DiffID != "" {
+			if p.LayerMetadata.DiffID != "" {
 				n.Properties = append(n.Properties, &sbom.Property{
 					Name: "deputy:layer-diffid",
-					Data: p.LayerDetails.DiffID,
+					Data: p.LayerMetadata.DiffID.String(),
 				})
 			}
-			if p.LayerDetails.ChainID != "" {
+			if p.LayerMetadata.ChainID != "" {
 				n.Properties = append(n.Properties, &sbom.Property{
 					Name: "deputy:layer-chainid",
-					Data: p.LayerDetails.ChainID,
+					Data: p.LayerMetadata.ChainID.String(),
 				})
 			}
-			if p.LayerDetails.Command != "" {
+			if p.LayerMetadata.Command != "" {
 				n.Properties = append(n.Properties, &sbom.Property{
 					Name: "deputy:layer-command",
-					Data: p.LayerDetails.Command,
+					Data: p.LayerMetadata.Command,
 				})
 			}
-			if p.LayerDetails.InBaseImage {
+			if p.LayerMetadata.BaseImageIndex > 0 {
 				n.Properties = append(n.Properties, &sbom.Property{
 					Name: "deputy:layer-in-base-image",
 					Data: "true",
@@ -728,7 +731,7 @@ func packageNameForSystem(pu *purl.PackageURL, sys pb.System) string {
 		return goModuleFromPURL(pu)
 	case pb.System_NPM:
 		if pu.Namespace != "" {
-			return "@" + pu.Namespace + "/" + pu.Name
+			return purlx.NPMPackageName(pu.Namespace, pu.Name)
 		}
 	case pb.System_RUBYGEMS, pb.System_CARGO, pb.System_PYPI, pb.System_NUGET:
 		if pu.Namespace != "" {

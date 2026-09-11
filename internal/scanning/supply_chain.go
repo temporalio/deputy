@@ -152,8 +152,7 @@ func checkSupplyChain(_ context.Context, pkgs []*extractor.Package, direct map[s
 			isDirect = direct[purlStr]
 		}
 
-		locs := make([]string, len(pkg.Locations))
-		copy(locs, pkg.Locations)
+		locs := dependency.PackagePaths(pkg)
 
 		findings = append(findings, vulnerability.Finding{
 			AdvisoryID: advisoryID,

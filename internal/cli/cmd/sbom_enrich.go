@@ -111,15 +111,12 @@ USAGE:
 			}
 
 			// Write output
-			var w io.Writer = cmd.OutOrStdout()
-			if outPath != "" && outPath != "-" {
-				f, err := os.Create(outPath)
-				if err != nil {
-					return fmt.Errorf("failed to create output file: %w", err)
-				}
-				defer f.Close()
-				w = f
+			out, err := openOutputWriter(cmd, outPath)
+			if err != nil {
+				return err
 			}
+			defer out.Close()
+			w := out.Writer
 
 			// Write in requested format
 			switch strings.ToLower(format) {

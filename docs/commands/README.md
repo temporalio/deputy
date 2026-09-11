@@ -83,6 +83,10 @@ $ deputy list --format json | jq '.packages[] | select(.direct) | .purl'
 
 Use exit codes for CI gating.
 
+## Color
+
+Text output is colored only when it lands on a terminal. The decision is made per destination, so `--output report.txt` writes a plain file even when you run the command from a terminal, and a redirected or piped stdout is plain for the same reason. `NO_COLOR` turns color off everywhere; `CLICOLOR_FORCE` turns it on for a destination that would otherwise be plain.
+
 ## Detailed Documentation
 
 ### Core Workflow

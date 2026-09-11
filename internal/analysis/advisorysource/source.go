@@ -28,4 +28,10 @@ type Source interface {
 type Result struct {
 	Findings   []*vulnerabilityv1.Finding
 	Advisories map[string]*vulnerabilityv1.Advisory
+	// Warnings names what the source could not answer for, one line each, for
+	// the scan report. A source that knows an advisory affects a package but
+	// cannot retrieve the record has to say so here: an incomplete answer that
+	// returns no warning is indistinguishable from a clean one, which is the
+	// failure mode that hides risk.
+	Warnings []string
 }

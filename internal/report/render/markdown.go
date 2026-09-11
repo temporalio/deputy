@@ -25,8 +25,8 @@ func DiffMarkdown(resp *diffv1.DiffVulnerabilitiesResponse) string {
 	var b strings.Builder
 
 	b.WriteString("## Deputy Dependency Diff\n\n")
-	base := resp.GetBaseTarget().GetDisplayPath()
-	target := resp.GetTargetTarget().GetDisplayPath()
+	base := resp.GetBase().GetDisplayPath()
+	target := resp.GetTarget().GetDisplayPath()
 	if base != "" || target != "" {
 		fmt.Fprintf(&b, "`%s` → `%s`\n\n", mdCode(base), mdCode(target))
 	}

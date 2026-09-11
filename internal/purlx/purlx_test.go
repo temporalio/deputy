@@ -79,15 +79,25 @@ func TestGitHubActionsPURL_Table(t *testing.T) {
 	}
 }
 
+// usesMetadataStub stands in for an extractor's own metadata type. Any struct
+// with a Subpath field will do, but SCALIBR now requires package metadata to
+// implement metadata.Protoable, which an anonymous struct cannot.
+type usesMetadataStub struct {
+	Raw     string
+	Subpath string
+}
+
+func (*usesMetadataStub) IsProtoable() {}
+
 func TestGitHubActionsPURLFromPackage_UsesMetadataSubpath(t *testing.T) {
 	p := &extractor.Package{
 		Name:     "foo-org/actions-repo",
 		Version:  "1.1.1",
 		PURLType: TypeGitHubActions,
-		Metadata: &struct {
-			Raw     string
-			Subpath string
-		}{Raw: "foo-org/actions-repo/.github/workflows/some.yml@1.1.1", Subpath: ".github/workflows/some.yml"},
+		Metadata: &usesMetadataStub{
+			Raw:     "foo-org/actions-repo/.github/workflows/some.yml@1.1.1",
+			Subpath: ".github/workflows/some.yml",
+		},
 	}
 	got := GitHubActionsPURLFromPackage(p)
 	if !strings.Contains(got, "#.github/workflows/some.yml") {
@@ -128,5 +138,41 @@ func TestIsGitHubActionsType_Table(t *testing.T) {
 				t.Fatalf("IsGitHubActionsType(%q) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestNPMPackageName covers both PURL producers: OSV-SCALIBR puts the "@" in the
+// namespace, other producers leave it off, and neither must yield "@@scope/name".
+func TestNPMPackageName(t *testing.T) {
+	tests := []struct {
+		name      string
+		namespace string
+		pkgName   string
+		want      string
+	}{
+		{name: "unscoped", pkgName: "lodash", want: "lodash"},
+		{name: "scalibr namespace keeps its at sign", namespace: "@types", pkgName: "node", want: "@types/node"},
+		{name: "bare namespace gets an at sign", namespace: "types", pkgName: "node", want: "@types/node"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NPMPackageName(tt.namespace, tt.pkgName); got != tt.want {
+				t.Errorf("NPMPackageName(%q, %q) = %q, want %q", tt.namespace, tt.pkgName, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNPMPackageNameRoundTripsScalibrPURL pins the actual upstream shape rather
+// than a hand-written assumption about it: SCALIBR started splitting scoped npm
+// names into the PURL namespace, which is what broke direct-dependency matching.
+func TestNPMPackageNameRoundTripsScalibrPURL(t *testing.T) {
+	pkg := &extractor.Package{Name: "@types/node", Version: "20.0.0", PURLType: "npm"}
+	pu := pkg.PURL()
+	if pu == nil {
+		t.Fatal("PURL() = nil")
+	}
+	if got := NPMPackageName(pu.Namespace, pu.Name); got != "@types/node" {
+		t.Errorf("NPMPackageName(%q, %q) = %q, want @types/node", pu.Namespace, pu.Name, got)
 	}
 }

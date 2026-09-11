@@ -407,8 +407,8 @@ func (c *Client) WhyDependency(ctx context.Context, target, dependency string) (
 //	}
 func (c *Client) DiffPackages(ctx context.Context, base, target string) (*diffv1.DiffPackagesResponse, error) {
 	resp, err := c.clients.Diff.DiffPackages(ctx, connect.NewRequest(&diffv1.DiffPackagesRequest{
-		BaseTarget:   base,
-		TargetTarget: target,
+		Base:   base,
+		Target: target,
 	}))
 	if err != nil {
 		return nil, err
@@ -427,8 +427,8 @@ func (c *Client) DiffPackages(ctx context.Context, base, target string) (*diffv1
 //	    len(diff.GetRemovedVulnerabilities()))
 func (c *Client) DiffVulnerabilities(ctx context.Context, base, target string) (*diffv1.DiffVulnerabilitiesResponse, error) {
 	resp, err := c.clients.Diff.DiffVulnerabilities(ctx, connect.NewRequest(&diffv1.DiffVulnerabilitiesRequest{
-		BaseTarget:   base,
-		TargetTarget: target,
+		Base:   base,
+		Target: target,
 	}))
 	if err != nil {
 		return nil, err

@@ -2,13 +2,15 @@ package osv
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"maps"
 	"slices"
 	"strings"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/temporalio/deputy/internal/vulnerability"
+	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // HydrateSparseVulnerabilityAliases fills sparse OSV records from richer alias
@@ -19,10 +21,10 @@ func HydrateSparseVulnerabilityAliases(ctx context.Context, client Client, vuln 
 		return vuln
 	}
 
-	out := cloneOSVVulnerability(vuln)
-	baseID := out.ID
+	out := proto.CloneOf(vuln)
+	baseID := out.GetId()
 	seen := map[string]struct{}{strings.ToUpper(strings.TrimSpace(baseID)): {}}
-	for _, alias := range vuln.Aliases {
+	for _, alias := range vuln.GetAliases() {
 		alias = strings.TrimSpace(alias)
 		if alias == "" {
 			continue
@@ -40,8 +42,8 @@ func HydrateSparseVulnerabilityAliases(ctx context.Context, client Client, vuln 
 		mergeOSVVulnerability(out, aliasVuln)
 	}
 
-	out.ID = baseID
-	out.Aliases = removeEqualFold(out.Aliases, baseID)
+	out.Id = baseID
+	out.Aliases = removeEqualFold(out.GetAliases(), baseID)
 	return out
 }
 
@@ -52,43 +54,41 @@ func HydrateSparseVulnerabilityAliases(ctx context.Context, client Client, vuln 
 // Single-advisory lookups hydrate on any of these so their answer is the full
 // picture across the alias set.
 func NeedsVulnerabilityAliasHydration(vuln *osvschema.Vulnerability) bool {
-	return vuln != nil && (strings.TrimSpace(vuln.Summary) == "" || len(vuln.Affected) == 0 || !hasSeverityRating(vuln))
-}
-
-func cloneOSVVulnerability(vuln *osvschema.Vulnerability) *osvschema.Vulnerability {
-	if vuln == nil {
-		return nil
-	}
-	out := *vuln
-	out.Aliases = slices.Clone(vuln.Aliases)
-	out.Related = slices.Clone(vuln.Related)
-	out.Upstream = slices.Clone(vuln.Upstream)
-	out.Severity = slices.Clone(vuln.Severity)
-	out.Affected = slices.Clone(vuln.Affected)
-	out.References = slices.Clone(vuln.References)
-	out.Credits = slices.Clone(vuln.Credits)
-	out.DatabaseSpecific = maps.Clone(vuln.DatabaseSpecific)
-	return &out
+	return vuln != nil && (strings.TrimSpace(vuln.GetSummary()) == "" || len(vuln.GetAffected()) == 0 || !hasSeverityRating(vuln))
 }
 
 func mergeOSVVulnerability(base *osvschema.Vulnerability, extra *osvschema.Vulnerability) {
 	if base == nil || extra == nil {
 		return
 	}
-	if base.SchemaVersion == "" {
-		base.SchemaVersion = extra.SchemaVersion
+	// Clone the donor so the merged record owns every message it keeps: alias
+	// records come from a shared cache, and appending their pointers would let a
+	// later mutation of one advisory show up in another.
+	extra = proto.CloneOf(extra)
+	if base.GetSchemaVersion() == "" {
+		base.SchemaVersion = extra.GetSchemaVersion()
 	}
-	if strings.TrimSpace(base.Summary) == "" {
-		base.Summary = extra.Summary
+	if strings.TrimSpace(base.GetSummary()) == "" {
+		base.Summary = extra.GetSummary()
 	}
-	if strings.TrimSpace(base.Details) == "" {
-		base.Details = extra.Details
+	if strings.TrimSpace(base.GetDetails()) == "" {
+		base.Details = extra.GetDetails()
 	}
-	if !extra.Published.IsZero() && (base.Published.IsZero() || extra.Published.Before(base.Published)) {
-		base.Published = extra.Published
+	// An absent timestamp is nil, not a zero value, so both "is the donor dated
+	// at all" and "is the base undated" go through OSVTime rather than reading
+	// the fields, which would score a missing date as the Unix epoch and let it
+	// win the earliest-published comparison.
+	if extraPub := vulnerability.OSVTime(extra.GetPublished()); !extraPub.IsZero() {
+		basePub := vulnerability.OSVTime(base.GetPublished())
+		if basePub.IsZero() || extraPub.Before(basePub) {
+			base.Published = extra.GetPublished()
+		}
 	}
-	if !extra.Modified.IsZero() && (base.Modified.IsZero() || extra.Modified.After(base.Modified)) {
-		base.Modified = extra.Modified
+	if extraMod := vulnerability.OSVTime(extra.GetModified()); !extraMod.IsZero() {
+		baseMod := vulnerability.OSVTime(base.GetModified())
+		if baseMod.IsZero() || extraMod.After(baseMod) {
+			base.Modified = extra.GetModified()
+		}
 	}
 	// Withdrawn deliberately never fills from an alias: withdrawal is a
 	// per-record statement, not a property of the alias set. GHSAs are often
@@ -96,15 +96,15 @@ func mergeOSVVulnerability(base *osvschema.Vulnerability, extra *osvschema.Vulne
 	// the alias's timestamp would mark a live advisory withdrawn and let
 	// downstream filters suppress a real vulnerability.
 
-	base.Aliases = mergeUniqueEqualFold(base.Aliases, []string{extra.ID})
-	base.Aliases = mergeUniqueEqualFold(base.Aliases, extra.Aliases)
-	base.Related = mergeUniqueEqualFold(base.Related, extra.Related)
-	base.Upstream = mergeUniqueEqualFold(base.Upstream, extra.Upstream)
-	base.Severity = mergeOSVSeverity(base.Severity, extra.Severity)
-	base.Affected = mergeOSVAffected(base.Affected, extra.Affected)
-	base.References = mergeOSVReferences(base.References, extra.References)
-	base.Credits = mergeOSVCredits(base.Credits, extra.Credits)
-	base.DatabaseSpecific = mergeStringAnyMap(base.DatabaseSpecific, extra.DatabaseSpecific)
+	base.Aliases = mergeUniqueEqualFold(base.GetAliases(), []string{extra.GetId()})
+	base.Aliases = mergeUniqueEqualFold(base.GetAliases(), extra.GetAliases())
+	base.Related = mergeUniqueEqualFold(base.GetRelated(), extra.GetRelated())
+	base.Upstream = mergeUniqueEqualFold(base.GetUpstream(), extra.GetUpstream())
+	base.Severity = mergeOSVSeverity(base.GetSeverity(), extra.GetSeverity())
+	base.Affected = mergeOSVAffected(base.GetAffected(), extra.GetAffected())
+	base.References = mergeOSVReferences(base.GetReferences(), extra.GetReferences())
+	base.Credits = mergeOSVCredits(base.GetCredits(), extra.GetCredits())
+	base.DatabaseSpecific = mergeStructFields(base.GetDatabaseSpecific(), extra.GetDatabaseSpecific())
 }
 
 func mergeUniqueEqualFold(base []string, extra []string) []string {
@@ -136,33 +136,27 @@ func removeEqualFold(values []string, target string) []string {
 	return out
 }
 
-func mergeOSVSeverity(base []osvschema.Severity, extra []osvschema.Severity) []osvschema.Severity {
-	return mergeUniqueByKey(base, extra, func(severity osvschema.Severity) string {
-		return string(severity.Type) + "\x00" + severity.Score
+func mergeOSVSeverity(base []*osvschema.Severity, extra []*osvschema.Severity) []*osvschema.Severity {
+	return mergeUniqueByKey(base, extra, func(severity *osvschema.Severity) string {
+		return severity.GetType().String() + "\x00" + severity.GetScore()
 	})
 }
 
-func mergeOSVAffected(base []osvschema.Affected, extra []osvschema.Affected) []osvschema.Affected {
-	return mergeUniqueByKey(base, extra, affectedKey)
+func mergeOSVAffected(base []*osvschema.Affected, extra []*osvschema.Affected) []*osvschema.Affected {
+	return mergeUniqueByKey(base, extra, protoKey)
 }
 
-func mergeOSVReferences(base []osvschema.Reference, extra []osvschema.Reference) []osvschema.Reference {
-	return mergeUniqueByKey(base, extra, func(ref osvschema.Reference) string {
-		if strings.TrimSpace(ref.URL) != "" {
-			return ref.URL
+func mergeOSVReferences(base []*osvschema.Reference, extra []*osvschema.Reference) []*osvschema.Reference {
+	return mergeUniqueByKey(base, extra, func(ref *osvschema.Reference) string {
+		if strings.TrimSpace(ref.GetUrl()) != "" {
+			return ref.GetUrl()
 		}
-		return string(ref.Type)
+		return ref.GetType().String()
 	})
 }
 
-func mergeOSVCredits(base []osvschema.Credit, extra []osvschema.Credit) []osvschema.Credit {
-	return mergeUniqueByKey(base, extra, func(credit osvschema.Credit) string {
-		data, err := json.Marshal(credit)
-		if err != nil {
-			return fmt.Sprintf("%#v", credit)
-		}
-		return string(data)
-	})
+func mergeOSVCredits(base []*osvschema.Credit, extra []*osvschema.Credit) []*osvschema.Credit {
+	return mergeUniqueByKey(base, extra, protoKey)
 }
 
 func mergeUniqueByKey[T any](base []T, extra []T, keyFunc func(T) string) []T {
@@ -185,32 +179,35 @@ func mergeUniqueByKey[T any](base []T, extra []T, keyFunc func(T) string) []T {
 	return out
 }
 
-func affectedKey(affected osvschema.Affected) string {
-	data, err := json.Marshal(affected)
+// protoKey derives a stable identity string for a message so structurally equal
+// records dedupe. Marshaling deterministically sorts map keys, which
+// [proto.Marshal] does not guarantee on its own.
+func protoKey[M proto.Message](msg M) string {
+	data, err := proto.MarshalOptions{Deterministic: true}.Marshal(msg)
 	if err != nil {
-		return fmt.Sprintf("%#v", affected)
+		return prototext.Format(msg)
 	}
 	return string(data)
 }
 
-func mergeStringAnyMap(base map[string]any, extra map[string]any) map[string]any {
-	if len(extra) == 0 {
+func mergeStructFields(base *structpb.Struct, extra *structpb.Struct) *structpb.Struct {
+	if len(extra.GetFields()) == 0 {
 		return base
 	}
-	out := maps.Clone(base)
-	if out == nil {
-		out = make(map[string]any, len(extra))
+	fields := maps.Clone(base.GetFields())
+	if fields == nil {
+		fields = make(map[string]*structpb.Value, len(extra.GetFields()))
 	}
-	for key, value := range extra {
+	for key, value := range extra.GetFields() {
 		if key == "" {
 			continue
 		}
-		if _, ok := out[key]; ok {
+		if _, ok := fields[key]; ok {
 			continue
 		}
-		out[key] = value
+		fields[key] = value
 	}
-	return out
+	return &structpb.Struct{Fields: fields}
 }
 
 // hasSeverityRating reports whether the record itself carries any severity
@@ -219,7 +216,7 @@ func hasSeverityRating(vuln *osvschema.Vulnerability) bool {
 	if vuln == nil {
 		return false
 	}
-	return len(vuln.Severity) > 0 || extractDatabaseSeverity(vuln.DatabaseSpecific) != ""
+	return len(vuln.GetSeverity()) > 0 || extractDatabaseSeverity(vuln.GetDatabaseSpecific()) != ""
 }
 
 // SeverityAliasOrder returns the advisory's aliases in the order severity
@@ -279,7 +276,7 @@ func ResolveSeverityFromAliases(ctx context.Context, client Client, aliases []st
 		if err != nil || vuln == nil {
 			continue
 		}
-		if raw, rawType = resolveSeverity(*vuln); raw != "" {
+		if raw, rawType = resolveSeverity(vuln); raw != "" {
 			return raw, rawType
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
@@ -24,16 +25,16 @@ func TestFilterGitignoredPackageLocationsDropsIgnoredFileOnlyPackages(t *testing
 
 	pkgs := []*extractor.Package{
 		{
-			Name:      "github.com/example/test-binary",
-			Version:   "(devel)",
-			PURLType:  "golang",
-			Locations: []string{"cmd.test"},
+			Name:     "github.com/example/test-binary",
+			Version:  "(devel)",
+			PURLType: "golang",
+			Location: extractor.LocationFromPath("cmd.test"),
 		},
 		{
-			Name:      "github.com/example/manifest",
-			Version:   "1.0.0",
-			PURLType:  "golang",
-			Locations: []string{"go.mod", "cmd.test"},
+			Name:     "github.com/example/manifest",
+			Version:  "1.0.0",
+			PURLType: "golang",
+			Location: dependency.NewPackageLocation("go.mod", "cmd.test"),
 		},
 	}
 
@@ -48,10 +49,10 @@ func TestFilterGitignoredPackageLocationsDropsIgnoredFileOnlyPackages(t *testing
 	if got[0].Name != "github.com/example/manifest" {
 		t.Fatalf("remaining package = %q, want github.com/example/manifest", got[0].Name)
 	}
-	if !slices.Equal(got[0].Locations, []string{"go.mod"}) {
-		t.Fatalf("remaining locations = %v, want [go.mod]", got[0].Locations)
+	if !slices.Equal(dependency.PackagePaths(got[0]), []string{"go.mod"}) {
+		t.Fatalf("remaining locations = %v, want [go.mod]", dependency.PackagePaths(got[0]))
 	}
-	if !slices.Equal(pkgs[1].Locations, []string{"go.mod", "cmd.test"}) {
-		t.Fatalf("original package locations were mutated: %v", pkgs[1].Locations)
+	if !slices.Equal(dependency.PackagePaths(pkgs[1]), []string{"go.mod", "cmd.test"}) {
+		t.Fatalf("original package locations were mutated: %v", dependency.PackagePaths(pkgs[1]))
 	}
 }

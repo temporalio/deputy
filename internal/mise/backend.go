@@ -45,6 +45,11 @@ type Metadata struct {
 	Platforms map[string]LockedPlatform
 }
 
+// IsProtoable marks Metadata as OSV-SCALIBR package metadata. Deputy attaches it to
+// an extractor.Package but never converts it to a proto message, so the marker
+// only satisfies the upstream metadata.Protoable interface.
+func (*Metadata) IsProtoable() {}
+
 // ParseChecksum splits a mise.lock checksum string of the form "algo:value"
 // (e.g. "sha256:abc…", "blake3:def…") into its algorithm (lowercased) and hex
 // value. If there is no recognizable "algo:" prefix it returns ("", value).

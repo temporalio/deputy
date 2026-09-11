@@ -8,6 +8,7 @@ import (
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/temporalio/deputy/internal/explain"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestExplainRenderer_Text(t *testing.T) {
@@ -16,7 +17,7 @@ func TestExplainRenderer_Text(t *testing.T) {
 	t.Run("renders basic vulnerability", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "CVE-2021-44228",
+			Id:      "CVE-2021-44228",
 			Summary: "Log4j remote code execution",
 			Aliases: []string{"GHSA-jfh8-c2jp-5v3q"},
 		}
@@ -41,17 +42,17 @@ func TestExplainRenderer_Text(t *testing.T) {
 	t.Run("renders affected packages", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "TEST-001",
+			Id:      "TEST-001",
 			Summary: "Test vulnerability",
-			Affected: []osvschema.Affected{
+			Affected: []*osvschema.Affected{
 				{
-					Package: osvschema.Package{
+					Package: &osvschema.Package{
 						Name:      "lodash",
 						Ecosystem: "npm",
 					},
-					Ranges: []osvschema.Range{
+					Ranges: []*osvschema.Range{
 						{
-							Events: []osvschema.Event{
+							Events: []*osvschema.Event{
 								{Introduced: "0"},
 								{Fixed: "4.17.21"},
 							},
@@ -92,11 +93,11 @@ func TestExplainRenderer_Text(t *testing.T) {
 	t.Run("includes details and references", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "TEST-002",
+			Id:      "TEST-002",
 			Summary: "Test vulnerability",
 			Details: "This is a detailed description of the vulnerability.",
-			References: []osvschema.Reference{
-				{URL: "https://example.com/advisory"},
+			References: []*osvschema.Reference{
+				{Url: "https://example.com/advisory"},
 			},
 		}
 
@@ -120,10 +121,10 @@ func TestExplainRenderer_Text(t *testing.T) {
 		modified := time.Date(2022, 1, 15, 0, 0, 0, 0, time.UTC)
 
 		vuln := &osvschema.Vulnerability{
-			ID:        "TEST-003",
+			Id:        "TEST-003",
 			Summary:   "Test vulnerability",
-			Published: published,
-			Modified:  modified,
+			Published: timestamppb.New(published),
+			Modified:  timestamppb.New(modified),
 		}
 
 		renderer := explain.NewRenderer(explain.Config{})
@@ -143,7 +144,7 @@ func TestExplainRenderer_Text(t *testing.T) {
 	t.Run("renders quick links for CVE", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "CVE-2021-44228",
+			Id:      "CVE-2021-44228",
 			Summary: "Test vulnerability",
 		}
 
@@ -167,7 +168,7 @@ func TestExplainRenderer_Text(t *testing.T) {
 	t.Run("renders quick links for Go vulnerability", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "GO-2024-2687",
+			Id:      "GO-2024-2687",
 			Summary: "Test Go vulnerability",
 			Aliases: []string{"CVE-2023-45288"},
 		}
@@ -193,18 +194,18 @@ func TestExplainRenderer_JSON(t *testing.T) {
 	t.Run("renders valid JSON with core fields", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "CVE-2021-44228",
+			Id:      "CVE-2021-44228",
 			Summary: "Log4j remote code execution",
 			Aliases: []string{"GHSA-jfh8-c2jp-5v3q"},
-			Affected: []osvschema.Affected{
+			Affected: []*osvschema.Affected{
 				{
-					Package: osvschema.Package{
+					Package: &osvschema.Package{
 						Name:      "org.apache.logging.log4j:log4j-core",
 						Ecosystem: "Maven",
 					},
-					Ranges: []osvschema.Range{
+					Ranges: []*osvschema.Range{
 						{
-							Events: []osvschema.Event{
+							Events: []*osvschema.Event{
 								{Fixed: "2.15.0"},
 							},
 						},
@@ -237,17 +238,17 @@ func TestExplainRenderer_JSON(t *testing.T) {
 	t.Run("includes remediation info for affected packages", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "TEST-JSON-001",
+			Id:      "TEST-JSON-001",
 			Summary: "Test vulnerability",
-			Affected: []osvschema.Affected{
+			Affected: []*osvschema.Affected{
 				{
-					Package: osvschema.Package{
+					Package: &osvschema.Package{
 						Name:      "lodash",
 						Ecosystem: "npm",
 					},
-					Ranges: []osvschema.Range{
+					Ranges: []*osvschema.Range{
 						{
-							Events: []osvschema.Event{
+							Events: []*osvschema.Event{
 								{Introduced: "0"},
 								{Fixed: "4.17.21"},
 							},
@@ -280,7 +281,7 @@ func TestExplainRenderer_JSON(t *testing.T) {
 	t.Run("includes links for CVE IDs", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "CVE-2023-12345",
+			Id:      "CVE-2023-12345",
 			Summary: "Test CVE",
 		}
 
@@ -304,7 +305,7 @@ func TestExplainRenderer_JSON(t *testing.T) {
 	t.Run("includes links for GHSA IDs", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "GHSA-abcd-1234-efgh",
+			Id:      "GHSA-abcd-1234-efgh",
 			Summary: "Test GHSA",
 		}
 
@@ -325,7 +326,7 @@ func TestExplainRenderer_JSON(t *testing.T) {
 	t.Run("includes links for Go vulnerability IDs", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "GO-2023-1234",
+			Id:      "GO-2023-1234",
 			Summary: "Test Go vuln",
 		}
 
@@ -348,9 +349,9 @@ func TestExplainRenderer_JSON(t *testing.T) {
 		published := time.Now().Add(-365 * 24 * time.Hour) // 1 year ago
 
 		vuln := &osvschema.Vulnerability{
-			ID:        "TEST-JSON-002",
+			Id:        "TEST-JSON-002",
 			Summary:   "Test vulnerability",
-			Published: published,
+			Published: timestamppb.New(published),
 		}
 
 		renderer := explain.NewRenderer(explain.Config{})
@@ -370,17 +371,17 @@ func TestExplainRenderer_JSON(t *testing.T) {
 	t.Run("handles package without fix", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "TEST-JSON-003",
+			Id:      "TEST-JSON-003",
 			Summary: "No fix available",
-			Affected: []osvschema.Affected{
+			Affected: []*osvschema.Affected{
 				{
-					Package: osvschema.Package{
+					Package: &osvschema.Package{
 						Name:      "vulnerable-pkg",
 						Ecosystem: "npm",
 					},
-					Ranges: []osvschema.Range{
+					Ranges: []*osvschema.Range{
 						{
-							Events: []osvschema.Event{
+							Events: []*osvschema.Event{
 								{Introduced: "0"},
 							},
 						},
@@ -406,11 +407,11 @@ func TestExplainRenderer_JSON(t *testing.T) {
 	t.Run("includes attack characteristics for CVSS vector", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
-			ID:      "CVE-2021-44228",
+			Id:      "CVE-2021-44228",
 			Summary: "Test vulnerability with CVSS",
-			Severity: []osvschema.Severity{
+			Severity: []*osvschema.Severity{
 				{
-					Type:  osvschema.SeverityCVSSV3,
+					Type:  osvschema.Severity_CVSS_V3,
 					Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
 				},
 			},

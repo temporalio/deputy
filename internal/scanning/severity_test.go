@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	"osv.dev/bindings/go/osvdev"
+	"osv.dev/bindings/go/api"
 
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/vulnerability"
@@ -17,7 +17,7 @@ type severityAliasClient struct {
 	vulns map[string]*osvschema.Vulnerability
 }
 
-func (c *severityAliasClient) QueryBatch(context.Context, []*osvdev.Query) (*osvdev.BatchedResponse, error) {
+func (c *severityAliasClient) QueryBatch(context.Context, []*api.Query) (*api.BatchVulnerabilityList, error) {
 	return nil, fmt.Errorf("unexpected QueryBatch")
 }
 
@@ -34,8 +34,8 @@ func TestResolveUnratedSeverities(t *testing.T) {
 	client := &severityAliasClient{
 		vulns: map[string]*osvschema.Vulnerability{
 			"GHSA-g9pc-8g42-g6vq": {
-				ID:       "GHSA-g9pc-8g42-g6vq",
-				Severity: []osvschema.Severity{{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"}},
+				Id:       "GHSA-g9pc-8g42-g6vq",
+				Severity: []*osvschema.Severity{{Type: osvschema.Severity_CVSS_V3, Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"}},
 			},
 		},
 	}

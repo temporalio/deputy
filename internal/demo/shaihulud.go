@@ -47,6 +47,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/hashicorp/go-cleanhttp"
 	"github.com/hashicorp/go-retryablehttp"
+	"github.com/temporalio/deputy/internal/dependency"
 	inv "github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/repository"
 	"golang.org/x/oauth2"
@@ -393,9 +394,7 @@ func matchPackages(pkgs []*extractor.Package, iocs iocSet) []PackageMatch {
 			Ecosystem: p.Ecosystem().String(),
 			PURL:      purl,
 		}
-		if len(p.Locations) > 0 {
-			match.Locations = append([]string(nil), p.Locations...)
-		}
+		match.Locations = dependency.PackagePaths(p)
 		matches = append(matches, match)
 	}
 	slices.SortFunc(matches, func(a, b PackageMatch) int {

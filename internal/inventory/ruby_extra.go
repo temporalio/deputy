@@ -95,10 +95,10 @@ func gemDependencyFromLine(line, path string) *extractor.Package {
 		version = normalizeGemConstraint(matches[0][1])
 	}
 	return &extractor.Package{
-		Name:      name,
-		Version:   version,
-		PURLType:  purl.TypeGem,
-		Locations: []string{path},
+		Name:     name,
+		Version:  version,
+		PURLType: purl.TypeGem,
+		Location: extractor.LocationFromPath(path),
 	}
 }
 

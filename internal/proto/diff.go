@@ -70,10 +70,10 @@ func GitDiffReportToProto(
 	policyFilesEvaluated int,
 ) *diffv1.DiffVulnerabilitiesResponse {
 	return &diffv1.DiffVulnerabilitiesResponse{
-		BaseTarget: &targetv1.Target{
+		Base: &targetv1.Target{
 			DisplayPath: baseRef,
 		},
-		TargetTarget: &targetv1.Target{
+		Target: &targetv1.Target{
 			DisplayPath: targetRef,
 		},
 		GeneratedAt:              timestamppb.Now(),

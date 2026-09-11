@@ -111,10 +111,10 @@ func (e *PluginExtractor) Extract(ctx context.Context, input *fsx.ScanInput) (in
 		purlType := ecosystemToPURLType(pp.Ecosystem)
 
 		pkg := &extractor.Package{
-			Name:      pp.Name,
-			Version:   pp.Version,
-			Locations: []string{input.Path},
-			PURLType:  purlType,
+			Name:     pp.Name,
+			Version:  pp.Version,
+			Location: extractor.LocationFromPath(input.Path),
+			PURLType: purlType,
 		}
 
 		packages = append(packages, pkg)

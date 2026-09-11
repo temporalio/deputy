@@ -17,11 +17,11 @@ func TestCollectRowsFromPackages(t *testing.T) {
 	ctx := t.Context()
 	pkgs := []*extractor.Package{
 		{
-			Name:      "github.com/example/foo",
-			Version:   "v1.0.0",
-			PURLType:  "golang",
-			Licenses:  []string{"MIT"},
-			Locations: []string{"go.mod"},
+			Name:     "github.com/example/foo",
+			Version:  "v1.0.0",
+			PURLType: "golang",
+			Licenses: []string{"MIT"},
+			Location: extractor.LocationFromPath("go.mod"),
 		},
 		{
 			// duplicate to verify de-duplication

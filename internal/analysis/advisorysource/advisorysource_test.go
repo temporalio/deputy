@@ -18,6 +18,7 @@ type fakeSource struct {
 	artifacts  []vulnerabilityv1.ArtifactKind
 	findings   []*vulnerabilityv1.Finding
 	advisories map[string]*vulnerabilityv1.Advisory
+	warnings   []string
 }
 
 func (f *fakeSource) Info() *pluginv1.AdvisorySourceInfo {
@@ -31,7 +32,7 @@ func (f *fakeSource) Info() *pluginv1.AdvisorySourceInfo {
 }
 
 func (f *fakeSource) Query(_ context.Context, _ []*dependencyv1.Package) (*Result, error) {
-	return &Result{Findings: f.findings, Advisories: f.advisories}, nil
+	return &Result{Findings: f.findings, Advisories: f.advisories, Warnings: f.warnings}, nil
 }
 
 func goPkg(name, version string) *dependencyv1.Package {

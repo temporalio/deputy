@@ -81,9 +81,9 @@ func TestFromInventory(t *testing.T) {
 func TestFromInventorySkipsRelativeGoReplacePaths(t *testing.T) {
 	pkgs := []*extractor.Package{
 		{
-			Name:      "../../..",
-			PURLType:  "golang",
-			Locations: []string{"examples/plugin/go.mod"},
+			Name:     "../../..",
+			PURLType: "golang",
+			Location: extractor.LocationFromPath("examples/plugin/go.mod"),
 		},
 		{
 			Name:     "github.com/temporalio/deputy",

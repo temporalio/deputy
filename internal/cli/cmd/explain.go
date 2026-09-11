@@ -143,12 +143,22 @@ func renderAgentAnalysis(ctx context.Context, out io.Writer, vuln *osvschema.Vul
 	}
 
 	// Build vulnerability summary for the agent
+	// Severity entries are flattened by hand: the OSV schema types are protobuf
+	// messages, which encoding/json renders with numeric enums instead of the
+	// "CVSS_V3" names the agent prompt is written against.
+	severities := make([]map[string]string, 0, len(vuln.GetSeverity()))
+	for _, sev := range vuln.GetSeverity() {
+		severities = append(severities, map[string]string{
+			"type":  sev.GetType().String(),
+			"score": sev.GetScore(),
+		})
+	}
 	vulnJSON, err := json.Marshal(map[string]any{
-		"id":       vuln.ID,
-		"summary":  vuln.Summary,
-		"details":  vuln.Details,
-		"aliases":  vuln.Aliases,
-		"severity": vuln.Severity,
+		"id":       vuln.GetId(),
+		"summary":  vuln.GetSummary(),
+		"details":  vuln.GetDetails(),
+		"aliases":  vuln.GetAliases(),
+		"severity": severities,
 	})
 	if err != nil {
 		return fmt.Errorf("encode vulnerability: %w", err)

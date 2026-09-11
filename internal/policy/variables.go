@@ -25,6 +25,8 @@ var variableMetadataByName = map[string]VariableMetadata{
 	"context":               {Type: "sandboxv1.ExecutionContext", Description: "Context about what triggered the sandbox execution"},
 	"dependency":            {Type: "dependencyv1.Package", Description: "Dependency associated with a change"},
 	"descendants":           {Type: "list(graphv1.Node)", Description: "Descendant nodes for the current graph node"},
+	"diff_base":             {Type: "targetv1.Target", Description: "Base side of a diff, the target being compared from"},
+	"diff_target":           {Type: "targetv1.Target", Description: "Target side of a diff, the target being compared to"},
 	"dockerfile":            {Type: "object", Description: "Parsed Dockerfile structure"},
 	"dockerfile_analysis":   {Type: "object", Description: "Dockerfile analysis results"},
 	"edge":                  {Type: "graphv1.Edge", Description: "Current dependency graph edge"},
