@@ -85,7 +85,7 @@ func (m *mockStrategy) Verify(_ context.Context, ref Ref) (*Verification, error)
 	}, nil
 }
 
-func (m *mockStrategy) Rewrite(_ *os.Root, path string, updates []Update) error {
+func (m *mockStrategy) Rewrite(_ context.Context, _ *os.Root, path string, updates []Update) error {
 	if m.rewriteErr != nil {
 		return m.rewriteErr
 	}
@@ -108,7 +108,7 @@ type workflowRewriteStrategy struct {
 	mockStrategy
 }
 
-func (m *workflowRewriteStrategy) Rewrite(root *os.Root, relPath string, updates []Update) error {
+func (m *workflowRewriteStrategy) Rewrite(_ context.Context, root *os.Root, relPath string, updates []Update) error {
 	content, err := fs.ReadFile(root.FS(), relPath)
 	if err != nil {
 		return err
@@ -154,7 +154,7 @@ func (m *containerMockStrategy) Verify(_ context.Context, _ Ref) (*Verification,
 func (m *containerMockStrategy) ResolveUpdate(_ context.Context, ref Ref) (string, string, string, error) {
 	return ref.Version, "", "", nil
 }
-func (m *containerMockStrategy) Rewrite(root *os.Root, relPath string, updates []Update) error {
+func (m *containerMockStrategy) Rewrite(_ context.Context, root *os.Root, relPath string, updates []Update) error {
 	if len(updates) == 0 {
 		return nil
 	}
@@ -1220,7 +1220,7 @@ type writingMockStrategy struct {
 	mockStrategy
 }
 
-func (m *writingMockStrategy) Rewrite(root *os.Root, path string, updates []Update) error {
+func (m *writingMockStrategy) Rewrite(_ context.Context, root *os.Root, path string, updates []Update) error {
 	return testRewriteWorkflow(root, path, updates)
 }
 

@@ -449,6 +449,6 @@ func majorChannel(version string) string {
 }
 
 // Rewrite implements pin.Strategy, dispatching to this strategy's format writer.
-func (s *Strategy) Rewrite(root *os.Root, relPath string, updates []pin.Update) error {
+func (s *Strategy) Rewrite(_ context.Context, root *os.Root, relPath string, updates []pin.Update) error {
 	return s.rewrite(root, relPath, updates)
 }
