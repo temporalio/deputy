@@ -9,6 +9,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
+	"github.com/temporalio/deputy/internal/config"
 	"github.com/temporalio/deputy/internal/services"
 
 	// Import AI providers to register them via init()
@@ -34,6 +35,14 @@ type Dependencies struct {
 	// AuthToken is the bearer token for authenticating with remote servers.
 	// Falls back to the DEPUTY_AUTH_TOKEN environment variable when empty.
 	AuthToken string
+
+	// Config is the configuration the CLI already merged from file,
+	// environment, and flags. Commands that need configuration read it here
+	// rather than loading their own: a second load answers the same question
+	// differently, because it cannot see the flag overrides the first one was
+	// given. Nil means no configuration was supplied, and commands fall back
+	// to their built-in defaults.
+	Config *config.Config
 }
 
 // ResolveConnection fills empty connection settings from the environment
@@ -143,7 +152,7 @@ func RegisterCommands(root *cobra.Command, deps *Dependencies) {
 	AddMCPCommand(root)
 
 	// Server command
-	AddServerCommand(root)
+	AddServerCommand(root, deps)
 }
 
 // authInterceptor returns a Connect interceptor that adds Bearer authentication.

@@ -35,6 +35,34 @@ Deputy searches these locations (in order):
 
 Override with `DEPUTY_CONFIG=/path/to/config.yaml`.
 
+## Invalid Configuration
+
+Having no config file is normal: Deputy runs on built-in defaults without comment. A config file that *is* found but cannot be read, parsed, or validated is a different situation, and Deputy refuses to run rather than falling back to defaults, because every setting the file carries would otherwise be silently dropped.
+
+Dropping them is not a safe fallback. `advisory_sources` is the one with real security weight: a deployment that pinned its vulnerability data to an internal mirror would silently query the public defaults instead. The `otel` block goes the same way, so a deployment that believes it is exporting traces exports nothing. The `egress` block is a list of relaxations (hosts and CIDRs permitted to resolve to private addresses), so losing it does not loosen anything, it makes allowlisted internal hosts unreachable and breaks the deployment in a way that is hard to trace back to the config file.
+
+Precedence still applies to this check: a value is only invalid if nothing higher in the order replaces it, so `--log-level=debug` corrects an invalid `DEPUTY_LOG_LEVEL` rather than being rejected by it. The rule covers a command's own flags too, because the check runs after the command line is parsed: `deputy server --egress-allow-cidr 10.0.0.0/8` starts on a config file whose `server.egress.allowed_cidrs` the flag replaces.
+
+The command exits non-zero, and the diagnostic points at the source that can actually be at fault. A file that cannot be read or parsed is the file's problem:
+
+```console
+$ deputy list
+Failed to load config: config error in .deputy.yaml: failed to parse config file.
+
+Suggestion: Fix the file, or run 'deputy config validate .deputy.yaml' for details
+```
+
+A value that fails validation is attributed more carefully, because validation runs on the merged result of file, environment, and flags:
+
+```console
+$ DEPUTY_LOG_LEVEL=shouty deputy list
+Invalid configuration: validation failed for logging.level: must be one of: debug, info, warn, error.
+
+Suggestion: The value can come from .deputy.yaml or from a DEPUTY_* environment variable, which overrides the file; check both
+```
+
+Commands that do not act on configuration keep working in this state: `deputy config` (`validate`, `show`, `path`) so you can diagnose the file, plus `deputy version`, `deputy help`, `deputy completion`, and shell tab completion. Everything else refuses to run until the file is fixed.
+
 ## Starter Config
 
 See [`.deputy.yaml.example`](../../.deputy.yaml.example) for an annotated template. Copy to `.deputy.yaml` and customize.
