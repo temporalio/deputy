@@ -26,6 +26,54 @@ flowchart TD
   class PURLs,SBOM output
 ```
 
+### Direct and transitive dependencies
+
+A package is direct when the project declares it in its own manifest. Deputy reads
+that from the manifests of Go (`go.mod`), npm (`package.json`), Cargo (`Cargo.toml`),
+and PyPI (`pyproject.toml`, `requirements.txt`). For PyPI that means every table
+the project declares for itself, including PEP 621 extras, PEP 735 dependency
+groups, and Poetry's named groups. Base images, workflow `uses`, and `mise` or
+`asdf` tools are direct by construction, since every one of them is written down
+in the file that declares it.
+
+A manifest names a version range, not a version, so a lockfile that carries two
+copies of a declared package needs the resolution to tell them apart. npm is the
+ecosystem where that is routine, and Deputy reads `package-lock.json`, or
+`npm-shrinkwrap.json` where a project publishes one instead, to mark only the
+version the declaration resolved to, so a nested copy of a declared name reads as
+transitive. A project carrying both files is read the way npm and Deputy's own
+inventory read it: the shrinkwrap governs and the `package-lock.json` is ignored.
+
+In a workspace every member's own declarations count, resolved against the copy
+nearest to that member. A lockfile answers only for the members its own
+`workspaces` globs claim, so a standalone project nested in the tree, a `tools/`
+directory with its own `package.json` and a Yarn lockfile, keeps its own answer
+rather than being resolved by a lockfile that never mentioned it. `direct`
+describes the scan as a whole: a package any member declares is direct, and two
+members declaring different versions make both direct. Which member a package is
+direct *for* is not something a boolean can say.
+
+That precision needs the resolution, so it holds per project and not per
+repository. A repository whose npm projects all commit a `package-lock.json` gets
+it throughout. One that mixes such a project with a Yarn or pnpm project declaring
+the same package does not: the unresolved project declares a name without a
+version, and that declaration is honored for every copy of the name in the scan,
+so a transitive copy elsewhere reads direct. Deputy prefers that to the
+alternative, which is reporting a dependency a project explicitly declared as
+transitive. Cargo can hold several versions of one crate the same way and is not
+resolved at all yet, so there a declared crate marks every copy of that name
+direct: [issue #279](https://github.com/temporalio/deputy/issues/279).
+
+Every other ecosystem Deputy inventories (Maven, RubyGems, NuGet, Hex, Pub,
+CocoaPods, Packagist, Hackage, CRAN, ConanCenter) has no manifest parser yet, and
+`direct` is a boolean, so its packages are reported as transitive whether they are
+or not, with nothing in the output distinguishing the two. Treat `--only-direct`,
+`direct` in JSON and SBOM output, and direct-only policies as covering the
+ecosystems listed above and no others.
+[Issue #246](https://github.com/temporalio/deputy/issues/246) tracks both halves:
+reading the remaining manifests, and a contract that can say "not determined"
+instead of reporting `false`.
+
 ## PURLs
 
 PURLs (Package URLs) are a compact identifier used throughout Deputy for output and linking.

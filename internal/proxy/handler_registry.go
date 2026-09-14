@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 // PathParseResult holds the parsed components from an ecosystem-specific URL path.
@@ -124,7 +126,7 @@ func (h *genericHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Filename:   parsed.Filename,
 	}
 
-	entrypoint := h.config.Ecosystem.ProxyEntrypoint()
+	entrypoint := policy.ProxyEntrypoint(string(h.config.Ecosystem))
 	input := h.buildPolicyInput(r.Context(), info, entrypoint)
 	h.serve(w, r, entrypoint, info, input)
 }
@@ -187,6 +189,15 @@ func (f *HandlerFactory) CreateHandlerWithOptions(eco ecosystem.Ecosystem, upstr
 		return nil, fmt.Errorf("unsupported ecosystem: %s", eco)
 	}
 
+	// A handler with no entrypoint cannot be governed: the policy engine skips
+	// entrypoint filtering for an empty entrypoint, so every loaded policy would
+	// run against these requests, including ones written for another ecosystem's
+	// artifact requests. Refuse the handler instead of serving it ungoverned.
+	if policy.ProxyEntrypoint(string(config.Ecosystem)) == "" {
+		return nil, fmt.Errorf("ecosystem %q has no artifact-request policy entrypoint; proxy handlers are available for: %s",
+			config.Ecosystem, strings.Join(f.proxyableEcosystems(), ", "))
+	}
+
 	baseCfg := handlerConfig{
 		ecosystem:    string(config.Ecosystem),
 		osvEcosystem: config.Ecosystem.OSVName(),
@@ -227,6 +238,22 @@ func (f *HandlerFactory) CreateHandlerWithOptions(eco ecosystem.Ecosystem, upstr
 		baseHandler: base,
 		config:      config,
 	}, nil
+}
+
+// proxyableEcosystems returns the sorted registered ecosystems that can
+// actually be served, meaning the ones a policy entrypoint exists for. It backs
+// the error a caller gets when they ask for one that cannot.
+func (f *HandlerFactory) proxyableEcosystems() []string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	out := make([]string, 0, len(f.registry))
+	for eco := range f.registry {
+		if policy.ProxyEntrypoint(string(eco)) != "" {
+			out = append(out, string(eco))
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // SupportedEcosystems returns a list of all ecosystems supported by the factory.

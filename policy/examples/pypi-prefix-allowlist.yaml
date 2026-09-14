@@ -2,12 +2,16 @@ policies:
   - name: pypi-prefix-allowlist
     description: Allow only approved prefixes for PyPI artifacts via the proxy
     vars:
+      # PyPI names reach a policy in PEP 503 form: lowercase, with every run of
+      # "-", "_", and "." collapsed to a single "-". Prefixes must be written
+      # that way, so "acme_" would never match the package it was meant to
+      # allow. See docs/reference/policy-inputs.md#canonical-package-identity.
       allowedPrefixes:
-        - "acme_"
-        - "corp_"
+        - "acme-"
+        - "corp-"
         - "internal-"
-      # pkg.name is synthesized from request.package/name, so we can use it directly
-      pkgName: 'pkg.name.lowerAscii()'
+      # pkg.name is synthesized from request.package/name and already canonical.
+      pkgName: 'pkg.name'
     rules:
       - action: deny
         when: env.entrypoint == "pypi_artifact_request" && !(allowedPrefixes.exists(p, pkgName.startsWith(p)))

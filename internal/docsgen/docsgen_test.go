@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/policy"
 )
 
@@ -14,14 +15,38 @@ import (
 // descriptor comments. When it fails, the registry or a proto comment changed
 // without regenerating the docs; run `go generate ./internal/docsgen/...`.
 func TestPolicyInputsDocIsGenerated(t *testing.T) {
-	path := filepath.Join("..", "..", filepath.FromSlash(PolicyInputsDocPath))
-	got, err := Section(path, PolicyEntrypointsSection)
-	if err != nil {
-		t.Fatalf("read generated section: %v", err)
+	sections := []struct {
+		name string
+		want string
+	}{
+		{name: PolicyEntrypointsSection, want: PolicyEntrypointsMarkdown()},
+		{name: CanonicalEcosystemsSection, want: CanonicalEcosystemsMarkdown()},
 	}
-	want := PolicyEntrypointsMarkdown()
-	if got != want {
-		t.Fatalf("%s is stale; run `go generate ./internal/docsgen/...` to regenerate the %s section", PolicyInputsDocPath, PolicyEntrypointsSection)
+
+	path := filepath.Join("..", "..", filepath.FromSlash(PolicyInputsDocPath))
+	for _, section := range sections {
+		t.Run(section.name, func(t *testing.T) {
+			got, err := Section(path, section.name)
+			if err != nil {
+				t.Fatalf("read generated section: %v", err)
+			}
+			if got != section.want {
+				t.Fatalf("%s is stale; run `go generate ./internal/docsgen/...` to regenerate the %s section", PolicyInputsDocPath, section.name)
+			}
+		})
+	}
+}
+
+// TestCanonicalEcosystemsMarkdownCoversTheVocabulary guards the ecosystem
+// table: every canonical token appears with its display name, so the docs
+// cannot fall behind the registry.
+func TestCanonicalEcosystemsMarkdownCoversTheVocabulary(t *testing.T) {
+	out := CanonicalEcosystemsMarkdown()
+	for _, token := range ecosystem.CanonicalEcosystems() {
+		row := "| `" + token + "` | " + ecosystem.Display(ecosystem.Ecosystem(token)) + " |"
+		if !strings.Contains(out, row) {
+			t.Errorf("missing row %q in:\n%s", row, out)
+		}
 	}
 }
 

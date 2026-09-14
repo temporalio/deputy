@@ -13,6 +13,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/extractor/filesystem"
 	scalibrfs "github.com/google/osv-scalibr/fs"
+	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/forge"
 	"github.com/temporalio/deputy/internal/inventory/plugins/github/actionsx"
 	"github.com/temporalio/deputy/internal/pin"
@@ -27,8 +28,9 @@ import (
 // on public repos; only verification needs API access.
 
 const (
-	// Ecosystem is the ecosystem identifier for GitHub Actions.
-	Ecosystem = "github-actions"
+	// Ecosystem is the ecosystem identifier for GitHub Actions, taken from the
+	// ecosystem package so the pin strategy names it the same way policies do.
+	Ecosystem = string(ecosystem.GitHubActions)
 )
 
 // Compile-time interface check.

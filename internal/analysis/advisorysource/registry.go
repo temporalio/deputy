@@ -19,8 +19,9 @@ import (
 
 // EcosystemGitHubActions is the canonical ecosystem label for GitHub Actions.
 // OSV serves these from its advisory bucket, so it is a coverage label rather
-// than an entry in the ecosystem registry.
-const EcosystemGitHubActions = "github-actions"
+// than an entry in the ecosystem registry; the token itself still comes from
+// the ecosystem package so coverage routing cannot drift from it.
+const EcosystemGitHubActions = string(ecosystem.GitHubActions)
 
 // maxSourceConcurrency bounds concurrent source queries.
 const maxSourceConcurrency = 8

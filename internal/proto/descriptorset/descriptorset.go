@@ -13,16 +13,75 @@ package descriptorset
 import (
 	_ "embed"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 //go:embed descriptorset.binpb
 var raw []byte
+
+// parse decodes the embedded descriptor set once, shared by every index built
+// from it.
+var parse = sync.OnceValues(func() (*descriptorpb.FileDescriptorSet, error) {
+	var fds descriptorpb.FileDescriptorSet
+	if err := proto.Unmarshal(raw, &fds); err != nil {
+		return nil, fmt.Errorf("parse embedded descriptor set: %w", err)
+	}
+	return &fds, nil
+})
+
+// resolved holds the embedded set as protoreflect descriptors. The set is built
+// with --exclude-imports, so references to well-known types cannot be resolved
+// and become placeholders; that is fine for structural queries over Deputy's
+// own messages and is why unresolvable references are allowed.
+var resolved = sync.OnceValues(func() (*protoregistry.Files, error) {
+	fds, err := parse()
+	if err != nil {
+		return nil, err
+	}
+	files, err := (protodesc.FileOptions{AllowUnresolvable: true}).NewFiles(fds)
+	if err != nil {
+		return nil, fmt.Errorf("resolve embedded descriptor set: %w", err)
+	}
+	return files, nil
+})
+
+// RangeMessages calls fn for every message declared in Deputy's protos,
+// including nested messages but not the synthetic map-entry messages. It stops
+// early when fn returns false. Callers get the complete schema, not just the
+// parts linked into the current binary, so schema-derived checks cannot go
+// blind on a package nobody imported.
+func RangeMessages(fn func(protoreflect.MessageDescriptor) bool) error {
+	files, err := resolved()
+	if err != nil {
+		return err
+	}
+	var walk func(protoreflect.MessageDescriptors) bool
+	walk = func(msgs protoreflect.MessageDescriptors) bool {
+		for i := range msgs.Len() {
+			md := msgs.Get(i)
+			if md.IsMapEntry() {
+				continue
+			}
+			if !fn(md) || !walk(md.Messages()) {
+				return false
+			}
+		}
+		return true
+	}
+	files.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
+		return walk(fd.Messages())
+	})
+	return nil
+}
 
 // comment index keyed by the element's proto full name (messages, fields,
 // enums, enum values), holding the cleaned leading comment.
@@ -35,9 +94,9 @@ var load = sync.OnceValues(func() (_ map[protoreflect.FullName]string, retErr er
 			retErr = fmt.Errorf("index embedded descriptor set: %v", r)
 		}
 	}()
-	var fds descriptorpb.FileDescriptorSet
-	if err := proto.Unmarshal(raw, &fds); err != nil {
-		return nil, fmt.Errorf("parse embedded descriptor set: %w", err)
+	fds, err := parse()
+	if err != nil {
+		return nil, err
 	}
 	idx := make(map[protoreflect.FullName]string)
 	for _, fd := range fds.GetFile() {
@@ -45,6 +104,81 @@ var load = sync.OnceValues(func() (_ map[protoreflect.FullName]string, retErr er
 	}
 	return idx, nil
 })
+
+// scalarMapFields indexes the field names declared anywhere in Deputy's protos
+// as a map with scalar values (map<string, string>, map<string, int32>, ...).
+// Map fields with message values are excluded: those are structured data the
+// schema describes, not opaque key/value pairs.
+var scalarMapFields = sync.OnceValues(func() (map[string]struct{}, error) {
+	fds, err := parse()
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]struct{})
+	for _, fd := range fds.GetFile() {
+		for _, msg := range fd.GetMessageType() {
+			collectScalarMapFields(names, msg)
+		}
+	}
+	return names, nil
+})
+
+// ScalarMapFieldNames returns the sorted names of every field in Deputy's
+// protos declared as a map with scalar values. The names come from the embedded
+// descriptor set, so callers that need to treat opaque key/value maps
+// differently from schema-described structures do not have to maintain their
+// own list. It returns nil when the descriptor set cannot be read.
+func ScalarMapFieldNames() []string {
+	names, err := scalarMapFields()
+	if err != nil {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(names))
+}
+
+// IsScalarMapField reports whether name is declared anywhere in Deputy's protos
+// as a map field with scalar values.
+func IsScalarMapField(name string) bool {
+	names, err := scalarMapFields()
+	if err != nil {
+		return false
+	}
+	_, ok := names[name]
+	return ok
+}
+
+// collectScalarMapFields records the scalar-valued map fields of a message and
+// of every message nested inside it. A map field is a repeated message field
+// whose element type is the synthetic map-entry message the compiler generates
+// next to it, so the entry's value field says what the map holds.
+func collectScalarMapFields(names map[string]struct{}, msg *descriptorpb.DescriptorProto) {
+	entries := make(map[string]*descriptorpb.DescriptorProto, len(msg.GetNestedType()))
+	for _, nested := range msg.GetNestedType() {
+		if nested.GetOptions().GetMapEntry() {
+			entries[nested.GetName()] = nested
+		}
+	}
+	for _, field := range msg.GetField() {
+		if field.GetLabel() != descriptorpb.FieldDescriptorProto_LABEL_REPEATED || field.GetType() != descriptorpb.FieldDescriptorProto_TYPE_MESSAGE {
+			continue
+		}
+		typeName := field.GetTypeName()
+		entry, ok := entries[typeName[strings.LastIndex(typeName, ".")+1:]]
+		if !ok {
+			continue
+		}
+		for _, entryField := range entry.GetField() {
+			if entryField.GetName() == "value" && entryField.GetType() != descriptorpb.FieldDescriptorProto_TYPE_MESSAGE {
+				names[field.GetName()] = struct{}{}
+			}
+		}
+	}
+	for _, nested := range msg.GetNestedType() {
+		if !nested.GetOptions().GetMapEntry() {
+			collectScalarMapFields(names, nested)
+		}
+	}
+}
 
 // Comment returns the cleaned leading comment for the proto element with the
 // given full name (message, field, enum, or enum value), or "" when the

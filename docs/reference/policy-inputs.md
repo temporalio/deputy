@@ -793,7 +793,71 @@ Finding represents a scan-time occurrence of an advisory in a dependency.
 
 ## Canonical ecosystems
 
-The canonical ecosystem strings used by the proxy and policy filters are `go`, `npm`, `pypi`, `rubygems`, `oci`.
+Every ecosystem value in a policy input is canonicalized before evaluation, so a policy sees exactly one spelling no matter which scanner produced the data: a lowercase, hyphenated name. Inventory, graph resolution, and OSV report display names (`Go`, `PyPI`, `crates.io`, `GitHub Actions`); those are for rendering only and never reach a policy.
+
+It happens once, at the boundary rather than per rule. Each of the three places `internal/policy` builds a CEL payload (a proto input, a map input, and the standalone evaluator behind filter expressions) rewrites the whole payload before any expression compiles, so every entrypoint on both the CLI and the server reads the same vocabulary and no rule has to normalize for itself. Only the payload is rewritten, which is why the display names below still appear in rendered output, in generated SBOMs, and in the queries Deputy sends to OSV.
+
+The proxy entrypoints use `go`, `npm`, `pypi`, `rubygems`, and `oci`. The full vocabulary comes from the ecosystem registry:
+
+<!-- BEGIN GENERATED: canonical-ecosystems -->
+| Canonical name | Display name |
+| --- | --- |
+| `asdf` | asdf |
+| `cargo` | Cargo |
+| `cocoapods` | CocoaPods |
+| `conancenter` | ConanCenter |
+| `cran` | CRAN |
+| `docker` | docker |
+| `github-actions` | GitHub Actions |
+| `go` | Go |
+| `hackage` | Hackage |
+| `hex` | Hex |
+| `maven` | Maven |
+| `mise` | mise |
+| `npm` | npm |
+| `nuget` | NuGet |
+| `oci` | oci |
+| `packagist` | Packagist |
+| `pub` | Pub |
+| `pypi` | PyPI |
+| `rubygems` | RubyGems |
+<!-- END GENERATED: canonical-ecosystems -->
+
+Write `pkg.ecosystem == "go"`, not `pkg.ecosystem == "Go"`, and drop any `lowerAscii()` workaround. Ecosystems Deputy does not recognize (OS package ecosystems such as `Alpine:v3.19`) are lowercased rather than remapped, so they stay comparable without losing their release suffix.
+
+A rule against an ecosystem is therefore one comparison per ecosystem, whatever the scanner that found the package called it:
+
+```cel
+// "Go" and "golang" both arrive as "go"; "GitHub Actions", "githubactions",
+// "github", and "gha" all arrive as "github-actions". One literal each.
+pkg.ecosystem in ["go", "github-actions"]
+  ? [{"action": "deny", "reason": "ecosystem not allowed for this target"}]
+  : [{"action": "allow"}]
+```
+
+An ecosystem Deputy does not recognize is the one case where the value is not from this vocabulary, and it is still folded, so match it in lowercase and keep the suffix: `pkg.ecosystem.startsWith("alpine:")` matches a package the scanner reported as `Alpine:v3.19`.
+
+## Canonical package identity
+
+The ecosystem selects how the rest of a package's identity is normalized, so name and version are canonicalized alongside it, using the same rules Deputy applies when it queries OSV or compares two trees:
+
+- Go versions always carry the `v` prefix, including in diff payloads where the extractor reports `1.44.0`. Write `pkg.version.matches("^v1\\.")`.
+- PyPI names arrive in PEP 503 form: lowercase, with every run of `-`, `_`, and `.` collapsed to a single `-`. `Flask_SQLAlchemy`, `flask.sqlalchemy`, and `Flask-SQLAlchemy` all reach a policy as `flask-sqlalchemy`. Write allowlist and denylist entries in that form; a prefix such as `acme_` never matches.
+- Every other ecosystem keeps the name string it reported. npm, Go, Maven, and Cargo names are case-sensitive or separator-significant, so folding them would merge distinct packages or invent a spelling nothing publishes. A crate in particular reaches a policy as `async-trait`, the name crates.io publishes and OSV indexes: crates.io folds `-` and `_` to decide two names are one crate and to stop a second crate claiming the other spelling, but it does not rename the crate. Deputy applies that fold where it belongs, when it matches a manifest entry against a lockfile entry, not to the identity a policy reads.
+
+- A package's `purl` carries the same identity as its name and version, so it is folded the same way: a PyPI component reports `pkg:pypi/zope-interface@6.4` and a Go one `pkg:golang/github.com/aws/aws-sdk-go@v1.44.0`. `purl(pkg.purl).version == pkg.version` always holds, and `purl(pkg.purl)` rejoined with its namespace names the same package as `pkg.name`. A PURL whose type is not the object's ecosystem, or that does not parse, is left exactly as it arrived, along with its qualifiers and subpath.
+
+This applies to each identity-carrying object in a payload (`pkg`, `request`, `change`, `node`, `component`, `dependency`, `step`, and nested `vulnerability.package`), to every version field on it (`version`, `base_version`, `target_version`, `fixed_version`, and `fixed_versions`), and to every field that names the package, whichever alias the schema uses: `name`, `old_name`, `request.package`, `request.module`, and a container vulnerability change's `package_name`. Reading one alias never gives a different string than reading another.
+
+An object that names no ecosystem but spells its own identity as a package URL resolves through that URL. A remediation `step` is the case that needs it: it names a package manager, not an ecosystem, so `step.version`, `step.target_version`, `step.package`, and `step.purl` are all normalized with the ecosystem `step.purl` names. A fix plan for `pkg:golang/github.com/aws/aws-sdk-go@1.44.0` therefore reaches `fix_plan_step` as `v1.44.0`, matching the version the same package carries everywhere else. A step whose URL is missing, unparseable, or of a type no ecosystem claims is left exactly as it arrived rather than folded by a guessed ecosystem's rules.
+
+An object that names no ecosystem and carries no package URL belongs to the one that contains it. A change carries base and target versions next to its package, and both are normalized with that package's ecosystem; a finding's `advisory.fixed_versions` are versions of `vulnerability.package`, so they are normalized with that package's ecosystem too. An object that does name an ecosystem overrides the inherited one for itself and everything below it, which is how an advisory's `package_fixes` entries keep their own.
+
+Free-form key/value maps are never canonicalized. `jwt.custom_claims`, container image `labels`, `target.provenance`, and an advisory's `database_specific` hold caller- or source-supplied data, so an entry that happens to be named `ecosystem` or `version` keeps the spelling it arrived with. Their values are not exempt from the payload-wide numeric coercion, though: a claim of `"12345"` reaches a policy as an integer, which is the same defect [issue #248](https://github.com/temporalio/deputy/issues/248) tracks for version strings. [Issue #276](https://github.com/temporalio/deputy/issues/276) audits whether each of these maps should be a map at all.
+
+Outside a package's own identity fields, only the fields documented as holding package URLs are canonicalized: the graph's `roots`, an edge's `from` and `to`, `sbom.purls`, and any `*_purl` or `*_purls` field. Every other string reaches a policy byte for byte, whatever it looks like. A sandbox request's `command` is the argv the caller asked to execute, so `command.exists(a, a == "pkg:golang/example.com/mod@1.2.3")` matches the argument exactly as requested rather than a rewritten spelling of it. A path is one of those strings: `step.path`, `pkg.manifest_refs[].path`, `dockerfile.path`, and a finding's `path` are compared exactly as Deputy received them, since the same field name means a file on most of the messages that declare it.
+
+The `<unknown>` sentinel described below is never normalized, and neither is a string that is not a version: an unstamped Go binary reports its main module as `(devel)`, so `pkg.version == "(devel)"` still matches.
 
 ## Proxy version semantics
 
@@ -887,8 +951,9 @@ For container images, `target.provenance` commonly includes: `registry`, `reposi
 
 When scanning SBOMs, Deputy injects `sbom.purls`, a list of PURL strings found in
 the SBOM input (including container image PURLs with qualifiers such as platform).
-PURLs are normalized to canonical form when possible; use `purl()` to parse fields
-in CEL:
+Every entry is canonicalized the same way a package's own `purl` is, so
+`pkg.purl in sbom.purls` holds for a package the SBOM carries; use `purl()` to
+parse fields in CEL:
 
 ```json
 {
@@ -899,6 +964,20 @@ in CEL:
     ]
   }
 }
+```
+
+Because both sides are canonicalized, membership holds without reformatting either one. An SBOM that spells a Go component `pkg:golang/example.com/mod@1.2.3` still matches a package whose own `purl` carries the `v`, so the rule is the plain test rather than a normalization of the list:
+
+```cel
+pkg.purl in sbom.purls
+  ? [{"action": "deny", "reason": "component is in the scanned SBOM"}]
+  : [{"action": "allow"}]
+```
+
+Reach for `purl()` when a rule needs one field of an entry rather than the whole string. It returns `type`, `namespace`, `name`, `version`, `qualifiers`, `subpath`, and the reassembled `purl`, and it returns `null` for a string that does not parse, so guard the result when the list can hold one:
+
+```cel
+sbom.purls.exists(p, purl(p) != null && purl(p).type == "oci")
 ```
 
 `image` is a convenience object for image targets and OCI proxy requests. It includes both provenance fields and extracted container configuration:
@@ -1043,7 +1122,7 @@ Scan vulnerability (simplified):
       "id": "GO-2024-1234",
       "severity": {"level": "SEVERITY_LEVEL_MEDIUM"}
     },
-    "package": {"name": "example.com/pkg", "version": "1.0.0", "ecosystem": "Go"}
+    "package": {"name": "example.com/pkg", "version": "v1.0.0", "ecosystem": "go"}
   },
   "env": {"command": "scan", "entrypoint": "scan_vulnerability"}
 }

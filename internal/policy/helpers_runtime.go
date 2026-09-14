@@ -302,11 +302,13 @@ func customHelperFunctions() []cel.EnvOption {
 			),
 		),
 
-		// nodeEcosystem(node) returns the ecosystem of a node (e.g., "npm", "Go", "PyPI").
+		// nodeEcosystem(node) returns the canonical ecosystem token of a node.
+		// Policy inputs are canonicalized before evaluation, so this is always
+		// the lowercase token ("go", "npm", "pypi"), never a display name.
 		//
 		// Example usage in CEL:
 		//   nodeEcosystem(node) == "npm"
-		//   nodes.filter(n, nodeEcosystem(n) in ["npm", "PyPI"])
+		//   nodes.filter(n, nodeEcosystem(n) in ["npm", "pypi"])
 		cel.Function("nodeEcosystem",
 			cel.Overload("nodeEcosystem_map",
 				[]*cel.Type{cel.DynType},

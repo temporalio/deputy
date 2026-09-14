@@ -1118,3 +1118,70 @@ func Test_buildProtobomDocument_dedupesBaseImageNodes(t *testing.T) {
 		t.Errorf("library/python nodes = %d, want 1", pythonNodes)
 	}
 }
+
+// TestBuildProtobomDocument_DirectPropertyMatchesPolicyClassification pins the
+// SBOM's "deputy:direct" property to the classification the policy payload
+// carries. The two used to be separate rules, and the local one compared the
+// scanned name to the manifest key verbatim, so any package an ecosystem folds
+// (a Cargo crate, a PyPI distribution) lost the property while the payload kept
+// it, and an always-direct ecosystem got it twice.
+func TestBuildProtobomDocument_DirectPropertyMatchesPolicyClassification(t *testing.T) {
+	orig := listRemoteRefsForSBOM
+	t.Cleanup(func() { listRemoteRefsForSBOM = orig })
+	listRemoteRefsForSBOM = func(context.Context, string, transport.AuthMethod) ([]*plumbing.Reference, error) {
+		return nil, nil
+	}
+
+	direct := map[string]bool{
+		"serde_json":       true,
+		"flask-sqlalchemy": true,
+		"mio":              false,
+	}
+	pkgs := []*extractor.Package{
+		{Name: "serde-json", Version: "1.0.117", PURLType: "cargo"},
+		{Name: "Flask-SQLAlchemy", Version: "3.0.5", PURLType: "pypi"},
+		{Name: "mio", Version: "0.8.6", PURLType: "cargo"},
+		{Name: "actions/checkout", Version: "v4", PURLType: purlx.TypeGitHubActions},
+	}
+	tests := []struct {
+		name       string
+		node       string
+		wantDirect int
+	}{
+		{name: "cargo crate spelled with a hyphen", node: "serde-json", wantDirect: 1},
+		{name: "pypi distribution spelled in mixed case", node: "flask-sqlalchemy", wantDirect: 1},
+		{name: "transitive crate", node: "mio", wantDirect: 0},
+		{name: "github action is direct exactly once", node: "actions/checkout", wantDirect: 1},
+	}
+
+	ws := workspace.NewMemory()
+	defer ws.Close()
+	doc, err := buildProtobomDocument(t.Context(), ws, "https://example.invalid/repo.git", "HEAD", "test", pkgs, direct, nil)
+	if err != nil {
+		t.Fatalf("buildProtobomDocument: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var node *sbom.Node
+			for _, n := range doc.GetNodeList().GetNodes() {
+				if n.GetName() == tt.node {
+					node = n
+					break
+				}
+			}
+			if node == nil {
+				t.Fatalf("no node named %q", tt.node)
+			}
+			got := 0
+			for _, p := range node.GetProperties() {
+				if p.GetName() == "deputy:direct" && p.GetData() == "true" {
+					got++
+				}
+			}
+			if got != tt.wantDirect {
+				t.Errorf("deputy:direct count = %d, want %d", got, tt.wantDirect)
+			}
+		})
+	}
+}

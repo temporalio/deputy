@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 )
 
 func TestEvaluateSimplePolicy(t *testing.T) {
@@ -1020,4 +1022,127 @@ func TestVulnerabilityGraphFields(t *testing.T) {
 			t.Errorf("expected 2 deep transitive vulnerabilities")
 		}
 	})
+}
+
+// TestConvertProtoValueTypedContainers pins that a payload carrying protos in
+// typed containers (the shape the container diff CLI builds) reaches CEL as
+// plain maps, so field access works and canonicalization can walk it. A typed
+// slice left intact is invisible to both.
+func TestConvertProtoValueTypedContainers(t *testing.T) {
+	changes := []*diffv1.ContainerPackageChange{
+		{Name: "runc", Ecosystem: "Go", BaseVersion: "1.0.0", TargetVersion: "1.2.0"},
+	}
+	advisories := map[string]*vulnerabilityv1.Advisory{
+		"GHSA-x": {Id: "GHSA-x", Summary: "boom"},
+	}
+
+	tests := []struct {
+		name  string
+		value any
+		check func(t *testing.T, got any)
+	}{
+		{
+			name:  "typed proto slice becomes a list of maps",
+			value: changes,
+			check: func(t *testing.T, got any) {
+				list, ok := got.([]any)
+				if !ok {
+					t.Fatalf("converted value is %T, want []any", got)
+				}
+				elem, ok := list[0].(map[string]any)
+				if !ok {
+					t.Fatalf("element is %T, want map[string]any", list[0])
+				}
+				if elem["ecosystem"] != "Go" {
+					t.Errorf("ecosystem = %v, want Go (conversion must not canonicalize)", elem["ecosystem"])
+				}
+			},
+		},
+		{
+			name:  "typed proto map becomes a map of maps",
+			value: advisories,
+			check: func(t *testing.T, got any) {
+				m, ok := got.(map[string]any)
+				if !ok {
+					t.Fatalf("converted value is %T, want map[string]any", got)
+				}
+				if _, ok := m["GHSA-x"].(map[string]any); !ok {
+					t.Fatalf("entry is %T, want map[string]any", m["GHSA-x"])
+				}
+			},
+		},
+		{
+			name:  "scalar slices are left alone",
+			value: []string{"a", "b"},
+			check: func(t *testing.T, got any) {
+				if _, ok := got.([]string); !ok {
+					t.Fatalf("converted value is %T, want []string", got)
+				}
+			},
+		},
+		{
+			name:  "byte slices are left alone",
+			value: []byte("raw"),
+			check: func(t *testing.T, got any) {
+				if _, ok := got.([]byte); !ok {
+					t.Fatalf("converted value is %T, want []byte", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.check(t, convertProtoValue(tt.value))
+		})
+	}
+}
+
+// TestEvaluateTypedProtoSlice drives the container diff report shape end to
+// end: a policy that iterates package_changes must see canonical ecosystem
+// tokens rather than failing on an unconvertible typed slice.
+func TestEvaluateTypedProtoSlice(t *testing.T) {
+	input := map[string]any{
+		"package_changes": []*diffv1.ContainerPackageChange{
+			{Name: "runc", Ecosystem: "Go", BaseVersion: "1.0.0", TargetVersion: "1.2.0"},
+		},
+	}
+	val, err := Evaluate(t.Context(), `package_changes.exists(c, c.ecosystem == "go" && c.target_version == "v1.2.0")`, input)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if b, ok := val.(bool); !ok || !b {
+		t.Errorf("policy did not match canonicalized package_changes, got %v", val)
+	}
+}
+
+// TestConvertedContainersStayOffCallerData pins that converting typed proto
+// containers does not widen canonicalization onto caller-supplied values: the
+// schema gate still decides which variables the walk enters, so a JWT claim
+// named "ecosystem" survives next to a converted package change.
+func TestConvertedContainersStayOffCallerData(t *testing.T) {
+	payload := map[string]any{
+		"jwt": map[string]any{"sub": "svc", "ecosystem": "Customer_Success"},
+		"package_changes": []*diffv1.ContainerPackageChange{
+			{Name: "runc", Ecosystem: "Go", BaseVersion: "1.0.0"},
+		},
+	}
+	payload = convertProtosInMap(payload)
+	canonicalizeEcosystemPayload(payload)
+
+	jwt, _ := payload["jwt"].(map[string]any)
+	if got := jwt["ecosystem"]; got != "Customer_Success" {
+		t.Errorf("jwt.ecosystem = %v, want Customer_Success", got)
+	}
+	changes, ok := payload["package_changes"].([]any)
+	if !ok {
+		t.Fatalf("package_changes is %T, want []any", payload["package_changes"])
+	}
+	change, _ := changes[0].(map[string]any)
+	if got := change["ecosystem"]; got != "go" {
+		t.Errorf("package_changes[0].ecosystem = %v, want go", got)
+	}
+	if got := change["base_version"]; got != "v1.0.0" {
+		t.Errorf("package_changes[0].base_version = %v, want v1.0.0", got)
+	}
 }

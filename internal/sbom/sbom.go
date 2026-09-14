@@ -48,6 +48,7 @@ import (
 	"github.com/temporalio/deputy/internal/license"
 	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/otel"
+	protoconv "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/purlx"
 	"github.com/temporalio/deputy/internal/repository"
 	"github.com/temporalio/deputy/internal/repository/workspace"
@@ -118,6 +119,15 @@ type Result struct {
 	Origin string
 	// Packages is the raw list of packages discovered by the inventory scanner.
 	Packages []*extractor.Package
+	// Direct marks which of Packages are direct dependencies, keyed the way
+	// [protoconv.ExtractorPackageIsDirect] expects: module roots for Go, the
+	// ecosystem's own normalized name for npm, Cargo, and PyPI, and PURL
+	// strings otherwise, plus name and version for an npm package whose
+	// declaration a lockfile resolved. Read it through that function rather
+	// than by name, since which key holds an answer is its business. It is nil
+	// when the target carries no manifest to derive directness from, such as a
+	// container image.
+	Direct map[string]bool
 }
 
 // Generate builds an SBOM document for repoPath (local) or a remote reference.
@@ -216,13 +226,17 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		return Result{}, err
 	}
 
+	// An SBOM inventories every ecosystem Deputy extracts, so its direct
+	// dependency set has to come from every ecosystem's manifests too. The
+	// Go-only collectors left each npm, Cargo, and PyPI component marked
+	// indirect, which is what a policy scoped to direct dependencies reads.
 	var directDeps map[string]bool
 	switch {
 	case strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0"):
-		directDeps = compare.CollectGoDirectModulesFromWorkspace(src.Workspace())
+		directDeps = compare.CollectDirectDependenciesFromWorkspace(src.Workspace())
 	default:
 		if hash, err := gitx.ResolveRevisionEnhanced(src.Repo, effRef); err == nil {
-			directDeps, _ = compare.CollectGoDirectModulesFromCommit(src.Repo, *hash)
+			directDeps, _ = compare.CollectDirectDependenciesFromCommit(src.Repo, *hash)
 		}
 	}
 
@@ -285,6 +299,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	result.Origin = origin
 	result.Document = doc
 	result.Packages = pkgs
+	result.Direct = directDeps
 	targetKind := targets.KindGit
 	if nonGit {
 		targetKind = targets.KindDir
@@ -448,12 +463,9 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 				Name: "deputy:requestedRef",
 				Data: strings.TrimSpace(p.Version),
 			})
-			// GitHub Actions "uses: owner/repo@v2" is effectively a moving tag.
-			// We treat it as a direct dependency in Deputy's SCA model.
-			n.Properties = append(n.Properties, &sbom.Property{
-				Name: "deputy:direct",
-				Data: "true",
-			})
+			// A workflow's "uses:" is a direct dependency, which the shared
+			// classification below already knows; adding it here too would write
+			// the property twice.
 			if ctx == nil {
 				ctx = context.Background()
 			}
@@ -480,17 +492,13 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		// does not have a native field for dependency directness (unlike CycloneDX's
 		// dependency graph or SPDX's relationship types, which are not fully exposed
 		// in the flat Node list in a way that persists easily through all formats).
-		isDirect := false
-		if directDeps != nil {
-			nameToCheck := p.Name
-			if pu := p.PURL(); pu != nil && pu.Type == purl.TypeGolang {
-				info := compare.ParseGoPackage(p)
-				nameToCheck = compare.GetModuleRoot(info.CanonicalName)
-			}
-			if directDeps[nameToCheck] {
-				isDirect = true
-			}
-		}
+		//
+		// The classification is [protoconv.ExtractorPackageIsDirect], the same call
+		// that fills the policy payload's direct field, so a component's SBOM
+		// property and the identity a policy reads can never disagree. A local rule
+		// here missed the always-direct ecosystems (Docker, GitHub Actions, mise)
+		// and every name an ecosystem folds.
+		isDirect := protoconv.ExtractorPackageIsDirect(p, directDeps)
 
 		if isDirect {
 			n.Properties = append(n.Properties, &sbom.Property{
