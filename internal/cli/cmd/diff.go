@@ -122,7 +122,11 @@ VULNERABILITY SCANNING:
 Automatically scans added and updated packages for known vulnerabilities using OSV.
 Reports CVE identifiers when available, otherwise shows GO- or GHSA- identifiers.
 Uses batch queries to the OSV API for efficient scanning.
-Can be disabled with --skip-vuln-scan for faster execution.`,
+Can be disabled with --skip-vuln-scan for faster execution.
+
+MARKDOWN OUTPUT:
+Markdown tables keep all dependency changes and vulnerability findings. The first
+20 rows are expanded; additional rows appear in a collapsible section.`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Determine repo path first - we need it to check for Git refs

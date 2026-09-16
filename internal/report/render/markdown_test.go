@@ -161,3 +161,64 @@ func TestDiffMarkdown_CollapsesLargeChangeSets(t *testing.T) {
 		t.Fatalf("collapsed tail must still contain the last change:\n%s", out)
 	}
 }
+
+func TestDiffMarkdown_SeparatesRemediationFromDetails(t *testing.T) {
+	resp := &diffv1.DiffVulnerabilitiesResponse{
+		ChangeStats: &diffv1.DiffStats{TotalChanges: 1, AddedCount: 1},
+		PolicyActions: []*policyv1.Action{{
+			Type:        policyv1.ActionType_ACTION_TYPE_WARN,
+			PolicyName:  "policy.yaml",
+			RuleName:    "stable-release",
+			Reason:      "prerelease dependency",
+			Remediation: "Use a stable release",
+			Subject:     &policyv1.Subject{Package: "example.com/pkg"},
+		}},
+		PolicyFilesEvaluated: 1,
+	}
+	out := DiffMarkdown(resp)
+
+	if !strings.Contains(out, "  </details>\n\n  _Remediation: Use a stable release_\n") {
+		t.Fatalf("remediation must start after the details HTML block:\n%s", out)
+	}
+
+	resp.PolicyActions[0].Remediation = ""
+	out = DiffMarkdown(resp)
+	if strings.Contains(out, "  </details>\n\n") {
+		t.Fatalf("details without remediation must keep its existing spacing:\n%s", out)
+	}
+}
+
+func TestDiffMarkdown_CollapsesLargeFindingSets(t *testing.T) {
+	resp := &diffv1.DiffVulnerabilitiesResponse{
+		ChangeStats: &diffv1.DiffStats{},
+		Stats:       &diffv1.VulnerabilityDiffStats{AddedCount: 30},
+	}
+	for i := range 30 {
+		resp.AddedVulnerabilities = append(resp.AddedVulnerabilities, &vulnerabilityv1.Finding{
+			AdvisoryId: fmt.Sprintf("CVE-2026-%04d", i),
+			Package:    &dependencyv1.Package{Name: fmt.Sprintf("example.com/pkg%02d", i), Version: "1.0.0"},
+		})
+	}
+
+	out := DiffMarkdown(resp)
+	if !strings.Contains(out, "<details><summary>… and 10 more findings</summary>") {
+		t.Fatalf("expected collapsed finding tail:\n%s", out)
+	}
+	if !strings.Contains(out, "CVE-2026-0029") {
+		t.Fatalf("collapsed tail must still contain the last finding:\n%s", out)
+	}
+	if strings.Contains(out, "see `--format json` for the full set") {
+		t.Fatalf("finding overflow must not be lossy:\n%s", out)
+	}
+
+	resp.UnchangedVulnerabilities = resp.AddedVulnerabilities
+	resp.AddedVulnerabilities = nil
+	resp.Stats = &diffv1.VulnerabilityDiffStats{UnchangedCount: 30}
+	out = DiffMarkdown(resp)
+	if !strings.Contains(out, "CVE-2026-0029") {
+		t.Fatalf("nested collapsed tail must still contain the last finding:\n%s", out)
+	}
+	if opened, closed := strings.Count(out, "<details>"), strings.Count(out, "</details>"); opened != closed {
+		t.Fatalf("nested details blocks are unbalanced: %d open, %d closed\n%s", opened, closed, out)
+	}
+}

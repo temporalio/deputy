@@ -564,6 +564,10 @@ the same message as GitHub-flavored markdown (the Deputy diff action uses it
 for PR comments); `--from-json` re-renders a saved JSON file without
 re-running analysis, so one scan feeds both the gate and the comment:
 
+Markdown tables keep every dependency change and vulnerability finding. The
+first 20 rows are expanded; additional rows appear in a collapsible section
+with a repeated table header.
+
 ```console
 $ deputy diff main HEAD --licenses --policy policy/ci/pr-review.yaml --format json --output diff.json
 $ jq '.stats.added_count' diff.json                      # gate on new vulnerabilities

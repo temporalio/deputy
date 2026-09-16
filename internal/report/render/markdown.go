@@ -187,9 +187,20 @@ func writeMarkdownVulnerabilities(b *strings.Builder, resp *diffv1.DiffVulnerabi
 // writeMarkdownFindingTable renders findings as an ID/severity/package/fix
 // table, linking IDs to their OSV advisory pages.
 func writeMarkdownFindingTable(b *strings.Builder, findings []*vulnerabilityv1.Finding, advisories map[string]*vulnerabilityv1.Advisory) {
-	b.WriteString("| ID | Severity | Package | Fixed in |\n| --- | --- | --- | --- |\n")
+	header := "| ID | Severity | Package | Fixed in |\n| --- | --- | --- | --- |\n"
+	b.WriteString(header)
 	visible := min(len(findings), maxMarkdownVisibleRows)
-	for _, f := range findings[:visible] {
+	writeMarkdownFindingRows(b, findings[:visible], advisories)
+	if rest := findings[visible:]; len(rest) > 0 {
+		fmt.Fprintf(b, "\n<details><summary>… and %d more finding%s</summary>\n\n", len(rest), pluralMD(len(rest)))
+		b.WriteString(header)
+		writeMarkdownFindingRows(b, rest, advisories)
+		b.WriteString("\n</details>\n")
+	}
+}
+
+func writeMarkdownFindingRows(b *strings.Builder, findings []*vulnerabilityv1.Finding, advisories map[string]*vulnerabilityv1.Advisory) {
+	for _, f := range findings {
 		advisory := f.GetAdvisory()
 		if advisory == nil {
 			advisory = advisories[f.GetAdvisoryId()]
@@ -205,9 +216,6 @@ func writeMarkdownFindingTable(b *strings.Builder, findings []*vulnerabilityv1.F
 			mdCode(pkg),
 			mdCell(strings.Join(advisory.GetFixedVersions(), ", ")),
 		)
-	}
-	if rest := len(findings) - visible; rest > 0 {
-		fmt.Fprintf(b, "\n… and %d more (see `--format json` for the full set)\n", rest)
 	}
 }
 
@@ -245,6 +253,9 @@ func writeMarkdownPolicy(b *strings.Builder, resp *diffv1.DiffVulnerabilitiesRes
 			b.WriteString("\n  </details>\n")
 		}
 		if rem := strings.TrimSpace(g.remediation); rem != "" {
+			if len(g.subjects) > 0 {
+				b.WriteString("\n")
+			}
 			fmt.Fprintf(b, "  _Remediation: %s_\n", mdCell(rem))
 		}
 	}

@@ -34,12 +34,13 @@ Compare dependency changes between Git refs with vulnerability analysis.
 | `policy-denials` | Policy deny results |
 | `policy-warnings` | Policy warn results |
 | `json-path` | Path to the full structured diff (`deputy diff --format json` output) |
-| `summary` | Markdown summary of changes (base64 encoded) |
+| `summary` | Markdown summary of changes (base64 encoded and bounded for GitHub Actions output limits) |
 
-All counts derive from the structured JSON output (`deputy.diff.v1`), and the
-PR comment and job summary are rendered from the same file via
-`deputy diff --from-json ... --format markdown`, so the gate and the comment
-can never disagree. Use `json-path` with `jq` for custom processing:
+All counts derive from the structured JSON output (`deputy.diff.v1`). The full
+job summary is rendered from the same file via
+`deputy diff --from-json ... --format markdown`; the PR comment and base64
+`summary` output are structurally truncated when needed for their platform
+limits. Use `json-path` with `jq` for complete custom processing:
 
 ```yaml
 - uses: temporalio/deputy/actions/diff@main
