@@ -10,6 +10,7 @@ import (
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/license"
 	"github.com/temporalio/deputy/internal/purlx"
 )
 
@@ -133,9 +134,19 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 		Purl:         purlStr,
 		Direct:       isDirect,
 		Locations:    dependency.PackagePaths(pkg),
-		Licenses:     pkg.Licenses,
+		Licenses:     packageLicenses(pkg, ecosystem),
 		LayerDetails: layerDetails,
 	}
+}
+
+// packageLicenses returns the extractor's licenses, falling back to the
+// well-known table for pseudo-packages (Go stdlib, toolchain) that no
+// registry or lockfile ever attributes.
+func packageLicenses(pkg *extractor.Package, ecosystem string) []string {
+	if len(pkg.Licenses) > 0 {
+		return pkg.Licenses
+	}
+	return license.WellKnownLicenses(ecosystem, pkg.Name)
 }
 
 // ExtractorPackagesToProto converts a slice of OSV-SCALIBR packages to proto Packages.
