@@ -48,6 +48,38 @@ func TestEnrichChangeLicenses_ScanUsesBestEffortLicenses(t *testing.T) {
 	}
 }
 
+// TestEnrichChangeLicenses_WellKnownWithoutNetwork pins that a go-directive
+// bump attributes the Go license to stdlib and toolchain under every license
+// source, so the pr-license-check policy stops warning on toolchain upgrades.
+func TestEnrichChangeLicenses_WellKnownWithoutNetwork(t *testing.T) {
+	license.ResetLicenseCachesForTest(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	restoreClient := license.WithLicenseHTTPClient(server.Client())
+	defer restoreClient()
+
+	for _, source := range []string{"depsdev", "scan", "both"} {
+		t.Run(source, func(t *testing.T) {
+			changes := []*diffv1.PackageChange{
+				{Package: &dependencyv1.Package{Name: "stdlib", Version: "1.26.5", Ecosystem: "Go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_UPDATED, TargetVersion: "1.26.6", IsDirect: true},
+				{Package: &dependencyv1.Package{Name: "toolchain", Version: "go1.26.5", Ecosystem: "Go"}, ChangeKind: diffv1.ChangeKind_CHANGE_KIND_UPDATED, TargetVersion: "go1.26.6", IsDirect: true},
+			}
+			enriched := enrichChangeLicenses(t.Context(), changes, source)
+			if len(enriched) != 2 {
+				t.Fatalf("expected 2 changes, got %d", len(enriched))
+			}
+			for _, c := range enriched {
+				if got := c.GetPackage().GetLicenses(); len(got) != 1 || got[0] != "BSD-3-Clause" {
+					t.Errorf("%s: licenses = %v, want [BSD-3-Clause]", c.GetPackage().GetName(), got)
+				}
+			}
+		})
+	}
+}
+
 // TestEnrichChangeLicenses_DoesNotInheritRepositoryLicense pins the boundary
 // between a project's own license and its dependencies'. Repository license
 // files describe the analyzed project; attaching them to dependencies would

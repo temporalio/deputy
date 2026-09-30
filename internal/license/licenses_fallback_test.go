@@ -373,6 +373,25 @@ func TestLookupLicensesBestEffort_WellKnown(t *testing.T) {
 	}
 }
 
+func TestFetchLicensesForEcosystem_WellKnown(t *testing.T) {
+	resetLicenseTestState(t)
+
+	for _, tc := range []struct{ ecosystem, name, version string }{
+		{"Go", "stdlib", "1.26.6"},
+		{"go", "toolchain", "go1.26.6"},
+		{"golang", "stdlib", ""},
+	} {
+		got := FetchLicensesForEcosystem(t.Context(), nil, tc.ecosystem, tc.name, tc.version)
+		if want := []string{"BSD-3-Clause"}; !slices.Equal(got, want) {
+			t.Errorf("FetchLicensesForEcosystem(%q, %q, %q) = %v, want %v", tc.ecosystem, tc.name, tc.version, got, want)
+		}
+	}
+
+	if got := FetchLicensesForEcosystem(t.Context(), nil, "go", "github.com/example/mod", "v1.0.0"); !slices.Equal(got, []string{"?"}) {
+		t.Errorf("expected placeholder for unknown module without a client, got %v", got)
+	}
+}
+
 func TestLookupLicensesBestEffort_GitHubWithoutVersion(t *testing.T) {
 	resetLicenseTestState(t)
 

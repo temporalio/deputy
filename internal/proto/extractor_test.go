@@ -218,6 +218,52 @@ func TestExtractorPackageToProto_DirectDetection(t *testing.T) {
 	}
 }
 
+func TestExtractorPackageToProto_WellKnownLicenses(t *testing.T) {
+	tests := []struct {
+		name string
+		pkg  *extractor.Package
+		want []string
+	}{
+		{
+			name: "Go stdlib gets the Go license",
+			pkg:  &extractor.Package{Name: "stdlib", Version: "1.26.6", PURLType: "golang"},
+			want: []string{"BSD-3-Clause"},
+		},
+		{
+			name: "Go toolchain gets the Go license",
+			pkg:  &extractor.Package{Name: "toolchain", Version: "go1.26.6", PURLType: "golang"},
+			want: []string{"BSD-3-Clause"},
+		},
+		{
+			name: "extractor licenses win over the well-known table",
+			pkg:  &extractor.Package{Name: "stdlib", Version: "1.26.6", PURLType: "golang", Licenses: []string{"MIT"}},
+			want: []string{"MIT"},
+		},
+		{
+			name: "ordinary module stays unattributed",
+			pkg:  &extractor.Package{Name: "github.com/stretchr/testify", Version: "1.8.0", PURLType: "golang"},
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractorPackageToProto(tt.pkg, nil)
+			if got == nil {
+				t.Fatal("expected a package")
+			}
+			if len(got.Licenses) != len(tt.want) {
+				t.Fatalf("licenses = %v, want %v", got.Licenses, tt.want)
+			}
+			for i := range tt.want {
+				if got.Licenses[i] != tt.want[i] {
+					t.Fatalf("licenses = %v, want %v", got.Licenses, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func TestExtractorPackageToProto_CustomEcosystems(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -227,6 +227,9 @@ func FetchLicensesForPackage(ctx context.Context, client DepsClient, name, versi
 // FetchLicensesForEcosystem queries deps.dev for license info for a package in the
 // given ecosystem. Returns ["?"] on error or missing data to preserve existing UX.
 func FetchLicensesForEcosystem(ctx context.Context, client DepsClient, ecosystem, name, version string) []string {
+	if lics := WellKnownLicenses(ecosystem, name); len(lics) > 0 {
+		return lics
+	}
 	if version == "" || name == "" {
 		return []string{"?"}
 	}
@@ -595,9 +598,7 @@ func LookupLicensesBestEffort(ctx context.Context, ecosystem, name, version stri
 		return nil
 	}
 
-	// Check well-known licenses first (no network, instant lookup).
-	// This handles Go stdlib, toolchain, and common packages with known licenses.
-	if lics := wellKnownLicense(eco, name, version); len(lics) > 0 {
+	if lics := WellKnownLicenses(eco, name); len(lics) > 0 {
 		return lics
 	}
 
@@ -636,18 +637,17 @@ func LookupLicensesBestEffort(ctx context.Context, ecosystem, name, version stri
 	return nil
 }
 
-// wellKnownLicense returns hardcoded licenses for packages that don't have
-// license metadata in any registry. This is a minimal list of truly essential
-// cases where network lookups will never succeed.
+// WellKnownLicenses returns the licenses of pseudo-packages that no registry
+// publishes, so callers can attribute them without a network lookup. It
+// returns nil for everything else.
 //
 // Sources:
 //   - Go stdlib/toolchain: https://go.dev/LICENSE (BSD-3-Clause)
-func wellKnownLicense(ecosystem, name, version string) []string {
-	switch ecosystem {
+func WellKnownLicenses(ecosystem, name string) []string {
+	switch collections.NormalizeLower(ecosystem) {
 	case "go", "golang":
-		// Go standard library and toolchain - not published to any registry
-		nameLower := strings.ToLower(name)
-		if nameLower == "stdlib" || nameLower == "go" || nameLower == "toolchain" {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "stdlib", "go", "toolchain":
 			return []string{"BSD-3-Clause"}
 		}
 	}
