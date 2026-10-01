@@ -527,6 +527,11 @@ const (
 // The policies can be provided as inline YAML or file paths.
 // Use NewInlinePolicy or NewPolicyFromPath to create PolicySource values.
 //
+// Evaluation fails closed: if a policy cannot be loaded, compiled, or
+// evaluated, this returns an error and no response. A non-nil error therefore
+// means the decision is unknown, never that the request was allowed, so check
+// it before reading the outcome.
+//
 // Example:
 //
 //	policy := sdk.NewInlinePolicy(`
@@ -554,11 +559,18 @@ func (c *Client) EvaluatePolicy(ctx context.Context, policies []*PolicySource, i
 // EvaluatePolicyForVulnerability evaluates policies for a single vulnerability.
 // This is useful for per-vulnerability policy checks.
 //
+// Evaluation fails closed: a non-nil error means the decision is unknown, not
+// that the vulnerability was allowed. Treat it as blocking rather than
+// continuing.
+//
 // Example:
 //
 //	for _, finding := range scanResult.GetFindings() {
 //	    result, err := client.EvaluatePolicyForVulnerability(ctx, policies, finding)
-//	    if result.Outcome == sdk.ActionDeny {
+//	    if err != nil {
+//	        return fmt.Errorf("evaluate policy for %s: %w", finding.GetAdvisoryId(), err)
+//	    }
+//	    if result.GetOutcome() == sdk.ActionDeny {
 //	        // Handle policy violation
 //	    }
 //	}
