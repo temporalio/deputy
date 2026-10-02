@@ -72,7 +72,16 @@ type serverFlags struct {
 }
 
 // AddServerCommand adds the server command to the root command.
-func AddServerCommand(root *cobra.Command) {
+func AddServerCommand(root *cobra.Command, deps *Dependencies) {
+	cmd, _ := newServerCommand(deps)
+	root.AddCommand(cmd)
+}
+
+// newServerCommand builds the server command and returns it alongside the
+// struct its flags bind to. Callers that need the parsed flag values, which is
+// the precedence tests, get them from the declarations the CLI actually ships
+// rather than from a second copy that can drift.
+func newServerCommand(deps *Dependencies) (*cobra.Command, *serverFlags) {
 	flags := &serverFlags{}
 
 	cmd := &cobra.Command{
@@ -153,7 +162,7 @@ Examples (curl):
     -H "Content-Type: application/json" \
     -d '{"target": "github.com/example/repo"}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServer(cmd.Context(), flags, cmd)
+			return runServer(cmd.Context(), flags, cmd, deps.Config)
 		},
 	}
 
@@ -208,7 +217,7 @@ Examples (curl):
 	cmd.Flags().BoolVar(&flags.egressAllowLoopback, "egress-allow-loopback", false, "Allow loopback targets in remote server mode")
 	cmd.Flags().BoolVar(&flags.egressAllowLinkLocal, "egress-allow-link-local", false, "Allow link-local targets in remote server mode")
 
-	root.AddCommand(cmd)
+	return cmd, flags
 }
 
 // parseTLSVersion converts a version string to a tls.Version constant.
@@ -245,14 +254,15 @@ func parseTLSClientAuth(auth string) tls.ClientAuthType {
 
 // loadServerConfig builds a server.Config with proper precedence:
 // CLI flags > environment variables > config file > defaults.
-func loadServerConfig(flags *serverFlags, cmd *cobra.Command) server.Config {
-	// Load config file + env vars (config.Loader handles file + env precedence)
-	configPath := config.FindConfigFile()
-	loader := config.NewLoader(configPath)
-	fileCfg, err := loader.Load()
-	if err != nil {
-		// Log but continue with defaults - config file is optional
-		logs.Debug(context.Background(), "config file load failed, using defaults", "error", err)
+//
+// fileCfg is the configuration the CLI already merged from file, environment,
+// and root flags. It is passed in rather than loaded again here: a second load
+// cannot see the overrides the first one was given, so it answers the same
+// question differently, which is how a valid --log-level came to be rejected by
+// the server command alone. A nil fileCfg means no configuration was supplied,
+// and the built-in defaults below stand.
+func loadServerConfig(flags *serverFlags, cmd *cobra.Command, fileCfg *config.Config) (server.Config, error) {
+	if fileCfg == nil {
 		fileCfg = &config.Config{}
 	}
 
@@ -535,12 +545,16 @@ func loadServerConfig(flags *serverFlags, cmd *cobra.Command) server.Config {
 		}
 	}
 
-	return cfg
+	return cfg, nil
 }
 
-func runServer(ctx context.Context, flags *serverFlags, cmd *cobra.Command) error {
-	// Load configuration with proper precedence: flags > env > config file > defaults
-	cfg := loadServerConfig(flags, cmd)
+func runServer(ctx context.Context, flags *serverFlags, cmd *cobra.Command, fileCfg *config.Config) error {
+	// Build the server settings with proper precedence: server flags on top of
+	// the configuration the CLI already merged.
+	cfg, err := loadServerConfig(flags, cmd, fileCfg)
+	if err != nil {
+		return err
+	}
 
 	srv, err := server.New(cfg)
 	if err != nil {
