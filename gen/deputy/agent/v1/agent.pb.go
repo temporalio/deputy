@@ -589,9 +589,16 @@ type AgentCapabilities struct {
 	// Max context tokens (0 = unknown/unlimited).
 	MaxContextTokens int32 `protobuf:"varint,6,opt,name=max_context_tokens,json=maxContextTokens,proto3" json:"max_context_tokens,omitempty"`
 	// Sandboxable indicates the agent can run in a container.
-	Sandboxable   bool `protobuf:"varint,7,opt,name=sandboxable,proto3" json:"sandboxable,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Sandboxable bool `protobuf:"varint,7,opt,name=sandboxable,proto3" json:"sandboxable,omitempty"`
+	// Approval workflows indicates the agent pauses for approval decisions:
+	// it emits approval-required events and applies the decisions delivered
+	// through the Approve RPC. Every plugin structurally has an Approve
+	// method, so only this field distinguishes real approval support from an
+	// acknowledgement that silently drops the decision. Agents that manage
+	// approvals internally, without surfacing them to the caller, report false.
+	ApprovalWorkflows bool `protobuf:"varint,8,opt,name=approval_workflows,json=approvalWorkflows,proto3" json:"approval_workflows,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *AgentCapabilities) Reset() {
@@ -669,6 +676,13 @@ func (x *AgentCapabilities) GetMaxContextTokens() int32 {
 func (x *AgentCapabilities) GetSandboxable() bool {
 	if x != nil {
 		return x.Sandboxable
+	}
+	return false
+}
+
+func (x *AgentCapabilities) GetApprovalWorkflows() bool {
+	if x != nil {
+		return x.ApprovalWorkflows
 	}
 	return false
 }
@@ -2139,7 +2153,7 @@ const file_deputy_agent_v1_agent_proto_rawDesc = "" +
 	"\aversion\x18\x04 \x01(\tR\aversion\x12F\n" +
 	"\fcapabilities\x18\x05 \x01(\v2\".deputy.agent.v1.AgentCapabilitiesR\fcapabilities\x12#\n" +
 	"\rdefault_model\x18\x06 \x01(\tR\fdefaultModel\x12)\n" +
-	"\x10supported_models\x18\a \x03(\tR\x0fsupportedModels\"\xfd\x01\n" +
+	"\x10supported_models\x18\a \x03(\tR\x0fsupportedModels\"\xac\x02\n" +
 	"\x11AgentCapabilities\x12\x1c\n" +
 	"\tstreaming\x18\x01 \x01(\bR\tstreaming\x12\x19\n" +
 	"\btool_use\x18\x02 \x01(\bR\atoolUse\x12\x16\n" +
@@ -2147,7 +2161,8 @@ const file_deputy_agent_v1_agent_proto_rawDesc = "" +
 	"\aagentic\x18\x04 \x01(\bR\aagentic\x12-\n" +
 	"\x12session_resumption\x18\x05 \x01(\bR\x11sessionResumption\x12,\n" +
 	"\x12max_context_tokens\x18\x06 \x01(\x05R\x10maxContextTokens\x12 \n" +
-	"\vsandboxable\x18\a \x01(\bR\vsandboxable\"\xa6\x03\n" +
+	"\vsandboxable\x18\a \x01(\bR\vsandboxable\x12-\n" +
+	"\x12approval_workflows\x18\b \x01(\bR\x11approvalWorkflows\"\xa6\x03\n" +
 	"\x0eExecuteRequest\x12\x1f\n" +
 	"\x06prompt\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06prompt\x12\x16\n" +
 	"\x06system\x18\x02 \x01(\tR\x06system\x12\x19\n" +

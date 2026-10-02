@@ -45,7 +45,7 @@ const arraySentinel = ","
 type Strategy struct {
 	ecosystem string
 	format    mise.Format
-	rewrite   func(root *os.Root, relPath string, updates []pin.Update) error
+	rewrite   func(ctx context.Context, root *os.Root, relPath string, updates []pin.Update) error
 	resolver  Resolver
 }
 
@@ -449,6 +449,6 @@ func majorChannel(version string) string {
 }
 
 // Rewrite implements pin.Strategy, dispatching to this strategy's format writer.
-func (s *Strategy) Rewrite(root *os.Root, relPath string, updates []pin.Update) error {
-	return s.rewrite(root, relPath, updates)
+func (s *Strategy) Rewrite(ctx context.Context, root *os.Root, relPath string, updates []pin.Update) error {
+	return s.rewrite(ctx, root, relPath, updates)
 }

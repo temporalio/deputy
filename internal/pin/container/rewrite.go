@@ -1,6 +1,7 @@
 package container
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -12,7 +13,7 @@ import (
 
 // rewriteContainerRefs rewrites container image references in a file to
 // include sha256 digest pins.
-func rewriteContainerRefs(root *os.Root, relPath string, updates []pin.Update) error {
+func rewriteContainerRefs(ctx context.Context, root *os.Root, relPath string, updates []pin.Update) error {
 	if len(updates) == 0 {
 		return nil
 	}
@@ -56,6 +57,12 @@ func rewriteContainerRefs(root *os.Root, relPath string, updates []pin.Update) e
 
 	if !modified {
 		return nil
+	}
+
+	// Past this point the file is truncated, so a caller whose context
+	// expired during the read above must not find the rewrite done.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("not writing %s: %w", relPath, err)
 	}
 
 	f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())

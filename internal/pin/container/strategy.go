@@ -197,8 +197,8 @@ func (s *Strategy) ResolveUpdate(ctx context.Context, ref pin.Ref) (pinnedValue,
 
 // Rewrite implements pin.Strategy. It rewrites container image references to
 // include sha256 digest pins, preserving the original tag for readability.
-func (s *Strategy) Rewrite(root *os.Root, relPath string, updates []pin.Update) error {
-	return rewriteContainerRefs(root, relPath, updates)
+func (s *Strategy) Rewrite(ctx context.Context, root *os.Root, relPath string, updates []pin.Update) error {
+	return rewriteContainerRefs(ctx, root, relPath, updates)
 }
 
 // --- Discovery helpers ---

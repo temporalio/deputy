@@ -1,6 +1,8 @@
 package remediation
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -8,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -331,7 +334,7 @@ jobs:
 				t.Fatalf("failed to write test file: %v", err)
 			}
 
-			err := applyActionUpdate(filePath, tt.actionRef, tt.newVersion)
+			err := applyActionUpdate(t.Context(), filePath, tt.actionRef, tt.newVersion)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("applyActionUpdate() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -575,7 +578,7 @@ COPY app /app
 				t.Fatalf("failed to write test file: %v", err)
 			}
 
-			err := applyDockerfileUpdate(filePath, tt.image, tt.newVersion)
+			err := applyDockerfileUpdate(t.Context(), filePath, tt.image, tt.newVersion)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("applyDockerfileUpdate() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -642,7 +645,7 @@ func TestApplyMiseUpdatePrunesLockForLayouts(t *testing.T) {
 			write(tt.lockPath, "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n")
 
 			cmd := "deputy:mise:update " + tt.configPath + " go 1.24.3 1.22.12"
-			if err := ApplyDeputyCommand(dir, cmd); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
 				t.Fatalf("ApplyDeputyCommand: %v", err)
 			}
 
@@ -754,7 +757,7 @@ func TestApplyMiseUpdateSymlinkedManifest(t *testing.T) {
 				if err := os.Symlink(outside, linkFull); err != nil {
 					t.Skipf("symlinks unavailable: %v", err)
 				}
-				err := ApplyDeputyCommand(dir, "deputy:mise:update "+tt.link+" go 1.24.3 1.22.12")
+				err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update "+tt.link+" go 1.24.3 1.22.12")
 				if err == nil {
 					t.Fatal("expected an error for a manifest symlinked outside the repository")
 				}
@@ -779,7 +782,7 @@ func TestApplyMiseUpdateSymlinkedManifest(t *testing.T) {
 				t.Skipf("symlinks unavailable: %v", err)
 			}
 
-			if err := ApplyDeputyCommand(dir, "deputy:mise:update "+tt.link+" go 1.24.3 1.22.12"); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update "+tt.link+" go 1.24.3 1.22.12"); err != nil {
 				t.Fatalf("ApplyDeputyCommand: %v", err)
 			}
 
@@ -998,7 +1001,7 @@ func TestApplyMiseUpdateSymlinkedLock(t *testing.T) {
 			if tt.escapes {
 				outside := write(t.TempDir(), "shared.lock", lock)
 				link(lockFull, outside)
-				if err := ApplyDeputyCommand(dir, "deputy:mise:update mise.toml go 1.24.3 1.22.12"); err == nil {
+				if err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update mise.toml go 1.24.3 1.22.12"); err == nil {
 					t.Fatal("expected an error for a lockfile symlinked outside the repository")
 				}
 				got, err := os.ReadFile(outside)
@@ -1019,7 +1022,7 @@ func TestApplyMiseUpdateSymlinkedLock(t *testing.T) {
 				link(filepath.Join(dir, filepath.FromSlash(from)), to)
 			}
 
-			err := ApplyDeputyCommand(dir, "deputy:mise:update mise.toml go 1.24.3 1.22.12")
+			err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update mise.toml go 1.24.3 1.22.12")
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected an error for a lockfile symlink that does not resolve")
@@ -1083,7 +1086,7 @@ backend = "core:node"
 checksum = "sha256:node"
 `)
 
-	if err := ApplyDeputyCommand(tmpDir, "deputy:mise:update mise.toml go 1.24.3 1.22.12"); err != nil {
+	if err := ApplyDeputyCommand(t.Context(), tmpDir, "deputy:mise:update mise.toml go 1.24.3 1.22.12"); err != nil {
 		t.Fatalf("ApplyDeputyCommand: %v", err)
 	}
 
@@ -1251,7 +1254,7 @@ node = "20.11.0"
 					t.Fatal(err)
 				}
 			}
-			if err := ApplyDeputyCommand(dir, tt.cmd); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, tt.cmd); err != nil {
 				t.Fatalf("ApplyDeputyCommand: %v", err)
 			}
 			lock, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
@@ -1431,7 +1434,7 @@ func TestApplyMiseUpdateKeepsLockEntryAnotherConfigClaims(t *testing.T) {
 				}
 			}
 
-			if err := ApplyDeputyCommand(dir, "deputy:mise:update "+tt.edited+" go 1.24.3 1.22.12"); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update "+tt.edited+" go 1.24.3 1.22.12"); err != nil {
 				t.Fatalf("ApplyDeputyCommand: %v", err)
 			}
 
@@ -1527,7 +1530,7 @@ func TestApplyMiseUpdateMatchesVPrefixedCurrentVersion(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := ApplyDeputyCommand(dir, tt.cmd); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, tt.cmd); err != nil {
 				t.Fatalf("apply: %v", err)
 			}
 
@@ -1645,7 +1648,7 @@ func TestApplyMiseUpdateRetryAfterLockFailure(t *testing.T) {
 			tt.block(t, dir, lockPath)
 
 			const cmd = "deputy:mise:update mise.toml go 1.24.3 1.22.12"
-			if err := ApplyDeputyCommand(dir, cmd); err == nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, cmd); err == nil {
 				t.Fatal("expected the blocked lockfile to fail the apply")
 			}
 			config, err := os.ReadFile(configPath)
@@ -1666,7 +1669,7 @@ func TestApplyMiseUpdateRetryAfterLockFailure(t *testing.T) {
 			// The operator fixes whatever blocked the lockfile write and
 			// retries.
 			tt.repair(t, dir, lockPath)
-			if err := ApplyDeputyCommand(dir, cmd); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
 				t.Fatalf("retry after partial failure: %v", err)
 			}
 			lock, err := os.ReadFile(lockPath)
@@ -1988,7 +1991,7 @@ node = "20.11.1"
 				}
 			}
 
-			err := ApplyDeputyCommand(tmpDir, tt.cmd)
+			err := ApplyDeputyCommand(t.Context(), tmpDir, tt.cmd)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ApplyDeputyCommand() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -2008,6 +2011,944 @@ node = "20.11.1"
 				if string(got) != wantContent {
 					t.Errorf("file %s content mismatch\ngot:\n%s\nwant:\n%s", filename, string(got), wantContent)
 				}
+			}
+		})
+	}
+}
+
+// TestValidateDeputyCommand pins the non-mutating validation that dry runs
+// rely on to predict whether ApplyDeputyCommand would accept a command:
+// opcode and arity are checked without touching the filesystem.
+func TestValidateDeputyCommand(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     string
+		wantErr string // substring; empty means the command must validate
+	}{
+		{
+			name: "action update with all arguments",
+			cmd:  "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+		},
+		{
+			name: "action pin with all arguments",
+			cmd:  "deputy:action:pin .github/workflows/ci.yml actions/checkout abc123 v4",
+		},
+		{
+			name: "dockerfile update with all arguments",
+			cmd:  "deputy:dockerfile:update Dockerfile golang 1.24",
+		},
+		{
+			name:    "unknown opcode",
+			cmd:     "deputy:unknown foo",
+			wantErr: "unknown deputy command: deputy:unknown",
+		},
+		{
+			name:    "action update missing arguments",
+			cmd:     "deputy:action:update file.yml",
+			wantErr: "expected 4 parts, got 2",
+		},
+		{
+			name:    "action pin missing tag",
+			cmd:     "deputy:action:pin file.yml actions/checkout abc123",
+			wantErr: "expected 5 parts, got 4",
+		},
+		{
+			name:    "unterminated quote",
+			cmd:     `deputy:action:update "unclosed`,
+			wantErr: "invalid command",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parts, err := ValidateDeputyCommand(tt.cmd)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateDeputyCommand(%q) = %v, want success", tt.cmd, err)
+				}
+				if len(parts) == 0 {
+					t.Fatal("ValidateDeputyCommand returned no parts on success")
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateDeputyCommand(%q) succeeded, want error containing %q", tt.cmd, tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want it to contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestApplyDeputyCommandRejectsWhatValidationRejects pins that the apply path
+// shares the validator, so a dry run's prediction cannot drift from what
+// applying actually does.
+func TestApplyDeputyCommandRejectsWhatValidationRejects(t *testing.T) {
+	invalid := []string{
+		"deputy:unknown foo",
+		"deputy:action:update file.yml",
+		"deputy:action:pin file.yml actions/checkout abc123",
+	}
+	for _, cmd := range invalid {
+		t.Run(cmd, func(t *testing.T) {
+			if _, err := ValidateDeputyCommand(cmd); err == nil {
+				t.Fatalf("ValidateDeputyCommand(%q) unexpectedly succeeded", cmd)
+			}
+			if err := ApplyDeputyCommand(t.Context(), t.TempDir(), cmd); err == nil {
+				t.Fatalf("ApplyDeputyCommand(%q) unexpectedly succeeded", cmd)
+			}
+		})
+	}
+}
+
+// TestApplyDeputyCommandThroughSymlinkedRepoDir pins that a deputy-internal
+// command works when the repository directory is reached through a symlink.
+// resolveDeputyCommand resolves the target path's symlinks, so any step that
+// relates that path back to the caller's unresolved repoDir computes a path
+// that leaves the repository and comes back in, which os.Root refuses. macOS
+// puts every temporary directory behind such a symlink (/var -> /private/var),
+// so this is the ordinary case there rather than an exotic one.
+func TestApplyDeputyCommandThroughSymlinkedRepoDir(t *testing.T) {
+	const (
+		workflow   = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
+		dockerfile = "FROM alpine:3.18\n"
+		sha        = "11bd71901bbe5b1630ceea73d27597364c9af683"
+	)
+	tests := []struct {
+		name        string
+		file        string
+		content     string
+		cmd         string
+		wantApplied string
+	}{
+		{
+			name:        "action update",
+			file:        ".github/workflows/ci.yml",
+			content:     workflow,
+			cmd:         "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+			wantApplied: "actions/checkout@v5",
+		},
+		{
+			name:        "action pin",
+			file:        ".github/workflows/ci.yml",
+			content:     workflow,
+			cmd:         "deputy:action:pin .github/workflows/ci.yml actions/checkout " + sha + " v4.2.2",
+			wantApplied: "actions/checkout@" + sha + " # v4.2.2",
+		},
+		{
+			name:        "dockerfile update",
+			file:        "Dockerfile",
+			content:     dockerfile,
+			cmd:         "deputy:dockerfile:update Dockerfile alpine 3.19",
+			wantApplied: "FROM alpine:3.19",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Build the repository under a real directory, then hand the
+			// command a symlink to it so repoDir and the resolved file path
+			// disagree in exactly the way a macOS temp directory makes them.
+			realDir := filepath.Join(t.TempDir(), "real")
+			target := filepath.Join(realDir, tt.file)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatalf("MkdirAll failed: %v", err)
+			}
+			if err := os.WriteFile(target, []byte(tt.content), 0o644); err != nil {
+				t.Fatalf("WriteFile failed: %v", err)
+			}
+			linkDir := filepath.Join(t.TempDir(), "link")
+			if err := os.Symlink(realDir, linkDir); err != nil {
+				t.Skipf("symlinks unsupported: %v", err)
+			}
+
+			if err := ApplyDeputyCommand(t.Context(), linkDir, tt.cmd); err != nil {
+				t.Fatalf("ApplyDeputyCommand() through symlinked repoDir failed: %v", err)
+			}
+			got, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatalf("ReadFile failed: %v", err)
+			}
+			if !strings.Contains(string(got), tt.wantApplied) {
+				t.Fatalf("edit not applied: want %q in:\n%s", tt.wantApplied, got)
+			}
+		})
+	}
+}
+
+// expiringContext is a deadline that expires between a step's first check and
+// its second: the first Err call reports a live context, every later one
+// reports the deadline as blown. Real clocks cannot be aimed that precisely, and
+// the window it stands for is the one that matters, between the read a step has
+// already done and the write it has not.
+//
+// It counts the checks so a test can tell a path that honoured the deadline from
+// one that simply never asked again.
+type expiringContext struct {
+	context.Context
+	checks int
+}
+
+// Err reports the deadline as live once and blown from then on.
+func (c *expiringContext) Err() error {
+	c.checks++
+	if c.checks == 1 {
+		return nil
+	}
+	return context.DeadlineExceeded
+}
+
+// TestApplyDeputyCommandHonorsContext pins the execution timeout for
+// deputy-internal steps. These commands are applied in process, so no
+// subprocess machinery enforces the caller's deadline on them: if the apply
+// path ignored its context, a step whose deadline expired while it ran would
+// still commit its rewrite, and the caller that was already told the step
+// timed out would find the workspace modified anyway.
+//
+// Each opcode is checked with a context that is already done, with one that
+// expires while the command runs, and with a live one. The live case is the
+// positive control: without it, an apply path that refused every command would
+// pass the cancelled cases.
+func TestApplyDeputyCommandHonorsContext(t *testing.T) {
+	const (
+		workflow   = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
+		dockerfile = "FROM alpine:3.18\nRUN echo hi\n"
+		sha        = "11bd71901bbe5b1630ceea73d27597364c9af683"
+	)
+	tests := []struct {
+		name string
+		// file is the workspace-relative path the command edits.
+		file string
+		// content is what that file holds before the command runs.
+		content string
+		cmd     string
+		// wantApplied is a substring the live run must produce, so a
+		// silently-skipped edit cannot masquerade as success.
+		wantApplied string
+	}{
+		{
+			name:        "action update",
+			file:        ".github/workflows/ci.yml",
+			content:     workflow,
+			cmd:         "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+			wantApplied: "actions/checkout@v5",
+		},
+		{
+			name:        "action pin",
+			file:        ".github/workflows/ci.yml",
+			content:     workflow,
+			cmd:         "deputy:action:pin .github/workflows/ci.yml actions/checkout " + sha + " v4.2.2",
+			wantApplied: "actions/checkout@" + sha + " # v4.2.2",
+		},
+		{
+			name:        "dockerfile update",
+			file:        "Dockerfile",
+			content:     dockerfile,
+			cmd:         "deputy:dockerfile:update Dockerfile alpine 3.19",
+			wantApplied: "FROM alpine:3.19",
+		},
+	}
+
+	// writeWorkspace lays down one command's target file in a fresh directory
+	// and returns that directory and the absolute path of the file.
+	writeWorkspace := func(t *testing.T, relPath, content string) (dir, path string) {
+		t.Helper()
+		dir = t.TempDir()
+		path = filepath.Join(dir, relPath)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+		return dir, path
+	}
+
+	// requireUnmodified fails when the command touched the workspace.
+	requireUnmodified := func(t *testing.T, path, want string) {
+		t.Helper()
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile failed: %v", err)
+		}
+		if string(got) != want {
+			t.Fatalf("workspace modified despite a dead context:\n%s", got)
+		}
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Run("cancelled context modifies nothing", func(t *testing.T) {
+				dir, path := writeWorkspace(t, tt.file, tt.content)
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+
+				if err := ApplyDeputyCommand(ctx, dir, tt.cmd); !errors.Is(err, context.Canceled) {
+					t.Fatalf("ApplyDeputyCommand() error = %v, want context.Canceled", err)
+				}
+				requireUnmodified(t, path, tt.content)
+			})
+
+			t.Run("expired deadline modifies nothing", func(t *testing.T) {
+				dir, path := writeWorkspace(t, tt.file, tt.content)
+				ctx, cancel := context.WithTimeout(t.Context(), -time.Second)
+				defer cancel()
+
+				if err := ApplyDeputyCommand(ctx, dir, tt.cmd); !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("ApplyDeputyCommand() error = %v, want context.DeadlineExceeded", err)
+				}
+				requireUnmodified(t, path, tt.content)
+			})
+
+			t.Run("deadline expiring during the edit modifies nothing", func(t *testing.T) {
+				dir, path := writeWorkspace(t, tt.file, tt.content)
+				ctx := &expiringContext{Context: t.Context()}
+
+				err := ApplyDeputyCommand(ctx, dir, tt.cmd)
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("ApplyDeputyCommand() error = %v, want context.DeadlineExceeded", err)
+				}
+				requireUnmodified(t, path, tt.content)
+				// A row that never looked past its first check would pass
+				// vacuously: the deadline it is meant to survive expired after
+				// that check, so it has to be consulted again.
+				if ctx.checks < 2 {
+					t.Fatalf("the deadline was consulted %d time(s); a write must recheck it", ctx.checks)
+				}
+			})
+
+			t.Run("live context applies the edit", func(t *testing.T) {
+				dir, path := writeWorkspace(t, tt.file, tt.content)
+				if err := ApplyDeputyCommand(t.Context(), dir, tt.cmd); err != nil {
+					t.Fatalf("ApplyDeputyCommand() failed: %v", err)
+				}
+				got, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("ReadFile failed: %v", err)
+				}
+				if !strings.Contains(string(got), tt.wantApplied) {
+					t.Fatalf("edit not applied, positive control is vacuous: want %q in:\n%s", tt.wantApplied, got)
+				}
+			})
+		})
+	}
+}
+
+// TestApplyMiseUpdateHonorsContextAroundEditing pins the deadline for the one
+// opcode whose edit cannot be split. A mise fix is two writes, the config and
+// its sibling lockfile, that only make sense together, and mise's rewriter takes
+// no context, so the checks sit on either side of both writes and never between
+// them:
+//
+//   - a deadline already gone costs no filesystem work,
+//   - one that expires while the edit runs lets the edit finish, since stopping
+//     between the halves cannot undo the first write and would leave a config
+//     declaring the new version beside a lock entry that still installs the old
+//     one, and
+//   - the caller is then told the edit landed late rather than told it timed
+//     out, because a step that finished after its deadline is not a step that
+//     did nothing, and the report is the only thing left to get right.
+//
+// The opcode is therefore absent from TestApplyDeputyCommandHonorsContext, whose
+// table requires a second check to refuse before writing. This is the shape of
+// that contract mise can keep, and the live control is what keeps the refusals
+// from passing vacuously.
+func TestApplyMiseUpdateHonorsContextAroundEditing(t *testing.T) {
+	const (
+		config = "[tools]\ngo = \"1.22.12\"\n"
+		lock   = "[[tools.go]]\nversion = \"1.22.12\"\nbackend = \"core:go\"\n"
+		cmd    = "deputy:mise:update mise.toml go 1.24.3 1.22.12"
+	)
+
+	// workspace lays down a config and its lockfile in a fresh directory.
+	workspace := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		for name, content := range map[string]string{"mise.toml": config, "mise.lock": lock} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+
+	// requireUntouched fails when either half of the fix was published.
+	requireUntouched := func(t *testing.T, dir string) {
+		t.Helper()
+		for name, want := range map[string]string{"mise.toml": config, "mise.lock": lock} {
+			got, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != want {
+				t.Errorf("%s was modified despite a dead context:\n%s", name, got)
+			}
+		}
+	}
+
+	tests := []struct {
+		name string
+		ctx  func(t *testing.T) context.Context
+		want error
+	}{
+		{
+			name: "cancelled context modifies nothing",
+			ctx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				return ctx
+			},
+			want: context.Canceled,
+		},
+		{
+			name: "expired deadline modifies nothing",
+			ctx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithTimeout(t.Context(), -time.Second)
+				t.Cleanup(cancel)
+				return ctx
+			},
+			want: context.DeadlineExceeded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := workspace(t)
+			if err := ApplyDeputyCommand(tt.ctx(t), dir, cmd); !errors.Is(err, tt.want) {
+				t.Fatalf("ApplyDeputyCommand() error = %v, want %v", err, tt.want)
+			}
+			requireUntouched(t, dir)
+		})
+	}
+
+	// requireFixed fails unless both halves of the fix are on disk.
+	requireFixed := func(t *testing.T, dir string) {
+		t.Helper()
+		got, err := os.ReadFile(filepath.Join(dir, "mise.toml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), "1.24.3") {
+			t.Errorf("the config was not rewritten:\n%s", got)
+		}
+		locked, err := os.ReadFile(filepath.Join(dir, "mise.lock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(locked), "1.22.12") {
+			t.Errorf("the stale lock entry survived, so only half the fix ran:\n%s", locked)
+		}
+	}
+
+	t.Run("deadline expiring during the edit reports the edit it finished", func(t *testing.T) {
+		dir := workspace(t)
+		// Live for the check before the edit, gone for the one after it, which
+		// is the window a real clock cannot be aimed at: between the write and
+		// the report.
+		ctx := &expiringContext{Context: t.Context()}
+
+		err := ApplyDeputyCommand(ctx, dir, cmd)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("ApplyDeputyCommand() error = %v, want context.DeadlineExceeded", err)
+		}
+		// Telling the caller only that the deadline passed would describe a
+		// workspace it no longer has.
+		if got := err.Error(); !strings.Contains(got, "mise.toml") || !strings.Contains(got, "lockfile") {
+			t.Errorf("refusal %q does not say which edits landed", got)
+		}
+		// Stopping between the halves is the failure this row rules out: the
+		// lockfile prune is the second write, and a config declaring the new
+		// version beside a stale lock entry scans as unfixed.
+		requireFixed(t, dir)
+		if ctx.checks < 2 {
+			t.Errorf("the deadline was consulted %d time(s); the report has to consult it again", ctx.checks)
+		}
+	})
+
+	t.Run("live context applies both halves", func(t *testing.T) {
+		dir := workspace(t)
+		if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
+			t.Fatalf("ApplyDeputyCommand() failed: %v", err)
+		}
+		// Also the positive control for the rows above: without it, a path that
+		// refused every command would pass them.
+		requireFixed(t, dir)
+	})
+}
+
+// TestDeputyCommandRefusesIrregularTarget pins that a deputy-internal command
+// refuses a target that is not a regular file, and that preflight refuses it on
+// the same terms so a dry run cannot preview a step execution would reject.
+//
+// The refusal has to happen before the read. A FIFO with no writer blocks the
+// opening read indefinitely, and no context can interrupt a read already
+// blocked in the kernel, so a plan naming one would hold its step past any
+// execution timeout. The test enforces that with its own deadline: it fails
+// rather than hangs if the guard regresses.
+func TestDeputyCommandRefusesIrregularTarget(t *testing.T) {
+	commands := []struct {
+		name string
+		file string
+		cmd  string
+	}{
+		{
+			name: "action update",
+			file: ".github/workflows/ci.yml",
+			cmd:  "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+		},
+		{
+			name: "action pin",
+			file: ".github/workflows/ci.yml",
+			cmd:  "deputy:action:pin .github/workflows/ci.yml actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4.2.2",
+		},
+		{
+			name: "dockerfile update",
+			file: "Dockerfile",
+			cmd:  "deputy:dockerfile:update Dockerfile alpine 3.19",
+		},
+	}
+
+	for _, tc := range commands {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, tc.file)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatalf("MkdirAll failed: %v", err)
+			}
+			if err := syscall.Mkfifo(target, 0o644); err != nil {
+				t.Skipf("mkfifo unsupported: %v", err)
+			}
+
+			// Run both paths off the test goroutine so a regression shows up
+			// as a failure instead of hanging the package until its timeout.
+			type result struct {
+				preflight error
+				apply     error
+			}
+			done := make(chan result, 1)
+			go func() {
+				var got result
+				got.preflight = PreflightDeputyCommand(dir, tc.cmd)
+				got.apply = ApplyDeputyCommand(context.Background(), dir, tc.cmd)
+				done <- got
+			}()
+
+			select {
+			case got := <-done:
+				if got.preflight == nil {
+					t.Errorf("PreflightDeputyCommand(%q) accepted a FIFO target", tc.cmd)
+				}
+				if got.apply == nil {
+					t.Errorf("ApplyDeputyCommand(%q) accepted a FIFO target", tc.cmd)
+				}
+				if got.preflight != nil && got.apply != nil && got.preflight.Error() != got.apply.Error() {
+					t.Errorf("dry run and execution refused differently:\npreflight: %v\napply:     %v", got.preflight, got.apply)
+				}
+			case <-time.After(10 * time.Second):
+				// The goroutine stays blocked on the FIFO; the test binary
+				// exits and takes it with it.
+				t.Fatalf("blocked reading a FIFO target: the execution timeout cannot bound this step")
+			}
+		})
+	}
+}
+
+// TestDeputyCommandRefusesUnwritableTarget pins the permission half of the same
+// agreement: a target this process can read and not write is refused by both
+// paths, in the same words, rather than previewed as an edit that would apply
+// and then failed on the write.
+//
+// The opcode's own way of publishing decides what is asked. The three that
+// rewrite the target in place are refused, since the file's own permission is
+// what their write needs. deputy:mise:update replaces the file by renaming a
+// temporary over it, so a read-only config in a writable directory really is
+// editable, and refusing it would block a fix that works: that row is the
+// control, and it fails if the probe is ever applied to every opcode alike.
+func TestDeputyCommandRefusesUnwritableTarget(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes files whatever their mode says, so nothing here is unwritable")
+	}
+
+	const (
+		workflow   = "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
+		dockerfile = "FROM alpine:3.18\nRUN true\n"
+		miseConfig = "[tools]\ngo = \"1.22.12\"\n"
+	)
+
+	tests := []struct {
+		name string
+		// file is the unwritable target, and content is what it holds, chosen
+		// so the command has something to change: a row must fail on the
+		// permission rather than on the file not matching.
+		file    string
+		content string
+		cmd     string
+		// editable marks the opcode whose write does not need the target's own
+		// permission, which both paths must therefore accept.
+		editable bool
+	}{
+		{
+			name:    "action update",
+			file:    ".github/workflows/ci.yml",
+			content: workflow,
+			cmd:     "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+		},
+		{
+			name:    "action pin",
+			file:    ".github/workflows/ci.yml",
+			content: workflow,
+			cmd:     "deputy:action:pin .github/workflows/ci.yml actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4.2.2",
+		},
+		{
+			name:    "dockerfile update",
+			file:    "Dockerfile",
+			content: dockerfile,
+			cmd:     "deputy:dockerfile:update Dockerfile alpine 3.19",
+		},
+		{
+			name:     "mise update publishes by replacement",
+			file:     "mise.toml",
+			content:  miseConfig,
+			cmd:      "deputy:mise:update mise.toml go 1.24.3 1.22.12",
+			editable: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, tt.file)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			// Readable, not writable, in a directory that is both.
+			if err := os.WriteFile(target, []byte(tt.content), 0o444); err != nil {
+				t.Fatal(err)
+			}
+
+			preflight := PreflightDeputyCommand(dir, tt.cmd)
+			apply := ApplyDeputyCommand(t.Context(), dir, tt.cmd)
+
+			if tt.editable {
+				if preflight != nil {
+					t.Errorf("preflight refused an edit that does not need the target writable: %v", preflight)
+				}
+				if apply != nil {
+					t.Errorf("apply refused an edit that does not need the target writable: %v", apply)
+				}
+				return
+			}
+			if apply == nil {
+				t.Fatalf("ApplyDeputyCommand(%q) accepted a target it cannot write", tt.cmd)
+			}
+			if preflight == nil {
+				t.Fatalf("PreflightDeputyCommand(%q) accepted a target the apply path refuses with: %v", tt.cmd, apply)
+			}
+			if preflight.Error() != apply.Error() {
+				t.Errorf("dry run and execution refused differently:\npreflight: %v\napply:     %v", preflight, apply)
+			}
+			// The refusal has to say what is wrong, since "cannot edit" alone
+			// reads as a missing file.
+			if got := preflight.Error(); !strings.Contains(got, "permission denied") {
+				t.Errorf("refusal %q does not name the permission that failed", got)
+			}
+			// A refused command leaves the workspace alone.
+			after, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != tt.content {
+				t.Errorf("the refused command modified the target:\n%s", after)
+			}
+		})
+	}
+}
+
+// TestDeputyCommandRefusesMissingTarget pins that preflight refuses a command
+// whose target is not there, on the same terms and in the same words as the
+// apply path. Reporting the edit as one that would apply, and then failing on
+// the first read, is the disagreement a dry run exists to prevent: the preview
+// counts the step as satisfied and goes on to describe its dependents running
+// against a plan that cannot be applied.
+func TestDeputyCommandRefusesMissingTarget(t *testing.T) {
+	commands := []struct {
+		name string
+		file string
+		cmd  string
+	}{
+		{
+			name: "action update",
+			file: ".github/workflows/ci.yml",
+			cmd:  "deputy:action:update .github/workflows/ci.yml actions/checkout v5",
+		},
+		{
+			name: "action pin",
+			file: ".github/workflows/ci.yml",
+			cmd:  "deputy:action:pin .github/workflows/ci.yml actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4.2.2",
+		},
+		{
+			name: "dockerfile update",
+			file: "Dockerfile",
+			cmd:  "deputy:dockerfile:update Dockerfile alpine 3.19",
+		},
+	}
+
+	// A plan can name a path whose parent directory is gone as easily as one
+	// whose file alone is gone, and the two reach the check by different
+	// routes through symlink resolution, so both are exercised.
+	layouts := []struct {
+		name       string
+		makeParent bool
+	}{
+		{name: "target missing", makeParent: true},
+		{name: "parent directory missing", makeParent: false},
+	}
+
+	for _, tc := range commands {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, layout := range layouts {
+				t.Run(layout.name, func(t *testing.T) {
+					dir := t.TempDir()
+					if layout.makeParent {
+						if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, tc.file)), 0o755); err != nil {
+							t.Fatalf("MkdirAll failed: %v", err)
+						}
+					}
+
+					preflight := PreflightDeputyCommand(dir, tc.cmd)
+					if preflight == nil {
+						t.Fatalf("PreflightDeputyCommand(%q) accepted a missing target", tc.cmd)
+					}
+					apply := ApplyDeputyCommand(t.Context(), dir, tc.cmd)
+					if apply == nil {
+						t.Fatalf("ApplyDeputyCommand(%q) accepted a missing target", tc.cmd)
+					}
+					if preflight.Error() != apply.Error() {
+						t.Errorf("dry run and execution refused differently:\npreflight: %v\napply:     %v", preflight, apply)
+					}
+					if !errors.Is(preflight, os.ErrNotExist) {
+						t.Errorf("refusal %v does not report a missing file", preflight)
+					}
+					if !strings.Contains(preflight.Error(), tc.file) {
+						t.Errorf("refusal %v does not name the target %q", preflight, tc.file)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestDeputyCommandRefusesUnmatchedTarget pins the last way a dry run could
+// promise an edit the run cannot make: the target exists and the arguments are
+// sound, but the file no longer contains the action or image the plan names.
+// Every opcode refuses that at apply time, so a preview that accepted it would
+// report the step as one that would execute, count it satisfied, and describe
+// its dependents running, when the real run fails the step and skips them.
+//
+// A plan outlives the tree it was built against, which is exactly when this
+// happens: someone bumps the action by hand, or deletes the build stage, and
+// the stored plan still names what used to be there.
+//
+// The final row of each opcode is a file that does contain the target, so the
+// check cannot pass by refusing everything.
+func TestDeputyCommandRefusesUnmatchedTarget(t *testing.T) {
+	const (
+		workflow   = ".github/workflows/ci.yml"
+		dockerfile = "Dockerfile"
+	)
+
+	tests := []struct {
+		name      string
+		file      string
+		content   string
+		cmd       string
+		wantMatch bool // whether the file contains what the command names
+	}{
+		{
+			name:    "action update against a workflow without the action",
+			file:    workflow,
+			content: "jobs:\n  build:\n    steps:\n      - uses: actions/setup-go@v5\n",
+			cmd:     "deputy:action:update " + workflow + " actions/checkout v5",
+		},
+		{
+			name:    "action pin against a workflow without the action",
+			file:    workflow,
+			content: "jobs:\n  build:\n    steps:\n      - uses: actions/setup-go@v5\n",
+			cmd:     "deputy:action:pin " + workflow + " actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4.2.2",
+		},
+		{
+			name:    "dockerfile update against a Dockerfile without the image",
+			file:    dockerfile,
+			content: "FROM debian:bookworm\nRUN true\n",
+			cmd:     "deputy:dockerfile:update " + dockerfile + " alpine 3.19",
+		},
+		{
+			name:      "action update against a workflow that has the action",
+			file:      workflow,
+			content:   "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
+			cmd:       "deputy:action:update " + workflow + " actions/checkout v5",
+			wantMatch: true,
+		},
+		{
+			name:      "action pin against a workflow that has the action",
+			file:      workflow,
+			content:   "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
+			cmd:       "deputy:action:pin " + workflow + " actions/checkout 11bd71901bbe5b1630ceea73d27597364c9af683 v4.2.2",
+			wantMatch: true,
+		},
+		{
+			name:      "dockerfile update against a Dockerfile that has the image",
+			file:      dockerfile,
+			content:   "FROM alpine:3.18\nRUN true\n",
+			cmd:       "deputy:dockerfile:update " + dockerfile + " alpine 3.19",
+			wantMatch: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// One tree for both, so the refusals can be compared verbatim:
+			// they name the resolved target path, which differs between two
+			// temporary directories for reasons that have nothing to do with
+			// the verdict.
+			dir := t.TempDir()
+			writeTestFile(t, dir, tt.file, tt.content)
+
+			// Preflight runs first and must leave the target alone.
+			preflight := PreflightDeputyCommand(dir, tt.cmd)
+			afterPreflight, err := os.ReadFile(filepath.Join(dir, tt.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(afterPreflight) != tt.content {
+				t.Errorf("preflight modified the target:\n--- got ---\n%s\n--- want ---\n%s", afterPreflight, tt.content)
+			}
+
+			apply := ApplyDeputyCommand(t.Context(), dir, tt.cmd)
+
+			if tt.wantMatch {
+				if preflight != nil {
+					t.Errorf("preflight refused an applicable command: %v", preflight)
+				}
+				if apply != nil {
+					t.Errorf("apply refused an applicable command: %v", apply)
+				}
+				return
+			}
+			if apply == nil {
+				t.Fatalf("ApplyDeputyCommand(%q) accepted a target it does not match", tt.cmd)
+			}
+			if preflight == nil {
+				t.Fatalf("PreflightDeputyCommand(%q) accepted a target the apply path refuses with: %v", tt.cmd, apply)
+			}
+			if preflight.Error() != apply.Error() {
+				t.Errorf("dry run and execution refused differently:\npreflight: %v\napply:     %v", preflight, apply)
+			}
+		})
+	}
+}
+
+// writeTestFile writes content to name under dir, creating parent
+// directories, so a table row can name a nested path without repeating the
+// setup.
+func writeTestFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	full := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestDeputyCommandRefusesInvalidArguments pins that preflight judges the
+// arguments only one opcode understands, not merely how many there are. A
+// deputy:action:pin command carrying something that is not a SHA is refused by
+// the rewrite that applies it, so a preview that accepted it would report the
+// edit as one that would apply, count the step as satisfied, and describe its
+// dependents running against a plan the run cannot carry out.
+//
+// Every row exists on disk, so nothing here can pass on the missing-target
+// check instead of the one under test, and the last row proves the opcode is
+// still applicable when its arguments are sound.
+func TestDeputyCommandRefusesInvalidArguments(t *testing.T) {
+	const (
+		workflow = ".github/workflows/ci.yml"
+		sha      = "11bd71901bbe5b1630ceea73d27597364c9af683"
+	)
+
+	tests := []struct {
+		name    string
+		cmd     string
+		wantErr string // substring both paths must report; empty means both must accept
+	}{
+		{
+			name:    "pinned value that is not a SHA",
+			cmd:     "deputy:action:pin " + workflow + " actions/checkout not-a-sha v4",
+			wantErr: `pinned value "not-a-sha" for actions/checkout is not a valid SHA`,
+		},
+		{
+			name:    "pinned value that is a short SHA",
+			cmd:     "deputy:action:pin " + workflow + " actions/checkout abc123 v4",
+			wantErr: `pinned value "abc123" for actions/checkout is not a valid SHA`,
+		},
+		{
+			name:    "pinned value of SHA length that is not hexadecimal",
+			cmd:     "deputy:action:pin " + workflow + " actions/checkout " + strings.Repeat("z", 40) + " v4",
+			wantErr: "is not a valid SHA",
+		},
+		{
+			name: "well formed pin",
+			cmd:  "deputy:action:pin " + workflow + " actions/checkout " + sha + " v4.2.2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, workflow)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatalf("MkdirAll failed: %v", err)
+			}
+			if err := os.WriteFile(target, []byte("jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"), 0o644); err != nil {
+				t.Fatalf("WriteFile failed: %v", err)
+			}
+
+			preflight := PreflightDeputyCommand(dir, tt.cmd)
+			apply := ApplyDeputyCommand(t.Context(), dir, tt.cmd)
+
+			if tt.wantErr == "" {
+				if preflight != nil {
+					t.Fatalf("PreflightDeputyCommand(%q) = %v, want acceptance", tt.cmd, preflight)
+				}
+				if apply != nil {
+					t.Fatalf("ApplyDeputyCommand(%q) = %v, want acceptance", tt.cmd, apply)
+				}
+				return
+			}
+			if preflight == nil {
+				t.Fatalf("PreflightDeputyCommand(%q) accepted arguments the rewrite refuses", tt.cmd)
+			}
+			if apply == nil {
+				t.Fatalf("ApplyDeputyCommand(%q) accepted arguments the rewrite refuses", tt.cmd)
+			}
+			if !strings.Contains(preflight.Error(), tt.wantErr) {
+				t.Errorf("preflight refusal %v does not contain %q", preflight, tt.wantErr)
+			}
+			if !strings.Contains(apply.Error(), tt.wantErr) {
+				t.Errorf("apply refusal %v does not contain %q", apply, tt.wantErr)
+			}
+
+			// A refused command must leave the workspace alone, since the
+			// preview promised no edit would be made.
+			after, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatalf("ReadFile failed: %v", err)
+			}
+			if strings.Contains(string(after), "@"+sha) {
+				t.Errorf("refused command still rewrote %s to %q", workflow, string(after))
 			}
 		})
 	}
@@ -2315,7 +3256,7 @@ checksum = "sha256:legacyfoo"
 
 			const configRel = ".config/mise/conf.d/a.toml"
 			cmd := `deputy:mise:update ` + configRel + ` "npm:foo" 1.0.1 1.0.0`
-			if err := ApplyDeputyCommand(dir, cmd); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
 				t.Fatalf("ApplyDeputyCommand: %v", err)
 			}
 
@@ -2496,7 +3437,7 @@ checksum = "sha256:legacyfoo"
 			}
 
 			cmd := `deputy:mise:update a/mise.toml "npm:foo" 1.0.1 1.0.0`
-			if err := ApplyDeputyCommand(dir, cmd); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, cmd); err != nil {
 				t.Fatalf("ApplyDeputyCommand: %v", err)
 			}
 
@@ -2642,13 +3583,14 @@ backend = "core:go"
 					}
 				}
 
+				ctx := t.Context()
 				var wg sync.WaitGroup
 				errs := make([]error, len(tt.commands))
 				for i, cmd := range tt.commands {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						errs[i] = ApplyDeputyCommand(dir, cmd)
+						errs[i] = ApplyDeputyCommand(ctx, dir, cmd)
 					}()
 				}
 				wg.Wait()
@@ -2751,7 +3693,7 @@ func TestApplyMiseUpdateMatchesGoPrefixedSpellings(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := ApplyDeputyCommand(dir, tt.cmd); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, tt.cmd); err != nil {
 				t.Fatalf("ApplyDeputyCommand: %v", err)
 			}
 
@@ -2902,7 +3844,7 @@ func TestApplyMiseUpdatePrunesObsoleteLockEntries(t *testing.T) {
 				configRel, lockRel = "a/mise.toml", "a/mise.lock"
 			}
 
-			if err := ApplyDeputyCommand(dir, tt.cmd); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, tt.cmd); err != nil {
 				t.Fatalf("ApplyDeputyCommand: %v", err)
 			}
 			after, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(lockRel)))
@@ -3037,9 +3979,10 @@ func TestApplyDeputyCommandRunsUnrelatedTreesConcurrently(t *testing.T) {
 	release := fileEdits.guard(busy)
 	defer release()
 
+	ctx := t.Context()
 	done := make(chan error, 1)
 	go func() {
-		done <- ApplyDeputyCommand(independent, "deputy:mise:update mise.toml go 1.24.3 1.22.12")
+		done <- ApplyDeputyCommand(ctx, independent, "deputy:mise:update mise.toml go 1.24.3 1.22.12")
 	}()
 
 	select {
@@ -3139,7 +4082,7 @@ func TestApplyMiseUpdateWithUnknownOwnership(t *testing.T) {
 				t.Fatal("expected ownership to be unresolvable in this layout")
 			}
 
-			if err := ApplyDeputyCommand(dir, "deputy:mise:update a/mise.toml go 1.24.3 1.22.12"); err != nil {
+			if err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update a/mise.toml go 1.24.3 1.22.12"); err != nil {
 				t.Fatalf("ApplyDeputyCommand: %v", err)
 			}
 
@@ -3272,7 +4215,7 @@ func TestApplyMiseUpdateInProjectedMount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ApplyDeputyCommand(dir, "deputy:mise:update ..data/mise.toml go 1.24.3 1.22.12"); err != nil {
+	if err := ApplyDeputyCommand(t.Context(), dir, "deputy:mise:update ..data/mise.toml go 1.24.3 1.22.12"); err != nil {
 		t.Fatalf("ApplyDeputyCommand: %v", err)
 	}
 	config, err := os.ReadFile(filepath.Join(mount, "mise.toml"))

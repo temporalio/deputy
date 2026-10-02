@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
+	"github.com/picatz/openai/codex"
 	agentv1 "github.com/temporalio/deputy/gen/deputy/agent/v1"
 	"github.com/temporalio/deputy/gen/deputy/agent/v1/agentv1connect"
-	"github.com/picatz/openai/codex"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -43,6 +43,9 @@ func (h *CodexHandler) GetInfo(ctx context.Context, req *connect.Request[agentv1
 			Agentic:           true,
 			SessionResumption: true,
 			MaxContextTokens:  0, // Varies by model
+			// Codex handles approvals inside its own CLI and never emits
+			// approval-required events, so callers cannot gate its steps.
+			ApprovalWorkflows: false,
 		},
 	}), nil
 }

@@ -98,6 +98,9 @@ func (h *SandboxedHandler) GetInfo(ctx context.Context, req *connect.Request[age
 			Streaming:   true,
 			Agentic:     true,
 			Sandboxable: true,
+			// The sandbox wrapper runs the agent in a container and does not
+			// surface approval-required events to the caller.
+			ApprovalWorkflows: false,
 		},
 	}), nil
 }
