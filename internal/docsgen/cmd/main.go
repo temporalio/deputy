@@ -17,11 +17,20 @@ func main() {
 		os.Exit(1)
 	}
 	path := filepath.Join(root, filepath.FromSlash(docsgen.PolicyInputsDocPath))
-	if err := docsgen.UpdateSection(path, docsgen.PolicyEntrypointsSection, docsgen.PolicyEntrypointsMarkdown()); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	sections := []struct {
+		name    string
+		content string
+	}{
+		{docsgen.PolicyEntrypointsSection, docsgen.PolicyEntrypointsMarkdown()},
+		{docsgen.CanonicalEcosystemsSection, docsgen.CanonicalEcosystemsMarkdown()},
 	}
-	fmt.Printf("regenerated %s section of %s\n", docsgen.PolicyEntrypointsSection, docsgen.PolicyInputsDocPath)
+	for _, section := range sections {
+		if err := docsgen.UpdateSection(path, section.name, section.content); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("regenerated %s section of %s\n", section.name, docsgen.PolicyInputsDocPath)
+	}
 }
 
 // repoRoot walks up from the working directory to the module root, so the

@@ -162,6 +162,20 @@ func TestNormalizeVersion(t *testing.T) {
 		{NPM, "1.2.3", "1.2.3"},
 		{NPM, "v1.2.3", "v1.2.3"},
 		{Go, "", ""},
+		// The "v" prefix only belongs on a version that is one. SCALIBR's
+		// gobinary extractor reports an unstamped main module as the literal
+		// "(devel)", and the Go toolchain reports "devel go1.24-abc123" for a
+		// development build; "v(devel)" is neither a version nor the sentinel a
+		// policy matches on.
+		{Go, "(devel)", "(devel)"},
+		{Go, "devel go1.24-abc123", "devel go1.24-abc123"},
+		{Go, "unknown", "unknown"},
+		// Everything that is a Go version still gains the prefix, including
+		// partial versions, pseudo-versions, and +incompatible builds.
+		{Go, "1.21", "v1.21"},
+		{Go, "0.0.0-20240101120000-abcdef123456", "v0.0.0-20240101120000-abcdef123456"},
+		{Go, "2.1.0+incompatible", "v2.1.0+incompatible"},
+		{Go, "1.2.3-rc.1", "v1.2.3-rc.1"},
 	}
 
 	for _, tt := range tests {
@@ -184,6 +198,25 @@ func TestNormalizeName(t *testing.T) {
 		{PyPI, "  Django  ", "django"},
 		{NPM, "React", "React"},
 		{Go, "github.com/Foo/Bar", "github.com/Foo/Bar"},
+		// PEP 503: runs of "-", "_", and "." are one separator, so every
+		// spelling of a distribution collapses onto the same name.
+		{PyPI, "Flask_SQLAlchemy", "flask-sqlalchemy"},
+		{PyPI, "flask.sqlalchemy", "flask-sqlalchemy"},
+		{PyPI, "Flask-SQLAlchemy", "flask-sqlalchemy"},
+		{PyPI, "zope..interface", "zope-interface"},
+		{PyPI, "ruamel_-.yaml", "ruamel-yaml"},
+		// A crate keeps the spelling it was published under. crates.io folds
+		// "-" and "_" to decide two names are one crate, but the crate is still
+		// named "async-trait" on crates.io, in Cargo.toml, in its purl, and in
+		// OSV. That fold is [Ecosystem.NameEquivalenceKey]'s job.
+		{Cargo, "async-trait", "async-trait"},
+		{Cargo, "serde_json", "serde_json"},
+		{Cargo, "Serde-JSON", "Serde-JSON"},
+		// Ecosystems with case-sensitive, separator-significant names keep
+		// every character.
+		{NPM, "@types/Node", "@types/Node"},
+		{Maven, "com.example:My_Artifact", "com.example:My_Artifact"},
+		{Unknown, "Some.Thing", "Some.Thing"},
 	}
 
 	for _, tt := range tests {
@@ -193,6 +226,101 @@ func TestNormalizeName(t *testing.T) {
 				t.Errorf("%s.NormalizeName(%q) = %q, want %q", tt.eco, tt.name, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestNameEquivalenceKey pins the half of package identity that decides two
+// spellings are one package. Cargo is the case that separates it from
+// [Ecosystem.NormalizeName]: the crate keeps its published hyphen, and only the
+// key folds. An ecosystem with no rule of its own must key by the name it
+// normalizes to, so a lookup there stays exact.
+func TestNameEquivalenceKey(t *testing.T) {
+	tests := []struct {
+		eco  Ecosystem
+		name string
+		want string
+	}{
+		// crates.io treats "-" and "_" as the same character and ignores case,
+		// so every spelling of one crate keys the same.
+		{Cargo, "async-trait", "async_trait"},
+		{Cargo, "async_trait", "async_trait"},
+		{Cargo, "Serde-JSON", "serde_json"},
+		{Cargo, "  rand-core  ", "rand_core"},
+		{Cargo, "", ""},
+		// PyPI's equivalence and its identity are the same PEP 503 form.
+		{PyPI, "Flask_SQLAlchemy", "flask-sqlalchemy"},
+		{PyPI, "zope.interface", "zope-interface"},
+		// No rule: the key is the name, so matching is exact.
+		{NPM, "@types/Node", "@types/Node"},
+		{Go, "github.com/Foo/Bar", "github.com/Foo/Bar"},
+		{Maven, "com.example:My_Artifact", "com.example:My_Artifact"},
+		{Unknown, "Some.Thing", "Some.Thing"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.eco)+"/"+tt.name, func(t *testing.T) {
+			got := tt.eco.NameEquivalenceKey(tt.name)
+			if got != tt.want {
+				t.Errorf("%s.NameEquivalenceKey(%q) = %q, want %q", tt.eco, tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNormalizesNames pins the predicate that tells a caller whether an outside
+// normalizer's opinion about a name can be adopted. It is derived from
+// NormalizeName, so the two cannot disagree; the table is here to state the
+// answer for each ecosystem out loud.
+func TestNormalizesNames(t *testing.T) {
+	tests := []struct {
+		eco  Ecosystem
+		want bool
+	}{
+		{PyPI, true},
+		{Cargo, false},
+		{Go, false},
+		{NPM, false},
+		{Maven, false},
+		{Unknown, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.eco), func(t *testing.T) {
+			if got := tt.eco.NormalizesNames(); got != tt.want {
+				t.Errorf("%s.NormalizesNames() = %v, want %v", tt.eco, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNormalizesNamesFollowsTheNormalizer checks the derivation rather than the
+// answer: every ecosystem that reports no name rule must really leave a name
+// with mixed case and all three separators alone, and every one that reports a
+// rule must really change it. A hand-maintained predicate would drift from
+// NormalizeName here.
+func TestNormalizesNamesFollowsTheNormalizer(t *testing.T) {
+	for _, eco := range append(All(), Unknown, GitHubActions) {
+		t.Run(string(eco), func(t *testing.T) {
+			changed := eco.NormalizeName(nameNormalizationProbe) != nameNormalizationProbe
+			if got := eco.NormalizesNames(); got != changed {
+				t.Errorf("%s.NormalizesNames() = %v but NormalizeName(%q) changed = %v",
+					eco, got, nameNormalizationProbe, changed)
+			}
+		})
+	}
+}
+
+// TestCargoIdentityIsNotTheEquivalenceKey states the distinction directly so a
+// future change cannot quietly collapse the two calls back into one: a crate
+// name survives normalization byte for byte while two spellings of it still
+// match.
+func TestCargoIdentityIsNotTheEquivalenceKey(t *testing.T) {
+	const published = "async-trait"
+	if got := Cargo.NormalizeName(published); got != published {
+		t.Errorf("Cargo.NormalizeName(%q) = %q, want the published spelling", published, got)
+	}
+	if a, b := Cargo.NameEquivalenceKey(published), Cargo.NameEquivalenceKey("async_trait"); a != b {
+		t.Errorf("equivalence keys differ: %q vs %q", a, b)
 	}
 }
 
@@ -362,36 +490,5 @@ func TestWantsLicenseLookup(t *testing.T) {
 	// PyPI doesn't have license support
 	if PyPI.WantsLicenseLookup() {
 		t.Error("PyPI.WantsLicenseLookup() = true, want false")
-	}
-}
-
-// TestProxyEntrypoint pins the entrypoint synthesis contract across the whole
-// registry. ProxyEntrypoint mechanically synthesizes "<name>_artifact_request"
-// for every ecosystem, but only proxy-capable ecosystems ever reach it (the
-// proxy handler registry is keyed by proxy support, see
-// internal/proxy/handler_registry.go), so the load-bearing invariant is that
-// every proxy-capable ecosystem synthesizes a canonical policy entrypoint.
-// Non-proxy ecosystems synthesizing unknown names is expected and harmless.
-func TestProxyEntrypoint(t *testing.T) {
-	proxyCapable := 0
-	for _, eco := range All() {
-		t.Run(string(eco), func(t *testing.T) {
-			got := eco.ProxyEntrypoint()
-			if want := string(eco) + "_artifact_request"; string(got) != want {
-				t.Errorf("%s.ProxyEntrypoint() = %q, want %q", eco, got, want)
-			}
-			if eco.Capabilities().Proxy && !got.IsValid() {
-				t.Errorf("proxy-capable ecosystem %s synthesizes entrypoint %q, which is not a canonical policy entrypoint; proxy policies for it would never match", eco, got)
-			}
-		})
-		if eco.Capabilities().Proxy {
-			proxyCapable++
-		}
-	}
-
-	// Sanity floor: 4 proxy-capable ecosystems today (go, npm, pypi,
-	// rubygems); zero would make the validity assertion above vacuous.
-	if proxyCapable < 4 {
-		t.Errorf("only %d proxy-capable ecosystems in All(), want at least 4", proxyCapable)
 	}
 }

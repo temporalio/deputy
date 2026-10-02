@@ -4,8 +4,7 @@ import (
 	"strings"
 
 	pb "deps.dev/api/v3"
-
-	"github.com/temporalio/deputy/internal/policy"
+	"golang.org/x/mod/semver"
 )
 
 // Ecosystem represents a supported package ecosystem.
@@ -132,39 +131,140 @@ func (e Ecosystem) WantsLicenseLookup() bool {
 
 // NormalizeVersion applies ecosystem-specific version normalization.
 // For Go, it ensures versions have a "v" prefix.
+//
+// The prefix is only added to a string that is a Go version once prefixed.
+// Scanners report unversioned builds with non-version sentinels, SCALIBR's
+// gobinary extractor emitting the literal "(devel)" for an unstamped main
+// module, and "v(devel)" is neither a version nor the sentinel a policy or a
+// comparison matches on.
 func (e Ecosystem) NormalizeVersion(version string) string {
 	v := strings.TrimSpace(version)
 	if v == "" {
 		return ""
 	}
-	if e == Go && !strings.HasPrefix(v, "v") {
+	if e == Go && !strings.HasPrefix(v, "v") && semver.IsValid("v"+v) {
 		return "v" + v
 	}
 	return v
 }
 
-// NormalizeName applies ecosystem-specific name normalization.
-// For PyPI, names are lowercased.
+// NormalizeName returns the name this ecosystem itself gives the package: the
+// published spelling, folded only where the ecosystem defines a normalized form
+// and publishes packages under it. This answers identity, not equivalence. It
+// is the one implementation of that rule, so the name a policy reads is the
+// name inventory, the SBOM, and a purl carry.
+//
+// Whether two spellings name one package is a different question, answered by
+// [Ecosystem.NameEquivalenceKey]. Do not fold a name here to make a comparison
+// work: rewriting an identity to make two records match invents a spelling that
+// the registry, the manifest, and the advisory database have never heard of.
+//
+// PyPI is the one ecosystem folded here, because for PyPI the folded form is
+// the identity: PEP 503 defines the normalized distribution name, the purl spec
+// normalizes pypi names that way, and PyPI serves that form. Cargo looks like
+// the same case and is not, so the asymmetry between them is deliberate.
+// crates.io folds a crate name for lookup and uniqueness, but it does not
+// rename the crate: "async-trait" is what crates.io publishes, what Cargo.toml
+// declares, what OSV indexes, and what its purl spells, because the purl spec
+// defines no normalization for the cargo type at all.
+//
+// Ecosystems whose names are case-sensitive and separator-significant (npm, Go,
+// Maven, Cargo, and everything Deputy has no rule for) get the name back
+// unchanged apart from surrounding whitespace.
 func (e Ecosystem) NormalizeName(name string) string {
 	n := strings.TrimSpace(name)
 	if n == "" {
 		return ""
 	}
 	if e == PyPI {
-		return strings.ToLower(n)
+		return normalizePyPIName(n)
 	}
 	return n
+}
+
+// nameNormalizationProbe carries every character class a name fold could act
+// on: upper case and all three separators. [Ecosystem.NormalizesNames] folds it
+// to decide whether an ecosystem has a rule at all, so a rule that changes any
+// of them is detected without anyone listing which ecosystems have one.
+const nameNormalizationProbe = "A_b.C-d"
+
+// NormalizesNames reports whether this ecosystem defines a name normalization,
+// that is, whether [Ecosystem.NormalizeName] is anything but the identity. The
+// answer is derived by folding a probe rather than by listing the ecosystems
+// that have a rule, so an ecosystem that gains one is covered by adding the
+// rule and nothing else.
+//
+// A caller needs this to know whether some other normalizer's opinion about a
+// name can be adopted. Where Deputy defines a fold, PyPI today, an outside
+// implementation of the same published rule agrees with Deputy and its output
+// is usable. Where Deputy defines none, a name is whatever its source spelled,
+// and a library that lowercases it (the purl spec does exactly that to a golang
+// namespace, though Go import paths are case-sensitive) is discarding identity
+// rather than canonicalizing it.
+func (e Ecosystem) NormalizesNames() bool {
+	return e.NormalizeName(nameNormalizationProbe) != nameNormalizationProbe
+}
+
+// NameEquivalenceKey returns the key under which this ecosystem considers two
+// names to be the same package, for matching one name against another. Unlike
+// [Ecosystem.NormalizeName] it does not return a name: the key is not a
+// spelling of anything and must never be emitted, stored, or displayed. It
+// exists so a comparison can be case- or separator-insensitive without either
+// side of the comparison being rewritten.
+//
+// Cargo is why the two are separate calls. crates.io compares crate names
+// case-insensitively with "-" and "_" interchangeable, so "async-trait" and
+// "async_trait" resolve to one crate and a second crate cannot claim the other
+// spelling. That makes the fold correct for deciding a manifest entry and a
+// lockfile entry are the same dependency, and wrong for naming the crate.
+//
+// An ecosystem with no equivalence rule of its own keys by its normalized name,
+// so matching there is exact.
+func (e Ecosystem) NameEquivalenceKey(name string) string {
+	n := strings.TrimSpace(name)
+	if n == "" {
+		return ""
+	}
+	if e == Cargo {
+		return foldCargoName(n)
+	}
+	return e.NormalizeName(n)
+}
+
+// foldCargoName applies the fold crates.io uses to decide two crate names name
+// one crate: case-insensitive, with "-" and "_" interchangeable. The underscore
+// side is an arbitrary choice of representative, which is safe precisely
+// because the result is a key and never a name.
+func foldCargoName(name string) string {
+	return strings.ReplaceAll(strings.ToLower(name), "-", "_")
+}
+
+// normalizePyPIName applies PEP 503: a distribution name is lowercase, and any
+// run of "-", "_", or "." is a single "-". That is the form PyPI itself
+// compares and the form OSV indexes, so "Flask_SQLAlchemy", "flask.sqlalchemy",
+// and "Flask-SQLAlchemy" all collapse to "flask-sqlalchemy".
+func normalizePyPIName(name string) string {
+	lowered := strings.ToLower(name)
+	var out strings.Builder
+	out.Grow(len(lowered))
+	inSeparator := false
+	for _, r := range lowered {
+		if r == '-' || r == '_' || r == '.' {
+			if !inSeparator {
+				out.WriteByte('-')
+				inSeparator = true
+			}
+			continue
+		}
+		out.WriteRune(r)
+		inSeparator = false
+	}
+	return out.String()
 }
 
 // IsSupported returns true if this is a known, supported ecosystem.
 func (e Ecosystem) IsSupported() bool {
 	return e != Unknown && e != ""
-}
-
-// ProxyEntrypoint returns the CEL policy entrypoint for proxy requests
-// to this ecosystem (e.g., EntrypointGoArtifactRequest, EntrypointNpmArtifactRequest).
-func (e Ecosystem) ProxyEntrypoint() policy.Entrypoint {
-	return policy.Entrypoint(string(e) + "_artifact_request")
 }
 
 // All returns all supported ecosystems.
@@ -180,10 +280,22 @@ func All() []Ecosystem {
 // etc. This method returns the first path segment(s) that identify extractors for
 // this ecosystem.
 //
+// The registry-less canonical tokens are covered too (see
+// [extraCanonicalEcosystems]), because OSV-SCALIBR inventories some of them
+// under a group name that is not their token: "hackage" is the group "haskell".
+// A filter that canonicalizes a caller's name before resolving plugins has to
+// be able to get back to the group name, or it hands SCALIBR a token nothing
+// there is called.
+//
 // Returns nil for Unknown or ecosystems without SCALIBR support.
 func (e Ecosystem) ScalibrPrefixes() []string {
 	if reg := Default().Get(e); reg != nil {
 		return reg.ScalibrPrefixes
+	}
+	for _, reg := range extraCanonicalEcosystems {
+		if reg.Ecosystem == e {
+			return reg.ScalibrPrefixes
+		}
 	}
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/policy"
+	internalproto "github.com/temporalio/deputy/internal/proto"
 	sbomx "github.com/temporalio/deputy/internal/sbom"
 	"github.com/temporalio/deputy/internal/services"
 	"github.com/temporalio/deputy/internal/targets"
@@ -347,6 +348,14 @@ PIPELINE INTEGRATION:
 
 // runSBOMPolicies evaluates policies against the generated SBOM result.
 // It checks both the overall report and individual components.
+//
+// The scanner's *extractor.Package is converted to the deputy.dependency.v1
+// .Package the sbom_report and sbom_component bindings declare before anything
+// is evaluated. That is the only shape the policy engine can work with: an
+// OSV-SCALIBR struct is neither a proto nor a CEL-adaptable type, so a policy
+// reading a field off one fails the whole evaluation, and the ecosystem
+// canonicalization that gives every other entrypoint one spelling cannot reach
+// inside it either.
 func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Result, errW io.Writer) error {
 	if len(policyPaths) == 0 {
 		return nil
@@ -358,11 +367,12 @@ func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Res
 		imagePayload = img
 	}
 
-	// Pass Go struct directly to CEL
+	components := internalproto.ExtractorPackagesToProto(result.Packages, result.Direct)
+
 	reportPayload := map[string]any{
 		"sbom":     result,
 		"target":   targetPayload,
-		"packages": result.Packages,
+		"packages": components,
 	}
 	if imagePayload != nil {
 		reportPayload["image"] = imagePayload
@@ -385,13 +395,16 @@ func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Res
 		commit = strings.TrimSpace(result.Target.CommitHash)
 	}
 
-	// Evaluate per-component policies with Go structs directly
-	for _, pkg := range result.Packages {
+	// Evaluate per-component policies. "pkg" is the spelling the binding
+	// registry documents alongside "component", so both name the same value
+	// instead of one of them being missing at evaluation time.
+	for _, component := range components {
 		compPayload := map[string]any{
 			"repo":      repo,
 			"ref":       ref,
 			"commit":    commit,
-			"component": pkg, // Pass extractor.Package directly
+			"component": component,
+			"pkg":       component,
 			"target":    targetPayload,
 		}
 		if imagePayload != nil {

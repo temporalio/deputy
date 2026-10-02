@@ -12,7 +12,7 @@
 #     - node.purl: Package URL (e.g., "pkg:npm/lodash@4.17.21")
 #     - node.name: Package name (e.g., "lodash")
 #     - node.version: Package version (e.g., "4.17.21")
-#     - node.ecosystem: Ecosystem (e.g., "npm", "Go", "PyPI")
+#     - node.ecosystem: Canonical ecosystem token (e.g., "npm", "go", "pypi")
 #     - node.direct: Whether this is a direct dependency
 #     - node.depth: Distance from root (0 = direct)
 #     - node.locations: File paths where this dependency is declared
@@ -94,9 +94,9 @@ policies:
     entrypoints: ["graph_node"]
     vars:
       allowedEcosystems:
-        - "Go"
+        - "go"
         - "npm"
-        - "PyPI"
+        - "pypi"
     rules:
       - action: warn
         when: |

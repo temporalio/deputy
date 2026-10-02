@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/temporalio/deputy/internal/ecosystem"
@@ -270,7 +271,7 @@ func TestEcosystemRegistryEntrypointsAreCanonical(t *testing.T) {
 		if !eco.Capabilities().Proxy {
 			t.Errorf("ecosystemRegistry contains %s, which does not declare proxy capability", eco)
 		}
-		if ep := eco.ProxyEntrypoint(); !ep.IsValid() {
+		if ep := policy.ProxyEntrypoint(string(eco)); !ep.IsValid() {
 			t.Errorf("proxied ecosystem %s synthesizes entrypoint %q, which is not a canonical policy entrypoint", eco, ep)
 		}
 	}
@@ -279,5 +280,90 @@ func TestEcosystemRegistryEntrypointsAreCanonical(t *testing.T) {
 		if _, ok := ecosystemRegistry[eco]; !ok {
 			t.Errorf("proxy-capable ecosystem %s is missing from ecosystemRegistry", eco)
 		}
+	}
+}
+
+// TestHandlerFactory_RegisteredEcosystemNeedsEntrypoint pins that an ecosystem
+// registered without an artifact-request policy entrypoint cannot be served.
+// Serving it would hand the evaluator an empty entrypoint, which disables
+// entrypoint filtering: policies scoped to another ecosystem's requests would
+// run against these ones.
+func TestHandlerFactory_RegisteredEcosystemNeedsEntrypoint(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	factory := NewHandlerFactory()
+	factory.Register(EcosystemConfig{
+		Ecosystem: ecosystem.Cargo,
+		PathParser: func(string) PathParseResult {
+			return PathParseResult{Name: "serde", Version: "1.0.0", Operation: "download"}
+		},
+	})
+
+	tests := []struct {
+		name      string
+		ecosystem ecosystem.Ecosystem
+		wantErr   string
+	}{
+		{name: "registered without an entrypoint", ecosystem: ecosystem.Cargo, wantErr: "no artifact-request policy entrypoint"},
+		{name: "built-in ecosystem still serves", ecosystem: ecosystem.Go},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, err := factory.CreateHandler(tt.ecosystem, upstream.URL, noopPolicyEvaluator{})
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("CreateHandler(%s) = %v, want error containing %q", tt.ecosystem, handler, tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("CreateHandler(%s) error = %v, want it to contain %q", tt.ecosystem, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CreateHandler(%s): %v", tt.ecosystem, err)
+			}
+			if handler == nil {
+				t.Fatal("expected a handler")
+			}
+		})
+	}
+}
+
+// TestRegisteredEcosystemDoesNotBorrowAnotherEntrypointsPolicies drives the
+// whole path: with a policy scoped to go_artifact_request loaded, a request to
+// a registered ecosystem that has no entrypoint of its own must never be
+// evaluated by it.
+func TestRegisteredEcosystemDoesNotBorrowAnotherEntrypointsPolicies(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	engine, err := policy.NewEngine([]policy.Source{{
+		Name: "go-only",
+		Body: `//! policy.entrypoints = "go_artifact_request"
+{"action": "deny", "reason": "go policy fired"}`,
+	}})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+
+	factory := NewHandlerFactory()
+	factory.Register(EcosystemConfig{
+		Ecosystem: ecosystem.Cargo,
+		PathParser: func(string) PathParseResult {
+			return PathParseResult{Name: "serde", Version: "1.0.0", Operation: "download"}
+		},
+	})
+
+	handler, err := factory.CreateHandler(ecosystem.Cargo, upstream.URL, engine)
+	if err == nil {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/serde/1.0.0/download", nil))
+		t.Fatalf("cargo handler was created and served with status %d body %q; a handler with no entrypoint must be refused", rec.Code, rec.Body.String())
 	}
 }
