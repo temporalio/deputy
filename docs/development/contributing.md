@@ -5,6 +5,7 @@
 - Go 1.21+ (uses `toolchain` directive)
 - Git
 - Make (optional, for convenience targets)
+- GitHub CLI (`gh`) with the `github/gh-stack` extension, for landing PRs: `gh extension install github/gh-stack`
 
 ## Local Setup
 
@@ -72,7 +73,7 @@ go build -o deputy .
 
 ### 5. Submit a PR
 
-- Clear description of what changed and why
+- Write the description as the commit message it becomes (see [Landing a Pull Request](#landing-a-pull-request))
 - Link to any related issues
 - Include test coverage for new functionality
 
@@ -233,6 +234,35 @@ docs/
   development/        # This section
 ```
 
+## Landing a Pull Request
+
+Every PR lands on `main` as one squash commit. GitHub builds that commit from the PR title and the PR description, so the description is the commit message and is worth writing as one.
+
+**Title.** An imperative sentence under 72 characters that names the change, for example `Recover superseded OSV advisories instead of aborting the scan`. GitHub appends `(#N)`.
+
+**Description.** Prose paragraphs that say what changed and why, then how it was verified. Plain text reads well in both `git log` and the PR page: short paragraphs, `-` bullets for lists, fenced blocks for commands. Avoid tables and raw HTML, which read poorly in a terminal.
+
+**Merging.** Squash is the only merge method. An ordinary PR merges once a maintainer other than the author has approved it:
+
+```bash
+gh pr merge <number> --squash
+```
+
+A stacked PR cannot be merged with `gh pr merge`. It needs the `gh-stack` extension from the prerequisites. Merge it by number, which lands everything up to and including that PR, then resync the stack:
+
+```bash
+gh stack merge <number> --squash --yes
+gh stack sync
+```
+
+Bot PRs (Dependabot) carry release notes in the description that do not belong in history. Pass an explicit body when merging them:
+
+```bash
+gh pr merge <number> --squash --body "Bumps <module> from <old> to <new>."
+```
+
+**Repository settings** that make this the default, under Settings, General, Pull Requests: allow squash merging only; default commit message "Pull request title and description".
+
 ## Pull Request Checklist
 
 - [ ] Tests pass (`go test ./...`)
@@ -240,7 +270,7 @@ docs/
 - [ ] No new linter warnings
 - [ ] Documentation updated (if behavior changed)
 - [ ] CHANGELOG entry (if user-facing change)
-- [ ] Commit messages are clear and descriptive
+- [ ] Title and description read as the squash commit they become
 
 ## Common Tasks
 
