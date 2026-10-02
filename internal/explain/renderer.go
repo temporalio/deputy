@@ -372,7 +372,7 @@ func (r *Renderer) renderTimeline(out io.Writer, data *VulnData) {
 	}
 
 	// Modified (only if different from published)
-	if !temporal.Modified.IsZero() && temporal.Modified != temporal.Published {
+	if !temporal.Modified.IsZero() && !temporal.Modified.Equal(temporal.Published) {
 		age := FormatAge(temporal.TimeSinceModified())
 		fmt.Fprintf(out, "  %s  %s  %s\n",
 			styleLabel.Render("updated"),

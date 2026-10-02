@@ -312,6 +312,30 @@ func TestRender_AbsentDatesRenderAsAbsent(t *testing.T) {
 	}
 }
 
+func TestRenderTimeline_SameInstantDoesNotRenderUpdated(t *testing.T) {
+	published := time.Now().Add(-24 * time.Hour).UTC()
+	modified := published.In(time.FixedZone("UTC+01:00", 60*60))
+	if !published.Equal(modified) {
+		t.Fatal("test times must represent the same instant")
+	}
+
+	var buf bytes.Buffer
+	NewRenderer(Config{}).renderTimeline(&buf, &VulnData{
+		Temporal: TemporalInfo{
+			Published: published,
+			Modified:  modified,
+		},
+	})
+
+	out := buf.String()
+	if !strings.Contains(out, "disclosed") {
+		t.Fatalf("timeline did not render the disclosure date:\n%s", out)
+	}
+	if strings.Contains(out, "updated") {
+		t.Errorf("timeline rendered equivalent instants as different dates:\n%s", out)
+	}
+}
+
 // TestRenderJSON_AbsentDatesOmitTimeline is [TestRender_AbsentDatesRenderAsAbsent]
 // for the JSON surface: an absent date must not produce a timeline key at all,
 // because a consumer cannot tell an epoch date from a missing one.
