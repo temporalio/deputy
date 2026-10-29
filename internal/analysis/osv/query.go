@@ -930,7 +930,7 @@ func osvQueryPackage(p PkgInput) (*osvschema.Package, string) {
 	version := p.Version
 	if p.Name != "" && p.Ecosystem != "" {
 		return &osvschema.Package{
-			Name:      p.Name,
+			Name:      osvQueryName(p),
 			Ecosystem: normalizeOSVEcosystem(p.Ecosystem),
 		}, version
 	}
@@ -987,6 +987,13 @@ func normalizeGoVersion(v string) string {
 
 // matchesPackage checks if an OSV package definition matches the target package input.
 func matchesPackage(pkg *osvschema.Package, target PkgInput) bool {
+	// An OS package queried under its source name matches records for that
+	// source package; its own PURL names the binary package, so comparing PURLs
+	// would reject every record the query was routed to.
+	if src := osSourceName(target); src != "" {
+		return strings.EqualFold(pkg.GetName(), src) &&
+			(pkg.GetEcosystem() == "" || strings.EqualFold(pkg.GetEcosystem(), target.Ecosystem))
+	}
 	if pkg.GetPurl() != "" && target.PURL != "" {
 		return equivalentPURL(pkg.GetPurl(), target.PURL)
 	}

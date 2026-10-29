@@ -70,9 +70,11 @@ func DisplayVulnerabilitiesWithHeader(w io.Writer, result scanning.Result, headi
 }
 
 // displayCoverageNote prints a subtle note about inventory that no advisory
-// source could check (e.g. container base images), so a clean result is not
-// mistaken for "everything was checked". Silent when nothing is uncovered.
+// source could check (e.g. container base images), and OS packages behind
+// their distribution branch, so a clean result is not mistaken for
+// "everything was checked". Silent when there is nothing to say.
 func displayCoverageNote(w io.Writer, cov *vulnerabilityv1.ScanCoverage) {
+	displayDistroUpdates(w, cov.GetDistroUpdates())
 	if cov == nil || len(cov.GetUncovered()) == 0 {
 		return
 	}
@@ -86,6 +88,21 @@ func displayCoverageNote(w io.Writer, cov *vulnerabilityv1.ScanCoverage) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, ui.StyleDim.Render("Not checked for advisories (no source covers): "+strings.Join(parts, ", ")))
+}
+
+// displayDistroUpdates lists OS source packages whose distribution branch
+// publishes a newer build. Advisory feeds can trail a distribution's security
+// releases, so these are not confirmed vulnerabilities but are not clean
+// either.
+func displayDistroUpdates(w io.Writer, updates []*vulnerabilityv1.DistroUpdate) {
+	if len(updates) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.StyleDowngraded.Render("Behind distribution branch (newer builds may carry security fixes advisory feeds do not list yet):"))
+	for _, u := range updates {
+		fmt.Fprintf(w, "  %s %s → %s (%s; %s)\n", u.GetSourcePackage(), u.GetInstalledVersion(), u.GetAvailableVersion(), u.GetRepository(), strings.Join(u.GetPackages(), ", "))
+	}
 }
 
 // fixAnnotation renders the inline fix marker for a finding, preferring the

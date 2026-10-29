@@ -96,6 +96,7 @@ func (h *ScanHandler) Scan(
 		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 		opts.VerifyFixes = !req.Msg.Options.DisableFixVerification
 		opts.ResolveSeverities = enrichSeverityRequested(req.Msg.Options.GetEnrichOptions())
+		opts.CheckDistroUpdates = enrichDistroUpdatesRequested(req.Msg.Options.GetEnrichOptions())
 	}
 
 	// Extract ref from options if provided
@@ -253,6 +254,7 @@ func (h *ScanHandler) StreamScan(
 		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 		opts.VerifyFixes = !req.Msg.Options.DisableFixVerification
 		opts.ResolveSeverities = enrichSeverityRequested(req.Msg.Options.GetEnrichOptions())
+		opts.CheckDistroUpdates = enrichDistroUpdatesRequested(req.Msg.Options.GetEnrichOptions())
 	}
 
 	// Send resolving target phase
@@ -366,6 +368,12 @@ func countBySeverity(findings []*vulnerabilityv1.Finding, level vulnerabilityv1.
 // resolution from alias records, either explicitly or via the enable-all flag.
 func enrichSeverityRequested(opts *scanv1.EnrichOptions) bool {
 	return opts.GetIncludeSeverity() || opts.GetEnabled()
+}
+
+// enrichDistroUpdatesRequested reports whether the scan should compare OS
+// packages against their distribution branch.
+func enrichDistroUpdatesRequested(opts *scanv1.EnrichOptions) bool {
+	return opts.GetIncludeDistroUpdates() || opts.GetEnabled()
 }
 
 func enrichFindings(ctx context.Context, findings []*vulnerabilityv1.Finding, opts *scanv1.EnrichOptions) {

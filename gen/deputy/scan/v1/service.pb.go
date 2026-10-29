@@ -562,8 +562,14 @@ type EnrichOptions struct {
 	// origin in type/raw, and resolution runs before consolidation so stats and
 	// triage priorities reflect it.
 	IncludeSeverity bool `protobuf:"varint,4,opt,name=include_severity,json=includeSeverity,proto3" json:"include_severity,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// IncludeDistroUpdates compares installed OS packages against the newest
+	// build their distribution branch publishes (Alpine APKINDEX today) and
+	// records packages that are behind in coverage.distro_updates, so a
+	// security release the distribution's advisory feed has not annotated yet
+	// is not mistaken for a clean result.
+	IncludeDistroUpdates bool `protobuf:"varint,5,opt,name=include_distro_updates,json=includeDistroUpdates,proto3" json:"include_distro_updates,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *EnrichOptions) Reset() {
@@ -620,6 +626,13 @@ func (x *EnrichOptions) GetIncludeKev() bool {
 func (x *EnrichOptions) GetIncludeSeverity() bool {
 	if x != nil {
 		return x.IncludeSeverity
+	}
+	return false
+}
+
+func (x *EnrichOptions) GetIncludeDistroUpdates() bool {
+	if x != nil {
+		return x.IncludeDistroUpdates
 	}
 	return false
 }
@@ -1441,13 +1454,14 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1b\n" +
 	"\tuse_proxy\x18\x02 \x01(\bR\buseProxy\x12\x17\n" +
 	"\ause_git\x18\x03 \x01(\bR\x06useGit\x12:\n" +
-	"\x10private_patterns\x18\x04 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\x0fprivatePatterns\"\x98\x01\n" +
+	"\x10private_patterns\x18\x04 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\x0fprivatePatterns\"\xce\x01\n" +
 	"\rEnrichOptions\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12!\n" +
 	"\finclude_epss\x18\x02 \x01(\bR\vincludeEpss\x12\x1f\n" +
 	"\vinclude_kev\x18\x03 \x01(\bR\n" +
 	"includeKev\x12)\n" +
-	"\x10include_severity\x18\x04 \x01(\bR\x0fincludeSeverity\"\xf3\a\n" +
+	"\x10include_severity\x18\x04 \x01(\bR\x0fincludeSeverity\x124\n" +
+	"\x16include_distro_updates\x18\x05 \x01(\bR\x14includeDistroUpdates\"\xf3\a\n" +
 	"\fScanResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x122\n" +
