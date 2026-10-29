@@ -1,0 +1,3815 @@
+{
+  "image": "temporalio/server:1.20.0",
+  "digest": "sha256:ebaede9e3dc4c8553a0b4de036bad06d52808899c41495d83f7b7eb43fa9ec7d",
+  "platform": "linux/amd64",
+  "recorded": "2026-10-29",
+  "packages": [
+    {
+      "name": "alpine-baselayout-data",
+      "version": "3.4.0-r0",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/alpine-baselayout-data@3.4.0-r0?arch=x86_64&distro=3.17.1&origin=alpine-baselayout",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "alpine-baselayout",
+      "version": "3.4.0-r0",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/alpine-baselayout@3.4.0-r0?arch=x86_64&distro=3.17.1&origin=alpine-baselayout",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "alpine-keys",
+      "version": "2.4-r1",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/alpine-keys@2.4-r1?arch=x86_64&distro=3.17.1&origin=alpine-keys",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "apk-tools",
+      "version": "2.12.10-r1",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/apk-tools@2.12.10-r1?arch=x86_64&distro=3.17.1&origin=apk-tools",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "bash",
+      "version": "5.2.15-r0",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/bash@5.2.15-r0?arch=x86_64&distro=3.17.1&origin=bash",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "brotli-libs",
+      "version": "1.0.9-r9",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/brotli-libs@1.0.9-r9?arch=x86_64&distro=3.17.1&origin=brotli",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "busybox-binsh",
+      "version": "1.35.0-r29",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/busybox-binsh@1.35.0-r29?arch=x86_64&distro=3.17.1&origin=busybox",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "busybox",
+      "version": "1.35.0-r29",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/busybox@1.35.0-r29?arch=x86_64&distro=3.17.1&origin=busybox",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "ca-certificates-bundle",
+      "version": "20220614-r4",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/ca-certificates-bundle@20220614-r4?arch=x86_64&distro=3.17.1&origin=ca-certificates",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "ca-certificates",
+      "version": "20220614-r4",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/ca-certificates@20220614-r4?arch=x86_64&distro=3.17.1&origin=ca-certificates",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "curl",
+      "version": "7.87.0-r1",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/curl@7.87.0-r1?arch=x86_64&distro=3.17.1&origin=curl",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "libc-utils",
+      "version": "0.7.2-r3",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/libc-utils@0.7.2-r3?arch=x86_64&distro=3.17.1&origin=libc-dev",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "libcrypto3",
+      "version": "3.0.7-r2",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/libcrypto3@3.0.7-r2?arch=x86_64&distro=3.17.1&origin=openssl",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "libcurl",
+      "version": "7.87.0-r1",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/libcurl@7.87.0-r1?arch=x86_64&distro=3.17.1&origin=curl",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "libssl3",
+      "version": "3.0.7-r2",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/libssl3@3.0.7-r2?arch=x86_64&distro=3.17.1&origin=openssl",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "musl-utils",
+      "version": "1.2.3-r4",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/musl-utils@1.2.3-r4?arch=x86_64&distro=3.17.1&origin=musl",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "musl",
+      "version": "1.2.3-r4",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/musl@1.2.3-r4?arch=x86_64&distro=3.17.1&origin=musl",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "ncurses-libs",
+      "version": "6.3_p20221119-r0",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/ncurses-libs@6.3_p20221119-r0?arch=x86_64&distro=3.17.1&origin=ncurses",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "ncurses-terminfo-base",
+      "version": "6.3_p20221119-r0",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/ncurses-terminfo-base@6.3_p20221119-r0?arch=x86_64&distro=3.17.1&origin=ncurses",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "nghttp2-libs",
+      "version": "1.51.0-r0",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/nghttp2-libs@1.51.0-r0?arch=x86_64&distro=3.17.1&origin=nghttp2",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "readline",
+      "version": "8.2.0-r0",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/readline@8.2.0-r0?arch=x86_64&distro=3.17.1&origin=readline",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "scanelf",
+      "version": "1.3.5-r1",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/scanelf@1.3.5-r1?arch=x86_64&distro=3.17.1&origin=pax-utils",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "ssl_client",
+      "version": "1.35.0-r29",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/ssl_client@1.35.0-r29?arch=x86_64&distro=3.17.1&origin=busybox",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "tzdata",
+      "version": "2022f-r1",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/tzdata@2022f-r1?arch=x86_64&distro=3.17.1&origin=tzdata",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "zlib",
+      "version": "1.2.13-r0",
+      "ecosystem": "Alpine:v3.17",
+      "purl": "pkg:apk/alpine/zlib@1.2.13-r0?arch=x86_64&distro=3.17.1&origin=zlib",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/compute/metadata",
+      "version": "0.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/compute/metadata@0.2.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/compute/metadata",
+      "version": "0.2.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/compute/metadata@0.2.3",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/compute/metadata",
+      "version": "0.2.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/compute/metadata@0.2.3",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/iam",
+      "version": "0.8.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/iam@0.8.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/iam",
+      "version": "0.8.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/iam@0.8.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/iam",
+      "version": "0.8.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/iam@0.8.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/storage",
+      "version": "1.28.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/storage@1.28.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/storage",
+      "version": "1.28.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/storage@1.28.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/storage",
+      "version": "1.28.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/storage@1.28.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/apache/thrift",
+      "version": "0.17.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/apache/thrift@0.17.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/apache/thrift",
+      "version": "0.17.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/apache/thrift@0.17.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/apache/thrift",
+      "version": "0.17.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/apache/thrift@0.17.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go",
+      "version": "1.44.151",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go@1.44.151",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go",
+      "version": "1.44.151",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go@1.44.151",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go",
+      "version": "1.44.151",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go@1.44.151",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/benbjohnson/clock",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/benbjohnson/clock@1.3.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/benbjohnson/clock",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/benbjohnson/clock@1.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/benbjohnson/clock",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/benbjohnson/clock@1.3.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/beorn7/perks",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/beorn7/perks@1.0.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/beorn7/perks",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/beorn7/perks@1.0.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/beorn7/perks",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/beorn7/perks@1.0.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/blang/semver/v4",
+      "version": "4.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/blang/semver/v4@4.0.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/blang/semver/v4",
+      "version": "4.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/blang/semver/v4@4.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/blang/semver/v4",
+      "version": "4.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/blang/semver/v4@4.0.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/cactus/go-statsd-client/statsd",
+      "version": "0.0.0-20200423205355-cb0885a1018c",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cactus/go-statsd-client/statsd@0.0.0-20200423205355-cb0885a1018c",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/cactus/go-statsd-client/statsd",
+      "version": "0.0.0-20200423205355-cb0885a1018c",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cactus/go-statsd-client/statsd@0.0.0-20200423205355-cb0885a1018c",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cactus/go-statsd-client/statsd",
+      "version": "0.0.0-20200423205355-cb0885a1018c",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cactus/go-statsd-client/statsd@0.0.0-20200423205355-cb0885a1018c",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/cenkalti/backoff/v4",
+      "version": "4.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cenkalti/backoff/v4@4.2.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/cenkalti/backoff/v4",
+      "version": "4.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cenkalti/backoff/v4@4.2.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cenkalti/backoff/v4",
+      "version": "4.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cenkalti/backoff/v4@4.2.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/cespare/xxhash/v2",
+      "version": "2.1.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cespare/xxhash/v2@2.1.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cespare/xxhash/v2",
+      "version": "2.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cespare/xxhash/v2@2.2.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/cespare/xxhash/v2",
+      "version": "2.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cespare/xxhash/v2@2.2.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/coreos/go-oidc/v3",
+      "version": "3.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/coreos/go-oidc/v3@3.1.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cpuguy83/go-md2man/v2",
+      "version": "2.0.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cpuguy83/go-md2man/v2@2.0.2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/cpuguy83/go-md2man/v2",
+      "version": "2.0.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cpuguy83/go-md2man/v2@2.0.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cpuguy83/go-md2man/v2",
+      "version": "2.0.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cpuguy83/go-md2man/v2@2.0.2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/davecgh/go-spew",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/davecgh/go-spew@1.1.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/davecgh/go-spew",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/davecgh/go-spew@1.1.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/davecgh/go-spew",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/davecgh/go-spew@1.1.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/dgryski/go-farm",
+      "version": "0.0.0-20200201041132-a6ae2369ad13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dgryski/go-farm@0.0.0-20200201041132-a6ae2369ad13",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/dgryski/go-farm",
+      "version": "0.0.0-20200201041132-a6ae2369ad13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dgryski/go-farm@0.0.0-20200201041132-a6ae2369ad13",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/dgryski/go-farm",
+      "version": "0.0.0-20200201041132-a6ae2369ad13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dgryski/go-farm@0.0.0-20200201041132-a6ae2369ad13",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/dustin/go-humanize",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dustin/go-humanize@1.0.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/dustin/go-humanize",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dustin/go-humanize@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/elgs/gosplitargs",
+      "version": "0.0.0-20160406212339-e9cf3de21e14",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/elgs/gosplitargs@0.0.0-20160406212339-e9cf3de21e14",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/facebookgo/clock",
+      "version": "0.0.0-20150410010913-600d898af40a",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/facebookgo/clock@0.0.0-20150410010913-600d898af40a",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/facebookgo/clock",
+      "version": "0.0.0-20150410010913-600d898af40a",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/facebookgo/clock@0.0.0-20150410010913-600d898af40a",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/facebookgo/clock",
+      "version": "0.0.0-20150410010913-600d898af40a",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/facebookgo/clock@0.0.0-20150410010913-600d898af40a",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/fatih/color",
+      "version": "1.13.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/fatih/color@1.13.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/fatih/color",
+      "version": "1.13.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/fatih/color@1.13.0",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "github.com/fatih/color",
+      "version": "1.14.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/fatih/color@1.14.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/logr",
+      "version": "1.2.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/logr@1.2.3",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/logr",
+      "version": "1.2.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/logr@1.2.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/logr",
+      "version": "1.2.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/logr@1.2.3",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/stdr",
+      "version": "1.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/stdr@1.2.2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/stdr",
+      "version": "1.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/stdr@1.2.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/stdr",
+      "version": "1.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/stdr@1.2.2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/go-sql-driver/mysql",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-sql-driver/mysql@1.5.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/go-sql-driver/mysql",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-sql-driver/mysql@1.6.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/go-sql-driver/mysql",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-sql-driver/mysql@1.6.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gocql/gocql",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gocql/gocql@1.3.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/gocql/gocql",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gocql/gocql@1.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gocql/gocql",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gocql/gocql@1.3.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/gogo/gateway",
+      "version": "1.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/gateway@1.1.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gogo/googleapis",
+      "version": "1.4.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/googleapis@1.4.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/gogo/googleapis",
+      "version": "1.4.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/googleapis@1.4.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gogo/googleapis",
+      "version": "1.4.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/googleapis@1.4.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/gogo/protobuf",
+      "version": "1.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/protobuf@1.3.2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/gogo/protobuf",
+      "version": "1.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/protobuf@1.3.2",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "github.com/gogo/protobuf",
+      "version": "1.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/protobuf@1.3.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gogo/protobuf",
+      "version": "1.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/protobuf@1.3.2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/gogo/status",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/status@1.1.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/gogo/status",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/status@1.1.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gogo/status",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/status@1.1.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/golang-jwt/jwt/v4",
+      "version": "4.4.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang-jwt/jwt/v4@4.4.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/golang-jwt/jwt/v4",
+      "version": "4.4.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang-jwt/jwt/v4@4.4.3",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/golang-jwt/jwt",
+      "version": "3.2.2+incompatible",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang-jwt/jwt@3.2.2%2Bincompatible",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/golang/groupcache",
+      "version": "0.0.0-20210331224755-41bb18bfe9da",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/groupcache@0.0.0-20210331224755-41bb18bfe9da",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/golang/groupcache",
+      "version": "0.0.0-20210331224755-41bb18bfe9da",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/groupcache@0.0.0-20210331224755-41bb18bfe9da",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/golang/groupcache",
+      "version": "0.0.0-20210331224755-41bb18bfe9da",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/groupcache@0.0.0-20210331224755-41bb18bfe9da",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/golang/mock",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/mock@1.6.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/golang/mock",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/mock@1.6.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/golang/mock",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/mock@1.6.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/golang/protobuf",
+      "version": "1.5.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/protobuf@1.5.2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/golang/protobuf",
+      "version": "1.5.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/protobuf@1.5.2",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "github.com/golang/protobuf",
+      "version": "1.5.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/protobuf@1.5.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/golang/protobuf",
+      "version": "1.5.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/protobuf@1.5.2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/golang/snappy",
+      "version": "0.0.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/snappy@0.0.4",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/golang/snappy",
+      "version": "0.0.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/snappy@0.0.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/golang/snappy",
+      "version": "0.0.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/snappy@0.0.4",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/google/go-cmp",
+      "version": "0.5.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/go-cmp@0.5.9",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/google/go-cmp",
+      "version": "0.5.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/go-cmp@0.5.9",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/google/go-cmp",
+      "version": "0.5.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/go-cmp@0.5.9",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/google/uuid",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/uuid@1.3.0",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/google/uuid",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/uuid@1.3.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/google/uuid",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/uuid@1.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/google/uuid",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/uuid@1.3.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/googleapis/enterprise-certificate-proxy",
+      "version": "0.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googleapis/enterprise-certificate-proxy@0.2.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/googleapis/enterprise-certificate-proxy",
+      "version": "0.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googleapis/enterprise-certificate-proxy@0.2.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/googleapis/enterprise-certificate-proxy",
+      "version": "0.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googleapis/enterprise-certificate-proxy@0.2.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/googleapis/gax-go/v2",
+      "version": "2.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googleapis/gax-go/v2@2.7.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/googleapis/gax-go/v2",
+      "version": "2.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googleapis/gax-go/v2@2.7.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/googleapis/gax-go/v2",
+      "version": "2.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googleapis/gax-go/v2@2.7.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/gorilla/securecookie",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gorilla/securecookie@1.1.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gorilla/websocket",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gorilla/websocket@1.5.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/gorilla/websocket",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gorilla/websocket@1.5.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/go-grpc-middleware",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/go-grpc-middleware@1.3.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/go-grpc-middleware",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/go-grpc-middleware@1.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/go-grpc-middleware",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/go-grpc-middleware@1.3.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/grpc-gateway/v2",
+      "version": "2.14.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/grpc-gateway/v2@2.14.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/grpc-gateway/v2",
+      "version": "2.14.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/grpc-gateway/v2@2.14.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/grpc-gateway/v2",
+      "version": "2.14.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/grpc-gateway/v2@2.14.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/hailocab/go-hostpool",
+      "version": "0.0.0-20160125115350-e80d13ce29ed",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hailocab/go-hostpool@0.0.0-20160125115350-e80d13ce29ed",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/hailocab/go-hostpool",
+      "version": "0.0.0-20160125115350-e80d13ce29ed",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hailocab/go-hostpool@0.0.0-20160125115350-e80d13ce29ed",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/hailocab/go-hostpool",
+      "version": "0.0.0-20160125115350-e80d13ce29ed",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hailocab/go-hostpool@0.0.0-20160125115350-e80d13ce29ed",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/hashicorp/go-hclog",
+      "version": "1.3.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hashicorp/go-hclog@1.3.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/hashicorp/go-hclog",
+      "version": "1.3.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hashicorp/go-hclog@1.3.1",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "github.com/hashicorp/go-plugin",
+      "version": "1.4.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hashicorp/go-plugin@1.4.5",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/hashicorp/go-plugin",
+      "version": "1.4.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hashicorp/go-plugin@1.4.5",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "github.com/hashicorp/yamux",
+      "version": "0.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hashicorp/yamux@0.1.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/hashicorp/yamux",
+      "version": "0.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hashicorp/yamux@0.1.1",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "github.com/hpcloud/tail",
+      "version": "1.0.1-0.20170207023346-faf842bde7ed",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hpcloud/tail@1.0.1-0.20170207023346-faf842bde7ed",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/huandu/xstrings",
+      "version": "1.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/huandu/xstrings@1.3.2",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/iancoleman/strcase",
+      "version": "0.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/iancoleman/strcase@0.2.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/iancoleman/strcase",
+      "version": "0.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/iancoleman/strcase@0.2.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/iancoleman/strcase",
+      "version": "0.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/iancoleman/strcase@0.2.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/imdario/mergo",
+      "version": "0.3.12",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/imdario/mergo@0.3.12",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/jmespath/go-jmespath",
+      "version": "0.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jmespath/go-jmespath@0.4.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/jmespath/go-jmespath",
+      "version": "0.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jmespath/go-jmespath@0.4.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/jmespath/go-jmespath",
+      "version": "0.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jmespath/go-jmespath@0.4.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/jmoiron/sqlx",
+      "version": "1.3.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jmoiron/sqlx@1.3.4",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/jmoiron/sqlx",
+      "version": "1.3.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jmoiron/sqlx@1.3.5",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/jmoiron/sqlx",
+      "version": "1.3.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jmoiron/sqlx@1.3.5",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/jonboulle/clockwork",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jonboulle/clockwork@0.3.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/jonboulle/clockwork",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jonboulle/clockwork@0.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/jonboulle/clockwork",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jonboulle/clockwork@0.3.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/josharian/intern",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/josharian/intern@1.0.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/josharian/intern",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/josharian/intern@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/josharian/intern",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/josharian/intern@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/jwilder/dockerize",
+      "version": "(devel)",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jwilder/dockerize@(devel)",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/jwilder/gojq",
+      "version": "0.0.0-20160421194050-81fa9a608a13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jwilder/gojq@0.0.0-20160421194050-81fa9a608a13",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/labstack/echo/v4",
+      "version": "4.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/labstack/echo/v4@4.9.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/labstack/gommon",
+      "version": "0.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/labstack/gommon@0.4.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/lib/pq",
+      "version": "1.10.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/lib/pq@1.10.7",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/lib/pq",
+      "version": "1.10.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/lib/pq@1.10.7",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/lib/pq",
+      "version": "1.10.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/lib/pq@1.10.7",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/mailru/easyjson",
+      "version": "0.7.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mailru/easyjson@0.7.7",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/mailru/easyjson",
+      "version": "0.7.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mailru/easyjson@0.7.7",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/mailru/easyjson",
+      "version": "0.7.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mailru/easyjson@0.7.7",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/goutils",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/goutils@1.1.1",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/semver",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/semver@1.5.0",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/sprig",
+      "version": "2.22.0+incompatible",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/sprig@2.22.0%2Bincompatible",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-colorable",
+      "version": "0.1.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-colorable@0.1.13",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-colorable",
+      "version": "0.1.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-colorable@0.1.13",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-colorable",
+      "version": "0.1.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-colorable@0.1.13",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-isatty",
+      "version": "0.0.16",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-isatty@0.0.16",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-isatty",
+      "version": "0.0.16",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-isatty@0.0.16",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-isatty",
+      "version": "0.0.16",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-isatty@0.0.16",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-isatty",
+      "version": "0.0.17",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-isatty@0.0.17",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-runewidth",
+      "version": "0.0.14",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-runewidth@0.0.14",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-runewidth",
+      "version": "0.0.14",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-runewidth@0.0.14",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/matttproud/golang_protobuf_extensions",
+      "version": "1.0.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/matttproud/golang_protobuf_extensions@1.0.4",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/matttproud/golang_protobuf_extensions",
+      "version": "1.0.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/matttproud/golang_protobuf_extensions@1.0.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/matttproud/golang_protobuf_extensions",
+      "version": "1.0.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/matttproud/golang_protobuf_extensions@1.0.4",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/copystructure",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/copystructure@1.2.0",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/go-testing-interface",
+      "version": "1.14.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/go-testing-interface@1.14.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/go-testing-interface",
+      "version": "1.14.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/go-testing-interface@1.14.1",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/reflectwalk",
+      "version": "1.0.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/reflectwalk@1.0.2",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "github.com/oklog/run",
+      "version": "1.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/oklog/run@1.1.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/oklog/run",
+      "version": "1.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/oklog/run@1.1.0",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "github.com/olekukonko/tablewriter",
+      "version": "0.0.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olekukonko/tablewriter@0.0.5",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/olekukonko/tablewriter",
+      "version": "0.0.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olekukonko/tablewriter@0.0.5",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/olivere/elastic/v7",
+      "version": "7.0.32",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olivere/elastic/v7@7.0.32",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/olivere/elastic/v7",
+      "version": "7.0.32",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olivere/elastic/v7@7.0.32",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/olivere/elastic/v7",
+      "version": "7.0.32",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olivere/elastic/v7@7.0.32",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/opentracing/opentracing-go",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/opentracing/opentracing-go@1.2.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/opentracing/opentracing-go",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/opentracing/opentracing-go@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/opentracing/opentracing-go",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/opentracing/opentracing-go@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/pborman/uuid",
+      "version": "1.2.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pborman/uuid@1.2.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/pborman/uuid",
+      "version": "1.2.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pborman/uuid@1.2.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/pborman/uuid",
+      "version": "1.2.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pborman/uuid@1.2.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/pkg/errors",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pkg/errors@0.9.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/pkg/errors",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pkg/errors@0.9.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/pkg/errors",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pkg/errors@0.9.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/pmezard/go-difflib",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pmezard/go-difflib@1.0.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/pmezard/go-difflib",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pmezard/go-difflib@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/pmezard/go-difflib",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pmezard/go-difflib@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_golang",
+      "version": "1.14.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_golang@1.14.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_golang",
+      "version": "1.14.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_golang@1.14.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_golang",
+      "version": "1.14.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_golang@1.14.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_model",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_model@0.3.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_model",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_model@0.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_model",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_model@0.3.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/common",
+      "version": "0.37.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/common@0.37.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/common",
+      "version": "0.37.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/common@0.37.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/common",
+      "version": "0.37.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/common@0.37.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/procfs",
+      "version": "0.8.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/procfs@0.8.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/procfs",
+      "version": "0.8.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/procfs@0.8.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/procfs",
+      "version": "0.8.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/procfs@0.8.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/rcrowley/go-metrics",
+      "version": "0.0.0-20201227073835-cf1acfcdf475",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/rcrowley/go-metrics@0.0.0-20201227073835-cf1acfcdf475",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/rcrowley/go-metrics",
+      "version": "0.0.0-20201227073835-cf1acfcdf475",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/rcrowley/go-metrics@0.0.0-20201227073835-cf1acfcdf475",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/rcrowley/go-metrics",
+      "version": "0.0.0-20201227073835-cf1acfcdf475",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/rcrowley/go-metrics@0.0.0-20201227073835-cf1acfcdf475",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/remyoudompheng/bigfft",
+      "version": "0.0.0-20220927061507-ef77025ab5aa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/remyoudompheng/bigfft@0.0.0-20220927061507-ef77025ab5aa",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/remyoudompheng/bigfft",
+      "version": "0.0.0-20220927061507-ef77025ab5aa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/remyoudompheng/bigfft@0.0.0-20220927061507-ef77025ab5aa",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/remyoudompheng/bigfft",
+      "version": "0.0.0-20220927061507-ef77025ab5aa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/remyoudompheng/bigfft@0.0.0-20220927061507-ef77025ab5aa",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/rivo/uniseg",
+      "version": "0.4.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/rivo/uniseg@0.4.3",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/rivo/uniseg",
+      "version": "0.4.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/rivo/uniseg@0.4.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron/v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron/v3@3.0.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron/v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron/v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron/v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron/v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron@1.2.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/russross/blackfriday/v2",
+      "version": "2.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/russross/blackfriday/v2@2.1.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/russross/blackfriday/v2",
+      "version": "2.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/russross/blackfriday/v2@2.1.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/russross/blackfriday/v2",
+      "version": "2.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/russross/blackfriday/v2@2.1.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/sirupsen/logrus",
+      "version": "1.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/sirupsen/logrus@1.9.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/sirupsen/logrus",
+      "version": "1.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/sirupsen/logrus@1.9.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/sirupsen/logrus",
+      "version": "1.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/sirupsen/logrus@1.9.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/objx",
+      "version": "0.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/objx@0.5.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/objx",
+      "version": "0.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/objx@0.5.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/objx",
+      "version": "0.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/objx@0.5.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/testify",
+      "version": "1.8.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/testify@1.8.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/testify",
+      "version": "1.8.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/testify@1.8.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/testify",
+      "version": "1.8.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/testify@1.8.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/cli",
+      "version": "(devel)",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/cli@(devel)",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/grpc-gateway",
+      "version": "1.17.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/grpc-gateway@1.17.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/ringpop-go",
+      "version": "0.0.0-20220818230611-30bf23b490b2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/ringpop-go@0.0.0-20220818230611-30bf23b490b2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/ringpop-go",
+      "version": "0.0.0-20220818230611-30bf23b490b2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/ringpop-go@0.0.0-20220818230611-30bf23b490b2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/ringpop-go",
+      "version": "0.0.0-20220818230611-30bf23b490b2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/ringpop-go@0.0.0-20220818230611-30bf23b490b2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/tchannel-go",
+      "version": "1.22.1-0.20220818200552-1be8d8cffa5b",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/tchannel-go@1.22.1-0.20220818200552-1be8d8cffa5b",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/tchannel-go",
+      "version": "1.22.1-0.20220818200552-1be8d8cffa5b",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/tchannel-go@1.22.1-0.20220818200552-1be8d8cffa5b",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/tchannel-go",
+      "version": "1.22.1-0.20220818200552-1be8d8cffa5b",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/tchannel-go@1.22.1-0.20220818200552-1be8d8cffa5b",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/tctl-kit",
+      "version": "0.0.0-20221128225502-a682971cf481",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/tctl-kit@0.0.0-20221128225502-a682971cf481",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/tctl-kit",
+      "version": "0.0.0-20230104170414-10932650d727",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/tctl-kit@0.0.0-20230104170414-10932650d727",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/tctl",
+      "version": "(devel)",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/tctl@(devel)",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/tctl",
+      "version": "(devel)",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/tctl@(devel)",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/ui-server/v2",
+      "version": "2.10.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/ui-server/v2@2.10.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/twmb/murmur3",
+      "version": "1.1.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/twmb/murmur3@1.1.6",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/twmb/murmur3",
+      "version": "1.1.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/twmb/murmur3@1.1.6",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/twmb/murmur3",
+      "version": "1.1.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/twmb/murmur3@1.1.6",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/uber-common/bark",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-common/bark@1.3.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/uber-common/bark",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-common/bark@1.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/uber-common/bark",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-common/bark@1.3.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/uber-go/tally/v4",
+      "version": "4.1.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-go/tally/v4@4.1.3",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/uber-go/tally/v4",
+      "version": "4.1.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-go/tally/v4@4.1.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/uber-go/tally/v4",
+      "version": "4.1.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-go/tally/v4@4.1.3",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/urfave/cli/v2",
+      "version": "2.24.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/urfave/cli/v2@2.24.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/urfave/cli/v2",
+      "version": "2.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/urfave/cli/v2@2.4.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/urfave/cli/v2",
+      "version": "2.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/urfave/cli/v2@2.4.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "github.com/urfave/cli",
+      "version": "1.22.10",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/urfave/cli@1.22.10",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/valyala/bytebufferpool",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/valyala/bytebufferpool@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/valyala/fasttemplate",
+      "version": "1.2.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/valyala/fasttemplate@1.2.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/xrash/smetrics",
+      "version": "0.0.0-20201216005158-039620a65673",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/xrash/smetrics@0.0.0-20201216005158-039620a65673",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/xwb1989/sqlparser",
+      "version": "0.0.0-20180606152119-120387863bf2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/xwb1989/sqlparser@0.0.0-20180606152119-120387863bf2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "github.com/xwb1989/sqlparser",
+      "version": "0.0.0-20180606152119-120387863bf2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/xwb1989/sqlparser@0.0.0-20180606152119-120387863bf2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/xwb1989/sqlparser",
+      "version": "0.0.0-20180606152119-120387863bf2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/xwb1989/sqlparser@0.0.0-20180606152119-120387863bf2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opencensus.io",
+      "version": "0.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opencensus.io@0.24.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opencensus.io",
+      "version": "0.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opencensus.io@0.24.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opencensus.io",
+      "version": "0.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opencensus.io@0.24.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+      "version": "0.36.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@0.36.4",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+      "version": "0.36.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@0.36.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+      "version": "0.36.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@0.36.4",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/internal/retry",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/internal/retry@1.11.2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/internal/retry",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/internal/retry@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/internal/retry",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/internal/retry@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc@0.34.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc@0.34.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc@0.34.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlpmetric@0.34.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlpmetric@0.34.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlpmetric@0.34.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@1.11.2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace@1.11.2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/prometheus",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/prometheus@0.34.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/prometheus",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/prometheus@0.34.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/prometheus",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/prometheus@0.34.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/metric",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/metric@0.34.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/metric",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/metric@0.34.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/metric",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/metric@0.34.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk/metric",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk/metric@0.34.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk/metric",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk/metric@0.34.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk/metric",
+      "version": "0.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk/metric@0.34.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk@1.11.2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/trace",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/trace@1.11.2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/trace",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/trace@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/trace",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/trace@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel@1.11.2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel",
+      "version": "1.11.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel@1.11.2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/proto/otlp",
+      "version": "0.19.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/proto/otlp@0.19.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/proto/otlp",
+      "version": "0.19.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/proto/otlp@0.19.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/proto/otlp",
+      "version": "0.19.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/proto/otlp@0.19.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.temporal.io/api",
+      "version": "1.16.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/api@1.16.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.temporal.io/api",
+      "version": "1.18.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/api@1.18.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.temporal.io/api",
+      "version": "1.18.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/api@1.18.1",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "go.temporal.io/api",
+      "version": "1.18.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/api@1.18.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.temporal.io/sdk",
+      "version": "1.21.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/sdk@1.21.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.temporal.io/sdk",
+      "version": "1.21.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/sdk@1.21.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.temporal.io/sdk",
+      "version": "1.21.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/sdk@1.21.1",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "go.temporal.io/sdk",
+      "version": "1.21.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/sdk@1.21.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.temporal.io/server",
+      "version": "(devel)",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/server@(devel)",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.temporal.io/server",
+      "version": "1.18.1-0.20230207023301-52c3a9eefb06",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/server@1.18.1-0.20230207023301-52c3a9eefb06",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.temporal.io/server",
+      "version": "1.18.1-0.20230217005328-b313b7f58641",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/server@1.18.1-0.20230217005328-b313b7f58641",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.temporal.io/version",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/version@0.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.temporal.io/version",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/version@0.3.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.uber.org/atomic",
+      "version": "1.10.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/atomic@1.10.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.uber.org/atomic",
+      "version": "1.10.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/atomic@1.10.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/atomic",
+      "version": "1.10.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/atomic@1.10.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.uber.org/dig",
+      "version": "1.15.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/dig@1.15.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.uber.org/dig",
+      "version": "1.15.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/dig@1.15.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/dig",
+      "version": "1.15.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/dig@1.15.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.uber.org/fx",
+      "version": "1.18.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/fx@1.18.2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.uber.org/fx",
+      "version": "1.18.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/fx@1.18.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/fx",
+      "version": "1.18.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/fx@1.18.2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.uber.org/multierr",
+      "version": "1.8.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/multierr@1.8.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.uber.org/multierr",
+      "version": "1.8.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/multierr@1.8.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/multierr",
+      "version": "1.8.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/multierr@1.8.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "go.uber.org/zap",
+      "version": "1.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/zap@1.24.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "go.uber.org/zap",
+      "version": "1.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/zap@1.24.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/zap",
+      "version": "1.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/zap@1.24.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "golang.org/x/crypto",
+      "version": "0.0.0-20211215153901-e495a2d5b3d3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/crypto@0.0.0-20211215153901-e495a2d5b3d3",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "golang.org/x/crypto",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/crypto@0.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/crypto",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/crypto@0.3.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "golang.org/x/exp",
+      "version": "0.0.0-20221126150942-6ab00d035af9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/exp@0.0.0-20221126150942-6ab00d035af9",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "golang.org/x/exp",
+      "version": "0.0.0-20221126150942-6ab00d035af9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/exp@0.0.0-20221126150942-6ab00d035af9",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/exp",
+      "version": "0.0.0-20221126150942-6ab00d035af9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/exp@0.0.0-20221126150942-6ab00d035af9",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "0.0.0-20211112202133-69e39bad7dc2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/net@0.0.0-20211112202133-69e39bad7dc2",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "0.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/net@0.5.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "0.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/net@0.7.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "0.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/net@0.7.0",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "0.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/net@0.7.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "golang.org/x/oauth2",
+      "version": "0.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/oauth2@0.2.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/oauth2",
+      "version": "0.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/oauth2@0.4.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "golang.org/x/oauth2",
+      "version": "0.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/oauth2@0.4.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "0.0.0-20211216021012-1d35b9e2eb4e",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sys@0.0.0-20211216021012-1d35b9e2eb4e",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "0.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sys@0.4.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "0.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sys@0.5.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "0.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sys@0.5.0",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "0.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sys@0.5.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "0.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/text@0.6.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "0.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/text@0.7.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "0.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/text@0.7.0",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "0.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/text@0.7.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "golang.org/x/time",
+      "version": "0.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/time@0.2.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "golang.org/x/time",
+      "version": "0.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/time@0.2.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/time",
+      "version": "0.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/time@0.2.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "golang.org/x/xerrors",
+      "version": "0.0.0-20220907171357-04be3eba64a2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/xerrors@0.0.0-20220907171357-04be3eba64a2",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "golang.org/x/xerrors",
+      "version": "0.0.0-20220907171357-04be3eba64a2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/xerrors@0.0.0-20220907171357-04be3eba64a2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/xerrors",
+      "version": "0.0.0-20220907171357-04be3eba64a2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/xerrors@0.0.0-20220907171357-04be3eba64a2",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "google.golang.org/api",
+      "version": "0.103.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/api@0.103.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "google.golang.org/api",
+      "version": "0.103.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/api@0.103.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "google.golang.org/api",
+      "version": "0.103.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/api@0.103.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto",
+      "version": "0.0.0-20230127162408-596548ed4efa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto@0.0.0-20230127162408-596548ed4efa",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto",
+      "version": "0.0.0-20230209215440-0dfe4f8abfcc",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto@0.0.0-20230209215440-0dfe4f8abfcc",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto",
+      "version": "0.0.0-20230209215440-0dfe4f8abfcc",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto@0.0.0-20230209215440-0dfe4f8abfcc",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto",
+      "version": "0.0.0-20230209215440-0dfe4f8abfcc",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto@0.0.0-20230209215440-0dfe4f8abfcc",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "google.golang.org/grpc",
+      "version": "1.52.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/grpc@1.52.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "google.golang.org/grpc",
+      "version": "1.53.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/grpc@1.53.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "google.golang.org/grpc",
+      "version": "1.53.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/grpc@1.53.0",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "google.golang.org/grpc",
+      "version": "1.53.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/grpc@1.53.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "google.golang.org/protobuf",
+      "version": "1.28.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/protobuf@1.28.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "google.golang.org/protobuf",
+      "version": "1.28.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/protobuf@1.28.1",
+      "locations": [
+        "usr/local/bin/tctl-authorization-plugin"
+      ]
+    },
+    {
+      "name": "google.golang.org/protobuf",
+      "version": "1.28.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/protobuf@1.28.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "google.golang.org/protobuf",
+      "version": "1.28.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/protobuf@1.28.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "gopkg.in/fsnotify.v1",
+      "version": "1.4.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/fsnotify.v1@1.4.7",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "gopkg.in/inf.v0",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/inf.v0@0.9.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "gopkg.in/inf.v0",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/inf.v0@0.9.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "gopkg.in/inf.v0",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/inf.v0@0.9.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "gopkg.in/square/go-jose.v2",
+      "version": "2.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/square/go-jose.v2@2.6.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "gopkg.in/square/go-jose.v2",
+      "version": "2.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/square/go-jose.v2@2.6.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "gopkg.in/tomb.v1",
+      "version": "1.0.0-20141024135613-dd632973f1e7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/tomb.v1@1.0.0-20141024135613-dd632973f1e7",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    },
+    {
+      "name": "gopkg.in/validator.v2",
+      "version": "2.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/validator.v2@2.0.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "gopkg.in/validator.v2",
+      "version": "2.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/validator.v2@2.0.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "gopkg.in/validator.v2",
+      "version": "2.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/validator.v2@2.0.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "gopkg.in/yaml.v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/yaml.v3@3.0.1",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "gopkg.in/yaml.v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/yaml.v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "gopkg.in/yaml.v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/yaml.v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "modernc.org/libc",
+      "version": "1.21.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/libc@1.21.5",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "modernc.org/libc",
+      "version": "1.21.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/libc@1.21.5",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "modernc.org/libc",
+      "version": "1.21.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/libc@1.21.5",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "modernc.org/mathutil",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/mathutil@1.5.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "modernc.org/mathutil",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/mathutil@1.5.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "modernc.org/mathutil",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/mathutil@1.5.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "modernc.org/memory",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/memory@1.4.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "modernc.org/memory",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/memory@1.4.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "modernc.org/memory",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/memory@1.4.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "modernc.org/sqlite",
+      "version": "1.20.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/sqlite@1.20.0",
+      "locations": [
+        "usr/local/bin/tctl"
+      ]
+    },
+    {
+      "name": "modernc.org/sqlite",
+      "version": "1.20.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/sqlite@1.20.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "modernc.org/sqlite",
+      "version": "1.20.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/sqlite@1.20.0",
+      "locations": [
+        "usr/local/bin/temporal-server"
+      ]
+    },
+    {
+      "name": "stdlib",
+      "version": "1.19.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/stdlib@1.19.5",
+      "locations": [
+        "usr/local/bin/dockerize"
+      ]
+    }
+  ]
+}

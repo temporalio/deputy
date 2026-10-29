@@ -1,0 +1,53 @@
+{
+  "image": "gcr.io/distroless/static-debian12",
+  "digest": "sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2",
+  "platform": "linux/amd64",
+  "recorded": "2026-10-29",
+  "packages": [
+    {
+      "name": "base-files",
+      "version": "12.4+deb12u15",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/base-files@12.4%2Bdeb12u15?arch=amd64&distro=12",
+      "locations": [
+        "var/lib/dpkg/status.d/base-files"
+      ]
+    },
+    {
+      "name": "ca-certificates",
+      "version": "20250419~deb12u1",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/ca-certificates@20250419~deb12u1?arch=all&distro=12",
+      "locations": [
+        "var/lib/dpkg/status.d/ca-certificates"
+      ]
+    },
+    {
+      "name": "media-types",
+      "version": "10.0.0",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/media-types@10.0.0?arch=all&distro=12",
+      "locations": [
+        "var/lib/dpkg/status.d/media-types"
+      ]
+    },
+    {
+      "name": "netbase",
+      "version": "6.4",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/netbase@6.4?arch=all&distro=12",
+      "locations": [
+        "var/lib/dpkg/status.d/netbase"
+      ]
+    },
+    {
+      "name": "tzdata",
+      "version": "2026b-0+deb12u1",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/tzdata@2026b-0%2Bdeb12u1?arch=all&distro=12",
+      "locations": [
+        "var/lib/dpkg/status.d/tzdata"
+      ]
+    }
+  ]
+}
