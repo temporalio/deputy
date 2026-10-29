@@ -40,8 +40,8 @@ type VulnExplanation struct {
 	// Details is the full advisory description; the explain tools populate it,
 	// and scan and diff summaries omit it for context-window economy.
 	Details string `protobuf:"bytes,4,opt,name=details,proto3" json:"details,omitempty"`
-	// Kind distinguishes malware from ordinary vulnerabilities. Absent means
-	// vulnerability.
+	// Kind distinguishes malware and end-of-life operating system releases
+	// from ordinary vulnerabilities. Absent means vulnerability.
 	Kind string `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`
 	// Severity is the normalized severity level.
 	Severity string `protobuf:"bytes,6,opt,name=severity,proto3" json:"severity,omitempty"`
@@ -373,6 +373,9 @@ type Coverage struct {
 	// these as possibly vulnerable, not clean. They never count toward
 	// vulnerability totals or clean. Present only for enriched scans.
 	DistroUpdates []*DistroUpdate `protobuf:"bytes,3,rep,name=distro_updates,json=distroUpdates,proto3" json:"distro_updates,omitempty"`
+	// Distros lists the operating system releases the scan identified and their
+	// support status in Deputy's vendored end-of-life dataset.
+	Distros       []*DistroRelease `protobuf:"bytes,4,rep,name=distros,proto3" json:"distros,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -428,6 +431,150 @@ func (x *Coverage) GetDistroUpdates() []*DistroUpdate {
 	return nil
 }
 
+func (x *Coverage) GetDistros() []*DistroRelease {
+	if x != nil {
+		return x.Distros
+	}
+	return nil
+}
+
+// DistroRelease is one operating system release a scan identified.
+type DistroRelease struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Distribution is the os-release ID, e.g. alpine, debian, ubuntu.
+	Distribution string `protobuf:"bytes,1,opt,name=distribution,proto3" json:"distribution,omitempty"`
+	// Release is the release cycle, e.g. 3.18, 12, 24.04.
+	Release string `protobuf:"bytes,2,opt,name=release,proto3" json:"release,omitempty"`
+	// Version is the most specific version detected, e.g. 3.18.12.
+	Version string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	// Status is the support status on the scan date.
+	Status string `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	// EolDate is the end of free security fixes, YYYY-MM-DD. Absent when
+	// unknown.
+	EolDate string `protobuf:"bytes,5,opt,name=eol_date,json=eolDate,proto3" json:"eol_date,omitempty"`
+	// DaysPastEol is whole days since EolDate; negative while supported.
+	DaysPastEol int32 `protobuf:"varint,6,opt,name=days_past_eol,json=daysPastEol,proto3" json:"days_past_eol,omitempty"`
+	// OldestSupportedRelease is the smallest upgrade that restores fixes.
+	OldestSupportedRelease string `protobuf:"bytes,7,opt,name=oldest_supported_release,json=oldestSupportedRelease,proto3" json:"oldest_supported_release,omitempty"`
+	// LatestRelease is the newest supported release in the family.
+	LatestRelease string `protobuf:"bytes,8,opt,name=latest_release,json=latestRelease,proto3" json:"latest_release,omitempty"`
+	// Origin is os-package or image-ref.
+	Origin string `protobuf:"bytes,9,opt,name=origin,proto3" json:"origin,omitempty"`
+	// Subject is the image reference for an image-ref origin.
+	Subject string `protobuf:"bytes,10,opt,name=subject,proto3" json:"subject,omitempty"`
+	// DatasetSnapshot is when the end-of-life dataset was captured.
+	DatasetSnapshot string `protobuf:"bytes,11,opt,name=dataset_snapshot,json=datasetSnapshot,proto3" json:"dataset_snapshot,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *DistroRelease) Reset() {
+	*x = DistroRelease{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DistroRelease) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DistroRelease) ProtoMessage() {}
+
+func (x *DistroRelease) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DistroRelease.ProtoReflect.Descriptor instead.
+func (*DistroRelease) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DistroRelease) GetDistribution() string {
+	if x != nil {
+		return x.Distribution
+	}
+	return ""
+}
+
+func (x *DistroRelease) GetRelease() string {
+	if x != nil {
+		return x.Release
+	}
+	return ""
+}
+
+func (x *DistroRelease) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *DistroRelease) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *DistroRelease) GetEolDate() string {
+	if x != nil {
+		return x.EolDate
+	}
+	return ""
+}
+
+func (x *DistroRelease) GetDaysPastEol() int32 {
+	if x != nil {
+		return x.DaysPastEol
+	}
+	return 0
+}
+
+func (x *DistroRelease) GetOldestSupportedRelease() string {
+	if x != nil {
+		return x.OldestSupportedRelease
+	}
+	return ""
+}
+
+func (x *DistroRelease) GetLatestRelease() string {
+	if x != nil {
+		return x.LatestRelease
+	}
+	return ""
+}
+
+func (x *DistroRelease) GetOrigin() string {
+	if x != nil {
+		return x.Origin
+	}
+	return ""
+}
+
+func (x *DistroRelease) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *DistroRelease) GetDatasetSnapshot() string {
+	if x != nil {
+		return x.DatasetSnapshot
+	}
+	return ""
+}
+
 // DistroUpdate is one OS source package behind its distribution branch.
 type DistroUpdate struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -451,7 +598,7 @@ type DistroUpdate struct {
 
 func (x *DistroUpdate) Reset() {
 	*x = DistroUpdate{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[4]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -463,7 +610,7 @@ func (x *DistroUpdate) String() string {
 func (*DistroUpdate) ProtoMessage() {}
 
 func (x *DistroUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[4]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -476,7 +623,7 @@ func (x *DistroUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DistroUpdate.ProtoReflect.Descriptor instead.
 func (*DistroUpdate) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{4}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DistroUpdate) GetEcosystem() string {
@@ -546,7 +693,7 @@ type CoverageEntry struct {
 
 func (x *CoverageEntry) Reset() {
 	*x = CoverageEntry{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[5]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -558,7 +705,7 @@ func (x *CoverageEntry) String() string {
 func (*CoverageEntry) ProtoMessage() {}
 
 func (x *CoverageEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[5]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -571,7 +718,7 @@ func (x *CoverageEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CoverageEntry.ProtoReflect.Descriptor instead.
 func (*CoverageEntry) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{5}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CoverageEntry) GetEcosystem() string {
@@ -625,7 +772,7 @@ type ScanDirectoryRequest struct {
 
 func (x *ScanDirectoryRequest) Reset() {
 	*x = ScanDirectoryRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[6]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -637,7 +784,7 @@ func (x *ScanDirectoryRequest) String() string {
 func (*ScanDirectoryRequest) ProtoMessage() {}
 
 func (x *ScanDirectoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[6]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -650,7 +797,7 @@ func (x *ScanDirectoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanDirectoryRequest.ProtoReflect.Descriptor instead.
 func (*ScanDirectoryRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{6}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ScanDirectoryRequest) GetPath() string {
@@ -729,7 +876,7 @@ type ScanDirectoryResult struct {
 
 func (x *ScanDirectoryResult) Reset() {
 	*x = ScanDirectoryResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[7]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -741,7 +888,7 @@ func (x *ScanDirectoryResult) String() string {
 func (*ScanDirectoryResult) ProtoMessage() {}
 
 func (x *ScanDirectoryResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[7]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -754,7 +901,7 @@ func (x *ScanDirectoryResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanDirectoryResult.ProtoReflect.Descriptor instead.
 func (*ScanDirectoryResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{7}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ScanDirectoryResult) GetPath() string {
@@ -865,7 +1012,7 @@ type ScanContainerRequest struct {
 
 func (x *ScanContainerRequest) Reset() {
 	*x = ScanContainerRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[8]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -877,7 +1024,7 @@ func (x *ScanContainerRequest) String() string {
 func (*ScanContainerRequest) ProtoMessage() {}
 
 func (x *ScanContainerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[8]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -890,7 +1037,7 @@ func (x *ScanContainerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanContainerRequest.ProtoReflect.Descriptor instead.
 func (*ScanContainerRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{8}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ScanContainerRequest) GetImage() string {
@@ -956,7 +1103,7 @@ type ScanContainerResult struct {
 
 func (x *ScanContainerResult) Reset() {
 	*x = ScanContainerResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[9]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -968,7 +1115,7 @@ func (x *ScanContainerResult) String() string {
 func (*ScanContainerResult) ProtoMessage() {}
 
 func (x *ScanContainerResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[9]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -981,7 +1128,7 @@ func (x *ScanContainerResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanContainerResult.ProtoReflect.Descriptor instead.
 func (*ScanContainerResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{9}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ScanContainerResult) GetImage() string {
@@ -1077,7 +1224,7 @@ type TriageRequest struct {
 
 func (x *TriageRequest) Reset() {
 	*x = TriageRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[10]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1089,7 +1236,7 @@ func (x *TriageRequest) String() string {
 func (*TriageRequest) ProtoMessage() {}
 
 func (x *TriageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[10]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1102,7 +1249,7 @@ func (x *TriageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriageRequest.ProtoReflect.Descriptor instead.
 func (*TriageRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{10}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *TriageRequest) GetPath() string {
@@ -1146,8 +1293,8 @@ type TriagedVuln struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Id is the primary vulnerability identifier.
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// Kind distinguishes malware from ordinary vulnerabilities. Absent means
-	// vulnerability.
+	// Kind distinguishes malware and end-of-life operating system releases
+	// from ordinary vulnerabilities. Absent means vulnerability.
 	Kind string `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
 	// Severity is the normalized severity level.
 	Severity string `protobuf:"bytes,3,opt,name=severity,proto3" json:"severity,omitempty"`
@@ -1187,7 +1334,7 @@ type TriagedVuln struct {
 
 func (x *TriagedVuln) Reset() {
 	*x = TriagedVuln{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[11]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1199,7 +1346,7 @@ func (x *TriagedVuln) String() string {
 func (*TriagedVuln) ProtoMessage() {}
 
 func (x *TriagedVuln) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[11]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1212,7 +1359,7 @@ func (x *TriagedVuln) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriagedVuln.ProtoReflect.Descriptor instead.
 func (*TriagedVuln) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{11}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *TriagedVuln) GetId() string {
@@ -1382,7 +1529,7 @@ type TriageResult struct {
 
 func (x *TriageResult) Reset() {
 	*x = TriageResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[12]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1394,7 +1541,7 @@ func (x *TriageResult) String() string {
 func (*TriageResult) ProtoMessage() {}
 
 func (x *TriageResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[12]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1407,7 +1554,7 @@ func (x *TriageResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriageResult.ProtoReflect.Descriptor instead.
 func (*TriageResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{12}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TriageResult) GetPath() string {
@@ -1572,7 +1719,7 @@ type ListDependenciesRequest struct {
 
 func (x *ListDependenciesRequest) Reset() {
 	*x = ListDependenciesRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[13]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1584,7 +1731,7 @@ func (x *ListDependenciesRequest) String() string {
 func (*ListDependenciesRequest) ProtoMessage() {}
 
 func (x *ListDependenciesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[13]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1597,7 +1744,7 @@ func (x *ListDependenciesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDependenciesRequest.ProtoReflect.Descriptor instead.
 func (*ListDependenciesRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{13}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ListDependenciesRequest) GetPath() string {
@@ -1666,7 +1813,7 @@ type DependencyInfo struct {
 
 func (x *DependencyInfo) Reset() {
 	*x = DependencyInfo{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[14]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1678,7 +1825,7 @@ func (x *DependencyInfo) String() string {
 func (*DependencyInfo) ProtoMessage() {}
 
 func (x *DependencyInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[14]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1691,7 +1838,7 @@ func (x *DependencyInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DependencyInfo.ProtoReflect.Descriptor instead.
 func (*DependencyInfo) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{14}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DependencyInfo) GetName() string {
@@ -1776,7 +1923,7 @@ type ListDependenciesResult struct {
 
 func (x *ListDependenciesResult) Reset() {
 	*x = ListDependenciesResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[15]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1788,7 +1935,7 @@ func (x *ListDependenciesResult) String() string {
 func (*ListDependenciesResult) ProtoMessage() {}
 
 func (x *ListDependenciesResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[15]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1801,7 +1948,7 @@ func (x *ListDependenciesResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDependenciesResult.ProtoReflect.Descriptor instead.
 func (*ListDependenciesResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{15}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListDependenciesResult) GetPath() string {
@@ -1906,7 +2053,7 @@ type GenerateSBOMRequest struct {
 
 func (x *GenerateSBOMRequest) Reset() {
 	*x = GenerateSBOMRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[16]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1918,7 +2065,7 @@ func (x *GenerateSBOMRequest) String() string {
 func (*GenerateSBOMRequest) ProtoMessage() {}
 
 func (x *GenerateSBOMRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[16]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1931,7 +2078,7 @@ func (x *GenerateSBOMRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateSBOMRequest.ProtoReflect.Descriptor instead.
 func (*GenerateSBOMRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{16}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GenerateSBOMRequest) GetPath() string {
@@ -2000,7 +2147,7 @@ type GenerateSBOMResult struct {
 
 func (x *GenerateSBOMResult) Reset() {
 	*x = GenerateSBOMResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[17]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2012,7 +2159,7 @@ func (x *GenerateSBOMResult) String() string {
 func (*GenerateSBOMResult) ProtoMessage() {}
 
 func (x *GenerateSBOMResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[17]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2025,7 +2172,7 @@ func (x *GenerateSBOMResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateSBOMResult.ProtoReflect.Descriptor instead.
 func (*GenerateSBOMResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{17}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GenerateSBOMResult) GetPath() string {
@@ -2108,7 +2255,7 @@ type GraphPathNode struct {
 
 func (x *GraphPathNode) Reset() {
 	*x = GraphPathNode{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[18]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2120,7 +2267,7 @@ func (x *GraphPathNode) String() string {
 func (*GraphPathNode) ProtoMessage() {}
 
 func (x *GraphPathNode) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[18]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2133,7 +2280,7 @@ func (x *GraphPathNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphPathNode.ProtoReflect.Descriptor instead.
 func (*GraphPathNode) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{18}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GraphPathNode) GetName() string {
@@ -2209,7 +2356,7 @@ type GraphPath struct {
 
 func (x *GraphPath) Reset() {
 	*x = GraphPath{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[19]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2221,7 +2368,7 @@ func (x *GraphPath) String() string {
 func (*GraphPath) ProtoMessage() {}
 
 func (x *GraphPath) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[19]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2234,7 +2381,7 @@ func (x *GraphPath) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphPath.ProtoReflect.Descriptor instead.
 func (*GraphPath) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{19}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GraphPath) GetNodes() []string {
@@ -2287,7 +2434,7 @@ type AnalyzeGraphRequest struct {
 
 func (x *AnalyzeGraphRequest) Reset() {
 	*x = AnalyzeGraphRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[20]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2299,7 +2446,7 @@ func (x *AnalyzeGraphRequest) String() string {
 func (*AnalyzeGraphRequest) ProtoMessage() {}
 
 func (x *AnalyzeGraphRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[20]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2312,7 +2459,7 @@ func (x *AnalyzeGraphRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnalyzeGraphRequest.ProtoReflect.Descriptor instead.
 func (*AnalyzeGraphRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{20}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *AnalyzeGraphRequest) GetPath() string {
@@ -2386,7 +2533,7 @@ type GraphTargetResult struct {
 
 func (x *GraphTargetResult) Reset() {
 	*x = GraphTargetResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[21]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2398,7 +2545,7 @@ func (x *GraphTargetResult) String() string {
 func (*GraphTargetResult) ProtoMessage() {}
 
 func (x *GraphTargetResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[21]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2411,7 +2558,7 @@ func (x *GraphTargetResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphTargetResult.ProtoReflect.Descriptor instead.
 func (*GraphTargetResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{21}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *GraphTargetResult) GetQuery() string {
@@ -2494,7 +2641,7 @@ type AnalyzeGraphResult struct {
 
 func (x *AnalyzeGraphResult) Reset() {
 	*x = AnalyzeGraphResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[22]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2506,7 +2653,7 @@ func (x *AnalyzeGraphResult) String() string {
 func (*AnalyzeGraphResult) ProtoMessage() {}
 
 func (x *AnalyzeGraphResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[22]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2519,7 +2666,7 @@ func (x *AnalyzeGraphResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnalyzeGraphResult.ProtoReflect.Descriptor instead.
 func (*AnalyzeGraphResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{22}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *AnalyzeGraphResult) GetPath() string {
@@ -2630,7 +2777,7 @@ type GraphWhyRequest struct {
 
 func (x *GraphWhyRequest) Reset() {
 	*x = GraphWhyRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[23]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2642,7 +2789,7 @@ func (x *GraphWhyRequest) String() string {
 func (*GraphWhyRequest) ProtoMessage() {}
 
 func (x *GraphWhyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[23]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2655,7 +2802,7 @@ func (x *GraphWhyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphWhyRequest.ProtoReflect.Descriptor instead.
 func (*GraphWhyRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{23}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GraphWhyRequest) GetPath() string {
@@ -2756,7 +2903,7 @@ type GraphWhyResult struct {
 
 func (x *GraphWhyResult) Reset() {
 	*x = GraphWhyResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[24]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2768,7 +2915,7 @@ func (x *GraphWhyResult) String() string {
 func (*GraphWhyResult) ProtoMessage() {}
 
 func (x *GraphWhyResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[24]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2781,7 +2928,7 @@ func (x *GraphWhyResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphWhyResult.ProtoReflect.Descriptor instead.
 func (*GraphWhyResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{24}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GraphWhyResult) GetPackage() string {
@@ -2909,7 +3056,7 @@ type GraphNeedsRequest struct {
 
 func (x *GraphNeedsRequest) Reset() {
 	*x = GraphNeedsRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[25]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2921,7 +3068,7 @@ func (x *GraphNeedsRequest) String() string {
 func (*GraphNeedsRequest) ProtoMessage() {}
 
 func (x *GraphNeedsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[25]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2934,7 +3081,7 @@ func (x *GraphNeedsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphNeedsRequest.ProtoReflect.Descriptor instead.
 func (*GraphNeedsRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{25}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GraphNeedsRequest) GetPath() string {
@@ -3029,7 +3176,7 @@ type GraphNeedsResult struct {
 
 func (x *GraphNeedsResult) Reset() {
 	*x = GraphNeedsResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[26]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3041,7 +3188,7 @@ func (x *GraphNeedsResult) String() string {
 func (*GraphNeedsResult) ProtoMessage() {}
 
 func (x *GraphNeedsResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[26]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3054,7 +3201,7 @@ func (x *GraphNeedsResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphNeedsResult.ProtoReflect.Descriptor instead.
 func (*GraphNeedsResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{26}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *GraphNeedsResult) GetPackage() string {
@@ -3170,7 +3317,7 @@ type ExplainVulnerabilityRequest struct {
 
 func (x *ExplainVulnerabilityRequest) Reset() {
 	*x = ExplainVulnerabilityRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[27]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3182,7 +3329,7 @@ func (x *ExplainVulnerabilityRequest) String() string {
 func (*ExplainVulnerabilityRequest) ProtoMessage() {}
 
 func (x *ExplainVulnerabilityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[27]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3195,7 +3342,7 @@ func (x *ExplainVulnerabilityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExplainVulnerabilityRequest.ProtoReflect.Descriptor instead.
 func (*ExplainVulnerabilityRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{27}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ExplainVulnerabilityRequest) GetId() string {
@@ -3228,7 +3375,7 @@ type ExplainVulnerabilitiesRequest struct {
 
 func (x *ExplainVulnerabilitiesRequest) Reset() {
 	*x = ExplainVulnerabilitiesRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[28]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3240,7 +3387,7 @@ func (x *ExplainVulnerabilitiesRequest) String() string {
 func (*ExplainVulnerabilitiesRequest) ProtoMessage() {}
 
 func (x *ExplainVulnerabilitiesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[28]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3253,7 +3400,7 @@ func (x *ExplainVulnerabilitiesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExplainVulnerabilitiesRequest.ProtoReflect.Descriptor instead.
 func (*ExplainVulnerabilitiesRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{28}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ExplainVulnerabilitiesRequest) GetIds() []string {
@@ -3286,7 +3433,7 @@ type ExplainVulnerabilitiesResult struct {
 
 func (x *ExplainVulnerabilitiesResult) Reset() {
 	*x = ExplainVulnerabilitiesResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[29]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3298,7 +3445,7 @@ func (x *ExplainVulnerabilitiesResult) String() string {
 func (*ExplainVulnerabilitiesResult) ProtoMessage() {}
 
 func (x *ExplainVulnerabilitiesResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[29]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3311,7 +3458,7 @@ func (x *ExplainVulnerabilitiesResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExplainVulnerabilitiesResult.ProtoReflect.Descriptor instead.
 func (*ExplainVulnerabilitiesResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{29}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ExplainVulnerabilitiesResult) GetVulnerabilities() []*VulnExplanation {
@@ -3352,7 +3499,7 @@ type ScanPackageRequest struct {
 
 func (x *ScanPackageRequest) Reset() {
 	*x = ScanPackageRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[30]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3364,7 +3511,7 @@ func (x *ScanPackageRequest) String() string {
 func (*ScanPackageRequest) ProtoMessage() {}
 
 func (x *ScanPackageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[30]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3377,7 +3524,7 @@ func (x *ScanPackageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanPackageRequest.ProtoReflect.Descriptor instead.
 func (*ScanPackageRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{30}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ScanPackageRequest) GetPurl() string {
@@ -3431,7 +3578,7 @@ type ScanPackageResult struct {
 
 func (x *ScanPackageResult) Reset() {
 	*x = ScanPackageResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[31]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3443,7 +3590,7 @@ func (x *ScanPackageResult) String() string {
 func (*ScanPackageResult) ProtoMessage() {}
 
 func (x *ScanPackageResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[31]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3456,7 +3603,7 @@ func (x *ScanPackageResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanPackageResult.ProtoReflect.Descriptor instead.
 func (*ScanPackageResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{31}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ScanPackageResult) GetPackage() string {
@@ -3510,7 +3657,7 @@ type GetServerInfoRequest struct {
 
 func (x *GetServerInfoRequest) Reset() {
 	*x = GetServerInfoRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[32]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3522,7 +3669,7 @@ func (x *GetServerInfoRequest) String() string {
 func (*GetServerInfoRequest) ProtoMessage() {}
 
 func (x *GetServerInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[32]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3535,7 +3682,7 @@ func (x *GetServerInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetServerInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetServerInfoRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{32}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{33}
 }
 
 // GetServerInfoResult describes the running Deputy MCP server.
@@ -3568,7 +3715,7 @@ type GetServerInfoResult struct {
 
 func (x *GetServerInfoResult) Reset() {
 	*x = GetServerInfoResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[33]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3580,7 +3727,7 @@ func (x *GetServerInfoResult) String() string {
 func (*GetServerInfoResult) ProtoMessage() {}
 
 func (x *GetServerInfoResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[33]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3593,7 +3740,7 @@ func (x *GetServerInfoResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetServerInfoResult.ProtoReflect.Descriptor instead.
 func (*GetServerInfoResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{33}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *GetServerInfoResult) GetName() string {
@@ -3680,7 +3827,7 @@ type ListPolicyEntrypointsRequest struct {
 
 func (x *ListPolicyEntrypointsRequest) Reset() {
 	*x = ListPolicyEntrypointsRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[34]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3692,7 +3839,7 @@ func (x *ListPolicyEntrypointsRequest) String() string {
 func (*ListPolicyEntrypointsRequest) ProtoMessage() {}
 
 func (x *ListPolicyEntrypointsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[34]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3705,7 +3852,7 @@ func (x *ListPolicyEntrypointsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPolicyEntrypointsRequest.ProtoReflect.Descriptor instead.
 func (*ListPolicyEntrypointsRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{34}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ListPolicyEntrypointsRequest) GetCategory() string {
@@ -3731,7 +3878,7 @@ type ListPolicyEntrypointsResult struct {
 
 func (x *ListPolicyEntrypointsResult) Reset() {
 	*x = ListPolicyEntrypointsResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[35]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3743,7 +3890,7 @@ func (x *ListPolicyEntrypointsResult) String() string {
 func (*ListPolicyEntrypointsResult) ProtoMessage() {}
 
 func (x *ListPolicyEntrypointsResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[35]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3756,7 +3903,7 @@ func (x *ListPolicyEntrypointsResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPolicyEntrypointsResult.ProtoReflect.Descriptor instead.
 func (*ListPolicyEntrypointsResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{35}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ListPolicyEntrypointsResult) GetCategory() string {
@@ -3800,7 +3947,7 @@ type GetRemediationRequest struct {
 
 func (x *GetRemediationRequest) Reset() {
 	*x = GetRemediationRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[36]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3812,7 +3959,7 @@ func (x *GetRemediationRequest) String() string {
 func (*GetRemediationRequest) ProtoMessage() {}
 
 func (x *GetRemediationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[36]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3825,7 +3972,7 @@ func (x *GetRemediationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRemediationRequest.ProtoReflect.Descriptor instead.
 func (*GetRemediationRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{36}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *GetRemediationRequest) GetPath() string {
@@ -3915,7 +4062,7 @@ type RemediationStep struct {
 
 func (x *RemediationStep) Reset() {
 	*x = RemediationStep{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[37]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3927,7 +4074,7 @@ func (x *RemediationStep) String() string {
 func (*RemediationStep) ProtoMessage() {}
 
 func (x *RemediationStep) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[37]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3940,7 +4087,7 @@ func (x *RemediationStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemediationStep.ProtoReflect.Descriptor instead.
 func (*RemediationStep) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{37}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *RemediationStep) GetId() string {
@@ -4117,7 +4264,7 @@ type GetRemediationResult struct {
 
 func (x *GetRemediationResult) Reset() {
 	*x = GetRemediationResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[38]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4129,7 +4276,7 @@ func (x *GetRemediationResult) String() string {
 func (*GetRemediationResult) ProtoMessage() {}
 
 func (x *GetRemediationResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[38]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4142,7 +4289,7 @@ func (x *GetRemediationResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRemediationResult.ProtoReflect.Descriptor instead.
 func (*GetRemediationResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{38}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *GetRemediationResult) GetPath() string {
@@ -4260,7 +4407,7 @@ type DiffRefsRequest struct {
 
 func (x *DiffRefsRequest) Reset() {
 	*x = DiffRefsRequest{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[39]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4272,7 +4419,7 @@ func (x *DiffRefsRequest) String() string {
 func (*DiffRefsRequest) ProtoMessage() {}
 
 func (x *DiffRefsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[39]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4285,7 +4432,7 @@ func (x *DiffRefsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffRefsRequest.ProtoReflect.Descriptor instead.
 func (*DiffRefsRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{39}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *DiffRefsRequest) GetPath() string {
@@ -4365,7 +4512,7 @@ type DependencyChange struct {
 
 func (x *DependencyChange) Reset() {
 	*x = DependencyChange{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[40]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4377,7 +4524,7 @@ func (x *DependencyChange) String() string {
 func (*DependencyChange) ProtoMessage() {}
 
 func (x *DependencyChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[40]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4390,7 +4537,7 @@ func (x *DependencyChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DependencyChange.ProtoReflect.Descriptor instead.
 func (*DependencyChange) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{40}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *DependencyChange) GetName() string {
@@ -4475,7 +4622,7 @@ type DiffVulnChange struct {
 
 func (x *DiffVulnChange) Reset() {
 	*x = DiffVulnChange{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[41]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4487,7 +4634,7 @@ func (x *DiffVulnChange) String() string {
 func (*DiffVulnChange) ProtoMessage() {}
 
 func (x *DiffVulnChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[41]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4500,7 +4647,7 @@ func (x *DiffVulnChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffVulnChange.ProtoReflect.Descriptor instead.
 func (*DiffVulnChange) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{41}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *DiffVulnChange) GetId() string {
@@ -4611,7 +4758,7 @@ type ContainerSummary struct {
 
 func (x *ContainerSummary) Reset() {
 	*x = ContainerSummary{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[42]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4623,7 +4770,7 @@ func (x *ContainerSummary) String() string {
 func (*ContainerSummary) ProtoMessage() {}
 
 func (x *ContainerSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[42]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4636,7 +4783,7 @@ func (x *ContainerSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerSummary.ProtoReflect.Descriptor instead.
 func (*ContainerSummary) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{42}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ContainerSummary) GetPackagesAdded() int32 {
@@ -4757,7 +4904,7 @@ type DiffRefsResult struct {
 
 func (x *DiffRefsResult) Reset() {
 	*x = DiffRefsResult{}
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[43]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4769,7 +4916,7 @@ func (x *DiffRefsResult) String() string {
 func (*DiffRefsResult) ProtoMessage() {}
 
 func (x *DiffRefsResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[43]
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4782,7 +4929,7 @@ func (x *DiffRefsResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffRefsResult.ProtoReflect.Descriptor instead.
 func (*DiffRefsResult) Descriptor() ([]byte, []int) {
-	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{43}
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *DiffRefsResult) GetPath() string {
@@ -4901,13 +5048,13 @@ var File_deputy_mcp_v1_mcp_proto protoreflect.FileDescriptor
 
 const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\n" +
-	"\x17deputy/mcp/v1/mcp.proto\x12\rdeputy.mcp.v1\x1a\x1bbuf/validate/validate.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/graph/v1/service.proto\x1a\x1edeputy/policy/v1/service.proto\x1a#deputy/remediation/v1/service.proto\"\x8b\x05\n" +
+	"\x17deputy/mcp/v1/mcp.proto\x12\rdeputy.mcp.v1\x1a\x1bbuf/validate/validate.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/graph/v1/service.proto\x1a\x1edeputy/policy/v1/service.proto\x1a#deputy/remediation/v1/service.proto\"\x90\x05\n" +
 	"\x0fVulnExplanation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaliases\x18\x02 \x03(\tR\aaliases\x12\x18\n" +
 	"\asummary\x18\x03 \x01(\tR\asummary\x12\x18\n" +
-	"\adetails\x18\x04 \x01(\tR\adetails\x124\n" +
-	"\x04kind\x18\x05 \x01(\tB \xbaH\x1d\xd8\x01\x01r\x18R\rvulnerabilityR\amalwareR\x04kind\x12J\n" +
+	"\adetails\x18\x04 \x01(\tR\adetails\x129\n" +
+	"\x04kind\x18\x05 \x01(\tB%\xbaH\"\xd8\x01\x01r\x1dR\rvulnerabilityR\amalwareR\x03eolR\x04kind\x12J\n" +
 	"\bseverity\x18\x06 \x01(\tB.\xbaH+\xd8\x01\x01r&R\bCRITICALR\x04HIGHR\x06MEDIUMR\x03LOWR\aUNKNOWNR\bseverity\x12#\n" +
 	"\rseverity_type\x18\a \x01(\tR\fseverityType\x12\x18\n" +
 	"\asources\x18\b \x03(\tR\asources\x12%\n" +
@@ -4933,11 +5080,25 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"unverifiedR\x06status\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12#\n" +
 	"\rtarget_module\x18\x03 \x01(\tR\ftargetModule\x12\x18\n" +
-	"\aclaimed\x18\x04 \x01(\tR\aclaimed\"\xc2\x01\n" +
+	"\aclaimed\x18\x04 \x01(\tR\aclaimed\"\xfa\x01\n" +
 	"\bCoverage\x126\n" +
 	"\acovered\x18\x01 \x03(\v2\x1c.deputy.mcp.v1.CoverageEntryR\acovered\x12:\n" +
 	"\tuncovered\x18\x02 \x03(\v2\x1c.deputy.mcp.v1.CoverageEntryR\tuncovered\x12B\n" +
-	"\x0edistro_updates\x18\x03 \x03(\v2\x1b.deputy.mcp.v1.DistroUpdateR\rdistroUpdates\"\x81\x02\n" +
+	"\x0edistro_updates\x18\x03 \x03(\v2\x1b.deputy.mcp.v1.DistroUpdateR\rdistroUpdates\x126\n" +
+	"\adistros\x18\x04 \x03(\v2\x1c.deputy.mcp.v1.DistroReleaseR\adistros\"\x9f\x03\n" +
+	"\rDistroRelease\x12\"\n" +
+	"\fdistribution\x18\x01 \x01(\tR\fdistribution\x12\x18\n" +
+	"\arelease\x18\x02 \x01(\tR\arelease\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\x129\n" +
+	"\x06status\x18\x04 \x01(\tB!\xbaH\x1e\xd8\x01\x01r\x19R\tsupportedR\x03eolR\aunknownR\x06status\x12\x19\n" +
+	"\beol_date\x18\x05 \x01(\tR\aeolDate\x12\"\n" +
+	"\rdays_past_eol\x18\x06 \x01(\x05R\vdaysPastEol\x128\n" +
+	"\x18oldest_supported_release\x18\a \x01(\tR\x16oldestSupportedRelease\x12%\n" +
+	"\x0elatest_release\x18\b \x01(\tR\rlatestRelease\x12\x16\n" +
+	"\x06origin\x18\t \x01(\tR\x06origin\x12\x18\n" +
+	"\asubject\x18\n" +
+	" \x01(\tR\asubject\x12)\n" +
+	"\x10dataset_snapshot\x18\v \x01(\tR\x0fdatasetSnapshot\"\x81\x02\n" +
 	"\fDistroUpdate\x12\x1c\n" +
 	"\tecosystem\x18\x01 \x01(\tR\tecosystem\x12%\n" +
 	"\x0esource_package\x18\x02 \x01(\tR\rsourcePackage\x12\x1a\n" +
@@ -5011,10 +5172,10 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"ecosystems\x18\x03 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
 	"ecosystems\x12:\n" +
 	"\rexclude_paths\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\x12\x16\n" +
-	"\x06enrich\x18\x05 \x01(\bR\x06enrich\"\xa3\x05\n" +
+	"\x06enrich\x18\x05 \x01(\bR\x06enrich\"\xa8\x05\n" +
 	"\vTriagedVuln\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
-	"\x04kind\x18\x02 \x01(\tB \xbaH\x1d\xd8\x01\x01r\x18R\rvulnerabilityR\amalwareR\x04kind\x12J\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x129\n" +
+	"\x04kind\x18\x02 \x01(\tB%\xbaH\"\xd8\x01\x01r\x1dR\rvulnerabilityR\amalwareR\x03eolR\x04kind\x12J\n" +
 	"\bseverity\x18\x03 \x01(\tB.\xbaH+\xd8\x01\x01r&R\bCRITICALR\x04HIGHR\x06MEDIUMR\x03LOWR\aUNKNOWNR\bseverity\x12#\n" +
 	"\rseverity_type\x18\x04 \x01(\tR\fseverityType\x12\x18\n" +
 	"\asources\x18\x05 \x03(\tR\asources\x12\x18\n" +
@@ -5404,102 +5565,104 @@ func file_deputy_mcp_v1_mcp_proto_rawDescGZIP() []byte {
 	return file_deputy_mcp_v1_mcp_proto_rawDescData
 }
 
-var file_deputy_mcp_v1_mcp_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
+var file_deputy_mcp_v1_mcp_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
 var file_deputy_mcp_v1_mcp_proto_goTypes = []any{
 	(*VulnExplanation)(nil),               // 0: deputy.mcp.v1.VulnExplanation
 	(*PackageFix)(nil),                    // 1: deputy.mcp.v1.PackageFix
 	(*FixVerdict)(nil),                    // 2: deputy.mcp.v1.FixVerdict
 	(*Coverage)(nil),                      // 3: deputy.mcp.v1.Coverage
-	(*DistroUpdate)(nil),                  // 4: deputy.mcp.v1.DistroUpdate
-	(*CoverageEntry)(nil),                 // 5: deputy.mcp.v1.CoverageEntry
-	(*ScanDirectoryRequest)(nil),          // 6: deputy.mcp.v1.ScanDirectoryRequest
-	(*ScanDirectoryResult)(nil),           // 7: deputy.mcp.v1.ScanDirectoryResult
-	(*ScanContainerRequest)(nil),          // 8: deputy.mcp.v1.ScanContainerRequest
-	(*ScanContainerResult)(nil),           // 9: deputy.mcp.v1.ScanContainerResult
-	(*TriageRequest)(nil),                 // 10: deputy.mcp.v1.TriageRequest
-	(*TriagedVuln)(nil),                   // 11: deputy.mcp.v1.TriagedVuln
-	(*TriageResult)(nil),                  // 12: deputy.mcp.v1.TriageResult
-	(*ListDependenciesRequest)(nil),       // 13: deputy.mcp.v1.ListDependenciesRequest
-	(*DependencyInfo)(nil),                // 14: deputy.mcp.v1.DependencyInfo
-	(*ListDependenciesResult)(nil),        // 15: deputy.mcp.v1.ListDependenciesResult
-	(*GenerateSBOMRequest)(nil),           // 16: deputy.mcp.v1.GenerateSBOMRequest
-	(*GenerateSBOMResult)(nil),            // 17: deputy.mcp.v1.GenerateSBOMResult
-	(*GraphPathNode)(nil),                 // 18: deputy.mcp.v1.GraphPathNode
-	(*GraphPath)(nil),                     // 19: deputy.mcp.v1.GraphPath
-	(*AnalyzeGraphRequest)(nil),           // 20: deputy.mcp.v1.AnalyzeGraphRequest
-	(*GraphTargetResult)(nil),             // 21: deputy.mcp.v1.GraphTargetResult
-	(*AnalyzeGraphResult)(nil),            // 22: deputy.mcp.v1.AnalyzeGraphResult
-	(*GraphWhyRequest)(nil),               // 23: deputy.mcp.v1.GraphWhyRequest
-	(*GraphWhyResult)(nil),                // 24: deputy.mcp.v1.GraphWhyResult
-	(*GraphNeedsRequest)(nil),             // 25: deputy.mcp.v1.GraphNeedsRequest
-	(*GraphNeedsResult)(nil),              // 26: deputy.mcp.v1.GraphNeedsResult
-	(*ExplainVulnerabilityRequest)(nil),   // 27: deputy.mcp.v1.ExplainVulnerabilityRequest
-	(*ExplainVulnerabilitiesRequest)(nil), // 28: deputy.mcp.v1.ExplainVulnerabilitiesRequest
-	(*ExplainVulnerabilitiesResult)(nil),  // 29: deputy.mcp.v1.ExplainVulnerabilitiesResult
-	(*ScanPackageRequest)(nil),            // 30: deputy.mcp.v1.ScanPackageRequest
-	(*ScanPackageResult)(nil),             // 31: deputy.mcp.v1.ScanPackageResult
-	(*GetServerInfoRequest)(nil),          // 32: deputy.mcp.v1.GetServerInfoRequest
-	(*GetServerInfoResult)(nil),           // 33: deputy.mcp.v1.GetServerInfoResult
-	(*ListPolicyEntrypointsRequest)(nil),  // 34: deputy.mcp.v1.ListPolicyEntrypointsRequest
-	(*ListPolicyEntrypointsResult)(nil),   // 35: deputy.mcp.v1.ListPolicyEntrypointsResult
-	(*GetRemediationRequest)(nil),         // 36: deputy.mcp.v1.GetRemediationRequest
-	(*RemediationStep)(nil),               // 37: deputy.mcp.v1.RemediationStep
-	(*GetRemediationResult)(nil),          // 38: deputy.mcp.v1.GetRemediationResult
-	(*DiffRefsRequest)(nil),               // 39: deputy.mcp.v1.DiffRefsRequest
-	(*DependencyChange)(nil),              // 40: deputy.mcp.v1.DependencyChange
-	(*DiffVulnChange)(nil),                // 41: deputy.mcp.v1.DiffVulnChange
-	(*ContainerSummary)(nil),              // 42: deputy.mcp.v1.ContainerSummary
-	(*DiffRefsResult)(nil),                // 43: deputy.mcp.v1.DiffRefsResult
-	nil,                                   // 44: deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
-	nil,                                   // 45: deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
-	nil,                                   // 46: deputy.mcp.v1.DiffRefsResult.VulnerabilitiesBySeverityEntry
-	(*v1.ManifestRef)(nil),                // 47: deputy.dependency.v1.ManifestRef
-	(*v11.GraphStats)(nil),                // 48: deputy.graph.v1.GraphStats
-	(*v12.EntrypointInfo)(nil),            // 49: deputy.policy.v1.EntrypointInfo
-	(*v13.PlanStats)(nil),                 // 50: deputy.remediation.v1.PlanStats
+	(*DistroRelease)(nil),                 // 4: deputy.mcp.v1.DistroRelease
+	(*DistroUpdate)(nil),                  // 5: deputy.mcp.v1.DistroUpdate
+	(*CoverageEntry)(nil),                 // 6: deputy.mcp.v1.CoverageEntry
+	(*ScanDirectoryRequest)(nil),          // 7: deputy.mcp.v1.ScanDirectoryRequest
+	(*ScanDirectoryResult)(nil),           // 8: deputy.mcp.v1.ScanDirectoryResult
+	(*ScanContainerRequest)(nil),          // 9: deputy.mcp.v1.ScanContainerRequest
+	(*ScanContainerResult)(nil),           // 10: deputy.mcp.v1.ScanContainerResult
+	(*TriageRequest)(nil),                 // 11: deputy.mcp.v1.TriageRequest
+	(*TriagedVuln)(nil),                   // 12: deputy.mcp.v1.TriagedVuln
+	(*TriageResult)(nil),                  // 13: deputy.mcp.v1.TriageResult
+	(*ListDependenciesRequest)(nil),       // 14: deputy.mcp.v1.ListDependenciesRequest
+	(*DependencyInfo)(nil),                // 15: deputy.mcp.v1.DependencyInfo
+	(*ListDependenciesResult)(nil),        // 16: deputy.mcp.v1.ListDependenciesResult
+	(*GenerateSBOMRequest)(nil),           // 17: deputy.mcp.v1.GenerateSBOMRequest
+	(*GenerateSBOMResult)(nil),            // 18: deputy.mcp.v1.GenerateSBOMResult
+	(*GraphPathNode)(nil),                 // 19: deputy.mcp.v1.GraphPathNode
+	(*GraphPath)(nil),                     // 20: deputy.mcp.v1.GraphPath
+	(*AnalyzeGraphRequest)(nil),           // 21: deputy.mcp.v1.AnalyzeGraphRequest
+	(*GraphTargetResult)(nil),             // 22: deputy.mcp.v1.GraphTargetResult
+	(*AnalyzeGraphResult)(nil),            // 23: deputy.mcp.v1.AnalyzeGraphResult
+	(*GraphWhyRequest)(nil),               // 24: deputy.mcp.v1.GraphWhyRequest
+	(*GraphWhyResult)(nil),                // 25: deputy.mcp.v1.GraphWhyResult
+	(*GraphNeedsRequest)(nil),             // 26: deputy.mcp.v1.GraphNeedsRequest
+	(*GraphNeedsResult)(nil),              // 27: deputy.mcp.v1.GraphNeedsResult
+	(*ExplainVulnerabilityRequest)(nil),   // 28: deputy.mcp.v1.ExplainVulnerabilityRequest
+	(*ExplainVulnerabilitiesRequest)(nil), // 29: deputy.mcp.v1.ExplainVulnerabilitiesRequest
+	(*ExplainVulnerabilitiesResult)(nil),  // 30: deputy.mcp.v1.ExplainVulnerabilitiesResult
+	(*ScanPackageRequest)(nil),            // 31: deputy.mcp.v1.ScanPackageRequest
+	(*ScanPackageResult)(nil),             // 32: deputy.mcp.v1.ScanPackageResult
+	(*GetServerInfoRequest)(nil),          // 33: deputy.mcp.v1.GetServerInfoRequest
+	(*GetServerInfoResult)(nil),           // 34: deputy.mcp.v1.GetServerInfoResult
+	(*ListPolicyEntrypointsRequest)(nil),  // 35: deputy.mcp.v1.ListPolicyEntrypointsRequest
+	(*ListPolicyEntrypointsResult)(nil),   // 36: deputy.mcp.v1.ListPolicyEntrypointsResult
+	(*GetRemediationRequest)(nil),         // 37: deputy.mcp.v1.GetRemediationRequest
+	(*RemediationStep)(nil),               // 38: deputy.mcp.v1.RemediationStep
+	(*GetRemediationResult)(nil),          // 39: deputy.mcp.v1.GetRemediationResult
+	(*DiffRefsRequest)(nil),               // 40: deputy.mcp.v1.DiffRefsRequest
+	(*DependencyChange)(nil),              // 41: deputy.mcp.v1.DependencyChange
+	(*DiffVulnChange)(nil),                // 42: deputy.mcp.v1.DiffVulnChange
+	(*ContainerSummary)(nil),              // 43: deputy.mcp.v1.ContainerSummary
+	(*DiffRefsResult)(nil),                // 44: deputy.mcp.v1.DiffRefsResult
+	nil,                                   // 45: deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
+	nil,                                   // 46: deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
+	nil,                                   // 47: deputy.mcp.v1.DiffRefsResult.VulnerabilitiesBySeverityEntry
+	(*v1.ManifestRef)(nil),                // 48: deputy.dependency.v1.ManifestRef
+	(*v11.GraphStats)(nil),                // 49: deputy.graph.v1.GraphStats
+	(*v12.EntrypointInfo)(nil),            // 50: deputy.policy.v1.EntrypointInfo
+	(*v13.PlanStats)(nil),                 // 51: deputy.remediation.v1.PlanStats
 }
 var file_deputy_mcp_v1_mcp_proto_depIdxs = []int32{
 	1,  // 0: deputy.mcp.v1.VulnExplanation.package_fixes:type_name -> deputy.mcp.v1.PackageFix
 	2,  // 1: deputy.mcp.v1.VulnExplanation.resolved_fix:type_name -> deputy.mcp.v1.FixVerdict
-	5,  // 2: deputy.mcp.v1.Coverage.covered:type_name -> deputy.mcp.v1.CoverageEntry
-	5,  // 3: deputy.mcp.v1.Coverage.uncovered:type_name -> deputy.mcp.v1.CoverageEntry
-	4,  // 4: deputy.mcp.v1.Coverage.distro_updates:type_name -> deputy.mcp.v1.DistroUpdate
-	44, // 5: deputy.mcp.v1.ScanDirectoryResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
-	0,  // 6: deputy.mcp.v1.ScanDirectoryResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
-	3,  // 7: deputy.mcp.v1.ScanDirectoryResult.coverage:type_name -> deputy.mcp.v1.Coverage
-	45, // 8: deputy.mcp.v1.ScanContainerResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
-	0,  // 9: deputy.mcp.v1.ScanContainerResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
-	3,  // 10: deputy.mcp.v1.ScanContainerResult.coverage:type_name -> deputy.mcp.v1.Coverage
-	1,  // 11: deputy.mcp.v1.TriagedVuln.package_fixes:type_name -> deputy.mcp.v1.PackageFix
-	2,  // 12: deputy.mcp.v1.TriagedVuln.resolved_fix:type_name -> deputy.mcp.v1.FixVerdict
-	11, // 13: deputy.mcp.v1.TriageResult.vulnerabilities:type_name -> deputy.mcp.v1.TriagedVuln
-	47, // 14: deputy.mcp.v1.DependencyInfo.manifest_refs:type_name -> deputy.dependency.v1.ManifestRef
-	14, // 15: deputy.mcp.v1.ListDependenciesResult.dependencies:type_name -> deputy.mcp.v1.DependencyInfo
-	18, // 16: deputy.mcp.v1.GraphPath.node_details:type_name -> deputy.mcp.v1.GraphPathNode
-	18, // 17: deputy.mcp.v1.GraphTargetResult.matched_nodes:type_name -> deputy.mcp.v1.GraphPathNode
-	48, // 18: deputy.mcp.v1.AnalyzeGraphResult.stats:type_name -> deputy.graph.v1.GraphStats
-	19, // 19: deputy.mcp.v1.AnalyzeGraphResult.vulnerable_paths:type_name -> deputy.mcp.v1.GraphPath
-	19, // 20: deputy.mcp.v1.AnalyzeGraphResult.paths_to_target:type_name -> deputy.mcp.v1.GraphPath
-	21, // 21: deputy.mcp.v1.AnalyzeGraphResult.target:type_name -> deputy.mcp.v1.GraphTargetResult
-	18, // 22: deputy.mcp.v1.GraphWhyResult.matched_node:type_name -> deputy.mcp.v1.GraphPathNode
-	19, // 23: deputy.mcp.v1.GraphWhyResult.paths:type_name -> deputy.mcp.v1.GraphPath
-	18, // 24: deputy.mcp.v1.GraphNeedsResult.matched_node:type_name -> deputy.mcp.v1.GraphPathNode
-	14, // 25: deputy.mcp.v1.GraphNeedsResult.dependents:type_name -> deputy.mcp.v1.DependencyInfo
-	0,  // 26: deputy.mcp.v1.ExplainVulnerabilitiesResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
-	0,  // 27: deputy.mcp.v1.ScanPackageResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
-	49, // 28: deputy.mcp.v1.ListPolicyEntrypointsResult.entrypoints:type_name -> deputy.policy.v1.EntrypointInfo
-	50, // 29: deputy.mcp.v1.GetRemediationResult.stats:type_name -> deputy.remediation.v1.PlanStats
-	37, // 30: deputy.mcp.v1.GetRemediationResult.steps:type_name -> deputy.mcp.v1.RemediationStep
-	40, // 31: deputy.mcp.v1.DiffRefsResult.changes:type_name -> deputy.mcp.v1.DependencyChange
-	0,  // 32: deputy.mcp.v1.DiffRefsResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
-	46, // 33: deputy.mcp.v1.DiffRefsResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.DiffRefsResult.VulnerabilitiesBySeverityEntry
-	41, // 34: deputy.mcp.v1.DiffRefsResult.vulnerability_changes:type_name -> deputy.mcp.v1.DiffVulnChange
-	42, // 35: deputy.mcp.v1.DiffRefsResult.container_summary:type_name -> deputy.mcp.v1.ContainerSummary
-	36, // [36:36] is the sub-list for method output_type
-	36, // [36:36] is the sub-list for method input_type
-	36, // [36:36] is the sub-list for extension type_name
-	36, // [36:36] is the sub-list for extension extendee
-	0,  // [0:36] is the sub-list for field type_name
+	6,  // 2: deputy.mcp.v1.Coverage.covered:type_name -> deputy.mcp.v1.CoverageEntry
+	6,  // 3: deputy.mcp.v1.Coverage.uncovered:type_name -> deputy.mcp.v1.CoverageEntry
+	5,  // 4: deputy.mcp.v1.Coverage.distro_updates:type_name -> deputy.mcp.v1.DistroUpdate
+	4,  // 5: deputy.mcp.v1.Coverage.distros:type_name -> deputy.mcp.v1.DistroRelease
+	45, // 6: deputy.mcp.v1.ScanDirectoryResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
+	0,  // 7: deputy.mcp.v1.ScanDirectoryResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
+	3,  // 8: deputy.mcp.v1.ScanDirectoryResult.coverage:type_name -> deputy.mcp.v1.Coverage
+	46, // 9: deputy.mcp.v1.ScanContainerResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
+	0,  // 10: deputy.mcp.v1.ScanContainerResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
+	3,  // 11: deputy.mcp.v1.ScanContainerResult.coverage:type_name -> deputy.mcp.v1.Coverage
+	1,  // 12: deputy.mcp.v1.TriagedVuln.package_fixes:type_name -> deputy.mcp.v1.PackageFix
+	2,  // 13: deputy.mcp.v1.TriagedVuln.resolved_fix:type_name -> deputy.mcp.v1.FixVerdict
+	12, // 14: deputy.mcp.v1.TriageResult.vulnerabilities:type_name -> deputy.mcp.v1.TriagedVuln
+	48, // 15: deputy.mcp.v1.DependencyInfo.manifest_refs:type_name -> deputy.dependency.v1.ManifestRef
+	15, // 16: deputy.mcp.v1.ListDependenciesResult.dependencies:type_name -> deputy.mcp.v1.DependencyInfo
+	19, // 17: deputy.mcp.v1.GraphPath.node_details:type_name -> deputy.mcp.v1.GraphPathNode
+	19, // 18: deputy.mcp.v1.GraphTargetResult.matched_nodes:type_name -> deputy.mcp.v1.GraphPathNode
+	49, // 19: deputy.mcp.v1.AnalyzeGraphResult.stats:type_name -> deputy.graph.v1.GraphStats
+	20, // 20: deputy.mcp.v1.AnalyzeGraphResult.vulnerable_paths:type_name -> deputy.mcp.v1.GraphPath
+	20, // 21: deputy.mcp.v1.AnalyzeGraphResult.paths_to_target:type_name -> deputy.mcp.v1.GraphPath
+	22, // 22: deputy.mcp.v1.AnalyzeGraphResult.target:type_name -> deputy.mcp.v1.GraphTargetResult
+	19, // 23: deputy.mcp.v1.GraphWhyResult.matched_node:type_name -> deputy.mcp.v1.GraphPathNode
+	20, // 24: deputy.mcp.v1.GraphWhyResult.paths:type_name -> deputy.mcp.v1.GraphPath
+	19, // 25: deputy.mcp.v1.GraphNeedsResult.matched_node:type_name -> deputy.mcp.v1.GraphPathNode
+	15, // 26: deputy.mcp.v1.GraphNeedsResult.dependents:type_name -> deputy.mcp.v1.DependencyInfo
+	0,  // 27: deputy.mcp.v1.ExplainVulnerabilitiesResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
+	0,  // 28: deputy.mcp.v1.ScanPackageResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
+	50, // 29: deputy.mcp.v1.ListPolicyEntrypointsResult.entrypoints:type_name -> deputy.policy.v1.EntrypointInfo
+	51, // 30: deputy.mcp.v1.GetRemediationResult.stats:type_name -> deputy.remediation.v1.PlanStats
+	38, // 31: deputy.mcp.v1.GetRemediationResult.steps:type_name -> deputy.mcp.v1.RemediationStep
+	41, // 32: deputy.mcp.v1.DiffRefsResult.changes:type_name -> deputy.mcp.v1.DependencyChange
+	0,  // 33: deputy.mcp.v1.DiffRefsResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
+	47, // 34: deputy.mcp.v1.DiffRefsResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.DiffRefsResult.VulnerabilitiesBySeverityEntry
+	42, // 35: deputy.mcp.v1.DiffRefsResult.vulnerability_changes:type_name -> deputy.mcp.v1.DiffVulnChange
+	43, // 36: deputy.mcp.v1.DiffRefsResult.container_summary:type_name -> deputy.mcp.v1.ContainerSummary
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_deputy_mcp_v1_mcp_proto_init() }
@@ -5507,28 +5670,28 @@ func file_deputy_mcp_v1_mcp_proto_init() {
 	if File_deputy_mcp_v1_mcp_proto != nil {
 		return
 	}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[7].OneofWrappers = []any{}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[9].OneofWrappers = []any{}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[11].OneofWrappers = []any{}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[14].OneofWrappers = []any{}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[18].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[8].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[10].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[12].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[15].OneofWrappers = []any{}
 	file_deputy_mcp_v1_mcp_proto_msgTypes[19].OneofWrappers = []any{}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[21].OneofWrappers = []any{}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[24].OneofWrappers = []any{}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[26].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[20].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[22].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[25].OneofWrappers = []any{}
 	file_deputy_mcp_v1_mcp_proto_msgTypes[27].OneofWrappers = []any{}
 	file_deputy_mcp_v1_mcp_proto_msgTypes[28].OneofWrappers = []any{}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[31].OneofWrappers = []any{}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[37].OneofWrappers = []any{}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[40].OneofWrappers = []any{}
-	file_deputy_mcp_v1_mcp_proto_msgTypes[43].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[29].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[32].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[38].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[41].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[44].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_mcp_v1_mcp_proto_rawDesc), len(file_deputy_mcp_v1_mcp_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   47,
+			NumMessages:   48,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

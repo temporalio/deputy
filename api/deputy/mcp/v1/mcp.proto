@@ -56,9 +56,9 @@ message VulnExplanation {
   // Details is the full advisory description; the explain tools populate it,
   // and scan and diff summaries omit it for context-window economy.
   string details = 4;
-  // Kind distinguishes malware from ordinary vulnerabilities. Absent means
-  // vulnerability.
-  string kind = 5 [(buf.validate.field).string = {in: ["vulnerability", "malware"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  // Kind distinguishes malware and end-of-life operating system releases
+  // from ordinary vulnerabilities. Absent means vulnerability.
+  string kind = 5 [(buf.validate.field).string = {in: ["vulnerability", "malware", "eol"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
   // Severity is the normalized severity level.
   string severity = 6 [(buf.validate.field).string = {in: ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
   // SeverityType is the scoring system the severity came from (e.g. CVSS_V3,
@@ -129,6 +129,36 @@ message Coverage {
   // these as possibly vulnerable, not clean. They never count toward
   // vulnerability totals or clean. Present only for enriched scans.
   repeated DistroUpdate distro_updates = 3;
+  // Distros lists the operating system releases the scan identified and their
+  // support status in Deputy's vendored end-of-life dataset.
+  repeated DistroRelease distros = 4;
+}
+
+// DistroRelease is one operating system release a scan identified.
+message DistroRelease {
+  // Distribution is the os-release ID, e.g. alpine, debian, ubuntu.
+  string distribution = 1;
+  // Release is the release cycle, e.g. 3.18, 12, 24.04.
+  string release = 2;
+  // Version is the most specific version detected, e.g. 3.18.12.
+  string version = 3;
+  // Status is the support status on the scan date.
+  string status = 4 [(buf.validate.field).string = {in: ["supported", "eol", "unknown"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  // EolDate is the end of free security fixes, YYYY-MM-DD. Absent when
+  // unknown.
+  string eol_date = 5;
+  // DaysPastEol is whole days since EolDate; negative while supported.
+  int32 days_past_eol = 6;
+  // OldestSupportedRelease is the smallest upgrade that restores fixes.
+  string oldest_supported_release = 7;
+  // LatestRelease is the newest supported release in the family.
+  string latest_release = 8;
+  // Origin is os-package or image-ref.
+  string origin = 9;
+  // Subject is the image reference for an image-ref origin.
+  string subject = 10;
+  // DatasetSnapshot is when the end-of-life dataset was captured.
+  string dataset_snapshot = 11;
 }
 
 // DistroUpdate is one OS source package behind its distribution branch.
@@ -288,9 +318,9 @@ message TriageRequest {
 message TriagedVuln {
   // Id is the primary vulnerability identifier.
   string id = 1;
-  // Kind distinguishes malware from ordinary vulnerabilities. Absent means
-  // vulnerability.
-  string kind = 2 [(buf.validate.field).string = {in: ["vulnerability", "malware"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  // Kind distinguishes malware and end-of-life operating system releases
+  // from ordinary vulnerabilities. Absent means vulnerability.
+  string kind = 2 [(buf.validate.field).string = {in: ["vulnerability", "malware", "eol"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
   // Severity is the normalized severity level.
   string severity = 3 [(buf.validate.field).string = {in: ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
   // SeverityType is the scoring system the severity came from when known.

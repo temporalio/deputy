@@ -3212,6 +3212,8 @@ func mcpFindingKind(k vulnerabilityv1.FindingKind) string {
 	switch k {
 	case vulnerabilityv1.FindingKind_FINDING_KIND_MALWARE:
 		return "malware"
+	case vulnerabilityv1.FindingKind_FINDING_KIND_EOL:
+		return "eol"
 	case vulnerabilityv1.FindingKind_FINDING_KIND_VULNERABILITY:
 		return "vulnerability"
 	default:

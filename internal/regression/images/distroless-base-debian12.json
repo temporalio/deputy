@@ -1,0 +1,71 @@
+{
+  "image": "gcr.io/distroless/base-debian12",
+  "digest": "sha256:fabbf1c0c357a3d42550111351daed089b20a2c954df13ee2fcff60602515e84",
+  "platform": "linux/amd64",
+  "recorded": "2026-10-29",
+  "packages": [
+    {
+      "name": "base-files",
+      "version": "12.4+deb12u15",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/base-files@12.4%2Bdeb12u15?arch=amd64&distro=12",
+      "locations": [
+        "var/lib/dpkg/status.d/base-files"
+      ]
+    },
+    {
+      "name": "ca-certificates",
+      "version": "20250419~deb12u1",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/ca-certificates@20250419~deb12u1?arch=all&distro=12",
+      "locations": [
+        "var/lib/dpkg/status.d/ca-certificates"
+      ]
+    },
+    {
+      "name": "libc6",
+      "version": "2.36-9+deb12u14",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/libc6@2.36-9%2Bdeb12u14?arch=amd64&distro=12&source=glibc",
+      "locations": [
+        "var/lib/dpkg/status.d/libc6"
+      ]
+    },
+    {
+      "name": "libssl3",
+      "version": "3.0.20-1~deb12u2",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/libssl3@3.0.20-1~deb12u2?arch=amd64&distro=12&source=openssl",
+      "locations": [
+        "var/lib/dpkg/status.d/libssl3"
+      ]
+    },
+    {
+      "name": "media-types",
+      "version": "10.0.0",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/media-types@10.0.0?arch=all&distro=12",
+      "locations": [
+        "var/lib/dpkg/status.d/media-types"
+      ]
+    },
+    {
+      "name": "netbase",
+      "version": "6.4",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/netbase@6.4?arch=all&distro=12",
+      "locations": [
+        "var/lib/dpkg/status.d/netbase"
+      ]
+    },
+    {
+      "name": "tzdata",
+      "version": "2026b-0+deb12u1",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/tzdata@2026b-0%2Bdeb12u1?arch=all&distro=12",
+      "locations": [
+        "var/lib/dpkg/status.d/tzdata"
+      ]
+    }
+  ]
+}

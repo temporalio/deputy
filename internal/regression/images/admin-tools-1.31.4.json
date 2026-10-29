@@ -1,0 +1,6074 @@
+{
+  "image": "temporalio/admin-tools:1.31.4",
+  "digest": "sha256:c286fe515148587228d692806bc6f7652be5febc384a73dfd16379aed69f7d87",
+  "platform": "linux/amd64",
+  "recorded": "2026-10-29",
+  "packages": [
+    {
+      "name": "alpine-baselayout-data",
+      "version": "3.7.2-r0",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/alpine-baselayout-data@3.7.2-r0?arch=x86_64&distro=3.23.5&origin=alpine-baselayout",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "alpine-baselayout",
+      "version": "3.7.2-r0",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/alpine-baselayout@3.7.2-r0?arch=x86_64&distro=3.23.5&origin=alpine-baselayout",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "alpine-keys",
+      "version": "2.6-r0",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/alpine-keys@2.6-r0?arch=x86_64&distro=3.23.5&origin=alpine-keys",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "alpine-release",
+      "version": "3.23.5-r0",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/alpine-release@3.23.5-r0?arch=x86_64&distro=3.23.5&origin=alpine-base",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "apk-tools",
+      "version": "3.0.6-r0",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/apk-tools@3.0.6-r0?arch=x86_64&distro=3.23.5&origin=apk-tools",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "busybox-binsh",
+      "version": "1.37.0-r30",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/busybox-binsh@1.37.0-r30?arch=x86_64&distro=3.23.5&origin=busybox",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "busybox",
+      "version": "1.37.0-r30",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/busybox@1.37.0-r30?arch=x86_64&distro=3.23.5&origin=busybox",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "ca-certificates-bundle",
+      "version": "20260611-r0",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/ca-certificates-bundle@20260611-r0?arch=x86_64&distro=3.23.5&origin=ca-certificates",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "ca-certificates",
+      "version": "20260909-r0",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/ca-certificates@20260909-r0?arch=x86_64&distro=3.23.5&origin=ca-certificates",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "libapk",
+      "version": "3.0.6-r0",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/libapk@3.0.6-r0?arch=x86_64&distro=3.23.5&origin=apk-tools",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "libcrypto3",
+      "version": "3.5.9-r0",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/libcrypto3@3.5.9-r0?arch=x86_64&distro=3.23.5&origin=openssl",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "libssl3",
+      "version": "3.5.9-r0",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/libssl3@3.5.9-r0?arch=x86_64&distro=3.23.5&origin=openssl",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "musl-utils",
+      "version": "1.2.5-r23",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/musl-utils@1.2.5-r23?arch=x86_64&distro=3.23.5&origin=musl",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "musl",
+      "version": "1.2.5-r23",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/musl@1.2.5-r23?arch=x86_64&distro=3.23.5&origin=musl",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "scanelf",
+      "version": "1.3.8-r2",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/scanelf@1.3.8-r2?arch=x86_64&distro=3.23.5&origin=pax-utils",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "ssl_client",
+      "version": "1.37.0-r30",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/ssl_client@1.37.0-r30?arch=x86_64&distro=3.23.5&origin=busybox",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "tzdata",
+      "version": "2026e-r0",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/tzdata@2026e-r0?arch=x86_64&distro=3.23.5&origin=tzdata",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.2-r1",
+      "ecosystem": "Alpine:v3.23",
+      "purl": "pkg:apk/alpine/zlib@1.3.2-r1?arch=x86_64&distro=3.23.5&origin=zlib",
+      "locations": [
+        "lib/apk/db/installed"
+      ]
+    },
+    {
+      "name": "cel.dev/expr",
+      "version": "0.25.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cel.dev/expr@0.25.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "cel.dev/expr",
+      "version": "0.25.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cel.dev/expr@0.25.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/auth/oauth2adapt",
+      "version": "0.2.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/auth/oauth2adapt@0.2.8",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/auth/oauth2adapt",
+      "version": "0.2.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/auth/oauth2adapt@0.2.8",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/auth",
+      "version": "0.18.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/auth@0.18.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/auth",
+      "version": "0.20.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/auth@0.20.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/compute/metadata",
+      "version": "0.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/compute/metadata@0.9.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/compute/metadata",
+      "version": "0.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/compute/metadata@0.9.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/iam",
+      "version": "1.5.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/iam@1.5.3",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/iam",
+      "version": "1.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/iam@1.9.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/longrunning",
+      "version": "0.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/longrunning@0.11.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/monitoring",
+      "version": "1.24.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/monitoring@1.24.3",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/monitoring",
+      "version": "1.27.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/monitoring@1.27.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/run",
+      "version": "1.19.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/run@1.19.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/storage",
+      "version": "1.56.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/storage@1.56.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "cloud.google.com/go/storage",
+      "version": "1.62.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/cloud.google.com/go/storage@1.62.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "dario.cat/mergo",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/dario.cat/mergo@1.0.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "dario.cat/mergo",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/dario.cat/mergo@1.0.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "dario.cat/mergo",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/dario.cat/mergo@1.0.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "dario.cat/mergo",
+      "version": "1.0.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/dario.cat/mergo@1.0.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "filippo.io/edwards25519",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/filippo.io/edwards25519@1.1.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "filippo.io/edwards25519",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/filippo.io/edwards25519@1.1.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "filippo.io/edwards25519",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/filippo.io/edwards25519@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/alitto/pond",
+      "version": "1.9.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/alitto/pond@1.9.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/apache/thrift",
+      "version": "0.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/apache/thrift@0.24.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream",
+      "version": "1.7.16",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream@1.7.16",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream",
+      "version": "1.7.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream@1.7.9",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/config",
+      "version": "1.32.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/config@1.32.13",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/config",
+      "version": "1.32.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/config@1.32.13",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/config",
+      "version": "1.32.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/config@1.32.13",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/config",
+      "version": "1.32.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/config@1.32.13",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/config",
+      "version": "1.32.16",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/config@1.32.16",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/credentials",
+      "version": "1.19.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/credentials@1.19.13",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/credentials",
+      "version": "1.19.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/credentials@1.19.13",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/credentials",
+      "version": "1.19.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/credentials@1.19.13",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/credentials",
+      "version": "1.19.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/credentials@1.19.13",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/credentials",
+      "version": "1.19.15",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/credentials@1.19.15",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
+      "version": "1.18.21",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/feature/ec2/imds@1.18.21",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
+      "version": "1.18.21",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/feature/ec2/imds@1.18.21",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
+      "version": "1.18.21",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/feature/ec2/imds@1.18.21",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
+      "version": "1.18.21",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/feature/ec2/imds@1.18.21",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
+      "version": "1.18.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/feature/ec2/imds@1.18.22",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/configsources",
+      "version": "1.4.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/configsources@1.4.22",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/configsources",
+      "version": "1.4.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/configsources@1.4.22",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/configsources",
+      "version": "1.4.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/configsources@1.4.22",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/configsources",
+      "version": "1.4.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/configsources@1.4.22",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/configsources",
+      "version": "1.4.35",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/configsources@1.4.35",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
+      "version": "2.7.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/endpoints/v2@2.7.22",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
+      "version": "2.7.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/endpoints/v2@2.7.22",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
+      "version": "2.7.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/endpoints/v2@2.7.22",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
+      "version": "2.7.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/endpoints/v2@2.7.22",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
+      "version": "2.7.35",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/endpoints/v2@2.7.35",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/ini",
+      "version": "1.8.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/ini@1.8.6",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/ini",
+      "version": "1.8.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/ini@1.8.6",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/ini",
+      "version": "1.8.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/ini@1.8.6",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/ini",
+      "version": "1.8.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/ini@1.8.6",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/v4a",
+      "version": "1.4.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/v4a@1.4.22",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/internal/v4a",
+      "version": "1.4.23",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/v4a@1.4.23",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/bedrockagentcore",
+      "version": "1.36.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/bedrockagentcore@1.36.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/bedrockagentcorecontrol",
+      "version": "1.54.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/bedrockagentcorecontrol@1.54.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/ecs",
+      "version": "1.78.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/ecs@1.78.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
+      "version": "1.13.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding@1.13.7",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
+      "version": "1.13.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding@1.13.7",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
+      "version": "1.13.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding@1.13.7",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
+      "version": "1.13.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding@1.13.7",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
+      "version": "1.13.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding@1.13.8",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/checksum",
+      "version": "1.9.13",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/checksum@1.9.13",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/checksum",
+      "version": "1.9.14",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/checksum@1.9.14",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
+      "version": "1.13.21",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/presigned-url@1.13.21",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
+      "version": "1.13.21",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/presigned-url@1.13.21",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
+      "version": "1.13.21",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/presigned-url@1.13.21",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
+      "version": "1.13.21",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/presigned-url@1.13.21",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
+      "version": "1.13.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/presigned-url@1.13.22",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/s3shared",
+      "version": "1.19.21",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/s3shared@1.19.21",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/internal/s3shared",
+      "version": "1.19.22",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/internal/s3shared@1.19.22",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/lambda",
+      "version": "1.89.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/lambda@1.89.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/s3",
+      "version": "1.98.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/s3@1.98.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/s3",
+      "version": "1.99.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/s3@1.99.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/signin",
+      "version": "1.0.10",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/signin@1.0.10",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/signin",
+      "version": "1.0.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/signin@1.0.9",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/signin",
+      "version": "1.0.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/signin@1.0.9",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/signin",
+      "version": "1.0.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/signin@1.0.9",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/signin",
+      "version": "1.0.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/signin@1.0.9",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/sso",
+      "version": "1.30.14",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/sso@1.30.14",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/sso",
+      "version": "1.30.14",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/sso@1.30.14",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/sso",
+      "version": "1.30.14",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/sso@1.30.14",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/sso",
+      "version": "1.30.14",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/sso@1.30.14",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/sso",
+      "version": "1.30.16",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/sso@1.30.16",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
+      "version": "1.35.18",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/ssooidc@1.35.18",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
+      "version": "1.35.18",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/ssooidc@1.35.18",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
+      "version": "1.35.18",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/ssooidc@1.35.18",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
+      "version": "1.35.18",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/ssooidc@1.35.18",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
+      "version": "1.35.20",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/ssooidc@1.35.20",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/sts",
+      "version": "1.41.10",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/sts@1.41.10",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/sts",
+      "version": "1.41.10",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/sts@1.41.10",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/sts",
+      "version": "1.41.10",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/sts@1.41.10",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/sts",
+      "version": "1.41.10",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/sts@1.41.10",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2/service/sts",
+      "version": "1.42.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/sts@1.42.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2",
+      "version": "1.41.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2@1.41.6",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2",
+      "version": "1.41.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2@1.41.6",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2",
+      "version": "1.41.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2@1.41.6",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2",
+      "version": "1.41.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2@1.41.6",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/aws-sdk-go-v2",
+      "version": "1.43.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/aws-sdk-go-v2@1.43.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/aws/smithy-go",
+      "version": "1.25.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/smithy-go@1.25.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/aws/smithy-go",
+      "version": "1.25.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/smithy-go@1.25.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/smithy-go",
+      "version": "1.25.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/smithy-go@1.25.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/smithy-go",
+      "version": "1.25.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/smithy-go@1.25.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/aws/smithy-go",
+      "version": "1.27.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/aws/smithy-go@1.27.6",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/benbjohnson/clock",
+      "version": "1.3.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/benbjohnson/clock@1.3.5",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/beorn7/perks",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/beorn7/perks@1.0.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/beorn7/perks",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/beorn7/perks@1.0.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/beorn7/perks",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/beorn7/perks@1.0.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/beorn7/perks",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/beorn7/perks@1.0.1",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/beorn7/perks",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/beorn7/perks@1.0.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/blang/semver/v4",
+      "version": "4.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/blang/semver/v4@4.0.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/blang/semver/v4",
+      "version": "4.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/blang/semver/v4@4.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/blang/semver/v4",
+      "version": "4.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/blang/semver/v4@4.0.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/blang/semver/v4",
+      "version": "4.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/blang/semver/v4@4.0.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/blang/semver/v4",
+      "version": "4.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/blang/semver/v4@4.0.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/BurntSushi/toml",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/burntsushi/toml@1.4.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cactus/go-statsd-client/statsd",
+      "version": "0.0.0-20200423205355-cb0885a1018c",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cactus/go-statsd-client/statsd@0.0.0-20200423205355-cb0885a1018c",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cactus/go-statsd-client/v5",
+      "version": "5.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cactus/go-statsd-client/v5@5.1.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/cactus/go-statsd-client/v5",
+      "version": "5.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cactus/go-statsd-client/v5@5.1.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cactus/go-statsd-client/v5",
+      "version": "5.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cactus/go-statsd-client/v5@5.1.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/cactus/go-statsd-client/v5",
+      "version": "5.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cactus/go-statsd-client/v5@5.1.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/cactus/go-statsd-client/v5",
+      "version": "5.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cactus/go-statsd-client/v5@5.1.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/caio/go-tdigest/v5",
+      "version": "5.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/caio/go-tdigest/v5@5.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cenkalti/backoff/v4",
+      "version": "4.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cenkalti/backoff/v4@4.3.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/cenkalti/backoff/v4",
+      "version": "4.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cenkalti/backoff/v4@4.3.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/cenkalti/backoff/v4",
+      "version": "4.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cenkalti/backoff/v4@4.3.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/cenkalti/backoff/v5",
+      "version": "5.0.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cenkalti/backoff/v5@5.0.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cespare/xxhash/v2",
+      "version": "2.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cespare/xxhash/v2@2.3.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/cespare/xxhash/v2",
+      "version": "2.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cespare/xxhash/v2@2.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cespare/xxhash/v2",
+      "version": "2.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cespare/xxhash/v2@2.3.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/cespare/xxhash/v2",
+      "version": "2.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cespare/xxhash/v2@2.3.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/cespare/xxhash/v2",
+      "version": "2.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cespare/xxhash/v2@2.3.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/clipperhouse/uax29/v2",
+      "version": "2.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/clipperhouse/uax29/v2@2.7.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/coreos/go-oidc/v3",
+      "version": "3.13.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/coreos/go-oidc/v3@3.13.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/cpuguy83/go-md2man/v2",
+      "version": "2.0.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cpuguy83/go-md2man/v2@2.0.7",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/cpuguy83/go-md2man/v2",
+      "version": "2.0.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cpuguy83/go-md2man/v2@2.0.7",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/cpuguy83/go-md2man/v2",
+      "version": "2.0.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cpuguy83/go-md2man/v2@2.0.7",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/cpuguy83/go-md2man/v2",
+      "version": "2.0.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/cpuguy83/go-md2man/v2@2.0.7",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/davecgh/go-spew",
+      "version": "1.1.2-0.20180830191138-d8f796af33cc",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/davecgh/go-spew@1.1.2-0.20180830191138-d8f796af33cc",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/davecgh/go-spew",
+      "version": "1.1.2-0.20180830191138-d8f796af33cc",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/davecgh/go-spew@1.1.2-0.20180830191138-d8f796af33cc",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/davecgh/go-spew",
+      "version": "1.1.2-0.20180830191138-d8f796af33cc",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/davecgh/go-spew@1.1.2-0.20180830191138-d8f796af33cc",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/davecgh/go-spew",
+      "version": "1.1.2-0.20180830191138-d8f796af33cc",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/davecgh/go-spew@1.1.2-0.20180830191138-d8f796af33cc",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/davecgh/go-spew",
+      "version": "1.1.2-0.20180830191138-d8f796af33cc",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/davecgh/go-spew@1.1.2-0.20180830191138-d8f796af33cc",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/dgryski/go-farm",
+      "version": "0.0.0-20240924180020-3414d57e47da",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dgryski/go-farm@0.0.0-20240924180020-3414d57e47da",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/dgryski/go-farm",
+      "version": "0.0.0-20240924180020-3414d57e47da",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dgryski/go-farm@0.0.0-20240924180020-3414d57e47da",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/dgryski/go-farm",
+      "version": "0.0.0-20240924180020-3414d57e47da",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dgryski/go-farm@0.0.0-20240924180020-3414d57e47da",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/dgryski/go-farm",
+      "version": "0.0.0-20240924180020-3414d57e47da",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dgryski/go-farm@0.0.0-20240924180020-3414d57e47da",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/dgryski/go-farm",
+      "version": "0.0.0-20240924180020-3414d57e47da",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dgryski/go-farm@0.0.0-20240924180020-3414d57e47da",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/dustin/go-humanize",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dustin/go-humanize@1.0.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/dustin/go-humanize",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dustin/go-humanize@1.0.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/dustin/go-humanize",
+      "version": "1.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/dustin/go-humanize@1.0.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/emicklei/go-restful/v3",
+      "version": "3.13.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/emicklei/go-restful/v3@3.13.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/emirpasic/gods",
+      "version": "1.18.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/emirpasic/gods@1.18.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/envoyproxy/go-control-plane/envoy",
+      "version": "1.37.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/envoyproxy/go-control-plane/envoy@1.37.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/envoyproxy/go-control-plane/envoy",
+      "version": "1.37.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/envoyproxy/go-control-plane/envoy@1.37.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/envoyproxy/protoc-gen-validate",
+      "version": "1.3.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/envoyproxy/protoc-gen-validate@1.3.3",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/envoyproxy/protoc-gen-validate",
+      "version": "1.3.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/envoyproxy/protoc-gen-validate@1.3.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/facebookgo/clock",
+      "version": "0.0.0-20150410010913-600d898af40a",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/facebookgo/clock@0.0.0-20150410010913-600d898af40a",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/facebookgo/clock",
+      "version": "0.0.0-20150410010913-600d898af40a",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/facebookgo/clock@0.0.0-20150410010913-600d898af40a",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/facebookgo/clock",
+      "version": "0.0.0-20150410010913-600d898af40a",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/facebookgo/clock@0.0.0-20150410010913-600d898af40a",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/facebookgo/clock",
+      "version": "0.0.0-20150410010913-600d898af40a",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/facebookgo/clock@0.0.0-20150410010913-600d898af40a",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/facebookgo/clock",
+      "version": "0.0.0-20150410010913-600d898af40a",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/facebookgo/clock@0.0.0-20150410010913-600d898af40a",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/fatih/color",
+      "version": "1.18.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/fatih/color@1.18.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/fatih/color",
+      "version": "1.19.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/fatih/color@1.19.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/felixge/httpsnoop",
+      "version": "1.0.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/felixge/httpsnoop@1.0.4",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/felixge/httpsnoop",
+      "version": "1.0.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/felixge/httpsnoop@1.0.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/fxamacker/cbor/v2",
+      "version": "2.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/fxamacker/cbor/v2@2.9.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-jose/go-jose/v4",
+      "version": "4.1.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-jose/go-jose/v4@4.1.4",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/go-jose/go-jose/v4",
+      "version": "4.1.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-jose/go-jose/v4@4.1.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/logr",
+      "version": "1.4.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/logr@1.4.3",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/logr",
+      "version": "1.4.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/logr@1.4.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/logr",
+      "version": "1.4.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/logr@1.4.3",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/logr",
+      "version": "1.4.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/logr@1.4.3",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/logr",
+      "version": "1.4.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/logr@1.4.3",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/stdr",
+      "version": "1.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/stdr@1.2.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/stdr",
+      "version": "1.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/stdr@1.2.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/stdr",
+      "version": "1.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/stdr@1.2.2",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/stdr",
+      "version": "1.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/stdr@1.2.2",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/go-logr/stdr",
+      "version": "1.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-logr/stdr@1.2.2",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/jsonpointer",
+      "version": "0.23.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/jsonpointer@0.23.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/jsonreference",
+      "version": "0.21.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/jsonreference@0.21.5",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag/cmdutils",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag/cmdutils@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag/conv",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag/conv@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag/fileutils",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag/fileutils@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag/jsonname",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag/jsonname@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag/jsonutils",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag/jsonutils@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag/loading",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag/loading@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag/mangling",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag/mangling@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag/netutils",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag/netutils@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag/stringutils",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag/stringutils@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag/typeutils",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag/typeutils@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag/yamlutils",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag/yamlutils@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-openapi/swag",
+      "version": "0.26.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-openapi/swag@0.26.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/go-sql-driver/mysql",
+      "version": "1.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-sql-driver/mysql@1.9.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/go-sql-driver/mysql",
+      "version": "1.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-sql-driver/mysql@1.9.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/go-sql-driver/mysql",
+      "version": "1.9.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/go-sql-driver/mysql@1.9.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gocql/gocql",
+      "version": "1.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gocql/gocql@1.7.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/gocql/gocql",
+      "version": "1.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gocql/gocql@1.7.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gocql/gocql",
+      "version": "1.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gocql/gocql@1.7.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/gocql/gocql",
+      "version": "1.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gocql/gocql@1.7.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/gogo/protobuf",
+      "version": "1.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/protobuf@1.3.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/gogo/protobuf",
+      "version": "1.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/protobuf@1.3.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gogo/protobuf",
+      "version": "1.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/protobuf@1.3.2",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/gogo/protobuf",
+      "version": "1.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/protobuf@1.3.2",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/gogo/protobuf",
+      "version": "1.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gogo/protobuf@1.3.2",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/golang-jwt/jwt/v4",
+      "version": "4.5.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang-jwt/jwt/v4@4.5.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/golang-jwt/jwt/v4",
+      "version": "4.5.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang-jwt/jwt/v4@4.5.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/golang/mock",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/mock@1.6.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/golang/mock",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/mock@1.6.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/golang/mock",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/mock@1.6.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/golang/mock",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/mock@1.6.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/golang/mock",
+      "version": "1.7.0-rc.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/mock@1.7.0-rc.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/golang/snappy",
+      "version": "0.0.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/snappy@0.0.4",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/golang/snappy",
+      "version": "0.0.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/snappy@0.0.4",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/golang/snappy",
+      "version": "0.0.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/snappy@0.0.4",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/golang/snappy",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/golang/snappy@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gomarkdown/markdown",
+      "version": "0.0.0-20260411013819-759bbc3e3207",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gomarkdown/markdown@0.0.0-20260411013819-759bbc3e3207",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/google/gnostic-models",
+      "version": "0.7.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/gnostic-models@0.7.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/google/s2a-go",
+      "version": "0.1.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/s2a-go@0.1.9",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/google/s2a-go",
+      "version": "0.1.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/s2a-go@0.1.9",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/google/uuid",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/uuid@1.6.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/google/uuid",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/uuid@1.6.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/google/uuid",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/uuid@1.6.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/google/uuid",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/uuid@1.6.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/google/uuid",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/google/uuid@1.6.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/googleapis/enterprise-certificate-proxy",
+      "version": "0.3.11",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googleapis/enterprise-certificate-proxy@0.3.11",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/googleapis/enterprise-certificate-proxy",
+      "version": "0.3.15",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googleapis/enterprise-certificate-proxy@0.3.15",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/googleapis/gax-go/v2",
+      "version": "2.17.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googleapis/gax-go/v2@2.17.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/googleapis/gax-go/v2",
+      "version": "2.22.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googleapis/gax-go/v2@2.22.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp",
+      "version": "1.33.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googlecloudplatform/opentelemetry-operations-go/detectors/gcp@1.33.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp",
+      "version": "1.33.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googlecloudplatform/opentelemetry-operations-go/detectors/gcp@1.33.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric",
+      "version": "0.53.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googlecloudplatform/opentelemetry-operations-go/exporter/metric@0.53.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric",
+      "version": "0.56.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googlecloudplatform/opentelemetry-operations-go/exporter/metric@0.56.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping",
+      "version": "0.53.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googlecloudplatform/opentelemetry-operations-go/internal/resourcemapping@0.53.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping",
+      "version": "0.56.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/googlecloudplatform/opentelemetry-operations-go/internal/resourcemapping@0.56.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gorilla/mux",
+      "version": "1.8.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gorilla/mux@1.8.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/gorilla/securecookie",
+      "version": "1.1.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/gorilla/securecookie@1.1.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/go-grpc-middleware/v2",
+      "version": "2.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/go-grpc-middleware/v2@2.3.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/go-grpc-middleware/v2",
+      "version": "2.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/go-grpc-middleware/v2@2.3.2",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/go-grpc-middleware/v2",
+      "version": "2.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/go-grpc-middleware/v2@2.3.2",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/go-grpc-middleware/v2",
+      "version": "2.3.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/go-grpc-middleware/v2@2.3.2",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/go-grpc-middleware/v2",
+      "version": "2.3.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/go-grpc-middleware/v2@2.3.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/grpc-gateway/v2",
+      "version": "2.27.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/grpc-gateway/v2@2.27.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/grpc-gateway/v2",
+      "version": "2.27.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/grpc-gateway/v2@2.27.2",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/grpc-gateway/v2",
+      "version": "2.27.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/grpc-gateway/v2@2.27.2",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/grpc-gateway/v2",
+      "version": "2.27.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/grpc-gateway/v2@2.27.2",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/grpc-ecosystem/grpc-gateway/v2",
+      "version": "2.29.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/grpc-ecosystem/grpc-gateway/v2@2.29.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/hailocab/go-hostpool",
+      "version": "0.0.0-20160125115350-e80d13ce29ed",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hailocab/go-hostpool@0.0.0-20160125115350-e80d13ce29ed",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/hailocab/go-hostpool",
+      "version": "0.0.0-20160125115350-e80d13ce29ed",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hailocab/go-hostpool@0.0.0-20160125115350-e80d13ce29ed",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/hailocab/go-hostpool",
+      "version": "0.0.0-20160125115350-e80d13ce29ed",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hailocab/go-hostpool@0.0.0-20160125115350-e80d13ce29ed",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/hailocab/go-hostpool",
+      "version": "0.0.0-20160125115350-e80d13ce29ed",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/hailocab/go-hostpool@0.0.0-20160125115350-e80d13ce29ed",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/huandu/xstrings",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/huandu/xstrings@1.5.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/huandu/xstrings",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/huandu/xstrings@1.5.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/huandu/xstrings",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/huandu/xstrings@1.5.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/huandu/xstrings",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/huandu/xstrings@1.5.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/iancoleman/strcase",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/iancoleman/strcase@0.3.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/iancoleman/strcase",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/iancoleman/strcase@0.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/iancoleman/strcase",
+      "version": "0.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/iancoleman/strcase@0.3.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/jackc/pgpassfile",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/pgpassfile@1.0.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/jackc/pgpassfile",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/pgpassfile@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/jackc/pgpassfile",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/pgpassfile@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/jackc/pgservicefile",
+      "version": "0.0.0-20240606120523-5a60cdf6a761",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/pgservicefile@0.0.0-20240606120523-5a60cdf6a761",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/jackc/pgservicefile",
+      "version": "0.0.0-20240606120523-5a60cdf6a761",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/pgservicefile@0.0.0-20240606120523-5a60cdf6a761",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/jackc/pgservicefile",
+      "version": "0.0.0-20240606120523-5a60cdf6a761",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/pgservicefile@0.0.0-20240606120523-5a60cdf6a761",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/jackc/pgx/v5",
+      "version": "5.10.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/pgx/v5@5.10.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/jackc/pgx/v5",
+      "version": "5.9.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/pgx/v5@5.9.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/jackc/pgx/v5",
+      "version": "5.9.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/pgx/v5@5.9.2",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/jackc/puddle/v2",
+      "version": "2.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/puddle/v2@2.2.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/jackc/puddle/v2",
+      "version": "2.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/puddle/v2@2.2.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/jackc/puddle/v2",
+      "version": "2.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jackc/puddle/v2@2.2.2",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/jmoiron/sqlx",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jmoiron/sqlx@1.4.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/jmoiron/sqlx",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jmoiron/sqlx@1.4.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/jmoiron/sqlx",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jmoiron/sqlx@1.4.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/jmoiron/sqlx",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/jmoiron/sqlx@1.4.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/josharian/intern",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/josharian/intern@1.0.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/josharian/intern",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/josharian/intern@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/josharian/intern",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/josharian/intern@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/josharian/intern",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/josharian/intern@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/josharian/intern",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/josharian/intern@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/klauspost/compress",
+      "version": "1.18.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/klauspost/compress@1.18.7",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/klauspost/compress",
+      "version": "1.18.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/klauspost/compress@1.18.7",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/klauspost/compress",
+      "version": "1.18.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/klauspost/compress@1.18.7",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/klauspost/compress",
+      "version": "1.18.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/klauspost/compress@1.18.7",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/klauspost/compress",
+      "version": "1.18.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/klauspost/compress@1.18.7",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/labstack/echo/v4",
+      "version": "4.15.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/labstack/echo/v4@4.15.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/labstack/gommon",
+      "version": "0.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/labstack/gommon@0.5.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/lib/pq",
+      "version": "1.10.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/lib/pq@1.10.9",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/lib/pq",
+      "version": "1.10.9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/lib/pq@1.10.9",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/lib/pq",
+      "version": "1.12.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/lib/pq@1.12.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/mailru/easyjson",
+      "version": "0.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mailru/easyjson@0.9.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/mailru/easyjson",
+      "version": "0.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mailru/easyjson@0.9.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/mailru/easyjson",
+      "version": "0.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mailru/easyjson@0.9.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/mailru/easyjson",
+      "version": "0.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mailru/easyjson@0.9.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/mailru/easyjson",
+      "version": "0.9.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mailru/easyjson@0.9.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/goutils",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/goutils@1.1.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/goutils",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/goutils@1.1.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/goutils",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/goutils@1.1.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/goutils",
+      "version": "1.1.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/goutils@1.1.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/semver/v3",
+      "version": "3.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/semver/v3@3.4.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/semver/v3",
+      "version": "3.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/semver/v3@3.4.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/semver/v3",
+      "version": "3.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/semver/v3@3.4.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/semver/v3",
+      "version": "3.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/semver/v3@3.4.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/sprig/v3",
+      "version": "3.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/sprig/v3@3.3.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/sprig/v3",
+      "version": "3.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/sprig/v3@3.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/sprig/v3",
+      "version": "3.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/sprig/v3@3.3.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/Masterminds/sprig/v3",
+      "version": "3.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/masterminds/sprig/v3@3.3.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-colorable",
+      "version": "0.1.14",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-colorable@0.1.14",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-colorable",
+      "version": "0.1.15",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-colorable@0.1.15",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-isatty",
+      "version": "0.0.20",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-isatty@0.0.20",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-isatty",
+      "version": "0.0.23",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-isatty@0.0.23",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-runewidth",
+      "version": "0.0.16",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-runewidth@0.0.16",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/mattn/go-runewidth",
+      "version": "0.0.23",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mattn/go-runewidth@0.0.23",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/copystructure",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/copystructure@1.2.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/copystructure",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/copystructure@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/copystructure",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/copystructure@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/copystructure",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/copystructure@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/mapstructure",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/mapstructure@1.5.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/mapstructure",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/mapstructure@1.5.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/mapstructure",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/mapstructure@1.5.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/mapstructure",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/mapstructure@1.5.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/mapstructure",
+      "version": "1.5.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/mapstructure@1.5.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/reflectwalk",
+      "version": "1.0.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/reflectwalk@1.0.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/reflectwalk",
+      "version": "1.0.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/reflectwalk@1.0.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/reflectwalk",
+      "version": "1.0.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/reflectwalk@1.0.2",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/mitchellh/reflectwalk",
+      "version": "1.0.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/mitchellh/reflectwalk@1.0.2",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/modern-go/concurrent",
+      "version": "0.0.0-20180306012644-bacd9c7ef1dd",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/modern-go/concurrent@0.0.0-20180306012644-bacd9c7ef1dd",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/modern-go/reflect2",
+      "version": "1.0.3-0.20250322232337-35a7c28c31ee",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/modern-go/reflect2@1.0.3-0.20250322232337-35a7c28c31ee",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/munnerz/goautoneg",
+      "version": "0.0.0-20191010083416-a7dc8b61c822",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/munnerz/goautoneg@0.0.0-20191010083416-a7dc8b61c822",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/munnerz/goautoneg",
+      "version": "0.0.0-20191010083416-a7dc8b61c822",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/munnerz/goautoneg@0.0.0-20191010083416-a7dc8b61c822",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/munnerz/goautoneg",
+      "version": "0.0.0-20191010083416-a7dc8b61c822",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/munnerz/goautoneg@0.0.0-20191010083416-a7dc8b61c822",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/munnerz/goautoneg",
+      "version": "0.0.0-20191010083416-a7dc8b61c822",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/munnerz/goautoneg@0.0.0-20191010083416-a7dc8b61c822",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/munnerz/goautoneg",
+      "version": "0.0.0-20191010083416-a7dc8b61c822",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/munnerz/goautoneg@0.0.0-20191010083416-a7dc8b61c822",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/nexus-rpc/nexus-proto-annotations",
+      "version": "0.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/nexus-rpc/nexus-proto-annotations@0.1.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/nexus-rpc/sdk-go",
+      "version": "0.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/nexus-rpc/sdk-go@0.6.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/nexus-rpc/sdk-go",
+      "version": "0.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/nexus-rpc/sdk-go@0.6.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/nexus-rpc/sdk-go",
+      "version": "0.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/nexus-rpc/sdk-go@0.6.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/nexus-rpc/sdk-go",
+      "version": "0.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/nexus-rpc/sdk-go@0.6.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/nexus-rpc/sdk-go",
+      "version": "0.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/nexus-rpc/sdk-go@0.6.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/olekukonko/tablewriter",
+      "version": "0.0.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olekukonko/tablewriter@0.0.5",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/olekukonko/tablewriter",
+      "version": "0.0.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olekukonko/tablewriter@0.0.5",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/olivere/elastic/v7",
+      "version": "7.0.32",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olivere/elastic/v7@7.0.32",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/olivere/elastic/v7",
+      "version": "7.0.32",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olivere/elastic/v7@7.0.32",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/olivere/elastic/v7",
+      "version": "7.0.32",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olivere/elastic/v7@7.0.32",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/olivere/elastic/v7",
+      "version": "7.0.32",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olivere/elastic/v7@7.0.32",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/olivere/elastic/v7",
+      "version": "7.0.32",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/olivere/elastic/v7@7.0.32",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/opentracing/opentracing-go",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/opentracing/opentracing-go@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/pkg/errors",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pkg/errors@0.9.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/pkg/errors",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pkg/errors@0.9.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/pkg/errors",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pkg/errors@0.9.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/pkg/errors",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pkg/errors@0.9.1",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/pkg/errors",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pkg/errors@0.9.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/pmezard/go-difflib",
+      "version": "1.0.1-0.20181226105442-5d4384ee4fb2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pmezard/go-difflib@1.0.1-0.20181226105442-5d4384ee4fb2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/pmezard/go-difflib",
+      "version": "1.0.1-0.20181226105442-5d4384ee4fb2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pmezard/go-difflib@1.0.1-0.20181226105442-5d4384ee4fb2",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/pmezard/go-difflib",
+      "version": "1.0.1-0.20181226105442-5d4384ee4fb2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pmezard/go-difflib@1.0.1-0.20181226105442-5d4384ee4fb2",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/pmezard/go-difflib",
+      "version": "1.0.1-0.20181226105442-5d4384ee4fb2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/pmezard/go-difflib@1.0.1-0.20181226105442-5d4384ee4fb2",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_golang",
+      "version": "1.21.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_golang@1.21.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_golang",
+      "version": "1.21.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_golang@1.21.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_golang",
+      "version": "1.21.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_golang@1.21.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_golang",
+      "version": "1.21.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_golang@1.21.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_golang",
+      "version": "1.21.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_golang@1.21.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_model",
+      "version": "0.6.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_model@0.6.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_model",
+      "version": "0.6.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_model@0.6.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_model",
+      "version": "0.6.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_model@0.6.2",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_model",
+      "version": "0.6.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_model@0.6.2",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/client_model",
+      "version": "0.6.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/client_model@0.6.2",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/common",
+      "version": "0.62.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/common@0.62.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/common",
+      "version": "0.62.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/common@0.62.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/common",
+      "version": "0.62.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/common@0.62.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/common",
+      "version": "0.62.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/common@0.62.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/common",
+      "version": "0.63.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/common@0.63.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/procfs",
+      "version": "0.15.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/procfs@0.15.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/procfs",
+      "version": "0.15.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/procfs@0.15.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/procfs",
+      "version": "0.15.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/procfs@0.15.1",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/procfs",
+      "version": "0.15.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/procfs@0.15.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/prometheus/procfs",
+      "version": "0.20.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/prometheus/procfs@0.20.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/rcrowley/go-metrics",
+      "version": "0.0.0-20250401214520-65e299d6c5c9",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/rcrowley/go-metrics@0.0.0-20250401214520-65e299d6c5c9",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/remyoudompheng/bigfft",
+      "version": "0.0.0-20230129092748-24d4a6f8daec",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/remyoudompheng/bigfft@0.0.0-20230129092748-24d4a6f8daec",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/remyoudompheng/bigfft",
+      "version": "0.0.0-20230129092748-24d4a6f8daec",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/remyoudompheng/bigfft@0.0.0-20230129092748-24d4a6f8daec",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/remyoudompheng/bigfft",
+      "version": "0.0.0-20230129092748-24d4a6f8daec",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/remyoudompheng/bigfft@0.0.0-20230129092748-24d4a6f8daec",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/rivo/uniseg",
+      "version": "0.4.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/rivo/uniseg@0.4.7",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron/v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron/v3@3.0.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron/v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron/v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron/v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron/v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron/v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron/v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron/v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron/v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron@1.2.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/robfig/cron",
+      "version": "1.2.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/robfig/cron@1.2.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/russross/blackfriday/v2",
+      "version": "2.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/russross/blackfriday/v2@2.1.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/russross/blackfriday/v2",
+      "version": "2.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/russross/blackfriday/v2@2.1.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/russross/blackfriday/v2",
+      "version": "2.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/russross/blackfriday/v2@2.1.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/russross/blackfriday/v2",
+      "version": "2.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/russross/blackfriday/v2@2.1.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/shopspring/decimal",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/shopspring/decimal@1.4.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/shopspring/decimal",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/shopspring/decimal@1.4.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/shopspring/decimal",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/shopspring/decimal@1.4.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/shopspring/decimal",
+      "version": "1.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/shopspring/decimal@1.4.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/sirupsen/logrus",
+      "version": "1.9.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/sirupsen/logrus@1.9.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/sony/gobreaker",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/sony/gobreaker@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/spf13/cast",
+      "version": "1.10.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/spf13/cast@1.10.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/spf13/cast",
+      "version": "1.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/spf13/cast@1.7.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/spf13/cast",
+      "version": "1.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/spf13/cast@1.7.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/spf13/cast",
+      "version": "1.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/spf13/cast@1.7.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/spf13/cobra",
+      "version": "1.10.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/spf13/cobra@1.10.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/spf13/pflag",
+      "version": "1.0.10",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/spf13/pflag@1.0.10",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/spiffe/go-spiffe/v2",
+      "version": "2.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/spiffe/go-spiffe/v2@2.7.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/spiffe/go-spiffe/v2",
+      "version": "2.7.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/spiffe/go-spiffe/v2@2.7.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/objx",
+      "version": "0.5.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/objx@0.5.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/objx",
+      "version": "0.5.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/objx@0.5.2",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/objx",
+      "version": "0.5.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/objx@0.5.2",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/objx",
+      "version": "0.5.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/objx@0.5.2",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/objx",
+      "version": "0.5.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/objx@0.5.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/testify",
+      "version": "1.11.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/testify@1.11.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/testify",
+      "version": "1.11.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/testify@1.11.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/testify",
+      "version": "1.11.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/testify@1.11.1",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/testify",
+      "version": "1.11.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/testify@1.11.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/stretchr/testify",
+      "version": "1.12.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/stretchr/testify@1.12.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/cli",
+      "version": "1.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/cli@1.9.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/ringpop-go",
+      "version": "0.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/ringpop-go@0.1.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/sqlparser",
+      "version": "0.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/sqlparser@0.1.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/sqlparser",
+      "version": "0.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/sqlparser@0.1.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/sqlparser",
+      "version": "0.1.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/sqlparser@0.1.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/tchannel-go",
+      "version": "1.22.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/tchannel-go@1.22.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/temporalio/ui-server/v2",
+      "version": "2.54.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/temporalio/ui-server/v2@2.54.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/tidwall/btree",
+      "version": "1.8.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/tidwall/btree@1.8.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/twmb/murmur3",
+      "version": "1.1.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/twmb/murmur3@1.1.8",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/twmb/murmur3",
+      "version": "1.1.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/twmb/murmur3@1.1.8",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/twmb/murmur3",
+      "version": "1.1.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/twmb/murmur3@1.1.8",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/twmb/murmur3",
+      "version": "1.1.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/twmb/murmur3@1.1.8",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/twmb/murmur3",
+      "version": "1.1.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/twmb/murmur3@1.1.8",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/uber-common/bark",
+      "version": "1.3.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-common/bark@1.3.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/uber-go/tally/v4",
+      "version": "4.1.17",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-go/tally/v4@4.1.17",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/uber-go/tally/v4",
+      "version": "4.1.17",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-go/tally/v4@4.1.17",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/uber-go/tally/v4",
+      "version": "4.1.17",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-go/tally/v4@4.1.17",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/uber-go/tally/v4",
+      "version": "4.1.17",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-go/tally/v4@4.1.17",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/uber-go/tally/v4",
+      "version": "4.1.17",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/uber-go/tally/v4@4.1.17",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/urfave/cli/v2",
+      "version": "2.27.7",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/urfave/cli/v2@2.27.7",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "github.com/urfave/cli",
+      "version": "1.22.16",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/urfave/cli@1.22.16",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "github.com/urfave/cli",
+      "version": "1.22.16",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/urfave/cli@1.22.16",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "github.com/urfave/cli",
+      "version": "1.22.16",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/urfave/cli@1.22.16",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "github.com/valyala/bytebufferpool",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/valyala/bytebufferpool@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/valyala/fasttemplate",
+      "version": "1.2.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/valyala/fasttemplate@1.2.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/x448/float16",
+      "version": "0.8.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/x448/float16@0.8.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "github.com/xrash/smetrics",
+      "version": "0.0.0-20240521201337-686a1a2994c1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/github.com/xrash/smetrics@0.0.0-20240521201337-686a1a2994c1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/auto/sdk",
+      "version": "1.2.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/auto/sdk@1.2.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/auto/sdk",
+      "version": "1.2.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/auto/sdk@1.2.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/auto/sdk",
+      "version": "1.2.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/auto/sdk@1.2.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/auto/sdk",
+      "version": "1.2.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/auto/sdk@1.2.1",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/auto/sdk",
+      "version": "1.2.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/auto/sdk@1.2.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/contrib/detectors/gcp",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/contrib/detectors/gcp@1.44.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/contrib/detectors/gcp",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/contrib/detectors/gcp@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+      "version": "0.61.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@0.61.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+      "version": "0.61.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@0.61.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+      "version": "0.61.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@0.61.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+      "version": "0.68.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@0.68.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
+      "version": "0.61.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@0.61.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
+      "version": "0.68.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@0.68.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc",
+      "version": "1.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc@1.34.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc",
+      "version": "1.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc@1.34.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc",
+      "version": "1.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc@1.34.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc",
+      "version": "1.43.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc@1.43.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
+      "version": "1.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@1.34.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
+      "version": "1.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@1.34.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
+      "version": "1.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@1.34.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
+      "version": "1.43.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@1.43.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+      "version": "1.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace@1.34.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+      "version": "1.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace@1.34.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+      "version": "1.34.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace@1.34.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+      "version": "1.43.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/otlp/otlptrace@1.43.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/prometheus",
+      "version": "0.56.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/prometheus@0.56.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/prometheus",
+      "version": "0.56.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/prometheus@0.56.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/prometheus",
+      "version": "0.56.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/prometheus@0.56.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/prometheus",
+      "version": "0.56.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/prometheus@0.56.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/exporters/prometheus",
+      "version": "0.57.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/exporters/prometheus@0.57.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/log",
+      "version": "0.20.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/log@0.20.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/metric",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/metric@1.44.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/metric",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/metric@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/metric",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/metric@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/metric",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/metric@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/metric",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/metric@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk/metric",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk/metric@1.44.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk/metric",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk/metric@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk/metric",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk/metric@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk/metric",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk/metric@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk/metric",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk/metric@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk@1.44.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/sdk",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/sdk@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/trace",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/trace@1.44.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/trace",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/trace@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/trace",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/trace@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/trace",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/trace@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel/trace",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/trace@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel@1.44.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/otel",
+      "version": "1.44.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/otel@1.44.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/proto/otlp",
+      "version": "1.10.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/proto/otlp@1.10.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/proto/otlp",
+      "version": "1.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/proto/otlp@1.9.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/proto/otlp",
+      "version": "1.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/proto/otlp@1.9.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.opentelemetry.io/proto/otlp",
+      "version": "1.9.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.opentelemetry.io/proto/otlp@1.9.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.temporal.io/api",
+      "version": "1.62.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/api@1.62.8",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.temporal.io/api",
+      "version": "1.62.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/api@1.62.8",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.temporal.io/api",
+      "version": "1.62.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/api@1.62.8",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.temporal.io/api",
+      "version": "1.62.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/api@1.62.8",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.temporal.io/api",
+      "version": "1.63.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/api@1.63.5",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.temporal.io/auto-scaled-workers",
+      "version": "0.2.0-1.32.0.158.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/auto-scaled-workers@0.2.0-1.32.0.158.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.temporal.io/sdk/contrib/envconfig",
+      "version": "1.0.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/sdk/contrib/envconfig@1.0.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.temporal.io/sdk",
+      "version": "1.41.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/sdk@1.41.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.temporal.io/sdk",
+      "version": "1.41.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/sdk@1.41.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.temporal.io/sdk",
+      "version": "1.41.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/sdk@1.41.1",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.temporal.io/sdk",
+      "version": "1.41.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/sdk@1.41.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.temporal.io/sdk",
+      "version": "1.47.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/sdk@1.47.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.temporal.io/server",
+      "version": "1.31.4-0.20261009215322-9a9a1f0fa8a5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/server@1.31.4-0.20261009215322-9a9a1f0fa8a5",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.temporal.io/server",
+      "version": "1.31.4-0.20261009215322-9a9a1f0fa8a5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/server@1.31.4-0.20261009215322-9a9a1f0fa8a5",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.temporal.io/server",
+      "version": "1.31.4-0.20261009215322-9a9a1f0fa8a5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/server@1.31.4-0.20261009215322-9a9a1f0fa8a5",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.temporal.io/server",
+      "version": "1.31.4-0.20261009215322-9a9a1f0fa8a5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/server@1.31.4-0.20261009215322-9a9a1f0fa8a5",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.temporal.io/server",
+      "version": "1.32.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.temporal.io/server@1.32.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/atomic",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/atomic@1.11.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.uber.org/atomic",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/atomic@1.11.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/atomic",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/atomic@1.11.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/atomic",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/atomic@1.11.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/atomic",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/atomic@1.11.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/dig",
+      "version": "1.19.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/dig@1.19.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.uber.org/dig",
+      "version": "1.19.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/dig@1.19.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/dig",
+      "version": "1.19.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/dig@1.19.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/dig",
+      "version": "1.19.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/dig@1.19.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/dig",
+      "version": "1.19.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/dig@1.19.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/fx",
+      "version": "1.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/fx@1.24.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.uber.org/fx",
+      "version": "1.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/fx@1.24.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/fx",
+      "version": "1.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/fx@1.24.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/fx",
+      "version": "1.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/fx@1.24.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/fx",
+      "version": "1.24.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/fx@1.24.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/mock",
+      "version": "0.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/mock@0.6.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.uber.org/mock",
+      "version": "0.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/mock@0.6.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/mock",
+      "version": "0.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/mock@0.6.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/mock",
+      "version": "0.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/mock@0.6.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/mock",
+      "version": "0.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/mock@0.6.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/multierr",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/multierr@1.11.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.uber.org/multierr",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/multierr@1.11.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/multierr",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/multierr@1.11.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/multierr",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/multierr@1.11.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/multierr",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/multierr@1.11.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/zap",
+      "version": "1.27.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/zap@1.27.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "go.uber.org/zap",
+      "version": "1.27.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/zap@1.27.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.uber.org/zap",
+      "version": "1.27.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/zap@1.27.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/zap",
+      "version": "1.27.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/zap@1.27.1",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "go.uber.org/zap",
+      "version": "1.27.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.uber.org/zap@1.27.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "go.yaml.in/yaml/v2",
+      "version": "2.4.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.yaml.in/yaml/v2@2.4.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "go.yaml.in/yaml/v3",
+      "version": "3.0.5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/go.yaml.in/yaml/v3@3.0.5",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/crypto",
+      "version": "0.56.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/crypto@0.56.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "golang.org/x/crypto",
+      "version": "0.56.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/crypto@0.56.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/crypto",
+      "version": "0.56.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/crypto@0.56.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/crypto",
+      "version": "0.56.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/crypto@0.56.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/exp",
+      "version": "0.0.0-20251023183803-a4bb9ffd2546",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/exp@0.0.0-20251023183803-a4bb9ffd2546",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "golang.org/x/exp",
+      "version": "0.0.0-20251023183803-a4bb9ffd2546",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/exp@0.0.0-20251023183803-a4bb9ffd2546",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/exp",
+      "version": "0.0.0-20251023183803-a4bb9ffd2546",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/exp@0.0.0-20251023183803-a4bb9ffd2546",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/exp",
+      "version": "0.0.0-20251023183803-a4bb9ffd2546",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/exp@0.0.0-20251023183803-a4bb9ffd2546",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/exp",
+      "version": "0.0.0-20260611194520-c48552f49976",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/exp@0.0.0-20260611194520-c48552f49976",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "0.58.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/net@0.58.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "0.58.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/net@0.58.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "0.58.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/net@0.58.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "0.58.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/net@0.58.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "0.58.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/net@0.58.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/oauth2",
+      "version": "0.36.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/oauth2@0.36.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "golang.org/x/oauth2",
+      "version": "0.36.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/oauth2@0.36.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/sync",
+      "version": "0.22.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sync@0.22.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "golang.org/x/sync",
+      "version": "0.22.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sync@0.22.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/sync",
+      "version": "0.22.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sync@0.22.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/sync",
+      "version": "0.22.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sync@0.22.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/sync",
+      "version": "0.22.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sync@0.22.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "0.47.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sys@0.47.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "0.47.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sys@0.47.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "0.47.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sys@0.47.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "0.47.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sys@0.47.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "0.47.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/sys@0.47.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/term",
+      "version": "0.45.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/term@0.45.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "0.41.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/text@0.41.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "0.41.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/text@0.41.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "0.41.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/text@0.41.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "0.41.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/text@0.41.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "0.41.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/text@0.41.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/time",
+      "version": "0.14.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/time@0.14.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "golang.org/x/time",
+      "version": "0.14.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/time@0.14.0",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/time",
+      "version": "0.14.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/time@0.14.0",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/time",
+      "version": "0.14.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/time@0.14.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "golang.org/x/time",
+      "version": "0.15.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/golang.org/x/time@0.15.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "google.golang.org/api",
+      "version": "0.264.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/api@0.264.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "google.golang.org/api",
+      "version": "0.276.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/api@0.276.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto/googleapis/api",
+      "version": "0.0.0-20260526163538-3dc84a4a5aaa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto/googleapis/api@0.0.0-20260526163538-3dc84a4a5aaa",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto/googleapis/api",
+      "version": "0.0.0-20260526163538-3dc84a4a5aaa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto/googleapis/api@0.0.0-20260526163538-3dc84a4a5aaa",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto/googleapis/api",
+      "version": "0.0.0-20260526163538-3dc84a4a5aaa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto/googleapis/api@0.0.0-20260526163538-3dc84a4a5aaa",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto/googleapis/api",
+      "version": "0.0.0-20260526163538-3dc84a4a5aaa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto/googleapis/api@0.0.0-20260526163538-3dc84a4a5aaa",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto/googleapis/api",
+      "version": "0.0.0-20260526163538-3dc84a4a5aaa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto/googleapis/api@0.0.0-20260526163538-3dc84a4a5aaa",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto/googleapis/rpc",
+      "version": "0.0.0-20260526163538-3dc84a4a5aaa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto/googleapis/rpc@0.0.0-20260526163538-3dc84a4a5aaa",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto/googleapis/rpc",
+      "version": "0.0.0-20260526163538-3dc84a4a5aaa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto/googleapis/rpc@0.0.0-20260526163538-3dc84a4a5aaa",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto/googleapis/rpc",
+      "version": "0.0.0-20260526163538-3dc84a4a5aaa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto/googleapis/rpc@0.0.0-20260526163538-3dc84a4a5aaa",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto/googleapis/rpc",
+      "version": "0.0.0-20260526163538-3dc84a4a5aaa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto/googleapis/rpc@0.0.0-20260526163538-3dc84a4a5aaa",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto/googleapis/rpc",
+      "version": "0.0.0-20260526163538-3dc84a4a5aaa",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto/googleapis/rpc@0.0.0-20260526163538-3dc84a4a5aaa",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto",
+      "version": "0.0.0-20260128011058-8636f8732409",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto@0.0.0-20260128011058-8636f8732409",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "google.golang.org/genproto",
+      "version": "0.0.0-20260420184626-e10c466a9529",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/genproto@0.0.0-20260420184626-e10c466a9529",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "google.golang.org/grpc",
+      "version": "1.83.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/grpc@1.83.2",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "google.golang.org/grpc",
+      "version": "1.83.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/grpc@1.83.2",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "google.golang.org/grpc",
+      "version": "1.83.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/grpc@1.83.2",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "google.golang.org/grpc",
+      "version": "1.83.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/grpc@1.83.2",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "google.golang.org/grpc",
+      "version": "1.83.2",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/grpc@1.83.2",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "google.golang.org/protobuf",
+      "version": "1.36.11",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/protobuf@1.36.11",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "google.golang.org/protobuf",
+      "version": "1.36.11",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/protobuf@1.36.11",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "google.golang.org/protobuf",
+      "version": "1.36.11",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/protobuf@1.36.11",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "google.golang.org/protobuf",
+      "version": "1.36.11",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/protobuf@1.36.11",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "google.golang.org/protobuf",
+      "version": "1.36.11",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/google.golang.org/protobuf@1.36.11",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "gopkg.in/evanphx/json-patch.v4",
+      "version": "4.13.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/evanphx/json-patch.v4@4.13.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "gopkg.in/inf.v0",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/inf.v0@0.9.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "gopkg.in/inf.v0",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/inf.v0@0.9.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "gopkg.in/inf.v0",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/inf.v0@0.9.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "gopkg.in/inf.v0",
+      "version": "0.9.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/inf.v0@0.9.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "gopkg.in/validator.v2",
+      "version": "2.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/validator.v2@2.0.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "gopkg.in/validator.v2",
+      "version": "2.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/validator.v2@2.0.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "gopkg.in/validator.v2",
+      "version": "2.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/validator.v2@2.0.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "gopkg.in/validator.v2",
+      "version": "2.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/validator.v2@2.0.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "gopkg.in/yaml.v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/yaml.v3@3.0.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "gopkg.in/yaml.v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/yaml.v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "gopkg.in/yaml.v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/yaml.v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal-cassandra-tool"
+      ]
+    },
+    {
+      "name": "gopkg.in/yaml.v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/yaml.v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal-elasticsearch-tool"
+      ]
+    },
+    {
+      "name": "gopkg.in/yaml.v3",
+      "version": "3.0.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/gopkg.in/yaml.v3@3.0.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "k8s.io/api",
+      "version": "0.35.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/k8s.io/api@0.35.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "k8s.io/apimachinery",
+      "version": "0.35.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/k8s.io/apimachinery@0.35.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "k8s.io/client-go",
+      "version": "0.35.4",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/k8s.io/client-go@0.35.4",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "k8s.io/klog/v2",
+      "version": "2.140.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/k8s.io/klog/v2@2.140.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "k8s.io/kube-openapi",
+      "version": "0.0.0-20260414162039-ec9c827d403f",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/k8s.io/kube-openapi@0.0.0-20260414162039-ec9c827d403f",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "k8s.io/utils",
+      "version": "0.0.0-20260319190234-28399d86e0b5",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/k8s.io/utils@0.0.0-20260319190234-28399d86e0b5",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "modernc.org/libc",
+      "version": "1.67.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/libc@1.67.6",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "modernc.org/libc",
+      "version": "1.67.6",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/libc@1.67.6",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "modernc.org/libc",
+      "version": "1.72.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/libc@1.72.3",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "modernc.org/mathutil",
+      "version": "1.7.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/mathutil@1.7.1",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "modernc.org/mathutil",
+      "version": "1.7.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/mathutil@1.7.1",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "modernc.org/mathutil",
+      "version": "1.7.1",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/mathutil@1.7.1",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "modernc.org/memory",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/memory@1.11.0",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "modernc.org/memory",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/memory@1.11.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "modernc.org/memory",
+      "version": "1.11.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/memory@1.11.0",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "modernc.org/sqlite",
+      "version": "1.44.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/sqlite@1.44.3",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    },
+    {
+      "name": "modernc.org/sqlite",
+      "version": "1.44.3",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/sqlite@1.44.3",
+      "locations": [
+        "usr/local/bin/temporal-sql-tool"
+      ]
+    },
+    {
+      "name": "modernc.org/sqlite",
+      "version": "1.51.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/modernc.org/sqlite@1.51.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "sigs.k8s.io/json",
+      "version": "0.0.0-20250730193827-2d320260d730",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/sigs.k8s.io/json@0.0.0-20250730193827-2d320260d730",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "sigs.k8s.io/randfill",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/sigs.k8s.io/randfill@1.0.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "sigs.k8s.io/structured-merge-diff/v6",
+      "version": "6.4.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/sigs.k8s.io/structured-merge-diff/v6@6.4.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "sigs.k8s.io/yaml",
+      "version": "1.6.0",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/sigs.k8s.io/yaml@1.6.0",
+      "locations": [
+        "usr/local/bin/temporal"
+      ]
+    },
+    {
+      "name": "stdlib",
+      "version": "1.26.8",
+      "ecosystem": "Go",
+      "purl": "pkg:golang/stdlib@1.26.8",
+      "locations": [
+        "usr/local/bin/tdbg"
+      ]
+    }
+  ]
+}

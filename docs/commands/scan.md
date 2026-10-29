@@ -170,8 +170,15 @@ result is never mistaken for complete coverage:
   Text output lists them under `Behind distribution branch`.
 - **`findings[].sources`**: which advisory source(s) reported each finding
   (e.g. `["osv"]`). Multiple entries mean independent corroboration.
+- **`coverage.distros`** (JSON/API/MCP): the operating system releases the
+  scan identified, each with its support status (`SUPPORTED`, `EOL`, or
+  `UNKNOWN`), end-of-life date, days past end of life (negative while still
+  supported), the oldest and newest supported releases in the family, where the
+  release was read from (`os-package` or `image-ref`), and the snapshot date of
+  the end-of-life dataset. See [End-of-life operating systems](#end-of-life-operating-systems).
 - **`advisories[].kind`**: distinguishes `FINDING_KIND_MALWARE` (e.g. OSV
-  `MAL-` records) from ordinary vulnerabilities.
+  `MAL-` records) and `FINDING_KIND_EOL` (an operating system release past end
+  of life) from ordinary vulnerabilities.
 - **`warnings`** (JSON/API, printed as `Warning:` lines in text output): gaps
   that opened while the sources answered. OSV can withdraw, rename, or merge a
   record between the batch query that reports it and the lookup that expands it,
@@ -199,6 +206,46 @@ their advisories by source package: `libssl3` and `libcrypto3` are checked as
 
 ```console
 $ deputy scan --format json | jq '.coverage'
+```
+
+### End-of-life operating systems
+
+An operating system release past its end of life gets no new security fixes,
+and its advisory feed stops growing, so a scan of it understates the risk more
+each day. Every scan checks the releases it finds against a vendored snapshot of
+[endoflife.date](https://endoflife.date/) (Alpine, Debian, Ubuntu; no network
+access) and reports each release past end of life as a `HIGH` finding of kind
+`FINDING_KIND_EOL`:
+
+- **Container and VM images:** the release comes from the installed OS package
+  metadata, which records `/etc/os-release` (`distro=3.18.12`, `bookworm`,
+  `noble`). Distroless images are read from `/var/lib/dpkg/status.d`.
+- **Directories:** the release comes from container image references whose tag
+  names one: official `alpine`, `debian`, and `ubuntu` images
+  (`FROM alpine:3.18`, `FROM debian:bookworm-slim`), distroless images
+  (`gcr.io/distroless/static-debian11`), and other images whose tag carries a
+  release segment (`node:20-alpine3.18`, `python:3.12-slim-bookworm`). A tag
+  that names no release (`alpine:latest`) is skipped.
+
+The advisory ID names the release, for example `DEPUTY-EOL-ALPINE-3.18`, and
+the advisory's `published` date is the end-of-life date. The end-of-life date
+is the end of free security fixes: for Debian that includes the LTS period, for
+Ubuntu it is the end of standard support (ESM is recorded separately in
+`coverage.distros[].extended_support_until` and does not change the verdict).
+A release the dataset does not know, such as Alpine edge or an untracked
+distribution, is reported in `coverage.distros` as `UNKNOWN` with a warning,
+never guessed. Text output lists end-of-life, soon-to-expire (within 90 days),
+and unknown releases under `Operating system support`.
+
+Accept a specific release with a `.deputyignore.yaml` rule. Because the ID
+names the release, the rule does not silently cover the next release to
+expire:
+
+```yaml
+ignore:
+  - id: DEPUTY-EOL-ALPINE-3.18
+    reason: base image upgrade scheduled
+    until: 2026-12-31
 ```
 
 Additional advisory sources (threat feeds, vendor databases) can be added via
