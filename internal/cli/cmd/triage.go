@@ -82,7 +82,7 @@ AI ASSISTANCE:
 	triageCmd.Flags().String("ref", "", "Git ref/commit to scan (defaults to HEAD or WORKING when inside a repo)")
 	triageCmd.Flags().StringSlice("ecosystems", nil, "Limit scanning to ecosystems: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, mise, asdf, haskell, r, cpp (default: all)")
 	triageCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes when generating the summary")
-	triageCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, and severity ratings resolved from alias advisories for unrated records")
+	triageCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, severity ratings resolved from alias advisories for unrated records, and OS packages behind their distribution branch")
 	triageCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	triageCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	triageCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")

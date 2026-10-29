@@ -707,6 +707,18 @@ func TestMCPCoverageAndKindConversion(t *testing.T) {
 	if cov.GetUncovered()[0].GetArtifact() != "container_image_ref" {
 		t.Errorf("uncovered[0].Artifact = %q, want container_image_ref", cov.GetUncovered()[0].GetArtifact())
 	}
+
+	// Distro updates alone still produce a coverage block: an agent reading a
+	// clean result must see that a package is behind its branch.
+	cov = coverageProto(&vulnerabilityv1.ScanCoverage{
+		DistroUpdates: []*vulnerabilityv1.DistroUpdate{{
+			Ecosystem: "Alpine:v3.24", SourcePackage: "openssl", Packages: []string{"libcrypto3", "libssl3"},
+			InstalledVersion: "3.5.8-r0", AvailableVersion: "3.5.9-r0", Repository: "v3.24/main", Source: "alpine-apkindex",
+		}},
+	})
+	if got := cov.GetDistroUpdates(); len(got) != 1 || got[0].GetSourcePackage() != "openssl" || got[0].GetAvailableVersion() != "3.5.9-r0" || got[0].GetSource() != "alpine-apkindex" || len(got[0].GetPackages()) != 2 {
+		t.Fatalf("distro updates = %+v, want the openssl update carried through", got)
+	}
 }
 
 func TestMCPEcosystemAliasesAreConsistent(t *testing.T) {

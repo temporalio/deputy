@@ -140,6 +140,14 @@ type Options struct {
 	// alias rating silently.
 	ResolveSeverities bool
 
+	// CheckDistroUpdates compares installed OS packages against the newest
+	// build their distribution branch publishes (Alpine today) and records
+	// packages that are behind in Coverage.DistroUpdates. A distribution can
+	// ship a security release well before its advisory feed says which CVEs it
+	// fixes; this keeps that window from reading as clean. Requires network
+	// access to the distribution mirror; opt-in via scan enrichment.
+	CheckDistroUpdates bool
+
 	// GoProxyURL overrides the Go module proxy used for fix verification.
 	// Empty uses the default (proxy.golang.org).
 	GoProxyURL string
@@ -174,7 +182,7 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 	}
 
 	// Query vulnerabilities
-	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL, opts)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -228,7 +236,7 @@ func ScanContainerImage(ctx context.Context, target string, targetOpts map[strin
 	}
 
 	// Query vulnerabilities
-	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL, opts)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -279,7 +287,7 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 	}
 
 	// Query vulnerabilities
-	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL, opts)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -330,7 +338,7 @@ func ScanVMImage(ctx context.Context, target string, targetOpts map[string]strin
 	}
 
 	// Query vulnerabilities
-	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	vulns, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL, opts)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -581,7 +589,7 @@ type advisoryQuery struct {
 
 // queryVulnerabilities queries OSV for vulnerabilities and checks for
 // supply-chain risks (e.g., unpinned GitHub Actions references).
-func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, originURL string) (advisoryQuery, error) {
+func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, originURL string, opts Options) (advisoryQuery, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.scanning.query_vulnerabilities",
 		trace.WithAttributes(
 			attribute.Int("deputy.package.count", len(pkgs)),
@@ -614,12 +622,17 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 		maps.Copy(advisories, scAdvisories)
 	}
 
+	coverage, warnings := agg.Coverage, agg.Warnings
+	if opts.CheckDistroUpdates {
+		coverage, warnings = withDistroUpdates(ctx, distroChecker, inputs, coverage, warnings)
+	}
+
 	span.SetAttributes(attribute.Int("deputy.finding.count", len(findings)))
 	return advisoryQuery{
 		Findings:   findings,
 		Advisories: advisories,
-		Coverage:   agg.Coverage,
-		Warnings:   agg.Warnings,
+		Coverage:   coverage,
+		Warnings:   warnings,
 	}, nil
 }
 

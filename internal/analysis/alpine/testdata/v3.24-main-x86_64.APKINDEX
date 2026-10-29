@@ -1,0 +1,114 @@
+C:Q1eGEwqPLTrGn8MWEYdXt+gVG4uMM=
+P:apk-tools
+V:3.0.8-r0
+A:x86_64
+S:55395
+I:115096
+T:Alpine Package Keeper - package manager for alpine
+U:https://gitlab.alpinelinux.org/alpine/apk-tools
+L:GPL-2.0-only
+o:apk-tools
+m:Natanael Copa <ncopa@alpinelinux.org>
+t:1788243861
+c:4588b452722bd4800efdc6cce4f6e980e02a997f
+D:musl>=1.2.3_git20230424 libcrypto3>=3.5 libapk=3.0.8-r0 ca-certificates-bundle so:libapk.so.3.0.0 so:libc.musl-x86_64.so.1 so:libz.so.1
+p:apk-tools3=3.0.8-r0 cmd:apk=3.0.8-r0
+
+C:Q1tUBevAL33YvpW2JlxUskPVRWq48=
+P:busybox
+V:1.37.0-r31
+A:x86_64
+S:504769
+I:813480
+T:Size optimized toolbox of many common UNIX utilities
+U:https://busybox.net/
+L:GPL-2.0-only
+o:busybox
+m:Sören Tempel <soeren+alpine@soeren-tempel.net>
+t:1768059508
+c:c3ef5d10e6ef6528852c51f0564963e2f8c1be19
+D:so:libc.musl-x86_64.so.1
+p:cmd:busybox=1.37.0-r31
+
+C:Q1XL0UrMbxgExbrGx33CxJLwELD8c=
+P:busybox-binsh
+V:1.37.0-r31
+A:x86_64
+S:1571
+I:1
+T:busybox ash /bin/sh
+U:https://busybox.net/
+L:GPL-2.0-only
+o:busybox
+m:Sören Tempel <soeren+alpine@soeren-tempel.net>
+t:1768059508
+c:c3ef5d10e6ef6528852c51f0564963e2f8c1be19
+k:100
+D:busybox=1.37.0-r31
+p:/bin/sh cmd:sh=1.37.0-r31
+
+C:Q1HA3ulzTPIvyXzdGBkTu9cQ5t+wg=
+P:libcrypto3
+V:3.5.9-r0
+A:x86_64
+S:1980198
+I:5221974
+T:Crypto library from openssl
+U:https://www.openssl.org/
+L:Apache-2.0
+o:openssl
+m:Natanael Copa <ncopa@alpinelinux.org>
+t:1790752173
+c:29b9ec24b1b5b39aeef51fa2a044210e2ec5258e
+k:100
+D:so:libc.musl-x86_64.so.1
+p:so:libcrypto.so.3=3
+
+C:Q1IMTJDqnSCp3ToE3q3yxsT2QjNkM=
+P:libssl3
+V:3.5.9-r0
+A:x86_64
+S:381860
+I:843640
+T:SSL shared libraries
+U:https://www.openssl.org/
+L:Apache-2.0
+o:openssl
+m:Natanael Copa <ncopa@alpinelinux.org>
+t:1790752173
+c:29b9ec24b1b5b39aeef51fa2a044210e2ec5258e
+k:100
+D:libcrypto3=3.5.9-r0 so:libc.musl-x86_64.so.1 so:libcrypto.so.3
+p:so:libssl.so.3=3
+
+C:Q1dw6DBNlY3O2Y12mX356Podtcoy8=
+P:musl
+V:1.2.6-r3
+A:x86_64
+S:415466
+I:670312
+T:the musl c library (libc) implementation
+U:https://musl.libc.org/
+L:MIT
+o:musl
+m:Natanael Copa <ncopa@alpinelinux.org>
+t:1792597816
+c:8f79d39391b46d6dbf1800fb68b8212a21d5ee2e
+p:so:libc.musl-x86_64.so.1=1
+
+C:Q1T1JcjMIE+EuLTKQNs744mVjwVsY=
+P:zlib
+V:1.3.2-r1
+A:x86_64
+S:56210
+I:108376
+T:A compression/decompression Library
+U:https://zlib.net/
+L:Zlib
+o:zlib
+m:Natanael Copa <ncopa@alpinelinux.org>
+t:1791318860
+c:0afa2da0e8c8051c6f8f64a7a388e5a259904245
+D:so:libc.musl-x86_64.so.1
+p:so:libz.so.1=1.3.2
+

@@ -77,7 +77,7 @@ can plug into the same scan flow as providers are added.
 | `--policy` | | | CEL policy file(s) to evaluate (repeatable) |
 | `--ecosystems` | `-e` | all | Limit to specific ecosystems (see [supported ecosystems](#supported-ecosystems)) |
 | `--exclude-path` | | | Directory glob to skip during the walk (repeatable; e.g. `.bin/**`). Unioned with `scan.exclude_paths` from config. A slash-less name matches at any depth; a slashed path is anchored to the scan root |
-| `--enrich` | | `false` | Enrich with EPSS scores, KEV status, and severity ratings resolved from alias advisories (requires network) |
+| `--enrich` | | `false` | Enrich with EPSS scores, KEV status, severity ratings resolved from alias advisories, and OS packages behind their distribution branch (requires network) |
 | `--with-graph` | | `false` | Build dependency graph to show paths to vulnerable packages |
 | `--secrets` | | `false` | Scan for leaked secrets and credentials alongside vulnerabilities |
 | `--filter` | | | CEL expression to filter vulnerabilities (e.g., `'vulnerability.advisory.severity.level == severity.critical'`) |
@@ -157,6 +157,17 @@ result is never mistaken for complete coverage:
   (for example container base images from Dockerfiles). Uncovered means
   *not checked*, not safe. Text output prints a matching
   `Not checked for advisories` note.
+- **`coverage.distro_updates`** (JSON/API/MCP, `--enrich` only): OS source
+  packages whose installed build is older than the newest build their
+  distribution branch publishes (Alpine today, read from the branch
+  `APKINDEX`). A distribution can ship a security release weeks before its
+  advisory feed records which CVEs it fixes, and every source built on that
+  feed reports the older build as clean in the meantime. These entries are a
+  signal that the advisory answer may be incomplete, not confirmed
+  vulnerabilities: they never count toward severity totals or `clean`. Each
+  entry names the source package, the installed binaries built from it, both
+  versions, the branch repository, and its provenance (`alpine-apkindex`).
+  Text output lists them under `Behind distribution branch`.
 - **`findings[].sources`**: which advisory source(s) reported each finding
   (e.g. `["osv"]`). Multiple entries mean independent corroboration.
 - **`advisories[].kind`**: distinguishes `FINDING_KIND_MALWARE` (e.g. OSV
@@ -180,6 +191,11 @@ result is never mistaken for complete coverage:
   further alias lookups that enrich a record already fetched are best-effort,
   and their failures are silent, so a scan can report an advisory with thinner
   severity, fix, or alias data than a later run would show.
+
+OS packages are looked up under the source package they were built from
+(the apk `origin`, the deb `source`), because Alpine, Debian, and Ubuntu key
+their advisories by source package: `libssl3` and `libcrypto3` are checked as
+`openssl`. Findings still name the installed binary package.
 
 ```console
 $ deputy scan --format json | jq '.coverage'
@@ -278,6 +294,7 @@ $ deputy scan --show-symbols
 The `--enrich` flag queries external APIs to add:
 - **EPSS scores**: Probability of exploitation in the next 30 days (0.0-1.0)
 - **KEV status**: Whether the CVE is in CISA's Known Exploited Vulnerabilities catalog
+- **Distribution branch check**: installed Alpine packages are compared against the newest build their release branch publishes (`main` and `community` indexes from `dl-cdn.alpinelinux.org`), and source packages that are behind are listed in `coverage.distro_updates` (see [Advisory Coverage and Provenance](#advisory-coverage-and-provenance)). An index that cannot be read is reported as a warning.
 - **Severity resolution**: advisories whose matched record carries no rating (common for Go vulnerability database records) get one from their alias advisories, GHSA first, then CVE. Resolution runs before consolidation, so severity counts and triage priorities reflect the resolved ratings, and the severity type records where the rating came from. Without `--enrich`, `UNKNOWN` means exactly "the matched record carries no rating".
 
 The `--show-unfixable-guidance` flag provides actionable recommendations for vulnerabilities without fixes, including:

@@ -216,7 +216,7 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().Bool("show-unfixable-guidance", false, "Show actionable guidance for vulnerabilities without fixes")
 	scanCmd.Flags().String("source", "", "Target source override: auto, git, dir, sbom, purl, dockerfile, remote, docker-daemon, tarball")
 	scanCmd.Flags().String("platform", "", "Platform for remote images (os/arch[/variant])")
-	scanCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, and severity ratings resolved from alias advisories for unrated records")
+	scanCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, severity ratings resolved from alias advisories for unrated records, and OS packages behind their distribution branch")
 	scanCmd.Flags().Bool("with-graph", false, "Build dependency graph to show paths to vulnerable packages")
 	scanCmd.Flags().Bool("secrets", false, "Scan for leaked secrets and credentials in addition to vulnerabilities")
 	scanCmd.Flags().Bool("detect-base-image", false, "Detect base image layers in container scans (requires network, queries deps.dev)")
@@ -278,7 +278,7 @@ TYPICAL USE CASES:
 	scanDirCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanDirCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 	scanDirCmd.Flags().Bool("show-unfixable-guidance", false, "Show actionable guidance for vulnerabilities without fixes")
-	scanDirCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, and severity ratings resolved from alias advisories for unrated records")
+	scanDirCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, severity ratings resolved from alias advisories for unrated records, and OS packages behind their distribution branch")
 	scanDirCmd.Flags().Bool("with-graph", false, "Build dependency graph to show paths to vulnerable packages")
 	scanDirCmd.Flags().Bool("secrets", false, "Scan for leaked secrets and credentials in addition to vulnerabilities")
 
@@ -371,7 +371,7 @@ WORKFLOW EXAMPLES:
 	scanSBOMCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanSBOMCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 	scanSBOMCmd.Flags().Bool("show-unfixable-guidance", false, "Show actionable guidance for vulnerabilities without fixes")
-	scanSBOMCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, and severity ratings resolved from alias advisories for unrated records")
+	scanSBOMCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, severity ratings resolved from alias advisories for unrated records, and OS packages behind their distribution branch")
 
 	scanPURLCmd := &cobra.Command{
 		Use:           "purl <purl>",
@@ -410,7 +410,7 @@ OUTPUT AND FILTERING:
 	scanPURLCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanPURLCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 	scanPURLCmd.Flags().Bool("show-unfixable-guidance", false, "Show actionable guidance for vulnerabilities without fixes")
-	scanPURLCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, and severity ratings resolved from alias advisories for unrated records")
+	scanPURLCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, severity ratings resolved from alias advisories for unrated records, and OS packages behind their distribution branch")
 
 	scanImageCmd := &cobra.Command{
 		Use:           "image <ref>",
@@ -486,7 +486,7 @@ POLICY ENFORCEMENT:
 	scanImageCmd.Flags().Bool("show-unfixable-guidance", false, "Show actionable guidance for vulnerabilities without fixes")
 	scanImageCmd.Flags().String("source", "remote", "Image source: remote, docker-daemon, tarball")
 	scanImageCmd.Flags().String("platform", "", "Platform for remote images (os/arch[/variant])")
-	scanImageCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, and severity ratings resolved from alias advisories for unrated records")
+	scanImageCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities over the network: EPSS scores, KEV status, severity ratings resolved from alias advisories for unrated records, and OS packages behind their distribution branch")
 
 	scanCmd.AddCommand(scanDirCmd, scanSBOMCmd, scanPURLCmd, scanImageCmd)
 	root.AddCommand(scanCmd)

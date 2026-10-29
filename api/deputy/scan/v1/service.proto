@@ -182,6 +182,13 @@ message EnrichOptions {
   // origin in type/raw, and resolution runs before consolidation so stats and
   // triage priorities reflect it.
   bool include_severity = 4;
+
+  // IncludeDistroUpdates compares installed OS packages against the newest
+  // build their distribution branch publishes (Alpine APKINDEX today) and
+  // records packages that are behind in coverage.distro_updates, so a
+  // security release the distribution's advisory feed has not annotated yet
+  // is not mistaken for a clean result.
+  bool include_distro_updates = 5;
 }
 
 // ScanResponse contains the complete scan results.

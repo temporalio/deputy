@@ -123,6 +123,30 @@ message Coverage {
   // Uncovered lists combinations no configured source could answer for (for
   // example container base images).
   repeated CoverageEntry uncovered = 2;
+  // DistroUpdates lists OS source packages whose installed build is older than
+  // the newest build their distribution branch publishes. The distribution may
+  // have shipped security fixes its advisory feed does not list yet, so treat
+  // these as possibly vulnerable, not clean. They never count toward
+  // vulnerability totals or clean. Present only for enriched scans.
+  repeated DistroUpdate distro_updates = 3;
+}
+
+// DistroUpdate is one OS source package behind its distribution branch.
+message DistroUpdate {
+  // Ecosystem is the OS-package ecosystem with its release, e.g. Alpine:v3.24.
+  string ecosystem = 1;
+  // SourcePackage is the source package, e.g. openssl.
+  string source_package = 2;
+  // Packages are the installed binary packages built from it, e.g. libssl3.
+  repeated string packages = 3;
+  // InstalledVersion is the installed build.
+  string installed_version = 4;
+  // AvailableVersion is the newest build the branch publishes.
+  string available_version = 5;
+  // Repository is the branch repository, e.g. v3.24/main.
+  string repository = 6;
+  // Source is the provenance of the comparison, e.g. alpine-apkindex.
+  string source = 7;
 }
 
 // CoverageEntry is one (ecosystem, artifact) coverage record.

@@ -330,7 +330,7 @@ func manifestRefsProto(refs []*dependencyv1.ManifestRef) []*dependencyv1.Manifes
 // coverageProto converts scan coverage to the mcp.v1 shape. Returns nil when
 // there is nothing to report so the field is omitted.
 func coverageProto(c *vulnerabilityv1.ScanCoverage) *mcpv1.Coverage {
-	if c == nil || (len(c.GetCovered()) == 0 && len(c.GetUncovered()) == 0) {
+	if c == nil || (len(c.GetCovered()) == 0 && len(c.GetUncovered()) == 0 && len(c.GetDistroUpdates()) == 0) {
 		return nil
 	}
 	conv := func(entries []*vulnerabilityv1.CoverageEntry) []*mcpv1.CoverageEntry {
@@ -348,5 +348,20 @@ func coverageProto(c *vulnerabilityv1.ScanCoverage) *mcpv1.Coverage {
 		}
 		return out
 	}
-	return &mcpv1.Coverage{Covered: conv(c.GetCovered()), Uncovered: conv(c.GetUncovered())}
+	var updates []*mcpv1.DistroUpdate
+	for _, u := range c.GetDistroUpdates() {
+		if u == nil {
+			continue
+		}
+		updates = append(updates, &mcpv1.DistroUpdate{
+			Ecosystem:        u.GetEcosystem(),
+			SourcePackage:    u.GetSourcePackage(),
+			Packages:         u.GetPackages(),
+			InstalledVersion: u.GetInstalledVersion(),
+			AvailableVersion: u.GetAvailableVersion(),
+			Repository:       u.GetRepository(),
+			Source:           u.GetSource(),
+		})
+	}
+	return &mcpv1.Coverage{Covered: conv(c.GetCovered()), Uncovered: conv(c.GetUncovered()), DistroUpdates: updates}
 }
