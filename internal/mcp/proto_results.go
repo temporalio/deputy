@@ -330,7 +330,7 @@ func manifestRefsProto(refs []*dependencyv1.ManifestRef) []*dependencyv1.Manifes
 // coverageProto converts scan coverage to the mcp.v1 shape. Returns nil when
 // there is nothing to report so the field is omitted.
 func coverageProto(c *vulnerabilityv1.ScanCoverage) *mcpv1.Coverage {
-	if c == nil || (len(c.GetCovered()) == 0 && len(c.GetUncovered()) == 0 && len(c.GetDistroUpdates()) == 0) {
+	if c == nil || (len(c.GetCovered()) == 0 && len(c.GetUncovered()) == 0 && len(c.GetDistroUpdates()) == 0 && len(c.GetDistros()) == 0) {
 		return nil
 	}
 	conv := func(entries []*vulnerabilityv1.CoverageEntry) []*mcpv1.CoverageEntry {
@@ -363,5 +363,41 @@ func coverageProto(c *vulnerabilityv1.ScanCoverage) *mcpv1.Coverage {
 			Source:           u.GetSource(),
 		})
 	}
-	return &mcpv1.Coverage{Covered: conv(c.GetCovered()), Uncovered: conv(c.GetUncovered()), DistroUpdates: updates}
+	var distros []*mcpv1.DistroRelease
+	for _, d := range c.GetDistros() {
+		if d == nil {
+			continue
+		}
+		out := &mcpv1.DistroRelease{
+			Distribution:           d.GetDistribution(),
+			Release:                d.GetRelease(),
+			Version:                d.GetVersion(),
+			Status:                 mcpDistroStatus(d.GetStatus()),
+			DaysPastEol:            d.GetDaysPastEol(),
+			OldestSupportedRelease: d.GetOldestSupportedRelease(),
+			LatestRelease:          d.GetLatestRelease(),
+			Origin:                 d.GetOrigin(),
+			Subject:                d.GetSubject(),
+			DatasetSnapshot:        d.GetDatasetSnapshot(),
+		}
+		if d.GetEol() != nil {
+			out.EolDate = d.GetEol().AsTime().UTC().Format(time.DateOnly)
+		}
+		distros = append(distros, out)
+	}
+	return &mcpv1.Coverage{Covered: conv(c.GetCovered()), Uncovered: conv(c.GetUncovered()), DistroUpdates: updates, Distros: distros}
+}
+
+// mcpDistroStatus renders a DistroStatus as a stable lowercase token.
+func mcpDistroStatus(s vulnerabilityv1.DistroStatus) string {
+	switch s {
+	case vulnerabilityv1.DistroStatus_DISTRO_STATUS_SUPPORTED:
+		return "supported"
+	case vulnerabilityv1.DistroStatus_DISTRO_STATUS_EOL:
+		return "eol"
+	case vulnerabilityv1.DistroStatus_DISTRO_STATUS_UNKNOWN:
+		return "unknown"
+	default:
+		return ""
+	}
 }

@@ -21,6 +21,7 @@ import (
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/analysis/advisorysource"
+	"github.com/temporalio/deputy/internal/analysis/distroeol"
 	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/container/image"
@@ -39,6 +40,10 @@ import (
 	"github.com/temporalio/deputy/internal/targets"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
+
+// scanClock is the time end-of-life status is evaluated at. Tests replace it
+// so recorded fixtures keep their verdicts as the calendar moves.
+var scanClock = time.Now
 
 // Result contains the output of a vulnerability scan.
 type Result struct {
@@ -623,6 +628,24 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	}
 
 	coverage, warnings := agg.Coverage, agg.Warnings
+
+	// Check the operating system releases the inventory describes against the
+	// vendored end-of-life dataset. Offline, so it always runs.
+	if ds, err := distroeol.Default(); err != nil {
+		warnings = append(warnings, fmt.Sprintf("end-of-life check skipped: %v", err))
+	} else if eol := checkEOL(inputs, scanClock().UTC(), ds); len(eol.distros) > 0 {
+		findings = append(findings, eol.findings...)
+		if len(eol.advisories) > 0 && advisories == nil {
+			advisories = make(map[string]*vulnerabilityv1.Advisory)
+		}
+		maps.Copy(advisories, eol.advisories)
+		if coverage == nil {
+			coverage = &vulnerabilityv1.ScanCoverage{}
+		}
+		coverage.Distros = eol.distros
+		warnings = append(warnings, eol.warnings...)
+	}
+
 	if opts.CheckDistroUpdates {
 		coverage, warnings = withDistroUpdates(ctx, distroChecker, inputs, coverage, warnings)
 	}

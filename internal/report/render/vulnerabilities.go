@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	pathpkg "path"
 
@@ -74,6 +75,7 @@ func DisplayVulnerabilitiesWithHeader(w io.Writer, result scanning.Result, headi
 // their distribution branch, so a clean result is not mistaken for
 // "everything was checked". Silent when there is nothing to say.
 func displayCoverageNote(w io.Writer, cov *vulnerabilityv1.ScanCoverage) {
+	displayDistros(w, cov.GetDistros())
 	displayDistroUpdates(w, cov.GetDistroUpdates())
 	if cov == nil || len(cov.GetUncovered()) == 0 {
 		return
@@ -88,6 +90,41 @@ func displayCoverageNote(w io.Writer, cov *vulnerabilityv1.ScanCoverage) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, ui.StyleDim.Render("Not checked for advisories (no source covers): "+strings.Join(parts, ", ")))
+}
+
+// displayDistros prints one line per operating system release the scan
+// identified that is past or near end of life, or whose status is unknown.
+// Supported releases are silent unless they reach end of life within 90 days.
+func displayDistros(w io.Writer, distros []*vulnerabilityv1.DistroRelease) {
+	var lines []string
+	for _, d := range distros {
+		name := strings.TrimSpace(d.GetDistribution() + " " + d.GetRelease())
+		if d.GetSubject() != "" {
+			name += " (" + d.GetSubject() + ")"
+		}
+		eol := ""
+		if d.GetEol() != nil {
+			eol = d.GetEol().AsTime().UTC().Format(time.DateOnly)
+		}
+		switch d.GetStatus() {
+		case vulnerabilityv1.DistroStatus_DISTRO_STATUS_EOL:
+			lines = append(lines, ui.StyleDowngraded.Render(fmt.Sprintf("  %s: end of life since %s (%d days); upgrade to %s or later", name, eol, d.GetDaysPastEol(), d.GetOldestSupportedRelease())))
+		case vulnerabilityv1.DistroStatus_DISTRO_STATUS_SUPPORTED:
+			if d.GetDaysPastEol() > -90 {
+				lines = append(lines, fmt.Sprintf("  %s: end of life on %s (%d days)", name, eol, -d.GetDaysPastEol()))
+			}
+		case vulnerabilityv1.DistroStatus_DISTRO_STATUS_UNKNOWN:
+			lines = append(lines, ui.StyleDim.Render(fmt.Sprintf("  %s: end-of-life status unknown (dataset %s)", name, d.GetDatasetSnapshot())))
+		}
+	}
+	if len(lines) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.StyleDowngraded.Render("Operating system support:"))
+	for _, l := range lines {
+		fmt.Fprintln(w, l)
+	}
 }
 
 // displayDistroUpdates lists OS source packages whose distribution branch
