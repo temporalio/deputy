@@ -329,3 +329,60 @@ func TestRenderJSON_AbsentDatesOmitTimeline(t *testing.T) {
 		t.Errorf("timeline = %v, want the key omitted when both dates are absent", out["timeline"])
 	}
 }
+
+// TestRenderTimeline_SameInstantSkipsUpdated pins issue #293: Modified and
+// Published naming the same instant must not render an "updated" line, even
+// when their time.Time representations differ. Comparing with != compares
+// representation (wall clock, monotonic reading, location pointer), so the
+// same instant in another location, or with its monotonic reading stripped
+// by a marshal/unmarshal round-trip, used to render a spurious update.
+func TestRenderTimeline_SameInstantSkipsUpdated(t *testing.T) {
+	instant := time.Date(2021, 12, 10, 10, 15, 30, 0, time.UTC)
+	now := time.Now()
+	tests := []struct {
+		name           string
+		published      time.Time
+		modified       time.Time
+		skipIfSameRepr bool
+	}{
+		{
+			name:      "same instant in a different location",
+			published: instant,
+			modified:  instant.In(time.FixedZone("PST", -8*3600)),
+		},
+		{
+			name:           "same instant with the monotonic reading stripped",
+			published:      now,
+			modified:       now.Round(0),
+			skipIfSameRepr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.skipIfSameRepr && tt.published == tt.modified {
+				t.Skip("time.Now() carries no monotonic reading here, so the representations do not differ")
+			}
+			var buf bytes.Buffer
+			NewRenderer(Config{}).renderTimeline(&buf, &VulnData{
+				Temporal: TemporalInfo{Published: tt.published, Modified: tt.modified},
+			})
+			if strings.Contains(buf.String(), "updated") {
+				t.Errorf("timeline rendered an 'updated' line for equal instants:\n%s", buf.String())
+			}
+		})
+	}
+}
+
+// TestRenderTimeline_LaterModifiedStillShowsUpdated guards the other side of
+// issue #293: a Modified that is genuinely later than Published must still
+// render the "updated" line after the comparison moves to .Equal().
+func TestRenderTimeline_LaterModifiedStillShowsUpdated(t *testing.T) {
+	published := time.Date(2021, 12, 10, 10, 15, 30, 0, time.UTC)
+	var buf bytes.Buffer
+	NewRenderer(Config{}).renderTimeline(&buf, &VulnData{
+		Temporal: TemporalInfo{Published: published, Modified: published.Add(24 * time.Hour)},
+	})
+	if !strings.Contains(buf.String(), "updated") {
+		t.Errorf("timeline omitted the 'updated' line for a later modification:\n%s", buf.String())
+	}
+}
