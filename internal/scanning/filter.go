@@ -15,6 +15,9 @@ import (
 )
 
 // FilterUnfixed drops findings without applicable fixes and recomputes stats.
+// Malware findings are never dropped: malware never has a fixed version —
+// the action is to remove the package — so hiding unfixed findings would
+// otherwise hide every malware finding entirely.
 func FilterUnfixed(result Result) Result {
 	if len(result.Findings) == 0 {
 		return result
@@ -25,7 +28,7 @@ func FilterUnfixed(result Result) Result {
 		if !ok {
 			continue
 		}
-		if advisoryIsFixable(adv, f.Version) {
+		if adv.GetKind() == vulnerabilityv1.FindingKind_FINDING_KIND_MALWARE || advisoryIsFixable(adv, f.Version) {
 			filtered = append(filtered, f)
 		}
 	}

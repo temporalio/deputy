@@ -12,6 +12,11 @@ import (
 // A finding is considered fixable if its advisory has fixed versions and at least
 // one of those versions is >= the current package version.
 //
+// Malware findings are never dropped: malware never has a fixed version —
+// the action is to remove the package — so hiding unfixed findings would
+// otherwise hide every malware finding entirely. This mirrors
+// scanning.FilterUnfixed; keep the two in agreement.
+//
 // Stats are recomputed from the filtered findings.
 func FilterUnfixed(resp *scanv1.ScanResponse) *scanv1.ScanResponse {
 	if resp == nil || len(resp.Findings) == 0 {
@@ -30,6 +35,12 @@ func FilterUnfixed(resp *scanv1.ScanResponse) *scanv1.ScanResponse {
 			adv = resp.Advisories[f.AdvisoryId]
 		}
 		if adv == nil {
+			continue
+		}
+
+		// Malware is never hidden by --ignore-unfixed (see above).
+		if adv.GetKind() == vulnerabilityv1.FindingKind_FINDING_KIND_MALWARE {
+			filtered = append(filtered, f)
 			continue
 		}
 

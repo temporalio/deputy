@@ -127,6 +127,41 @@ func TestFilterUnfixed(t *testing.T) {
 			wantFindings: 1,
 			wantAdvisory: true,
 		},
+		{
+			name: "malware finding without fix is kept (#405)",
+			resp: &scanv1.ScanResponse{
+				Findings: []*vulnerabilityv1.Finding{
+					{
+						AdvisoryId: "MAL-2025-20690",
+						Package: &dependencyv1.Package{
+							Name:    "flatmap-stream",
+							Version: "0.1.1",
+						},
+					},
+					{
+						AdvisoryId: "CVE-2021-5678",
+						Package: &dependencyv1.Package{
+							Name:    "other",
+							Version: "v2.0.0",
+						},
+					},
+				},
+				Advisories: map[string]*vulnerabilityv1.Advisory{
+					"MAL-2025-20690": {
+						Id:   "MAL-2025-20690",
+						Kind: vulnerabilityv1.FindingKind_FINDING_KIND_MALWARE,
+						// No fixed versions: malware is never fixable by upgrade.
+					},
+					"CVE-2021-5678": {
+						Id:            "CVE-2021-5678",
+						Kind:          vulnerabilityv1.FindingKind_FINDING_KIND_VULNERABILITY,
+						FixedVersions: []string{}, // No fix
+					},
+				},
+			},
+			wantFindings: 1,
+			wantAdvisory: true,
+		},
 	}
 
 	for _, tt := range tests {

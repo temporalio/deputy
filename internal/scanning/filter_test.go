@@ -439,6 +439,79 @@ func TestFilterByCEL_DocumentedExamples(t *testing.T) {
 // TestFilterUnfixed_KeepsCommandRemediated verifies that --ignore-unfixed keeps
 // supply-chain findings whose remediation is a command (e.g., deputy pin) even
 // though they carry no FixedVersions, while still dropping findings with no fix.
+func TestFilterUnfixed_KeepsMalware(t *testing.T) {
+	// Regression test for #405: --ignore-unfixed dropped every finding
+	// with no fixed version, including malware — which never has one.
+	// flatmap-stream@0.1.1 carries the OSV malware record MAL-2025-20690
+	// alongside two ordinary vulnerabilities; under --ignore-unfixed the
+	// malware finding must survive while the unfixed vulnerability is
+	// still hidden.
+	result := Result{
+		Findings: []vulnerability.Finding{
+			{
+				AdvisoryID: "MAL-2025-20690",
+				Dependency: dependency.ID{Name: "flatmap-stream", Ecosystem: "npm"},
+				Version:    "0.1.1",
+				Affected:   true,
+			},
+			{
+				AdvisoryID: "GHSA-9x64-5r7x-2q53",
+				Dependency: dependency.ID{Name: "flatmap-stream", Ecosystem: "npm"},
+				Version:    "0.1.1",
+				Affected:   true,
+			},
+			{
+				AdvisoryID: "GHSA-fixed",
+				Dependency: dependency.ID{Name: "flatmap-stream", Ecosystem: "npm"},
+				Version:    "0.1.1",
+				Affected:   true,
+			},
+		},
+		Advisories: map[string]*vulnerabilityv1.Advisory{
+			"MAL-2025-20690": {
+				Id:   "MAL-2025-20690",
+				Kind: vulnerabilityv1.FindingKind_FINDING_KIND_MALWARE,
+				// No fixed versions: malware is never fixable by upgrade.
+			},
+			"GHSA-9x64-5r7x-2q53": {
+				Id:   "GHSA-9x64-5r7x-2q53",
+				Kind: vulnerabilityv1.FindingKind_FINDING_KIND_VULNERABILITY,
+				// No fixed versions: an ordinary unfixed vulnerability.
+			},
+			"GHSA-fixed": {
+				Id:            "GHSA-fixed",
+				Kind:          vulnerabilityv1.FindingKind_FINDING_KIND_VULNERABILITY,
+				FixedVersions: []string{"0.1.2"},
+			},
+		},
+	}
+
+	got := FilterUnfixed(result)
+
+	if len(got.Findings) != 2 {
+		t.Fatalf("expected 2 findings kept, got %d: %v", len(got.Findings), got.Findings)
+	}
+	kept := map[string]bool{}
+	for _, f := range got.Findings {
+		kept[f.AdvisoryID] = true
+	}
+	if !kept["MAL-2025-20690"] {
+		t.Error("malware finding MAL-2025-20690 was dropped by FilterUnfixed")
+	}
+	if !kept["GHSA-fixed"] {
+		t.Error("fixable vulnerability GHSA-fixed was dropped by FilterUnfixed")
+	}
+	if kept["GHSA-9x64-5r7x-2q53"] {
+		t.Error("unfixed vulnerability GHSA-9x64-5r7x-2q53 was kept by FilterUnfixed")
+	}
+	if _, ok := got.Advisories["MAL-2025-20690"]; !ok {
+		t.Error("malware advisory was dropped from the filtered result")
+	}
+	if _, ok := got.Advisories["GHSA-9x64-5r7x-2q53"]; ok {
+		t.Error("unfixed vulnerability advisory was kept in the filtered result")
+	}
+}
+
 func TestFilterUnfixed_KeepsCommandRemediated(t *testing.T) {
 	result := Result{
 		Findings: []vulnerability.Finding{

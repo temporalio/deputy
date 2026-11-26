@@ -202,7 +202,7 @@ WORKFLOW EXAMPLES:
 	scanCmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to scan: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, mise, asdf, haskell, r, cpp (default: all)")
 	scanCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
-	scanCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
+	scanCmd.Flags().Bool("ignore-unfixed", false, "Ignore unfixed vulnerabilities (malware findings are never ignored)")
 	scanCmd.Flags().Bool("no-verify-fixes", false, "Skip Go module proxy verification of fixed versions (offline; trusts advisory data)")
 	scanCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	scanCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -267,7 +267,7 @@ TYPICAL USE CASES:
 	}
 	scanDirCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanDirCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
-	scanDirCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
+	scanDirCmd.Flags().Bool("ignore-unfixed", false, "Ignore unfixed vulnerabilities (malware findings are never ignored)")
 	scanDirCmd.Flags().Bool("no-verify-fixes", false, "Skip Go module proxy verification of fixed versions (offline; trusts advisory data)")
 	scanDirCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	scanDirCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -359,7 +359,7 @@ WORKFLOW EXAMPLES:
 	}
 	scanSBOMCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanSBOMCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
-	scanSBOMCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
+	scanSBOMCmd.Flags().Bool("ignore-unfixed", false, "Ignore unfixed vulnerabilities (malware findings are never ignored)")
 	scanSBOMCmd.Flags().Bool("no-verify-fixes", false, "Skip Go module proxy verification of fixed versions (offline; trusts advisory data)")
 	scanSBOMCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	scanSBOMCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -399,7 +399,7 @@ OUTPUT AND FILTERING:
 	}
 	scanPURLCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanPURLCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
-	scanPURLCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
+	scanPURLCmd.Flags().Bool("ignore-unfixed", false, "Ignore unfixed vulnerabilities (malware findings are never ignored)")
 	scanPURLCmd.Flags().Bool("no-verify-fixes", false, "Skip Go module proxy verification of fixed versions (offline; trusts advisory data)")
 	scanPURLCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	scanPURLCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -473,7 +473,7 @@ POLICY ENFORCEMENT:
 	}
 	scanImageCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanImageCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
-	scanImageCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
+	scanImageCmd.Flags().Bool("ignore-unfixed", false, "Ignore unfixed vulnerabilities (malware findings are never ignored)")
 	scanImageCmd.Flags().Bool("no-verify-fixes", false, "Skip Go module proxy verification of fixed versions (offline; trusts advisory data)")
 	scanImageCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	scanImageCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")

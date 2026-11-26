@@ -23,7 +23,7 @@ deputy fix [repo] [flags]
 | `--ref` | | auto | Git reference to scan; omitted lets Deputy choose `HEAD` or the working tree |
 | `--ecosystems` | | all | Limit to specific ecosystems |
 | `--exclude-path` | | | Directory glob to skip during the walk (repeatable; e.g. `.bin/**`). Unioned with `scan.exclude_paths` from config |
-| `--ignore-unfixed` | | `false` | Skip vulns without fixes |
+| `--ignore-unfixed` | | `false` | Skip unfixed vulns (never hides malware) |
 | `--published-before` | | | Date filter for vulnerabilities |
 | `--published-after` | | | Date filter for vulnerabilities |
 | `--as-of` | | | Historical view date |
