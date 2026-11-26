@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -32,8 +33,10 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	cliflags "github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/collections"
 	"github.com/temporalio/deputy/internal/container/image"
@@ -54,6 +57,7 @@ import (
 	"github.com/temporalio/deputy/internal/targets"
 	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/temporalio/deputy/internal/version"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // ModuleDeprecation captures information about a deprecated module and its
@@ -681,12 +685,12 @@ func runScanRepository(c *services.Clients, cmd *cobra.Command, repoArg string) 
 
 	// Policy evaluation - can be done client-side or server-side
 	// Server-side policies are already applied, but we support client-side policies too
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, nil)
+	policyActions, deniedFindings, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, nil)
 	if err != nil {
 		return err
 	}
-	policyFindings := actionsToPolicyFindings(policyActions)
-	result.PolicyActions = policyActions
+	result.PolicyActions = internalproto.PolicyActionsFromProto(policyActions)
+	policyFindings := actionsToPolicyFindings(result.PolicyActions)
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -694,6 +698,7 @@ func runScanRepository(c *services.Clients, cmd *cobra.Command, repoArg string) 
 	}
 	defer out.Close()
 
+	var outErr error
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
 		if err := outputText(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
@@ -701,18 +706,23 @@ func runScanRepository(c *services.Clients, cmd *cobra.Command, repoArg string) 
 		}
 		// Show policy evaluation summary
 		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
-		return nil
 	case FormatJSON:
 		// Convert filtered result back to proto for consistent JSON output
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		// Add client-side policy actions
-		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
-		return outputProtoJSON(out.Writer, protoResp)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActions...)
+		outErr = outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
-		return outputSARIF(out.Writer, resultOut, policyFindings)
+		outErr = outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
-		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
+		outErr = cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
+	if outErr != nil {
+		return outErr
+	}
+	// A deny still fails the command, but only after the report and
+	// structured output are written so CI consumers get the full picture.
+	return scanPolicyDenyError(policyActions, deniedFindings)
 }
 
 // runScanDir executes the directory scan command logic.
@@ -778,12 +788,12 @@ func runScanDir(c *services.Clients, cmd *cobra.Command, args []string) error {
 		resultOut = policyResult
 	}
 
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, nil)
+	policyActions, deniedFindings, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, nil)
 	if err != nil {
 		return err
 	}
-	policyFindings := actionsToPolicyFindings(policyActions)
-	result.PolicyActions = policyActions
+	result.PolicyActions = internalproto.PolicyActionsFromProto(policyActions)
+	policyFindings := actionsToPolicyFindings(result.PolicyActions)
 
 	// Run secrets scan if enabled (client-side for now)
 	var secretsResults *SecretsResult
@@ -800,6 +810,7 @@ func runScanDir(c *services.Clients, cmd *cobra.Command, args []string) error {
 	}
 	defer out.Close()
 
+	var outErr error
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
 		if err := outputTextDir(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
@@ -811,18 +822,23 @@ func runScanDir(c *services.Clients, cmd *cobra.Command, args []string) error {
 		}
 		// Show policy evaluation summary
 		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
-		return nil
 	case FormatJSON:
 		// Convert filtered result back to proto for consistent JSON output
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		// Add client-side policy actions
-		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
-		return outputProtoJSON(out.Writer, protoResp)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActions...)
+		outErr = outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
-		return outputSARIF(out.Writer, resultOut, policyFindings)
+		outErr = outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
-		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
+		outErr = cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
+	if outErr != nil {
+		return outErr
+	}
+	// A deny still fails the command, but only after the report and
+	// structured output are written so CI consumers get the full picture.
+	return scanPolicyDenyError(policyActions, deniedFindings)
 }
 
 // runScanVMImage executes the VM/rootfs image scan command logic.
@@ -891,12 +907,12 @@ func runScanVMImage(c *services.Clients, cmd *cobra.Command, target string) erro
 		resultOut = policyResult
 	}
 
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, nil)
+	policyActions, deniedFindings, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, nil)
 	if err != nil {
 		return err
 	}
-	policyFindings := actionsToPolicyFindings(policyActions)
-	result.PolicyActions = policyActions
+	result.PolicyActions = internalproto.PolicyActionsFromProto(policyActions)
+	policyFindings := actionsToPolicyFindings(result.PolicyActions)
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -904,22 +920,28 @@ func runScanVMImage(c *services.Clients, cmd *cobra.Command, target string) erro
 	}
 	defer out.Close()
 
+	var outErr error
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
 		if err := outputTextDir(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
 			return err
 		}
 		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
-		return nil
 	case FormatJSON:
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
-		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
-		return outputProtoJSON(out.Writer, protoResp)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActions...)
+		outErr = outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
-		return outputSARIF(out.Writer, resultOut, policyFindings)
+		outErr = outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
-		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
+		outErr = cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
+	if outErr != nil {
+		return outErr
+	}
+	// A deny still fails the command, but only after the report and
+	// structured output are written so CI consumers get the full picture.
+	return scanPolicyDenyError(policyActions, deniedFindings)
 }
 
 // runScanSBOM executes the SBOM scan command logic.
@@ -1066,12 +1088,12 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 	if len(sbomPURLs) > 0 {
 		extra = map[string]any{"sbom": map[string]any{"purls": sbomPURLs}}
 	}
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, extra)
+	policyActions, deniedFindings, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, extra)
 	if err != nil {
 		return err
 	}
-	policyFindings := actionsToPolicyFindings(policyActions)
-	result.PolicyActions = policyActions
+	result.PolicyActions = internalproto.PolicyActionsFromProto(policyActions)
+	policyFindings := actionsToPolicyFindings(result.PolicyActions)
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -1079,6 +1101,7 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 	}
 	defer out.Close()
 
+	var outErr error
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
 		doc := render.ScanResultsHeaderDoc("SBOM input", "", "", "")
@@ -1093,18 +1116,23 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 		render.PolicyFindings(out.Writer, policyFindings)
 		// Show policy evaluation summary
 		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
-		return nil
 	case FormatJSON:
 		// Convert filtered result back to proto for consistent JSON output
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		// Add client-side policy actions
-		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
-		return outputProtoJSON(out.Writer, protoResp)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActions...)
+		outErr = outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
-		return outputSARIF(out.Writer, resultOut, policyFindings)
+		outErr = outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
-		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
+		outErr = cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
+	if outErr != nil {
+		return outErr
+	}
+	// A deny still fails the command, but only after the report and
+	// structured output are written so CI consumers get the full picture.
+	return scanPolicyDenyError(policyActions, deniedFindings)
 }
 
 // runScanPURL executes the PURL scan command logic.
@@ -1161,12 +1189,12 @@ func runScanPURL(c *services.Clients, cmd *cobra.Command, args []string) error {
 		resultOut = policyResult
 	}
 
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, nil)
+	policyActions, deniedFindings, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, nil)
 	if err != nil {
 		return err
 	}
-	policyFindings := actionsToPolicyFindings(policyActions)
-	result.PolicyActions = policyActions
+	result.PolicyActions = internalproto.PolicyActionsFromProto(policyActions)
+	policyFindings := actionsToPolicyFindings(result.PolicyActions)
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -1174,6 +1202,7 @@ func runScanPURL(c *services.Clients, cmd *cobra.Command, args []string) error {
 	}
 	defer out.Close()
 
+	var outErr error
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
 		if err := outputTextDir(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions()); err != nil {
@@ -1181,18 +1210,23 @@ func runScanPURL(c *services.Clients, cmd *cobra.Command, args []string) error {
 		}
 		// Show policy evaluation summary
 		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
-		return nil
 	case FormatJSON:
 		// Convert filtered result back to proto for consistent JSON output
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		// Add client-side policy actions
-		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
-		return outputProtoJSON(out.Writer, protoResp)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActions...)
+		outErr = outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
-		return outputSARIF(out.Writer, resultOut, policyFindings)
+		outErr = outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
-		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
+		outErr = cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
+	if outErr != nil {
+		return outErr
+	}
+	// A deny still fails the command, but only after the report and
+	// structured output are written so CI consumers get the full picture.
+	return scanPolicyDenyError(policyActions, deniedFindings)
 }
 
 // runScanImage executes the container image scan command logic.
@@ -1268,12 +1302,12 @@ func runScanImageWithOptions(c *services.Clients, cmd *cobra.Command, input, sou
 		resultOut = policyResult
 	}
 
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, nil)
+	policyActions, deniedFindings, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, nil)
 	if err != nil {
 		return err
 	}
-	policyFindings := actionsToPolicyFindings(policyActions)
-	result.PolicyActions = policyActions
+	result.PolicyActions = internalproto.PolicyActionsFromProto(policyActions)
+	policyFindings := actionsToPolicyFindings(result.PolicyActions)
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -1281,6 +1315,7 @@ func runScanImageWithOptions(c *services.Clients, cmd *cobra.Command, input, sou
 	}
 	defer out.Close()
 
+	var outErr error
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
 		if err := outputTextContainer(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions()); err != nil {
@@ -1288,18 +1323,23 @@ func runScanImageWithOptions(c *services.Clients, cmd *cobra.Command, input, sou
 		}
 		// Show policy evaluation summary
 		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
-		return nil
 	case FormatJSON:
 		// Convert filtered result back to proto for consistent JSON output
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		// Add client-side policy actions
-		protoResp.PolicyActions = append(protoResp.PolicyActions, internalproto.PolicyActionsToProto(policyActions)...)
-		return outputProtoJSON(out.Writer, protoResp)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActions...)
+		outErr = outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
-		return outputSARIF(out.Writer, resultOut, policyFindings)
+		outErr = outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
-		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
+		outErr = cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
+	if outErr != nil {
+		return outErr
+	}
+	// A deny still fails the command, but only after the report and
+	// structured output are written so CI consumers get the full picture.
+	return scanPolicyDenyError(policyActions, deniedFindings)
 }
 
 // sourceToTransport converts CLI source flag to proto transport string.
@@ -2097,11 +2137,38 @@ func buildScanImagePayload(target inventory.Target) map[string]any {
 	return ref.ToMap()
 }
 
+// DeniedFinding names one finding a policy deny was attributed to: the
+// package, version, advisory, and the fixed version that would resolve it
+// ("" when the advisory carries no applicable fix).
+type DeniedFinding struct {
+	Package   string
+	Version   string
+	Ecosystem string
+	Advisory  string
+	FixedIn   string
+}
+
 // runScanPolicies evaluates the provided policies against the scan report and individual vulnerabilities.
 // Passes proto messages directly to CEL for type-safe evaluation.
-func runScanPolicies(ctx context.Context, policyPaths []string, result scanning.Result, errW io.Writer, extra map[string]any) ([]policy.Action, error) {
-	if len(policyPaths) == 0 {
-		return nil, nil
+//
+// It never fails on denies: callers write the full report and structured
+// output first and gate on scanPolicyDenyError afterwards, so a deny still
+// produces complete output before the command fails (mirroring
+// runDiffPolicies). Only engine errors are returned.
+//
+// The returned denied findings attribute each deny to the finding(s) that
+// triggered it, so the blocking error can name them. Per-vulnerability
+// denies carry their finding as the action subject; report-level denies
+// have no subject, so they are attributed diagnostically by re-evaluating
+// the report entrypoint against a report holding each finding on its own
+// and keeping the findings whose single-finding report denies under the
+// same policy rule. That attribution is exact for the usual exists-style
+// gate rules; aggregate rules (counts, stats) may attribute nothing, in
+// which case the error falls back to the policy message alone.
+func runScanPolicies(ctx context.Context, policyPaths []string, result scanning.Result, extra map[string]any) ([]*policyv1.Action, []DeniedFinding, error) {
+	evaluator, err := newPolicyEvaluator(policyPaths, "scan")
+	if evaluator == nil || err != nil {
+		return nil, nil, err
 	}
 
 	// Convert scanning result to proto for CEL evaluation
@@ -2125,12 +2192,18 @@ func runScanPolicies(ctx context.Context, policyPaths []string, result scanning.
 	// Merge extra context
 	maps.Copy(payload, extra)
 
-	var out []policy.Action
-	actions, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "scan", policy.EntrypointScanReport, errW)
-	if err != nil {
-		return nil, err
+	var out []*policyv1.Action
+	collect := func(actions []policy.Action, entrypoint policy.Entrypoint, subject *policyv1.Subject) {
+		for _, act := range actions {
+			out = append(out, internalproto.PolicyActionToProto(act, entrypoint.String(), subject))
+		}
 	}
-	out = append(out, actions...)
+
+	actions, err := evaluator.evaluate(ctx, payload, policy.EntrypointScanReport)
+	if err != nil {
+		return nil, nil, err
+	}
+	collect(actions, policy.EntrypointScanReport, nil)
 
 	// Evaluate per-vulnerability policies
 	for _, finding := range scanResponse.Findings {
@@ -2147,13 +2220,197 @@ func runScanPolicies(ctx context.Context, policyPaths []string, result scanning.
 				vulnPayload[key] = val
 			}
 		}
-		actions, err := evaluatePoliciesForCommand(ctx, policyPaths, vulnPayload, "scan", policy.EntrypointScanVulnerability, errW)
+		actions, err := evaluator.evaluate(ctx, vulnPayload, policy.EntrypointScanVulnerability)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		out = append(out, actions...)
+		collect(actions, policy.EntrypointScanVulnerability, internalproto.PolicySubjectFromFinding(finding))
 	}
-	return out, nil
+
+	denied := attributeDeniedFindings(ctx, evaluator, out, scanResponse, result, extra)
+	return out, denied, nil
+}
+
+// maxDiagnosticFindings bounds the attribution pass in
+// attributeDeniedFindings: only the most severe findings are re-evaluated,
+// so a scan with thousands of findings does not pay thousands of CEL
+// evaluations on the already-failing deny path.
+const maxDiagnosticFindings = 200
+
+// attributeDeniedFindings attributes deny actions to the findings that
+// triggered them. Per-vulnerability denies already carry their finding as
+// the action subject. Report-level denies have no subject, so each finding
+// is re-evaluated on its own against the report entrypoint and kept when
+// its single-finding report denies under the same policy rule that denied
+// the full report. Denies that cannot be attributed (for example aggregate
+// rules over counts or stats) contribute nothing here, and the error falls
+// back to the policy message alone.
+func attributeDeniedFindings(ctx context.Context, evaluator *policyEvaluator, actions []*policyv1.Action, scanResponse *scanv1.ScanResponse, result scanning.Result, extra map[string]any) []DeniedFinding {
+	var denies []*policyv1.Action
+	for _, act := range actions {
+		if act.GetType() == policyv1.ActionType_ACTION_TYPE_DENY {
+			denies = append(denies, act)
+		}
+	}
+	if len(denies) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	var out []DeniedFinding
+	add := func(subject *policyv1.Subject) {
+		if subject == nil || subject.GetPackage() == "" {
+			return
+		}
+		key := subject.GetPackage() + "\x00" + subject.GetVersion() + "\x00" + subject.GetAdvisory()
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, DeniedFinding{
+			Package:   subject.GetPackage(),
+			Version:   subject.GetVersion(),
+			Ecosystem: subject.GetEcosystem(),
+			Advisory:  subject.GetAdvisory(),
+			FixedIn:   fixedInFor(subject.GetAdvisory(), subject.GetVersion(), result.Advisories),
+		})
+	}
+
+	// Direct attribution from per-vulnerability denies.
+	reportDenies := false
+	for _, act := range denies {
+		if act.GetSubject() == nil || act.GetSubject().GetPackage() == "" {
+			reportDenies = true
+			continue
+		}
+		add(act.GetSubject())
+	}
+	if !reportDenies {
+		return out
+	}
+
+	// Diagnostic attribution for report-level denies: re-evaluate the
+	// report entrypoint with one finding at a time, keeping the findings
+	// that deny under a rule that also denied the full report. Most severe
+	// first, so the likeliest triggers are covered within the bound.
+	denySources := make(map[string]struct{})
+	for _, act := range denies {
+		if act.GetSubject() == nil || act.GetSubject().GetPackage() == "" {
+			denySources[joinDenySource(act.GetPolicyName(), act.GetRuleName())] = struct{}{}
+		}
+	}
+	findings := slices.Clone(scanResponse.Findings)
+	slices.SortFunc(findings, func(a, b *vulnerabilityv1.Finding) int {
+		return cmp.Compare(findingSeverityRank(b, scanResponse.Advisories), findingSeverityRank(a, scanResponse.Advisories))
+	})
+	if len(findings) > maxDiagnosticFindings {
+		findings = findings[:maxDiagnosticFindings]
+	}
+	for _, finding := range findings {
+		single := &scanv1.ScanResponse{
+			Target:    scanResponse.Target,
+			Findings:  []*vulnerabilityv1.Finding{finding},
+			Stats:     scanResponse.Stats,
+			ImageInfo: scanResponse.ImageInfo,
+		}
+		singlePayload := map[string]any{
+			"report":          single,
+			"target":          scanResponse.Target,
+			"findings":        single.Findings,
+			"vulnerabilities": single.Findings, // Alias for backward compatibility
+			"stats":           scanResponse.Stats,
+		}
+		if scanResponse.ImageInfo != nil {
+			singlePayload["image"] = scanResponse.ImageInfo
+			singlePayload["image_info"] = scanResponse.ImageInfo
+		}
+		maps.Copy(singlePayload, extra)
+		// Best-effort: an evaluation error here must not fail the scan,
+		// which is already failing on the full-report deny.
+		singleActions, err := evaluator.evaluate(ctx, singlePayload, policy.EntrypointScanReport)
+		if err != nil {
+			continue
+		}
+		for _, act := range singleActions {
+			if policy.ActionTypeIs(act.Type, policy.ActionDeny) {
+				if _, ok := denySources[act.Source]; ok {
+					add(internalproto.PolicySubjectFromFinding(finding))
+				}
+			}
+		}
+	}
+	return out
+}
+
+// joinDenySource reconstructs the engine's combined "policy::rule" source
+// from a proto action's split halves.
+func joinDenySource(policyName, ruleName string) string {
+	if ruleName == "" {
+		return policyName
+	}
+	return policyName + "::" + ruleName
+}
+
+// findingSeverityRank orders findings for diagnostic attribution, most
+// severe first. Unknown severity ranks lowest.
+func findingSeverityRank(f *vulnerabilityv1.Finding, advisories map[string]*vulnerabilityv1.Advisory) int {
+	if f == nil {
+		return 0
+	}
+	if adv := advisories[f.GetAdvisoryId()]; adv != nil {
+		return int(adv.GetSeverity().GetLevel())
+	}
+	return 0
+}
+
+// fixedInFor returns the best fixed version for advisoryID at version, or
+// the first listed fixed version when no best version applies, or "" when
+// the advisory carries no fixed version.
+func fixedInFor(advisoryID, version string, advisories map[string]*vulnerabilityv1.Advisory) string {
+	adv := advisories[advisoryID]
+	if adv == nil {
+		return ""
+	}
+	if fixed := vulnerability.FindBestFixedVersion(adv.GetFixedVersions(), version); fixed != "" {
+		return fixed
+	}
+	if len(adv.GetFixedVersions()) > 0 {
+		return adv.GetFixedVersions()[0]
+	}
+	return ""
+}
+
+// scanPolicyDenyError builds the blocking error for denied scan policies, or
+// nil when nothing denied. The error names each denied finding — package,
+// version, advisory, fixed-in version — so the cause is visible in the step
+// log without a local re-run. At most maxDeniedFindingsInError findings are
+// listed, with a count for the rest; denies that could not be attributed to
+// a finding (aggregate report rules) fall back to the policy message alone.
+func scanPolicyDenyError(actions []*policyv1.Action, denied []DeniedFinding) error {
+	base := policyDenyError(actions)
+	if base == nil {
+		return nil
+	}
+	if len(denied) == 0 {
+		return base
+	}
+	const maxDeniedFindingsInError = 5
+	shown := denied
+	suffix := ""
+	if len(shown) > maxDeniedFindingsInError {
+		shown = shown[:maxDeniedFindingsInError]
+		suffix = fmt.Sprintf(" (and %d more denied finding%s)", len(denied)-maxDeniedFindingsInError, plural(len(denied)-maxDeniedFindingsInError))
+	}
+	details := make([]string, 0, len(shown))
+	for _, d := range shown {
+		detail := fmt.Sprintf("%s@%s (%s", d.Package, d.Version, d.Advisory)
+		if d.FixedIn != "" {
+			detail += ", fixed in " + d.FixedIn
+		}
+		detail += ")"
+		details = append(details, detail)
+	}
+	return fmt.Errorf("%s; denied findings: %s%s", base.Error(), strings.Join(details, "; "), suffix)
 }
 
 // actionsToPolicyFindings converts policy actions into findings suitable for the scan report.

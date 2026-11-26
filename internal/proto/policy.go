@@ -47,6 +47,55 @@ func PolicyActionsToProto(actions []policy.Action) []*policyv1.Action {
 	return out
 }
 
+// PolicyActionsFromProto converts proto policy actions back to internal
+// actions, for call sites that keep the evaluated result in the internal
+// scanning.Result. Entrypoint and subject attribution have no internal
+// counterpart and are dropped.
+func PolicyActionsFromProto(actions []*policyv1.Action) []policy.Action {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make([]policy.Action, 0, len(actions))
+	for _, a := range actions {
+		if a == nil {
+			continue
+		}
+		out = append(out, policy.Action{
+			Source:      joinPolicySource(a.GetPolicyName(), a.GetRuleName()),
+			Type:        policyActionTypeFromProto(a.GetType()),
+			Reason:      a.GetReason(),
+			Message:     a.GetMessage(),
+			Remediation: a.GetRemediation(),
+			Code:        a.GetCode(),
+		})
+	}
+	return out
+}
+
+// joinPolicySource is the inverse of splitPolicySource: a rule name, when
+// present, is re-attached with the "::" separator.
+func joinPolicySource(policyName, ruleName string) string {
+	if ruleName == "" {
+		return policyName
+	}
+	return policyName + "::" + ruleName
+}
+
+// policyActionTypeFromProto converts a proto action type back to the internal
+// string vocabulary. Unknown types map to "" rather than failing.
+func policyActionTypeFromProto(actionType policyv1.ActionType) string {
+	switch actionType {
+	case policyv1.ActionType_ACTION_TYPE_DENY:
+		return policy.ActionDeny
+	case policyv1.ActionType_ACTION_TYPE_WARN:
+		return policy.ActionWarn
+	case policyv1.ActionType_ACTION_TYPE_ALLOW:
+		return policy.ActionAllow
+	default:
+		return ""
+	}
+}
+
 // splitPolicySource splits the engine's combined "path::rule" action source
 // into its policy source and rule name halves. A source without the
 // separator is treated as a bare policy name with no rule.

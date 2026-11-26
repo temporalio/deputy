@@ -170,7 +170,12 @@ runs:
             ] | length
           ' "$INPUT_OUTPUT" 2>/dev/null || echo "0")
 
-          VIOLATIONS=$(jq -r '[.runs[0].results[] | select(.ruleId | startswith("policy/"))] | length // 0' "$INPUT_OUTPUT" 2>/dev/null || echo "0")
+          # Policy results carry a DEP-numbered ruleId (SARIF rule IDs are
+          # hashed), so they cannot be recognised by a "policy/" prefix.
+          # They are identified by the policyAction fingerprint the SARIF
+          # converter attaches; only denies count as violations, so a
+          # warn-only run does not fail the job.
+          VIOLATIONS=$(jq -r '[.runs[0].results[] | select(.partialFingerprints."policyAction/v1" == "deny")] | length // 0' "$INPUT_OUTPUT" 2>/dev/null || echo "0")
 
           echo "findings-count=$FINDINGS" >> "$GITHUB_OUTPUT"
           echo "critical-count=$CRITICAL" >> "$GITHUB_OUTPUT"
@@ -455,6 +460,10 @@ runs:
         CRITICAL="${CRITICAL:-0}"
         HIGH="${HIGH:-0}"
         VIOLATIONS="${VIOLATIONS:-0}"
+        # The scan step records its exit code in the environment; a failed
+        # scan must never render as a clean bill of health, even when no
+        # SARIF was produced to count from.
+        SCAN_EXIT_CODE="${DEPUTY_EXIT_CODE:-0}"
 
         {
           echo "## Deputy Security Scan"
@@ -463,7 +472,10 @@ runs:
           echo ""
 
           # One-line status banner using GitHub's alert syntax.
-          if [ "$VIOLATIONS" -gt 0 ] || [ "$CRITICAL" -gt 0 ]; then
+          if [ "$SCAN_EXIT_CODE" != "0" ] && [ "$FINDINGS" -eq 0 ] && [ "$VIOLATIONS" -eq 0 ]; then
+            echo "> [!CAUTION]"
+            echo "> Deputy scan failed (exit code ${SCAN_EXIT_CODE}) and produced no results — see the Run Deputy Scan step log."
+          elif [ "$VIOLATIONS" -gt 0 ] || [ "$CRITICAL" -gt 0 ]; then
             echo "> [!CAUTION]"
             echo "> ${CRITICAL} critical finding(s) and ${VIOLATIONS} policy violation(s) need immediate attention."
           elif [ "$HIGH" -gt 0 ]; then

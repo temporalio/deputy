@@ -88,6 +88,39 @@ func TestPolicyActionToProto_CarriesMessageAndCode(t *testing.T) {
 	}
 }
 
+func TestPolicyActionsFromProto(t *testing.T) {
+	// Round-trip: ToProto then FromProto preserves the fields the
+	// internal action carries. Entrypoint and subject have no internal
+	// counterpart and are dropped by design.
+	actions := []policy.Action{
+		{Type: "deny", Source: "policy/ci/security-gate.yaml::ci-block-fixable-high", Reason: "High severity vulnerability has an available fix", Remediation: "Upgrade to a fixed version", Code: "GATE"},
+		{Type: "warn", Source: "inline-policy", Reason: "blocked", Message: "extra context"},
+		{Type: "audit", Source: "p.yaml::r", Reason: "unknown type"},
+	}
+	got := PolicyActionsFromProto(PolicyActionsToProto(actions))
+	if len(got) != len(actions) {
+		t.Fatalf("len = %d, want %d", len(got), len(actions))
+	}
+	for i, want := range actions {
+		if got[i].Source != want.Source {
+			t.Errorf("[%d] Source = %q, want %q", i, got[i].Source, want.Source)
+		}
+		if got[i].Reason != want.Reason || got[i].Message != want.Message ||
+			got[i].Remediation != want.Remediation || got[i].Code != want.Code {
+			t.Errorf("[%d] fields = %+v, want %+v", i, got[i], want)
+		}
+	}
+	if got[0].Type != policy.ActionDeny || got[1].Type != policy.ActionWarn {
+		t.Errorf("types = %q/%q, want deny/warn", got[0].Type, got[1].Type)
+	}
+	if got[2].Type != "" {
+		t.Errorf("unknown type round-trips as %q, want empty", got[2].Type)
+	}
+	if got := PolicyActionsFromProto(nil); got != nil {
+		t.Errorf("nil input = %v, want nil", got)
+	}
+}
+
 func TestPolicySubjectFromPackage(t *testing.T) {
 	if got := PolicySubjectFromPackage(nil); got != nil {
 		t.Fatalf("expected nil subject for nil package, got %v", got)
