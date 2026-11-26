@@ -30,6 +30,7 @@ import (
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/dependency/graphquery"
 	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/gitutil"
 	"github.com/temporalio/deputy/internal/ignore"
 	"github.com/temporalio/deputy/internal/logs"
 	"github.com/temporalio/deputy/internal/otel"
@@ -2667,6 +2668,27 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 	return result, nil
 }
 
+// resolveDiffScanRef resolves a diff side to the commit SHA the scan service
+// should read, so a diff always compares committed snapshots (except the
+// working tree itself). Working-tree pseudo-refs (WORKING, WORKTREE, WT, ".")
+// and empty refs pass through unchanged — they are how the caller asks for
+// the working tree. A ref that cannot be resolved (path is not a local
+// repository, unknown ref) also passes through unchanged, leaving the scan
+// service to report the problem exactly as it did before.
+func resolveDiffScanRef(repoPath, ref string) string {
+	if ref == "" || ref == "." {
+		return ref
+	}
+	switch strings.ToUpper(ref) {
+	case gitutil.RefWORKING, "WORKTREE", "WT":
+		return ref
+	}
+	if commit, err := gitutil.ResolveRefToCommit(repoPath, ref); err == nil {
+		return commit
+	}
+	return ref
+}
+
 // diffGitRefs compares dependencies between Git references.
 func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (*mcpv1.DiffRefsResult, error) {
 	if args.GetPath() == "" {
@@ -2679,13 +2701,22 @@ func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (
 	baseRef := strings.TrimSpace(args.GetBaseRef())
 	targetRef := strings.TrimSpace(args.GetTargetRef())
 
+	// Resolve each side to the commit it names before scanning. The scan
+	// service treats a symbolic HEAD (and HEAD~0) as a working-tree request,
+	// so passing "HEAD" through would scan the working tree for the base and
+	// compare it with itself when the target is WORKING. Resolving to the
+	// commit SHA pins each side to its committed snapshot; the reported
+	// BaseRef/TargetRef below still show the refs as requested.
+	baseScanRef := resolveDiffScanRef(targetPath, baseRef)
+	targetScanRef := resolveDiffScanRef(targetPath, targetRef)
+
 	// Scan base ref
 	baseReq := connect.NewRequest(&scanv1.ScanRequest{
 		Target: targetPath,
 		Options: &scanv1.ScanOptions{
 			Ecosystems:   normalizeMCPEcosystems(args.GetEcosystems()),
 			ExcludePaths: s.excludePaths(args.GetExcludePaths()),
-			Ref:          baseRef,
+			Ref:          baseScanRef,
 			TargetHint: &scanv1.TargetHint{
 				Kind: targetv1.TargetKind_TARGET_KIND_GIT,
 			},
@@ -2702,7 +2733,7 @@ func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (
 		Options: &scanv1.ScanOptions{
 			Ecosystems:   normalizeMCPEcosystems(args.GetEcosystems()),
 			ExcludePaths: s.excludePaths(args.GetExcludePaths()),
-			Ref:          targetRef,
+			Ref:          targetScanRef,
 			TargetHint: &scanv1.TargetHint{
 				Kind: targetv1.TargetKind_TARGET_KIND_GIT,
 			},
