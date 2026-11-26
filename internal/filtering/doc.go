@@ -4,7 +4,8 @@
 //
 // # Filter Functions
 //
-// FilterUnfixed removes findings without available fixes:
+// FilterUnfixed removes findings without available fixes (malware findings
+// are never removed: malware has no fixed version by nature):
 //
 //	filtered := filtering.FilterUnfixed(resp)
 //

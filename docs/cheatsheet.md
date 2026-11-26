@@ -24,7 +24,7 @@ Quick reference for common commands and patterns.
 | `--output FILE` | scan, sbom, list | Write to file |
 | `--ref REF` | scan, sbom, list, diff | Git reference |
 | `--policy FILE` | scan, diff, proxy | Apply CEL policy |
-| `--ignore-unfixed` | scan, diff | Hide vulns without fixes |
+| `--ignore-unfixed` | scan, diff | Hide unfixed vulns (never hides malware) |
 | `--only-direct` | list | Direct dependencies only |
 | `--apply` | fix | Execute remediation steps |
 | `--ecosystems` | scan, list | Limit to specific ecosystems |

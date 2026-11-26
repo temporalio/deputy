@@ -369,7 +369,7 @@ flowchart TB
 | `--published-before` | | Only show vulns published before this date |
 | `--published-after` | | Only show vulns published on/after this date |
 | `--as-of` | | Historical view (implies `--published-before`) |
-| `--ignore-unfixed` | `false` | Hide unfixable vulnerabilities |
+| `--ignore-unfixed` | `false` | Hide unfixable vulnerabilities (never hides malware) |
 | `--show-unchanged` | `false` | Show vulns in unchanged dependencies |
 | `--unchanged-threshold` | `critical` | Auto-show unchanged vulns at this severity+ |
 | `--ecosystems` | `all` | Ecosystems to scan |
@@ -500,7 +500,7 @@ $ deputy diff --show-unchanged main develop
 # Show unchanged vulns if HIGH or above
 $ deputy diff --unchanged-threshold high main develop
 
-# Hide unfixable vulnerabilities
+# Hide unfixable vulnerabilities (never hides malware)
 $ deputy diff --ignore-unfixed main develop
 ```
 

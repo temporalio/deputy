@@ -69,7 +69,7 @@ can plug into the same scan flow as providers are added.
 | `--ref` | `-r` | `HEAD` | Git reference to scan (branch, tag, commit, or `WORKING`) |
 | `--format` | `-f` | `text` | Output format: `text`, `json`, `sarif` |
 | `--output` | `-o` | stdout | Output file path |
-| `--ignore-unfixed` | | `false` | Hide vulnerabilities without a known fix |
+| `--ignore-unfixed` | | `false` | Hide unfixed vulnerabilities (never hides malware) |
 | `--ignore-file` | | | Path to ignore rules file (`.deputyignore.yaml`) |
 | `--published-before` | | | Only show vulns published before this date |
 | `--published-after` | | | Only show vulns published on/after this date |
