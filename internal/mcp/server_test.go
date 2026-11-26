@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
@@ -5102,6 +5104,99 @@ func TestDiffGitRefsNormalizesPath(t *testing.T) {
 	}
 	if got := mockScan.requests[1].Options.GetRef(); got != "target" {
 		t.Fatalf("target scan ref = %q, want target", got)
+	}
+}
+
+func TestDiffGitRefsResolvesHEADToCommit(t *testing.T) {
+	// Regression test for #402: diff_refs with baseRef "HEAD" compared the
+	// working tree with itself, because the scan service reads Ref "HEAD"
+	// as a working-tree request. The base scan must receive the HEAD commit
+	// SHA so it reads the committed snapshot, while the WORKING target
+	// still passes through as a working-tree request.
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("requests==2.31.0\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree: %v", err)
+	}
+	if _, err := wt.Add("requirements.txt"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	head, err := wt.Commit("init", &git.CommitOptions{
+		Author: &object.Signature{Name: "test", Email: "test@example.com", When: time.Now()},
+	})
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	// Uncommitted edit: the working tree now adds urllib3.
+	if err := os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("requests==2.31.0\nurllib3==1.26.5\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	requests := &dependencyv1.Package{Name: "requests", Version: "2.31.0", Ecosystem: "pypi", Purl: "pkg:pypi/requests@2.31.0", Direct: true}
+	urllib3 := &dependencyv1.Package{Name: "urllib3", Version: "1.26.5", Ecosystem: "pypi", Purl: "pkg:pypi/urllib3@1.26.5", Direct: true}
+	mockScan := &mockScanHandler{
+		scanResponses: []*scanv1.ScanResponse{
+			{Packages: []*dependencyv1.Package{requests}, Stats: &vulnerabilityv1.Stats{}},
+			{Packages: []*dependencyv1.Package{requests, urllib3}, Stats: &vulnerabilityv1.Stats{}},
+		},
+	}
+	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
+
+	result, err := s.diffGitRefs(t.Context(), &mcpv1.DiffRefsRequest{
+		Path:      dir,
+		BaseRef:   "HEAD",
+		TargetRef: "WORKING",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := mockScan.requests[0].Options.GetRef(); got != head.String() {
+		t.Fatalf("base scan ref = %q, want HEAD commit %q (base must be the committed snapshot, not the working tree)", got, head.String())
+	}
+	if got := mockScan.requests[1].Options.GetRef(); got != "WORKING" {
+		t.Fatalf("target scan ref = %q, want WORKING", got)
+	}
+	if result.BaseRef != "HEAD" || result.TargetRef != "WORKING" {
+		t.Fatalf("result refs = %q/%q, want HEAD/WORKING", result.BaseRef, result.TargetRef)
+	}
+	if result.AddedCount != 1 {
+		t.Fatalf("added count = %d, want 1: %v", result.AddedCount, result.Changes)
+	}
+	if len(result.Changes) != 1 || result.Changes[0].Name != "urllib3" || result.Changes[0].ChangeType != "added" {
+		t.Fatalf("changes = %v, want single added urllib3", result.Changes)
+	}
+}
+
+func TestDiffGitRefsUnresolvableRefPassesThrough(t *testing.T) {
+	mockScan := &mockScanHandler{
+		scanResponses: []*scanv1.ScanResponse{
+			emptyScanResponse(),
+			emptyScanResponse(),
+		},
+	}
+	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
+
+	_, err := s.diffGitRefs(t.Context(), &mcpv1.DiffRefsRequest{
+		Path:      "/test/path",
+		BaseRef:   "no-such-ref",
+		TargetRef: "WORKING",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := mockScan.requests[0].Options.GetRef(); got != "no-such-ref" {
+		t.Fatalf("base scan ref = %q, want passthrough no-such-ref", got)
+	}
+	if got := mockScan.requests[1].Options.GetRef(); got != "WORKING" {
+		t.Fatalf("target scan ref = %q, want WORKING", got)
 	}
 }
 

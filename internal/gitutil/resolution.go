@@ -1,6 +1,7 @@
 package gitutil
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -170,4 +171,22 @@ func ResolveRevisionEnhanced(repo *git.Repository, ref string) (*plumbing.Hash, 
 	}
 	// Fallback to base
 	return bh, nil
+}
+
+// ResolveRefToCommit resolves ref in the repository at repoPath to the full
+// commit SHA it names (HEAD, a branch or tag name, a short SHA, or a
+// time-qualified revision). Callers that must scan a committed snapshot —
+// rather than whatever the scan service makes of a symbolic ref — use the
+// returned SHA as the scan ref. An error is returned when repoPath is not a
+// Git repository or ref does not resolve there.
+func ResolveRefToCommit(repoPath, ref string) (string, error) {
+	repo, err := git.PlainOpenWithOptions(repoPath, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return "", fmt.Errorf("error opening repository at %s: %w", repoPath, err)
+	}
+	hash, err := ResolveRevisionEnhanced(repo, ref)
+	if err != nil {
+		return "", fmt.Errorf("error resolving reference %q: %w", ref, err)
+	}
+	return hash.String(), nil
 }
