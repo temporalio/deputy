@@ -143,7 +143,9 @@ func (p *Provider) Stream(ctx context.Context, req *ai.CompletionRequest) iter.S
 		success := cmd.ProcessState != nil && cmd.ProcessState.Success()
 
 		if cmdErr != nil && !success {
-			yield(ai.ErrorEvent{Message: cmdErr.Error(), Err: cmdErr}, nil)
+			if !yield(ai.ErrorEvent{Message: cmdErr.Error(), Err: cmdErr}, nil) {
+				return
+			}
 		}
 
 		yield(ai.DoneEvent{FinishReason: ai.FinishReasonStop}, nil)
